@@ -68,7 +68,7 @@ Financial statement units and fiscal basis:
 - IQ income `eps` and `eps_diluted` accept the exact descriptor titles `EPS basic (VND)` and `EPS diluted (VND)` as per-share evidence (`VND/share`). These values, including zero, are not monetary totals and are not multiplied by statement amount scales. Explicit unknown/conflicting units or scales still withhold the affected EPS field; unsupported monetary totals remain null. Scoped descriptors, raw values, fiscal identity and field-level unit evidence survive SQL and MCP serving.
 - The legacy `/equity/{symbol}/income-statement` applies final EPS admission after ratio enrichment. Ratio EPS is filled only from decoded source evidence with matching fiscal period and consolidation basis; quarterly data must also match flow basis. Missing or conflicting lineage remains unavailable rather than inheriting another quarter.
 - Profile, screener and comparison market-cap responses expose `market_cap_provenance` with raw observations and admission status. Unverified units, dates or share bases are withheld; incompatible certified observations are conflicts. Consumers must not infer market-cap units from magnitude or reconstruct a value from undated shares.
-- Installed free KBS financial parsing already converts its `unit=1000` response into VND. VNIBB does not multiply it again. This contract applies to the actual KBS implementation, not unmarked sponsor/VCI records. Original values, labels, report `Head`, source dates, consolidation and normalization remain in the retained lineage.
+- Retained legacy KBS financial rows already convert the provider's `unit=1000` response into VND; VNIBB does not scale them twice. KBS is not an execution source or fallback, so this applies only to already-retained rows, not unmarked sponsor/VCI records. Original values, labels, report `Head`, source dates, consolidation and normalization remain in the retained lineage.
 - Unknown unit or conflicting observations produce null monetary fields and an explicit `unavailable_reason`; missing data is not zero. Persisted canonical values are read from `raw_data._financial_lineage`, not guessed from raw field magnitudes. Legacy annual values retain an unconfirmed-basis disclosure.
 - Accepted wide-row aliases pass through the same unit normalization as mapped metrics, retain selected-field lineage, and follow deterministic field precedence. Unit rejection cannot fall through to a lower-priority alias.
 - TTM balance sheets use the latest confirmed quarterly snapshot, not a sum. Income/cash flows require four consecutive quarters with matching units and consolidation. Explicit cumulative-YTD observations are differenced against the preceding quarter; unsupported EPS/share aggregation is unavailable. Incomplete or ambiguous TTM returns a null-valued row explaining the cause.
@@ -95,13 +95,17 @@ Pre-review integration limitation: source `37745d91f29face8393af0a16ce2d28faf613
 Quote and historical rows expose `price_unit`: `VND`, `index_points`, or
 `unknown`. Confirmed equity OHLC, price, previous/raw/adjusted close and absolute
 change use VND; percentage change, volume and trading value are not rescaled.
-Explicit source unit markers take precedence. Verified free vnstock equity
-history lineage converts thousand-VND once; already-VND values and legitimate
-low-VND prices are preserved. Indices/futures retain points, not currency.
+Explicit source unit markers take precedence. Retained legacy
+`vnstock_history:KBS`, `vnstock_history:VCI` and `vnstock_history:TCBS` equity
+lineage converts thousand-VND once; already-VND values and legitimate low-VND
+prices are preserved. New SDK 5 history uses `vnstock5_history:<source>` and
+has no established implicit price-unit contract: unmarked values stay unchanged
+and `unknown`, including indices, until explicit unit evidence is supplied.
+Explicit `VND`, `THOUSAND_VND` and `index_points` markers remain supported.
 
-Unmarked sponsor/premium records and generic legacy PostgreSQL/Redis values are
-not certified by their numeric magnitude. Canonical history excludes incompatible
-or unconfirmed rows and discloses excluded rows/partial coverage in `meta.warnings`.
+Unmarked SDK 5 and sponsor/premium records and generic legacy PostgreSQL/Redis
+values are not certified by their numeric magnitude. Canonical history excludes
+incompatible or unconfirmed rows and discloses excluded rows/partial coverage in `meta.warnings`.
 `meta.unit_status` describes selected returned rows, not only the Mongo source.
 This can reduce legacy coverage until trusted acquisition fills it; no automatic
 production data rewrite is part of this contract. Endpoint cache namespaces are

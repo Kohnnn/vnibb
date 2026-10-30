@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.providers.base import BaseFetcher
-from vnibb.core.ratio_units import normalize_ratio_payload, ratio_method_kwargs
+from vnibb.core.ratio_units import normalize_ratio_payload
 
 logger = logging.getLogger(__name__)
 
@@ -195,24 +195,21 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
 
         def _fetch_sync() -> List[dict[str, Any]]:
             try:
-                from vnibb.providers.vnstock.runtime import (
-                    create_finance,
-                    finance_method_kwargs,
-                    validate_source,
-                )
+                from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
                 candidate_sources = [validate_source(settings.vnstock_source)]
 
                 def _fetch_rows_for_source(source: str) -> List[dict[str, Any]]:
-                    finance = create_finance(query["symbol"], source, query.get("period", "year"))
-                    method = finance.ratio
-                    kwargs = ratio_method_kwargs(method, finance_method_kwargs(method, query.get("period", "year")))
-                    df = method(**kwargs)
+                    fundamental = import_vnstock_symbol("Fundamental")[0]()
+                    df = fundamental.equity(query["symbol"]).ratio(
+                        source=source, period=query.get("period", "year"),
+                        lang="en", format="long",
+                    )
 
                     if df is None or df.empty:
                         return []
 
-                    if "period" not in df.columns:
+                    if "period" not in df.columns and "item_id" not in df.columns:
                         index_name = df.index.name or "index"
                         df = df.reset_index()
                         if "period" not in df.columns:
@@ -271,8 +268,11 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 return []
             except (Exception, SystemExit) as e:
                 logger.error(f"vnstock ratios fetch error: {e}")
+                code = getattr(e, "code", None)
+                message = f"{code}: {e}" if code else str(e)
                 raise ProviderError(
-                    message=str(e), provider="vnstock", details={"symbol": query["symbol"]}
+                    message=message, provider="vnstock",
+                    details={"symbol": query["symbol"], "provider_code": code},
                 ) from e
 
         try:
@@ -296,6 +296,28 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
     ) -> List[FinancialRatioData]:
         if not data:
             return []
+
+        if any("id" in row and "period" in row and "value" in row for row in data):
+            grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for row in data:
+                if not isinstance(row, dict) or not row.get("id"):
+                    continue
+                period = _normalize_period_value(row.get("period"), default_period=params.period)
+                if period:
+                    grouped.setdefault((str(row["id"]), period), []).append(row)
+            wide = []
+            for (item_id, period), rows in grouped.items():
+                values = {_as_float(row.get("value")) for row in rows}
+                values.discard(None)
+                if len(values) > 1:
+                    continue
+                for row in rows:
+                    wide.append({"item_id": item_id, "item": row.get("name"),
+                                 "unit": row.get("unit"), period: row.get("value")})
+            results = VnstockFinancialRatiosFetcher.transform_data(params, wide)
+            for result in results:
+                result.provider_evidence = [dict(row) for row in data]
+            return results
 
         def _canonical_ratio(evidence: list[dict], period_keys: list[Any] | None = None, **payload: Any) -> FinancialRatioData:
             return FinancialRatioData(**normalize_ratio_payload(payload, evidence, payload.get("period"), period_keys))

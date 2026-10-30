@@ -20,9 +20,9 @@ from vnibb.core.database import async_session_maker
 from vnibb.models.company import Company
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.stock import Stock
 from vnibb.models.trading import FinancialRatio
-from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.runtime import get_listing_class, validate_source
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ async def _fetch_provider_industry_map() -> dict[str, str]:
 
     def _fetch_sync() -> dict[str, str]:
         try:
-            from vnstock import Listing
+            Listing = get_listing_class()
         except Exception as exc:
             logger.warning("Listing import failed: %s", exc)
             return {}
@@ -105,7 +105,7 @@ async def _fetch_provider_industry_map() -> dict[str, str]:
         mapping: dict[str, str] = {}
         for source in sources:
             try:
-                listing = Listing(source=source.lower())
+                listing = Listing(source=source)
                 df = listing.symbols_by_industries()
             except Exception as exc:
                 logger.debug("symbols_by_industries failed for %s: %s", source, exc)
@@ -149,171 +149,6 @@ async def _fetch_provider_industry_map() -> dict[str, str]:
     return await loop.run_in_executor(None, _fetch_sync)
 
 
-async def _fetch_provider_outstanding_shares(symbols: list[str]) -> dict[str, float]:
-    if not symbols:
-        return {}
-
-    loop = asyncio.get_running_loop()
-    sources = _get_listing_sources()
-
-    def _fetch_symbol_sync(symbol: str) -> float | None:
-        try:
-            from vnstock import Vnstock
-        except Exception:
-            return None
-
-        for source in sources:
-            try:
-                stock = Vnstock().stock(symbol=symbol, source=source)
-            except Exception:
-                continue
-
-            for fetch_name in ("overview", "profile"):
-                try:
-                    fetcher = getattr(stock.company, fetch_name)
-                    df = fetcher()
-                except Exception:
-                    continue
-
-                if df is None or getattr(df, "empty", True):
-                    continue
-
-                row = df.iloc[0].to_dict()
-                shares = _to_float(
-                    row.get("outstanding_shares")
-                    or row.get("issue_share")
-                    or row.get("financial_ratio_issue_share")
-                    or row.get("listed_shares")
-                    or row.get("listed_volume")
-                )
-                if shares not in (None, 0):
-                    return shares
-
-        return None
-
-    semaphore = asyncio.Semaphore(8)
-
-    async def _worker(symbol: str) -> tuple[str, float | None]:
-        async with semaphore:
-            value = await loop.run_in_executor(None, _fetch_symbol_sync, symbol)
-            return symbol, value
-
-    tasks = [asyncio.create_task(_worker(symbol)) for symbol in symbols]
-    shares_by_symbol: dict[str, float] = {}
-    for task in asyncio.as_completed(tasks):
-        symbol, shares = await task
-        if shares not in (None, 0):
-            shares_by_symbol[symbol] = shares
-
-    return shares_by_symbol
-
-
-def _extract_ratio_market_cap(dataframe: Any) -> float | None:
-    if dataframe is None or getattr(dataframe, "empty", True):
-        return None
-
-    if "item_id" in dataframe.columns:
-        try:
-            records = dataframe.to_dict("records")
-        except Exception:
-            return None
-
-        target_item_ids = {
-            "market_cap",
-            "marketcap",
-            "market_capitalization",
-            "charter_capital",
-        }
-
-        for record in records:
-            item_id = _normalize_text(record.get("item_id"))
-            if not item_id or item_id.lower() not in target_item_ids:
-                continue
-
-            year_columns = sorted(
-                [column for column in record.keys() if str(column).isdigit()],
-                reverse=True,
-            )
-            for year in year_columns:
-                value = _to_float(record.get(year))
-                if value not in (None, 0):
-                    return value
-        return None
-
-    row = dataframe.iloc[0].to_dict()
-    return _to_float(
-        row.get("market_cap")
-        or row.get("marketCap")
-        or row.get("capitalization")
-        or row.get("charter_capital")
-    )
-
-
-async def _fetch_provider_market_caps(symbols: list[str]) -> dict[str, float]:
-    if not symbols:
-        return {}
-
-    loop = asyncio.get_running_loop()
-    sources = _get_listing_sources()
-
-    def _fetch_symbol_sync(symbol: str) -> float | None:
-        try:
-            from vnstock import Vnstock
-        except Exception:
-            return None
-
-        for source in sources:
-            try:
-                stock = Vnstock().stock(symbol=symbol, source=source)
-            except Exception:
-                continue
-
-            try:
-                ratio_df = stock.finance.ratio(period="year")
-                ratio_market_cap = _extract_ratio_market_cap(ratio_df)
-                if ratio_market_cap not in (None, 0):
-                    return ratio_market_cap
-            except Exception:
-                pass
-
-            for fetch_name in ("overview", "profile"):
-                try:
-                    fetcher = getattr(stock.company, fetch_name)
-                    df = fetcher()
-                except Exception:
-                    continue
-
-                if df is None or getattr(df, "empty", True):
-                    continue
-
-                row = df.iloc[0].to_dict()
-                market_cap = _to_float(
-                    row.get("market_cap")
-                    or row.get("marketCap")
-                    or row.get("capitalization")
-                    or row.get("charter_capital")
-                    or row.get("charterCapital")
-                )
-                if market_cap not in (None, 0):
-                    return market_cap
-
-        return None
-
-    semaphore = asyncio.Semaphore(8)
-
-    async def _worker(symbol: str) -> tuple[str, float | None]:
-        async with semaphore:
-            value = await loop.run_in_executor(None, _fetch_symbol_sync, symbol)
-            return symbol, value
-
-    tasks = [asyncio.create_task(_worker(symbol)) for symbol in symbols]
-    market_caps: dict[str, float] = {}
-    for task in asyncio.as_completed(tasks):
-        symbol, market_cap = await task
-        if market_cap not in (None, 0):
-            market_caps[symbol] = market_cap
-
-    return market_caps
 
 
 def _extract_year_quarter(
@@ -717,138 +552,20 @@ async def _backfill_industry(batch_size: int) -> dict[str, int]:
 
 
 async def _backfill_market_cap(batch_size: int) -> int:
-    async with async_session_maker() as session:
-        latest_snapshot = (
-            await session.execute(select(func.max(ScreenerSnapshot.snapshot_date)))
-        ).scalar()
-        if latest_snapshot is None:
-            return 0
-
-        company_rows = (
-            await session.execute(
-                select(Company.symbol, Company.outstanding_shares, Company.listed_shares).where(
-                    or_(Company.outstanding_shares.is_not(None), Company.listed_shares.is_not(None))
-                )
-            )
-        ).all()
-        shares_by_symbol: dict[str, float] = {}
-        for symbol, outstanding_shares, listed_shares in company_rows:
-            shares = _to_float(outstanding_shares)
-            if shares in (None, 0):
-                shares = _to_float(listed_shares)
-            if shares not in (None, 0):
-                shares_by_symbol[symbol] = shares
-
-        latest_time_subquery = (
-            select(StockPrice.symbol, func.max(StockPrice.time).label("max_time"))
-            .group_by(StockPrice.symbol)
-            .subquery()
-        )
-
-        latest_price_rows = (
-            await session.execute(
-                select(StockPrice.symbol, StockPrice.close).join(
-                    latest_time_subquery,
-                    and_(
-                        StockPrice.symbol == latest_time_subquery.c.symbol,
-                        StockPrice.time == latest_time_subquery.c.max_time,
-                    ),
-                )
-            )
-        ).all()
-        latest_price_by_symbol = {
-            symbol: _to_float(close)
-            for symbol, close in latest_price_rows
-            if _to_float(close) not in (None, 0)
-        }
-
-        screener_rows = (
-            (
-                await session.execute(
-                    select(ScreenerSnapshot).where(
-                        ScreenerSnapshot.snapshot_date == latest_snapshot,
-                        ScreenerSnapshot.market_cap.is_(None),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-        updated = 0
-        unresolved_symbols: set[str] = set()
-        for index, row in enumerate(screener_rows, start=1):
-            shares = shares_by_symbol.get(row.symbol)
-            price = latest_price_by_symbol.get(row.symbol) or _to_float(row.price)
-            if shares in (None, 0) or price in (None, 0):
-                unresolved_symbols.add(row.symbol)
-                continue
-            row.market_cap = shares * price
-            updated += 1
-            if index % batch_size == 0:
-                await session.commit()
-
-        if unresolved_symbols:
-            provider_shares = await _fetch_provider_outstanding_shares(sorted(unresolved_symbols))
-            if provider_shares:
-                shares_by_symbol.update(provider_shares)
-
-                company_rows_existing = (
-                    (
-                        await session.execute(
-                            select(Company).where(Company.symbol.in_(list(provider_shares.keys())))
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                existing_symbols = {row.symbol for row in company_rows_existing}
-
-                for company in company_rows_existing:
-                    if _to_float(company.outstanding_shares) in (None, 0):
-                        company.outstanding_shares = provider_shares[company.symbol]
-
-                for symbol, shares in provider_shares.items():
-                    if symbol in existing_symbols:
-                        continue
-                    session.add(
-                        Company(
-                            symbol=symbol,
-                            outstanding_shares=shares,
-                            updated_at=datetime.now(UTC).replace(tzinfo=None),
-                        )
-                    )
-
-                for row in screener_rows:
-                    if row.market_cap is not None:
-                        continue
-                    shares = shares_by_symbol.get(row.symbol)
-                    price = latest_price_by_symbol.get(row.symbol) or _to_float(row.price)
-                    if shares in (None, 0) or price in (None, 0):
-                        continue
-                    row.market_cap = shares * price
-                    updated += 1
-
-            unresolved_after_shares = sorted(
-                {row.symbol for row in screener_rows if row.market_cap is None and row.symbol}
-            )
-            if unresolved_after_shares:
-                provider_market_caps = await _fetch_provider_market_caps(unresolved_after_shares)
-                for row in screener_rows:
-                    if row.market_cap is not None:
-                        continue
-                    market_cap = provider_market_caps.get(row.symbol)
-                    if market_cap in (None, 0):
-                        continue
-                    row.market_cap = market_cap
-                    updated += 1
-
-        await session.commit()
-        return updated
+    raise RuntimeError(
+        "Market-cap backfill is disabled: price and share units lack admission evidence."
+    )
 
 
 async def main() -> int:
     args = parse_args()
+
+    if not args.audit_only and args.target == "market-cap":
+        try:
+            await _backfill_market_cap(args.batch_size)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     if not args.audit_only and args.target in {"all", "eps"}:
         try:

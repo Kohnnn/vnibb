@@ -96,14 +96,13 @@ async def test_live_chart_normalizes_only_known_provider_units(
         "time": date(2026, 1, 1), "open": close, "high": close,
         "low": close, "close": close, "volume": 100,
     }])
+    frame.attrs["price_unit"] = "THOUSAND_VND" if symbol == "FPT" else "index_points"
     quote = SimpleNamespace(history=lambda **kwargs: frame)
     if metadata == "frame":
         frame.category = "derivative"
     if metadata == "quote":
         quote.asset_type = "derivative"
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=quote)
-    ))
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: lambda **kwargs: quote)
     monkeypatch.setattr(chart_data_service, "_cache", {})
 
     async def no_db_history(**kwargs):
@@ -117,6 +116,37 @@ async def test_live_chart_normalizes_only_known_provider_units(
 
 
 @pytest.mark.asyncio
+async def test_live_chart_uses_vci_quote_with_requested_dates_and_sorts_bars(monkeypatch):
+    from vnibb.providers.vnstock import runtime
+
+    calls = []
+    start = date(2025, 1, 2)
+    monkeypatch.setattr(chart_data_service, "_compute_start_date", lambda period: start)
+    monkeypatch.setattr(chart_data_service, "_cache", {})
+
+    class Quote:
+        def __init__(self, *, symbol, source):
+            calls.append((symbol, source))
+
+        def history(self, *, start, end, interval):
+            calls.append((start, end, interval))
+            frame = pd.DataFrame([
+                {"time": "2025-01-03", "open": 2, "high": 3, "low": 1, "close": 2, "volume": 20},
+                {"time": "2025-01-02", "open": 1, "high": 2, "low": 1, "close": 1, "volume": 10},
+            ])
+            frame.attrs["price_unit"] = "THOUSAND_VND"
+            return frame
+
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    bars = await chart_data_service.fetch_chart_data(" fpt ", period="1Y", source="vci")
+
+    assert calls == [("FPT", "VCI"), ("2025-01-02", date.today().isoformat(), "1D")]
+    assert [(bar["time"], bar["close"], bar["volume"]) for bar in bars] == [
+        ("2025-01-02", 1000, 10), ("2025-01-03", 2000, 20),
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("source", ["KBS", "TCBS", "MSN", "DNSE"])
 async def test_live_chart_rejects_unsupported_source_before_provider_call(monkeypatch, source):
     from vnibb.providers.vnstock import runtime
@@ -124,7 +154,7 @@ async def test_live_chart_rejects_unsupported_source_before_provider_call(monkey
     def forbid_provider():
         raise AssertionError("provider must not be loaded for an unsupported source")
 
-    monkeypatch.setattr(runtime, "get_vnstock_class", forbid_provider)
+    monkeypatch.setattr(runtime, "get_quote_class", forbid_provider)
     monkeypatch.setattr(chart_data_service, "_cache", {})
 
     with pytest.raises(ValueError, match="only free VCI"):
@@ -231,7 +261,7 @@ def test_chart_cache_stays_scoped_per_source_and_period():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("marker,expected,unit", [
     ({"price_unit": "VND"}, [0.5], "VND"),
-    ({}, [500], "VND"),
+    ({}, [], None),
     ({"price_unit": "UNKNOWN"}, [], None),
 ])
 async def test_chart_requires_provider_declared_equity_unit(monkeypatch, marker, expected, unit):
@@ -249,9 +279,7 @@ async def test_chart_requires_provider_declared_equity_unit(monkeypatch, marker,
         def history(self, **kwargs):
             return frame
 
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=Quote())
-    ))
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: lambda **kwargs: Quote())
     monkeypatch.setattr(chart_data_service, "_cache", {})
 
     async def no_db_history(**kwargs):

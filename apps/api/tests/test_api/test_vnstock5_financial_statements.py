@@ -204,3 +204,131 @@ async def test_generation_four_missing_sdk_version_stays_on_legacy_route(monkeyp
     )
     assert calls[0] == ("init", "HPG", "VCI")
     assert result[0].period == "2025"
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+@pytest.mark.parametrize("basis", [False, True])
+async def test_dedicated_fetchers_use_vci_and_shared_admission(sdk, statement, basis):
+    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
+    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+
+    fetchers = {
+        "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
+        "balance": (VnstockBalanceSheetFetcher, BalanceSheetQueryParams),
+        "cashflow": (VnstockCashFlowFetcher, CashFlowQueryParams),
+    }
+    calls, frames, _ = sdk
+    report = STATEMENTS[statement][1]
+    frames[(statement, "year", report)] = sdk_frame(report, statement, "2025", basis=basis)
+    fetcher, params = fetchers[statement]
+
+    result = await fetcher.fetch(params(symbol="HPG", period="year"))
+
+    assert len(result) == 2
+    assert calls[0][1:7] == (STATEMENTS[statement][0], "year", "en", False, "long", "vci")
+    assert getattr(result[0], STATEMENTS[statement][3]) == (100 if basis else None)
+    assert result[0].raw_data["provider_attrs"]["source"] == "vci"
+    assert result[0].consolidation_basis == ("consolidated" if basis else None)
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+async def test_dedicated_fetchers_do_not_truncate_available_periods(sdk, statement):
+    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
+    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+
+    fetchers = {
+        "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
+        "balance": (VnstockBalanceSheetFetcher, BalanceSheetQueryParams),
+        "cashflow": (VnstockCashFlowFetcher, CashFlowQueryParams),
+    }
+    _, frames, _ = sdk
+    report = STATEMENTS[statement][1]
+    frame = sdk_frame(report, statement, "2025", basis=True)
+    frames[(statement, "year", report)] = pd.concat([
+        frame.iloc[:1].assign(period=str(year)) for year in range(2019, 2026)
+    ], ignore_index=True)
+    frames[(statement, "year", report)].attrs.update(frame.attrs)
+    fetcher, params = fetchers[statement]
+
+    result = await fetcher.fetch(params(symbol="HPG"))
+
+    assert [row.period for row in result] == [str(year) for year in range(2025, 2018, -1)]
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+async def test_dedicated_extractors_preserve_provider_errors(monkeypatch, statement):
+    from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+    from vnibb.providers.vnstock.balance_sheet import VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.cash_flow import VnstockCashFlowFetcher
+    from vnibb.providers.vnstock.income_statement import VnstockIncomeStatementFetcher
+
+    fetcher = {"income": VnstockIncomeStatementFetcher, "balance": VnstockBalanceSheetFetcher,
+               "cashflow": VnstockCashFlowFetcher}[statement]
+
+    async def fail(query, credentials):
+        raise ProviderError(message="synthetic failure", provider="vnstock", details={"symbol": query["symbol"]})
+
+    monkeypatch.setattr(VnstockFinancialsFetcher, "extract_data", fail)
+    with pytest.raises(ProviderError, match="synthetic failure"):
+        await fetcher.extract_data({"symbol": "HPG", "period": "year"})
+
+    async def timeout(query, credentials):
+        raise ProviderTimeoutError(provider="vnstock", timeout_seconds=1)
+
+    monkeypatch.setattr(VnstockFinancialsFetcher, "extract_data", timeout)
+    with pytest.raises(ProviderTimeoutError):
+        await fetcher.extract_data({"symbol": "HPG", "period": "year"})
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+@pytest.mark.parametrize("invalid", ["source", "unit", "basis"])
+async def test_dedicated_fetchers_withhold_unverified_zero(sdk, statement, invalid):
+    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
+    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+
+    fetcher, params = {
+        "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
+        "balance": (VnstockBalanceSheetFetcher, BalanceSheetQueryParams),
+        "cashflow": (VnstockCashFlowFetcher, CashFlowQueryParams),
+    }[statement]
+    _, frames, _ = sdk
+    report = STATEMENTS[statement][1]
+    frame = sdk_frame(report, statement, "2025", basis=True)
+    frame.loc[:, "value"] = 0
+    if invalid == "source":
+        frame.attrs["source"] = "kbs"
+    elif invalid == "unit":
+        frame.loc[:, "unit"] = "unknown"
+    else:
+        frame.attrs.pop("consolidation_basis")
+    frames[(statement, "year", report)] = frame
+
+    result = await fetcher.fetch(params(symbol="HPG"))
+
+    assert result
+    assert getattr(result[0], STATEMENTS[statement][3]) is None
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+async def test_dedicated_fetchers_admit_evidenced_zero(sdk, statement):
+    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
+    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+
+    fetcher, params = {
+        "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
+        "balance": (VnstockBalanceSheetFetcher, BalanceSheetQueryParams),
+        "cashflow": (VnstockCashFlowFetcher, CashFlowQueryParams),
+    }[statement]
+    _, frames, _ = sdk
+    report = STATEMENTS[statement][1]
+    frame = sdk_frame(report, statement, "2025", basis=True)
+    frame.loc[:, "value"] = 0
+    frames[(statement, "year", report)] = frame
+
+    result = await fetcher.fetch(params(symbol="HPG"))
+
+    assert getattr(result[0], STATEMENTS[statement][3]) == 0

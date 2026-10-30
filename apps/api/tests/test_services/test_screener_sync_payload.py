@@ -249,15 +249,15 @@ def test_screener_provider_uses_actual_history_contract(unit, source, price, exp
 @pytest.mark.parametrize(
     "provider_module,frame_source,unit,close,expected_price,expected_unit,expected_source",
     [
-        ("vnstock.explorer.kbs.quote", "KBS", None, 60.3, 60300, "VND", "vnstock_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "VCI", None, 60.3, 60300, "VND", "vnstock_history:VCI"),
-        ("vnstock.explorer.kbs.quote", "KBS", None, 0.5, 500, "VND", "vnstock_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "KBS", None, 100000, 100000000, "VND", "vnstock_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "KBS", "VND", 60300, 60300, "VND", "vnstock_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "KBS", "thousand_VND", 60.3, 60300, "VND", "vnstock5_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "VCI", "thousand_VND", 60.3, 60300, "VND", "vnstock5_history:VCI"),
+        ("vnstock.explorer.kbs.quote", "KBS", "thousand_VND", 0.5, 500, "VND", "vnstock5_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "KBS", "thousand_VND", 100000, 100000000, "VND", "vnstock5_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "KBS", "VND", 60300, 60300, "VND", "vnstock5_history:KBS"),
         ("vnstock_data.explorer.kbs.quote", "KBS", "VND", 60300, 60300, "VND", "vnstock_data_history:KBS"),
         ("vnstock_data.explorer.kbs.quote", "KBS", None, 60300, 60300, "unknown", "vnstock_data_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "MSN", None, 60300, 60300, "unknown", "vnstock_history:MSN"),
-        ("vnstock.explorer.kbs.quote", "MSN", None, 0.5, 0.5, "unknown", "vnstock_history:MSN"),
+        ("vnstock.explorer.kbs.quote", "MSN", None, 60300, 60300, "unknown", "vnstock5_history:MSN"),
+        ("vnstock.explorer.kbs.quote", "MSN", None, 0.5, 0.5, "unknown", "vnstock5_history:MSN"),
     ],
     ids=[
         "free-history",
@@ -318,11 +318,13 @@ async def test_pipeline_screener_history_enrichment_retains_actual_price_lineage
         symbols_by_industries = all_symbols
 
     class Finance:
-        def __init__(self, **kwargs):
-            pass
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
         def ratio(self, **kwargs):
-            return pd.DataFrame([{"item_id": "pe", "2025": 12}])
+            assert kwargs == {"source": "VCI", "period": "year", "lang": "en", "format": "long"}
+            return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12}])
 
     class Quote:
         def __init__(self, symbol, source):
@@ -349,7 +351,7 @@ async def test_pipeline_screener_history_enrichment_retains_actual_price_lineage
         cache.append(value)
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", pace)
@@ -433,8 +435,8 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
     monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
     monkeypatch.setattr(data_pipeline_module.settings, "vnstock_source", "VCI")
     evidence = [
-        {"item_id": "roe", "unit": provider_unit, "2025": 0.25},
-        {"item_id": "debt_assets", "unit": provider_unit, "2025": 0.42},
+        {"period": "2025", "id": "roe", "name": "ROE", "unit": provider_unit, "value": 0.25},
+        {"period": "2025", "id": "debt_assets", "name": "Debt/assets", "unit": provider_unit, "value": 0.42},
     ]
 
     class Listing:
@@ -448,8 +450,9 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
         symbols_by_industries = all_symbols
 
     class Finance:
-        def __init__(self, **kwargs):
-            pass
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
         def ratio(self, **kwargs):
             return pd.DataFrame(evidence)
@@ -468,7 +471,7 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
         return None
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", pace)
@@ -532,11 +535,12 @@ async def test_pipeline_previous_cap_is_only_a_fallback(test_engine, monkeypatch
         symbols_by_industries = symbols_by_exchange
 
     class Finance:
-        def __init__(self, **kwargs):
-            pass
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
         def ratio(self, **kwargs):
-            return pd.DataFrame([{"item_id": "pe", "2025": 12}])
+            return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12}])
 
     class Quote:
         def __init__(self, **kwargs):
@@ -549,7 +553,7 @@ async def test_pipeline_previous_cap_is_only_a_fallback(test_engine, monkeypatch
         pass
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", noop)

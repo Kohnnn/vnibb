@@ -656,7 +656,6 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
 
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
     monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace())
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: object)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
@@ -751,9 +750,6 @@ async def test_heatmap_distinct_batches_progress_at_child_worker_capacity(client
                     active -= 1
 
     monkeypatch.setattr(equity_screener, "_executor", pool)
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=Quote(**kwargs)),
-    ))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 6)
@@ -883,9 +879,6 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
 
     calls = {"broad_stock": 0, "listing": 0, "quotes": []}
 
-    def broad_stock_is_forbidden():
-        calls["broad_stock"] += 1
-        raise AssertionError("Quote-only acquisition must not construct Finance")
 
     class Listing:
         def __init__(self, *, source):
@@ -912,7 +905,7 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
                 "time": date.today().isoformat(), "close": 100.0, "volume": 1_000_000,
             }])
 
-    monkeypatch.setattr(equity_screener, "get_vnstock", broad_stock_is_forbidden)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda *_args: (_ for _ in ()).throw(AssertionError("Quote-only acquisition must not construct Fundamental")))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
@@ -979,10 +972,6 @@ def screener_supplier(monkeypatch):
             return history(**kwargs)
 
 
-    supplier = SimpleNamespace(
-        finance=SimpleNamespace(ratio=ratios), quote=SimpleNamespace(history=history),
-    )
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(stock=lambda **_kw: supplier))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))

@@ -44,7 +44,7 @@ def test_decodes_descriptor_code_not_fixed_provider_code_and_preserves_zero(enve
 
 
 @pytest.mark.parametrize("field", ["eps_diluted", "epsDiluted", "dilutedEps"])
-def test_income_provider_preserves_diluted_eps_zero(field):
+def test_income_provider_withholds_unitless_diluted_eps_zero(field):
     from vnibb.providers.vnstock.income_statement import (
         IncomeStatementQueryParams,
         VnstockIncomeStatementFetcher,
@@ -53,7 +53,7 @@ def test_income_provider_preserves_diluted_eps_zero(field):
     rows = VnstockIncomeStatementFetcher.transform_data(
         IncomeStatementQueryParams(symbol="FPT"), [{"yearReport": 2025, field: 0}],
     )
-    assert rows[0].eps_diluted == 0
+    assert rows[0].eps_diluted is None
 
 
 @pytest.mark.parametrize("failure", ["null", "source", "scope", "fiscal"])

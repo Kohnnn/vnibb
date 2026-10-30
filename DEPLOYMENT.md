@@ -21,8 +21,9 @@ SUPABASE_KEY=your-service-role-key
 # Cache tier (optional, for caching)
 REDIS_URL=redis://localhost:6379/0
 
-# VNStock Premium (optional)
-VNSTOCK_API_KEY=your-vnstock-api-key
+# VNStock authentication (optional)
+# Only VNSTOCK_RUNTIME_TIER=golden uses this; supply it from a deployment secret.
+VNSTOCK_API_KEY=
 
 # AI Features (optional)
 GOOGLE_API_KEY=your-google-api-key
@@ -135,9 +136,10 @@ The backend exposes Prometheus metrics at `/metrics` (when enabled).
    - Check network connectivity
 
 2. **VNStock API errors**
-   - Verify VNSTOCK_API_KEY is valid
-   - Check rate limits
-   - Fallback to free tier if needed
+   - Confirm `VNSTOCK_SOURCE=VCI` and the configured `VNSTOCK_RUNTIME_TIER`
+   - Golden startup fails closed when `VNSTOCK_API_KEY` is missing, rejected or timed out
+   - Free mode runs no startup account check; isolate `VNSTOCK_HOME` so a persisted paid account is not reused
+   - Check the configured rate limits; unavailable data is not filled from another source
 
 3. **Frontend build errors**
    - Clear `.next` folder

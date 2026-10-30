@@ -426,12 +426,13 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
 ):
     from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
     from vnibb.providers.vnstock import runtime
+    from types import SimpleNamespace
 
     class QuotaFinance:
         def ratio(self, **kwargs):
             raise SystemExit("API usage quota exceeded")
 
-    monkeypatch.setattr(runtime, "create_finance", lambda *args: QuotaFinance())
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (lambda: SimpleNamespace(equity=lambda symbol: QuotaFinance()), "vnstock"))
 
     if retained:
         test_db.add(FinancialRatio(

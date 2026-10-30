@@ -48,7 +48,7 @@ from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.retry import with_retry
 from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
-from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.providers.vnstock.runtime import validate_source
 from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
@@ -192,7 +192,6 @@ class RateLimiter:
 
 class DataPipeline:
     def __init__(self):
-        self._vnstock = None
         self.cache_writes_enabled = True
         self._redis_disabled_until = 0.0
         rps_budget = max(float(getattr(settings, "vnstock_rate_limit_rps", 0) or 0), 0.0)
@@ -263,13 +262,6 @@ class DataPipeline:
         if limiter:
             await limiter.wait()
         await self._record_rate_usage(mode)
-
-    @property
-    def vnstock(self):
-        from vnibb.providers.vnstock.runtime import get_vnstock_class
-
-        Vnstock = get_vnstock_class()
-        return Vnstock()
 
     @staticmethod
     def _describe_provider_exception(exc: BaseException) -> str:
@@ -1117,8 +1109,7 @@ class DataPipeline:
     ) -> int:
         """Materialize retained quotes; acquire provider-board sessions only when requested."""
         from vnibb.providers.vnstock.runtime import (
-            create_finance,
-            finance_method_kwargs,
+            import_vnstock_symbol,
             get_listing_class,
             run_financial_provider,
         )
@@ -1658,85 +1649,23 @@ class DataPipeline:
                         try:
 
                             def _fetch_ratio_snapshot(sym: str, src: str):
-                                finance = create_finance(sym, src, "year")
-                                kwargs = ratio_method_kwargs(finance.ratio, finance_method_kwargs(finance.ratio, "year"))
-                                df = finance.ratio(**kwargs)
+                                fundamental = import_vnstock_symbol("Fundamental")[0]()
+                                df = fundamental.equity(sym).ratio(
+                                    source=validate_source(src), period="year", lang="en", format="long",
+                                )
                                 if df is None or df.empty:
                                     return None
-
-                                # Row-based format (item/item_id/year columns)
-                                if "item_id" in df.columns:
-                                    records = df.to_dict("records")
-                                    year_cols = sorted(
-                                        [
-                                            str(column)
-                                            for column in df.columns
-                                            if re.fullmatch(r"20\d{2}", str(column))
-                                        ],
-                                        reverse=True,
-                                    )
-                                    if not year_cols:
-                                        return None
-                                    latest_year = year_cols[0]
-                                    ratio_row: Dict[str, Any] = {"year_report": int(latest_year)}
-                                    # vnstock item_id naming changed across versions:
-                                    # legacy emitted `p_e`/`p_b`/`p_s`, current 4.x emits
-                                    # `pe`/`pb`/`ps`. Accept BOTH so valuation multiples
-                                    # don't silently land as NULL (regression that left
-                                    # screener_snapshots.pe/pb/ps empty for every symbol).
-                                    metric_map = {
-                                        # P/E
-                                        "p_e": "pe",
-                                        "pe": "pe",
-                                        "price_to_earning": "pe",
-                                        # P/B
-                                        "p_b": "pb",
-                                        "pb": "pb",
-                                        "price_to_book": "pb",
-                                        # P/S
-                                        "p_s": "ps",
-                                        "ps": "ps",
-                                        "price_to_sales": "ps",
-                                        # EV/EBITDA
-                                        "ev_ebitda": "ev_ebitda",
-                                        "ev_per_ebitda": "ev_ebitda",
-                                        # Returns
-                                        "roe": "roe",
-                                        "roa": "roa",
-                                        "roic": "roic",
-                                        # Per-share / yield
-                                        "trailing_eps": "eps",
-                                        "eps": "eps",
-                                        "book_value_per_share": "bvps",
-                                        "bvps": "bvps",
-                                        "dividend_yield": "dividend_yield",
-                                        "beta": "beta",
-                                    }
-                                    liabilities = None
-                                    owners_equity = None
-                                    for record in records:
-                                        item_id = record.get("item_id")
-                                        if not item_id:
-                                            continue
-                                        # Normalize provider item_id (casing/whitespace
-                                        # drift across vnstock versions) before mapping.
-                                        item_key = str(item_id).strip().lower()
-                                        value = record.get(latest_year)
-                                        if value is None:
-                                            continue
-                                        if item_key in metric_map:
-                                            ratio_row[metric_map[item_key]] = value
-                                        elif item_key == "liabilities":
-                                            liabilities = value
-                                        elif item_key == "owners_equity":
-                                            owners_equity = value
-                                    if liabilities is not None and owners_equity not in (None, 0):
-                                        ratio_row["de"] = liabilities / owners_equity
-                                    ratio_row = normalize_ratio_payload(ratio_row, records, latest_year)
-                                else:
-                                    # Legacy format
-                                    ratio_row = df.iloc[0].to_dict()
-                                    ratio_row = normalize_ratio_payload(ratio_row, [ratio_row])
+                                ratios = VnstockFinancialRatiosFetcher.transform_data(
+                                    FinancialRatiosQueryParams(symbol=sym, period="year"),
+                                    df.to_dict("records"),
+                                )
+                                annual = [ratio for ratio in ratios if ratio.period and re.fullmatch(r"20\d{2}", ratio.period)]
+                                if not annual:
+                                    return None
+                                latest = max(annual, key=lambda ratio: ratio.period)
+                                ratio_row = latest.model_dump()
+                                ratio_row["year_report"] = int(latest.period)
+                                ratio_row["debt_to_equity"] = ratio_row.get("debt_equity")
 
                                 try:
                                     end_date = datetime.now()
@@ -5852,8 +5781,8 @@ class DataPipeline:
                         continue
                     buy_vol = payload.get("foreign_buy_vol")
                     sell_vol = payload.get("foreign_sell_vol")
-                    buy_value = payload.get("foreign_buy_value")
-                    sell_value = payload.get("foreign_sell_value")
+                    # The SDK does not declare the currency unit of board values.
+                    buy_value = sell_value = None
                     values = {
                         "symbol": symbol,
                         "trade_date": trade_date,
@@ -5870,7 +5799,10 @@ class DataPipeline:
                         "created_at": datetime.utcnow(),
                         "updated_at": datetime.utcnow(),
                     }
-                    stmt = get_upsert_stmt(ForeignTrading, ["symbol", "trade_date"], values)
+                    stmt = get_upsert_stmt(
+                        ForeignTrading, ["symbol", "trade_date"], values,
+                        preserve_existing_on_null={"buy_value", "sell_value", "net_value"},
+                    )
                     await session.execute(stmt)
                     total += 1
 
@@ -6092,10 +6024,15 @@ class DataPipeline:
                         receipt.update(provider="vietcap:Trading", price_multiplier=1, source_price_unit="VND")
                         return acquired, receipt
                     except Exception as primary_error:
-                        from vnibb.providers.vnstock.runtime import get_vnstock_class
-                        stock = get_vnstock_class()().stock(symbol=symbol, source=validate_source(source))
-                        acquired, receipt = acquire_session_trades(stock.quote.intraday, trade_date, limit, session_closed=self._is_after_market_close())
-                        receipt.update(provider=f"vnstock:{source}", price_multiplier=1000, source_price_unit="thousand_VND", primary_error=type(primary_error).__name__)
+                        from vnibb.providers.vnstock.runtime import get_quote_class
+                        quote = get_quote_class()(symbol=symbol, source=validate_source(source))
+                        frame = quote.intraday(page_size=min(max(1, limit), 1000))
+                        unit = str(getattr(frame, "attrs", {}).get("price_unit") or "").strip().lower()
+                        units = {"vnd": (1, "VND"), "thousand_vnd": (1000, "thousand_VND")}
+                        if unit not in units:
+                            raise ValueError("VCI intraday price unit unavailable") from primary_error
+                        acquired, receipt = acquire_session_trades(lambda: frame, trade_date, limit, session_closed=self._is_after_market_close())
+                        receipt.update(provider=f"vnstock:{source}", price_multiplier=units[unit][0], source_price_unit=units[unit][1], primary_error=type(primary_error).__name__)
                         return acquired, receipt
                 raw_rows, coverage = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=settings.vnstock_timeout)
                 coverage.update(raw_dataset="equity.intraday", price_unit="VND", volume_unit="shares", current_depth={"status": "unknown"})

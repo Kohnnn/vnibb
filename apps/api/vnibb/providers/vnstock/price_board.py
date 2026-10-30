@@ -106,9 +106,12 @@ class VnstockPriceBoardFetcher:
                 trading = Trading(source=source)
                 df = trading.price_board(
                     symbols_list=[s.upper() for s in symbols],
-                    flatten_columns=True,
-                    drop_levels=[0],
+                    get_unified=True,
                 )
+                if df is not None and len(df) > 0 and str(df.attrs.get("price_unit", "")).upper() != "VND":
+                    raise ValueError("VCI price board price unit is unavailable")
+                if df is not None and str(df.attrs.get("value_unit", "")).upper() != "VND":
+                    df = df.drop(columns=[name for name in ("value", "nmTotalTradedValue", "accumulated_value", "total_value", "foreign_buy_value", "foreign_sell_value", "foreignBuyValue", "foreignSellValue", "fBuyValue", "fSellValue") if name in df.columns])
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
             loop = asyncio.get_event_loop()
@@ -148,7 +151,7 @@ class VnstockPriceBoardFetcher:
                     close=_coalesce("close", "closePrice", "close_price"),
                     prev_close=_coalesce("prevClose", "refPrice", "ref", "ref_price", "reference_price"),
                     change=_coalesce("change", "priceChange", "price_change"),
-                    percent_change=_coalesce("percentChange", "pctChange", "percent_change"),
+                    percent_change=_coalesce("percentChange", "pctChange", "percent_change", "change_percent"),
                     volume=_coalesce("volume", "nmTotalTradedQty", "accumulated_volume", "volume_accumulated"),
                     value=_coalesce("value", "nmTotalTradedValue", "accumulated_value", "total_value"),
                     best_bid=_coalesce("bestBid", "bidPrice1", "bid_price_1", "bid_1_price"),

@@ -60,17 +60,6 @@ class InsiderTrackingService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
-        self._vnstock = None
-    
-    @property
-    def vnstock(self):
-        if self._vnstock is None:
-            from vnibb.providers.vnstock.runtime import get_vnstock_class
-
-            Vnstock = get_vnstock_class()
-            self._vnstock = Vnstock()
-        return self._vnstock
-
     
     async def sync_insider_deals(self, symbols: List[str]) -> Dict[str, int]:
         """

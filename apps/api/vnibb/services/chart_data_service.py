@@ -129,11 +129,11 @@ async def fetch_chart_data(
 
     def _fetch_sync() -> List[Dict[str, Any]]:
         try:
-            from vnibb.providers.vnstock.runtime import get_vnstock_class
+            from vnibb.providers.vnstock.runtime import get_quote_class
 
-            Vnstock = get_vnstock_class()
-            stock = Vnstock().stock(symbol=symbol, source=source)
-            df = stock.quote.history(
+            Quote = get_quote_class()
+            quote = Quote(symbol=symbol, source=source)
+            df = quote.history(
                 start=start_date.isoformat(),
                 end=end_date.isoformat(),
                 interval="1D",
@@ -144,7 +144,7 @@ async def fetch_chart_data(
                 return []
 
             records = []
-            normalized_rows = history_price_records(df, symbol=symbol, source=source, provider=stock.quote)
+            normalized_rows = history_price_records(df, symbol=symbol, source=source, provider=quote)
             for normalized in normalized_rows:
                 time_val = normalized.get("time") or normalized.get("date") or normalized.get("trading_date")
                 if hasattr(time_val, "isoformat"):

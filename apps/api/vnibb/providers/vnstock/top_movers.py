@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
+from vnibb.core.price_units import normalize_price_record
 from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 from concurrent.futures import ThreadPoolExecutor
 
@@ -252,10 +253,15 @@ def _parse_price_board_record(row: dict) -> Optional[dict]:
         )
     )
 
+    price_record = normalize_price_record(
+        {"price": match_price, "change": price_change, "price_unit": row.get("price_unit")},
+        symbol=symbol,
+    )
+    known_unit = price_record["price_unit"] == "VND"
     return {
         "symbol": symbol,
-        "price": match_price,
-        "change": round(price_change, 2),
+        "price": price_record["price"] if known_unit else None,
+        "change": round(price_record["change"], 2) if known_unit else None,
         "change_pct": round(price_change_pct, 2),
         "volume": volume,
         "value": value,
@@ -327,24 +333,23 @@ class VnstockTopMoversFetcher:
                             "Failed to get symbols for group %s (source=%s): %s", group, source, exc
                         )
 
-                    # Fallback: get all symbols and filter by exchange
+                    # all_symbols() in SDK 5 returns no exchange column.
                     if not symbols:
-                        logger.info("Falling back to all_symbols for %s (source=%s)", index, source)
+                        logger.info("Falling back to symbols_by_exchange for %s (source=%s)", index, source)
                         try:
-                            all_df = listing.all_symbols()
+                            all_df = listing.symbols_by_exchange()
                             if all_df is not None and not all_df.empty:
-                                if "exchange" in all_df.columns:
-                                    if index == "HNX":
-                                        all_df = all_df[all_df["exchange"] == "HNX"]
-                                    else:
-                                        all_df = all_df[all_df["exchange"] == "HOSE"]
+                                if "exchange" not in all_df.columns:
+                                    raise ValueError("Exchange listing has no exchange column")
+                                exchange = "HNX" if index == "HNX" else "HOSE"
+                                all_df = all_df[all_df["exchange"] == exchange]
                                 symbols = all_df["symbol"].head(100).tolist()
                                 logger.info(
                                     "Got %s symbols from fallback (source=%s)", len(symbols), source
                                 )
                         except Exception as exc:
                             last_error = exc
-                            logger.warning("Failed to get all_symbols (source=%s): %s", source, exc)
+                            logger.warning("Failed to get symbols_by_exchange (source=%s): %s", source, exc)
                             continue
 
                     if not symbols:
@@ -362,8 +367,12 @@ class VnstockTopMoversFetcher:
 
                         # Flatten MultiIndex columns
                         df = _flatten_multiindex_df(df)
+                        unit = df.attrs.get("price_unit") or df.attrs.get("priceUnit")
 
                         records = df.to_dict(orient="records")
+                        if unit is not None:
+                            for record in records:
+                                record.setdefault("price_unit", unit)
                         logger.info(
                             "Got %s records from price_board (source=%s)", len(records), source
                         )
@@ -549,7 +558,11 @@ class VnstockTopMoversFetcher:
                             continue
 
                         df = _flatten_multiindex_df(df)
+                        unit = df.attrs.get("price_unit") or df.attrs.get("priceUnit")
                         records = df.to_dict(orient="records")
+                        if unit is not None:
+                            for record in records:
+                                record.setdefault("price_unit", unit)
                         logger.info(
                             "Got %s records for sector movers (source=%s)",
                             len(records),

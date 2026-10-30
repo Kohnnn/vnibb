@@ -99,14 +99,15 @@ class VnstockDerivativesFetcher:
         """
         try:
             def _fetch():
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+                from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
-                df = stock.quote.history(
+                source = validate_source(settings.vnstock_source)
+                market = import_vnstock_symbol("Market")[0]()
+                df = market.futures(symbol.upper()).history(
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                     interval=interval,
+                    source=source,
                 )
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
             

@@ -39,28 +39,49 @@ def _sdk(monkeypatch, **exports):
     return module
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("answer", "expected"), [(True, True), (False, False)])
-async def test_registration_keeps_v4_boolean_auth_result(isolated_registration, monkeypatch, answer, expected):
-    calls = []
-    _sdk(monkeypatch, change_api_key=lambda key: calls.append(key) or answer)
-
-    result = await registration.ensure_vnstock_registration()
-
-    assert result.registered is expected
-    assert calls == ["synthetic-key"]
-
 
 @pytest.mark.asyncio
 async def test_registration_accepts_authenticated_v5_status(isolated_registration, monkeypatch):
     calls = []
-    _sdk(monkeypatch, setup_api_key=lambda key: calls.append(key) or {"authenticated": True})
+    _sdk(monkeypatch, setup_api_key=lambda key: calls.append(key) or {"authenticated": True, "tier": "free"})
 
     result = await registration.ensure_vnstock_registration()
 
     assert result.registered is True
     assert result.reason == "registered"
     assert calls == ["synthetic-key"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tier, expected", [("golden", True), ("diamond", True), ("free", False), ("silver", False), (None, False)])
+async def test_golden_registration_requires_entitled_sdk_status(isolated_registration, monkeypatch, tier, expected):
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(monkeypatch, setup_api_key=lambda key: {"authenticated": True, "tier": tier})
+
+    result = await registration.ensure_vnstock_registration()
+    assert result.registered is expected
+
+
+@pytest.mark.asyncio
+async def test_sdk_auth_error_does_not_disclose_key(isolated_registration, monkeypatch, caplog):
+    def failed_auth(key):
+        raise RuntimeError(key)
+
+    _sdk(monkeypatch, setup_api_key=failed_auth)
+    result = await registration.ensure_vnstock_registration()
+    assert not result.registered
+    assert "synthetic-key" not in caplog.text
+    assert "synthetic-key" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_golden_cannot_reuse_free_registration(isolated_registration, monkeypatch):
+    _sdk(monkeypatch, setup_api_key=lambda key: {"authenticated": True, "tier": "free"})
+    assert (await registration.ensure_vnstock_registration()).registered
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    assert not (await registration.ensure_vnstock_registration()).registered
 
 
 @pytest.mark.asyncio
@@ -129,7 +150,7 @@ async def test_concurrent_registration_shares_blocked_authentication(isolated_re
         calls.append(key)
         loop.call_soon_threadsafe(worker_started.set)
         unblock_worker.wait()
-        return {"authenticated": True}
+        return {"authenticated": True, "tier": "free"}
 
     _sdk(monkeypatch, setup_api_key=blocked_auth)
     first = asyncio.create_task(registration.ensure_vnstock_registration())
@@ -188,7 +209,7 @@ async def test_registration_cancellation_returns_before_worker_and_holds_lock(
     def blocked_auth(_key):
         loop.call_soon_threadsafe(worker_started.set)
         unblock_worker.wait()
-        return {"authenticated": True}
+        return {"authenticated": True, "tier": "free"}
 
     async def release_lock(key, lock):
         released.append((key, lock))
@@ -261,3 +282,57 @@ async def test_free_vci_guard_rejects_paid_runtime_before_sdk_import(isolated_re
 
     assert result.registered is False
     assert imports == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["no_api_key", "lock_busy", "registration_failed"])
+async def test_golden_startup_rejects_unregistered_status(monkeypatch, reason):
+    from vnibb.api import main
+
+    monkeypatch.setattr(main.settings, "vnstock_runtime_tier", "golden")
+
+    async def failed():
+        return registration.RegistrationResult(False, reason)
+
+    monkeypatch.setattr(registration, "ensure_vnstock_registration", failed)
+    with pytest.raises(RuntimeError, match="VNStock Golden registration failed"):
+        await main._register_vnstock_on_startup()
+
+
+@pytest.mark.asyncio
+async def test_golden_startup_sanitizes_registration_exception(monkeypatch, caplog):
+    from vnibb.api import main
+
+    monkeypatch.setattr(main.settings, "vnstock_runtime_tier", "golden")
+
+    async def failed():
+        raise RuntimeError("synthetic-secret")
+
+    monkeypatch.setattr(registration, "ensure_vnstock_registration", failed)
+    with pytest.raises(RuntimeError, match="VNStock Golden registration failed") as error:
+        await main._register_vnstock_on_startup()
+    assert error.value.__suppress_context__
+    assert "synthetic-secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_golden_startup_accepts_registered_status(monkeypatch):
+    from vnibb.api import main
+
+    monkeypatch.setattr(main.settings, "vnstock_runtime_tier", "golden")
+
+    async def registered():
+        return registration.RegistrationResult(True, "registered")
+
+    monkeypatch.setattr(registration, "ensure_vnstock_registration", registered)
+    await main._register_vnstock_on_startup()
+
+
+def test_warmup_loads_facades_without_provider_requests(monkeypatch):
+    from vnibb.api import main
+    from vnibb.providers.vnstock import runtime
+
+    names = []
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: names.append(name))
+    main._warmup_vnstock_sync()
+    assert names == ["Company", "Finance", "Listing"]

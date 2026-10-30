@@ -4,17 +4,12 @@ VnStock Balance Sheet Fetcher
 Fetches balance sheet data for Vietnam-listed companies.
 """
 
-import asyncio
-import logging
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 from vnibb.providers.base import BaseFetcher
-from vnibb.core.config import settings
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
-logger = logging.getLogger(__name__)
 
 
 class BalanceSheetQueryParams(BaseModel):
@@ -53,6 +48,7 @@ class BalanceSheetData(BaseModel):
     currency: str | None = None
     flow_basis: str | None = None
     consolidation_basis: str | None = None
+    unavailable_reason: str | None = None
     
     model_config = {
         "json_schema_extra": {
@@ -81,54 +77,24 @@ class VnstockBalanceSheetFetcher(BaseFetcher[BalanceSheetQueryParams, BalanceShe
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-        loop = asyncio.get_event_loop()
-        
-        def _fetch_sync() -> List[dict]:
-            try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+        from sys import maxsize
+        from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
-                df = stock.finance.balance_sheet(period=query.get("period", "year"), lang="en")
-                
-                if df is None or df.empty:
-                    return []
-                
-                return df.to_dict("records")
-            except Exception as e:
-                logger.error(f"vnstock balance sheet fetch error: {e}")
-                raise ProviderError(message=str(e), provider="vnstock", details={"symbol": query["symbol"]})
-        
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
-            )
-        except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
+        return await VnstockFinancialsFetcher.extract_data(
+            {**query, "statement_type": "balance", "limit": maxsize}, credentials
+        )
     
     @staticmethod
     def transform_data(
         params: BalanceSheetQueryParams,
         data: List[dict[str, Any]],
     ) -> List[BalanceSheetData]:
-        results = []
-        for row in data:
-            try:
-                results.append(BalanceSheetData(
-                    symbol=params.symbol.upper(),
-                    period=str(row.get("yearReport") or row.get("period") or ""),
-                    total_assets=row.get("asset") or row.get("totalAssets"),
-                    current_assets=row.get("shortAsset") or row.get("currentAssets"),
-                    fixed_assets=row.get("fixedAsset") or row.get("longAsset"),
-                    total_liabilities=row.get("debt") or row.get("totalLiabilities"),
-                    current_liabilities=row.get("shortDebt") or row.get("currentLiabilities"),
-                    long_term_liabilities=row.get("longDebt") or row.get("longTermDebt"),
-                    equity=row.get("equity") or row.get("stockholderEquity"),
-                    cash=row.get("cash") or row.get("cashAndEquivalents"),
-                    inventory=row.get("inventory"),
-                    receivables=row.get("shortReceivable"),
-                ))
-            except Exception as e:
-                logger.warning(f"Skipping invalid balance sheet row: {e}")
-        return results
+        from sys import maxsize
+        from vnibb.providers.vnstock.financials import FinancialsQueryParams, StatementType, VnstockFinancialsFetcher
+        from vnibb.services.financial_service import admit_statement_rows
+
+        statements = VnstockFinancialsFetcher.transform_data(
+            FinancialsQueryParams(symbol=params.symbol, period=params.period, statement_type=StatementType.BALANCE, limit=maxsize), data
+        )
+        return [BalanceSheetData.model_validate({**row.model_dump(), "receivables": row.accounts_receivable})
+                for row in admit_statement_rows(statements, params.period)]

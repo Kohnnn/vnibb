@@ -17,12 +17,14 @@ from vnibb.core.cache_constants import PIPELINE_TTL_SCREENER
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import normalize_screener_record
-from vnibb.core.retry import with_retry
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from vnibb.services.screener_metadata import screener_metadata_updates
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
-from vnibb.services.pipeline.base import BasePipeline, get_upsert_stmt
+from vnibb.services.pipeline.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,6 @@ class ScreenerPipeline(BasePipeline):
             normalized /= 100
         return normalized
 
-    @with_retry(max_retries=3)
     async def sync_screener_data(
         self,
         symbols: Optional[List[str]] = None,
@@ -87,13 +88,11 @@ class ScreenerPipeline(BasePipeline):
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
     ) -> int:
-        """Sync comprehensive metrics for stocks using vnstock finance.ratio."""
-        from vnibb.core.ratio_units import ratio_method_kwargs
-        from vnibb.providers.vnstock.runtime import (
-            create_finance,
-            finance_method_kwargs,
-            validate_source,
+        """Sync admitted VCI financial ratios into screener snapshots."""
+        from vnibb.providers.vnstock.financial_ratios import (
+            FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher,
         )
+        from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
         source = validate_source(settings.vnstock_source)
 
@@ -163,20 +162,23 @@ class ScreenerPipeline(BasePipeline):
                 await self._wait_for_rate_limit("screener")
 
                 def _fetch_sync():
-                    finance = create_finance(symbol, source, "year")
-                    try:
-                        method = finance.ratio
-                        df = method(**ratio_method_kwargs(method, finance_method_kwargs(method, "year")))
-                        return df
-                    except Exception as e:
-                        logger.debug(f"Ratio fetch failed for {symbol}: {e}")
-                        return None
+                    fundamental = import_vnstock_symbol("Fundamental")[0]()
+                    return fundamental.equity(symbol).ratio(
+                        source=source, period="year", lang="en", format="long",
+                    )
 
                 ratio_df = await loop.run_in_executor(None, _fetch_sync)
 
                 if ratio_df is not None and not ratio_df.empty:
-                    # Process ratio data and store
-                    for _, row in ratio_df.iterrows():
+                    ratios = VnstockFinancialRatiosFetcher.transform_data(
+                        FinancialRatiosQueryParams(symbol=symbol, period="year"),
+                        ratio_df.to_dict("records"),
+                    )
+                    ratios = [ratio for ratio in ratios if ratio.period and ratio.period.isdigit()]
+                    if not ratios:
+                        raise ValueError("Nonempty ratio response contains no admitted fiscal periods")
+                    for ratio in ratios[:1]:
+                        row = ratio.model_dump()
                         extended_metrics = {
                             "change_1d": self._pick_float(
                                 row.get("price_change_1d_pct"),
@@ -224,13 +226,17 @@ class ScreenerPipeline(BasePipeline):
                             "operating_margin": self._parse_float(row.get("operating_margin")),
                             "revenue_growth": self._parse_float(row.get("revenue_growth")),
                             "earnings_growth": self._parse_float(row.get("earnings_growth")),
-                            "dividend_yield": self._normalize_dividend_yield(row.get("dividend_yield")),
-                            "debt_to_equity": self._parse_float(row.get("debt_to_equity")),
+                            "dividend_yield": row.get("dividend_yield"),
+                            "debt_to_equity": row.get("debt_equity"),
                             "current_ratio": self._parse_float(row.get("current_ratio")),
                             "quick_ratio": self._parse_float(row.get("quick_ratio")),
                             "eps": self._parse_float(row.get("eps")),
                             "bvps": self._parse_float(row.get("bvps")),
-                            "extended_metrics": extended_metrics,
+                            "extended_metrics": {
+                                **extended_metrics,
+                                "ratio_units": row.get("ratio_units", {}),
+                                "provider_evidence": row.get("provider_evidence", []),
+                            },
                             "source": settings.vnstock_source or "VCI",
                             "created_at": date.today(),
                         }
@@ -241,10 +247,15 @@ class ScreenerPipeline(BasePipeline):
                         })
 
                         async with self._get_session() as session:
-                            stmt = get_upsert_stmt(
-                                ScreenerSnapshot,
-                                ["symbol", "snapshot_date"],
-                                values,
+                            dialect_insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+                            stmt = dialect_insert(ScreenerSnapshot).values(**values)
+                            updates = {
+                                key: func.coalesce(stmt.excluded[key], ScreenerSnapshot.__table__.c[key])
+                                for key in values if key not in ("symbol", "snapshot_date", "source")
+                            }
+                            updates.update(screener_metadata_updates(stmt, session.bind.dialect.name, stmt.excluded.price.is_(None)))
+                            stmt = stmt.on_conflict_do_update(
+                                index_elements=["symbol", "snapshot_date"], set_=updates,
                             )
                             await session.execute(stmt)
                             await session.commit()
@@ -260,6 +271,8 @@ class ScreenerPipeline(BasePipeline):
                     await self._checkpoint(progress, sync_id)
 
             except Exception as e:
+                if getattr(e, "code", None) == "VNSTOCK_TIER_ROUTE" or type(e).__name__ in {"EntitlementError", "UnsupportedError"}:
+                    raise
                 logger.debug(f"Failed to sync screener for {symbol}: {e}")
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1

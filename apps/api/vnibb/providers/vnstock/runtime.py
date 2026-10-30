@@ -1,4 +1,4 @@
-"""Runtime helpers for the free VNStock VCI provider."""
+"""Runtime helpers for the VNStock VCI provider."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from importlib.util import find_spec
 from threading import Lock
 from typing import Any
+
+from vnibb.core.config import settings
 
 
 def validate_free_runtime() -> None:
@@ -24,19 +26,23 @@ def validate_free_runtime() -> None:
         )
 
 
+def validate_runtime() -> None:
+    """Enforce the configured tier and VCI policy before importing the SDK."""
+    tier = os.getenv("VNSTOCK_RUNTIME_TIER", settings.vnstock_runtime_tier).strip().lower()
+    if tier not in {"free", "golden"}:
+        raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free' or 'golden'")
+    if tier != settings.vnstock_runtime_tier:
+        raise ValueError("VNSTOCK_RUNTIME_TIER differs from configured runtime tier")
+    validate_source(settings.vnstock_source)
+    validate_source(os.getenv("VNSTOCK_SOURCE", settings.vnstock_source))
+    if tier == "free":
+        validate_free_runtime()
+
+
 def import_vnstock_symbol(name: str) -> tuple[Any, str]:
-    """Validate the free VCI policy before community import can authenticate VNAI."""
-    tier = os.getenv("VNSTOCK_RUNTIME_TIER", "free").strip().lower()
-    if tier != "free":
-        raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free'; paid runtimes are disabled")
-    validate_source(os.getenv("VNSTOCK_SOURCE", "VCI"))
-    validate_free_runtime()
+    validate_runtime()
     module = __import__("vnstock", fromlist=[name])
     return getattr(module, name), "vnstock"
-
-
-def get_vnstock_class():
-    return import_vnstock_symbol("Vnstock")[0]
 
 
 def get_listing_class():
@@ -60,11 +66,8 @@ def get_company_class():
 
 
 def create_reference_company(symbol: str, source: str):
-    validate_source(source)
-    import_vnstock_symbol("Company")
-    from vnstock.explorer.vci import Company
-
-    return Company(symbol=symbol)
+    source = validate_source(source)
+    return get_company_class()(symbol=symbol, source=source)
 
 
 def validate_source(source: str | None = None) -> str:

@@ -96,12 +96,12 @@ class TechnicalAnalysisService:
         import asyncio
 
         def _sync_calculate():
-            from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+            from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
 
-            Vnstock = get_vnstock_class()
-            stock = Vnstock().stock(symbol=symbol, source=validate_source(settings.vnstock_source))
+            source = validate_source(settings.vnstock_source)
+            quote = get_quote_class()(symbol=symbol, source=source)
 
-            df = stock.quote.history(
+            df = quote.history(
                 start=start_date.strftime("%Y-%m-%d"),
                 end=end_date.strftime("%Y-%m-%d"),
             )
@@ -109,8 +109,8 @@ class TechnicalAnalysisService:
             if df is None or df.empty:
                 return {}
             df = normalize_history_frame(
-                df, symbol=symbol, source=settings.vnstock_source,
-                provider=stock.quote,
+                df, symbol=symbol, source=source,
+                provider=quote,
             )
             if df.empty:
                 return {}
@@ -321,12 +321,12 @@ class TechnicalAnalysisService:
 
         def _fetch():
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+                from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol, source=validate_source(settings.vnstock_source))
+                source = validate_source(settings.vnstock_source)
+                quote = get_quote_class()(symbol=symbol, source=source)
 
-                df = stock.quote.history(
+                df = quote.history(
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                     interval=interval,
@@ -334,8 +334,8 @@ class TechnicalAnalysisService:
                 if df is None or df.empty:
                     return None
                 return normalize_history_frame(
-                    df, symbol=symbol, source=settings.vnstock_source,
-                    provider=stock.quote,
+                    df, symbol=symbol, source=source,
+                    provider=quote,
                 )
             except Exception as e:
                 logger.error(f"Failed to fetch OHLCV for {symbol}: {e}")

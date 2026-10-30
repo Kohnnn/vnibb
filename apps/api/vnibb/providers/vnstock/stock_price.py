@@ -110,11 +110,14 @@ class VnstockStockPriceFetcher:
 
                 df = trading.price_board(
                     symbols_list=[symbol],
-                    flatten_columns=True,
-                    drop_levels=[0],
+                    get_unified=True,
                 )
                 if df is None or df.empty:
                     return None
+                if str(df.attrs.get("price_unit", "")).upper() != "VND":
+                    raise ValueError("VCI stock price unit is unavailable")
+                if str(df.attrs.get("value_unit", "")).upper() != "VND":
+                    df = df.drop(columns=[name for name in ("value", "total_value", "nmTotalTradedValue") if name in df.columns])
                 return df.to_dict(orient="records")[0]
             
             loop = asyncio.get_event_loop()
@@ -137,15 +140,15 @@ class VnstockStockPriceFetcher:
                 low=record.get("low") or record.get("low_price") or record.get("lowPrice"),
                 prev_close=record.get("prev_close") or record.get("ref_price") or record.get("refPrice"),
                 change=record.get("change") or record.get("price_change") or record.get("priceChange"),
-                percent_change=record.get("percent_change") or record.get("pct_change") or record.get("pctChange"),
-                volume=record.get("volume") or record.get("total_volume") or record.get("nmTotalTradedQty"),
+                percent_change=record.get("percent_change") or record.get("change_percent") or record.get("pct_change") or record.get("pctChange"),
+                volume=record.get("volume") or record.get("accumulated_volume") or record.get("total_volume") or record.get("nmTotalTradedQty"),
                 value=record.get("value") or record.get("total_value") or record.get("nmTotalTradedValue"),
                 best_bid=record.get("best_bid") or record.get("bid_1_price") or record.get("bidPrice1"),
                 best_ask=record.get("best_ask") or record.get("ask_1_price") or record.get("offerPrice1"),
                 best_bid_vol=record.get("best_bid_vol") or record.get("bid_1_volume") or record.get("bidVol1"),
                 best_ask_vol=record.get("best_ask_vol") or record.get("ask_1_volume") or record.get("offerVol1"),
-                foreign_buy_vol=record.get("foreign_buy_vol") or record.get("f_buy_vol") or record.get("fBuyVol"),
-                foreign_sell_vol=record.get("foreign_sell_vol") or record.get("f_sell_vol") or record.get("fSellVol"),
+                foreign_buy_vol=record.get("foreign_buy_volume") or record.get("foreign_buy_vol") or record.get("f_buy_vol") or record.get("fBuyVol"),
+                foreign_sell_vol=record.get("foreign_sell_volume") or record.get("foreign_sell_vol") or record.get("f_sell_vol") or record.get("fSellVol"),
                 ceiling=record.get("ceiling") or record.get("ceiling_price") or record.get("ceilingPrice"),
                 floor=record.get("floor") or record.get("floor_price") or record.get("floorPrice"),
                 reference=record.get("reference") or record.get("ref_price") or record.get("refPrice"),

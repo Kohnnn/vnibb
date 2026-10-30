@@ -15,8 +15,7 @@ from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
-from vnibb.providers.vnstock import get_vnstock
-from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
 logger = logging.getLogger(__name__)
 _index_jobs: dict[tuple[str, str], asyncio.Future] = {}
@@ -107,7 +106,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
         def _fetch_single_index(index_name: str, symbols: list[str]) -> Optional[dict[str, Any]]:
             """Fetch a single market index with timeout handling."""
-            stock_manager = get_vnstock()
+            market = import_vnstock_symbol("Market")[0]()
 
             end_date = datetime.now()
             start_date = end_date - timedelta(days=5)
@@ -117,11 +116,11 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
             for source in source_candidates:
                 for symbol in symbols:
                     try:
-                        stock = stock_manager.stock(symbol=symbol, source=source)
-                        df = stock.quote.history(
+                        index = market.index(symbol)
+                        df = index.history(
                             start=start_date.strftime("%Y-%m-%d"),
                             end=end_date.strftime("%Y-%m-%d"),
-                            show_log=False,
+                            source=source,
                         )
                     except Exception as exc:
                         logger.debug(
@@ -166,10 +165,10 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
                     if prev_close is None:
                         try:
-                            prev_df = stock.quote.history(
+                            prev_df = index.history(
                                 start=prev_start_date.strftime("%Y-%m-%d"),
                                 end=prev_end_date.strftime("%Y-%m-%d"),
-                                show_log=False,
+                                source=source,
                             )
                             if prev_df is not None and not prev_df.empty:
                                 if "time" in prev_df.columns:

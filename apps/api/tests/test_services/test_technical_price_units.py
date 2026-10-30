@@ -11,19 +11,54 @@ from vnibb.services.technical_analysis import TechnicalAnalysisService, normaliz
 
 
 def _frame(close=0.5, periods=30):
-    return pd.DataFrame({
+    frame = pd.DataFrame({
         "time": pd.date_range("2026-01-01", periods=periods),
         "open": [close] * periods, "high": [close + 0.1] * periods,
         "low": [close - 0.1] * periods, "close": [close] * periods,
         "volume": [100] * periods,
     })
+    frame.attrs["price_unit"] = "THOUSAND_VND"
+    return frame
 
 
 def _mock_history(monkeypatch, frame, asset_type=None):
     quote = SimpleNamespace(history=lambda **kwargs: frame, asset_type=asset_type)
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=quote)
-    ))
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: lambda **kwargs: quote)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["indicators", "history"])
+async def test_technical_history_uses_vci_quote_and_requested_window(monkeypatch, mode):
+    calls = []
+
+    class Quote:
+        def __init__(self, *, symbol, source):
+            calls.append((symbol, source))
+
+        def history(self, *, start, end, interval="1D"):
+            calls.append((start, end, interval))
+            frame = _frame()
+            frame.attrs["price_unit"] = "THOUSAND_VND"
+            return frame
+
+    async def run_provider(fn, **kwargs):
+        return fn()
+
+    monkeypatch.setattr(settings, "vnstock_source", "vci")
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(runtime, "run_reference_provider", run_provider)
+    service = TechnicalAnalysisService()
+    start, end = date(2026, 1, 1), date(2026, 2, 1)
+
+    if mode == "indicators":
+        result = await service.calculate_indicators("FPT", start, end)
+        assert result["sma_20"] == 500
+    else:
+        result = await service._load_ohlcv_frame("FPT", start, end, interval="1W")
+        assert result["close"].tolist() == [500] * 30
+
+    interval = "1D" if mode == "indicators" else "1W"
+    assert calls == [("FPT", "VCI"), ("2026-01-01", "2026-02-01", interval)]
 
 
 @pytest.mark.asyncio
@@ -48,7 +83,9 @@ async def test_technical_history_quote_merge_requires_same_known_unit(monkeypatc
 
 @pytest.mark.asyncio
 async def test_technical_derivative_history_retains_points_before_quote_merge(monkeypatch):
-    _mock_history(monkeypatch, _frame(close=1200, periods=2), asset_type="derivative")
+    frame = _frame(close=1200, periods=2)
+    frame.attrs["price_unit"] = "index_points"
+    _mock_history(monkeypatch, frame, asset_type="derivative")
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     async def fetch_quote(**kwargs):
@@ -62,9 +99,11 @@ async def test_technical_derivative_history_retains_points_before_quote_merge(mo
 
 
 @pytest.mark.asyncio
-async def test_technical_unknown_history_is_not_used_for_calculations(monkeypatch):
+@pytest.mark.parametrize("source", ["VCI", "MSN"])
+async def test_technical_unknown_history_is_not_used_for_calculations(monkeypatch, source):
     frame = _frame()
-    frame.attrs["source"] = "MSN"
+    frame.attrs.pop("price_unit")
+    frame.attrs["source"] = source
     _mock_history(monkeypatch, frame)
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
@@ -122,6 +161,7 @@ def test_history_normalization_preserves_real_split_in_canonical_prices():
 
 def test_frame_category_keeps_unrecognized_index_in_points():
     frame = _frame(close=1200)
+    frame.attrs["price_unit"] = "index_points"
     frame.category = "index"
 
     result = normalize_history_frame(frame, symbol="CUSTOMIDX", source="KBS")
@@ -133,6 +173,7 @@ def test_frame_category_keeps_unrecognized_index_in_points():
 @pytest.mark.parametrize("unit,expected", [(None, None), ("VND", 0.5)])
 def test_stored_sponsor_technical_history_needs_explicit_equity_unit(unit, expected):
     frame = _frame(periods=2)
+    frame.attrs.pop("price_unit")
     if unit:
         frame.attrs["price_unit"] = unit
 

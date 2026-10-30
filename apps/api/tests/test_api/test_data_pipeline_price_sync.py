@@ -95,6 +95,7 @@ async def test_fetch_quote_history_frame_uses_community_quote_and_bypasses_retry
     FakeQuote.history.__wrapped__ = fake_unwrapped_history
 
     community = types.ModuleType("vnstock")
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
     community.Quote = FakeQuote
     monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
@@ -234,7 +235,7 @@ async def test_gap_fill_never_fetches_old_history_or_complete_windows(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_sync_foreign_trading_persists_derived_values(monkeypatch):
+async def test_sync_foreign_trading_rejects_unverified_values(monkeypatch):
     pipeline = DataPipeline()
     statements = []
 
@@ -281,17 +282,23 @@ async def test_sync_foreign_trading_persists_derived_values(monkeypatch):
     vnm = next(values for values in compiled if values.get("symbol") == "VNM")
     fpt = next(values for values in compiled if values.get("symbol") == "FPT")
     assert count == 2
-    assert vnm["buy_value"] == 1_500.0
-    assert vnm["sell_value"] == 600.0
-    assert vnm["net_value"] == 900.0
+    assert vnm["buy_value"] is None
+    assert vnm["sell_value"] is None
+    assert vnm["net_value"] is None
     assert vnm["net_volume"] == 60
     assert fpt["net_value"] is None
 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("symbol,unit,close", [("VNM", "VND", 60500.0), ("VNINDEX", "index_points", 60.5)])
-async def test_vci_history_retains_actual_price_contract(monkeypatch, symbol, unit, close):
+@pytest.mark.parametrize("symbol,marker,unit,close", [
+    ("VNM", "THOUSAND_VND", "VND", 60500.0),
+    ("VNM", "VND", "VND", 60.5),
+    ("VNINDEX", "index_points", "index_points", 60.5),
+    ("VNM", None, "unknown", 60.5),
+    ("VNINDEX", None, "unknown", 60.5),
+])
+async def test_vci_history_retains_actual_price_contract(monkeypatch, symbol, marker, unit, close):
     import vnibb.providers.vnstock.runtime as runtime
 
     sources = []
@@ -302,8 +309,11 @@ async def test_vci_history_retains_actual_price_contract(monkeypatch, symbol, un
             self.source = source
 
         def history(self, **kwargs):
-            return pd.DataFrame([{"time": date(2026, 3, 17), "open": 60.0, "high": 61.0,
-                                  "low": 59.0, "close": 60.5, "volume": 100}])
+            frame = pd.DataFrame([{"time": date(2026, 3, 17), "open": 60.0, "high": 61.0,
+                                   "low": 59.0, "close": 60.5, "volume": 100}])
+            if marker is not None:
+                frame.attrs["price_unit"] = marker
+            return frame
 
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
@@ -313,7 +323,7 @@ async def test_vci_history_retains_actual_price_contract(monkeypatch, symbol, un
     assert sources == ["VCI"]
     assert row["close"] == close
     assert row["price_unit"] == unit
-    assert row["price_source"] == "vnstock_history:VCI"
+    assert row["price_source"] == "vnstock5_history:VCI"
 
 
 @pytest.mark.asyncio
@@ -613,26 +623,25 @@ async def test_daily_writer_persists_sparse_value_and_clears_absent_adj_close(
 
 @pytest.mark.asyncio
 async def test_modular_screener_uses_explicit_community_vci_finance(monkeypatch):
+    from vnibb.providers.vnstock import runtime
     from vnibb.services.pipeline.screener_pipeline import ScreenerPipeline
 
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source, period):
-            calls.append(("finance", symbol, source, period))
+    class Fundamental:
+        def equity(self, symbol):
+            calls.append(("equity", symbol))
+            return self
 
-        def ratio(self, period, lang):
-            calls.append(("ratio", period, lang))
-            return pd.DataFrame([{"pe": 12.0}])
+        def ratio(self, *, source, period, lang, format):
+            calls.append(("ratio", source, period, lang, format))
+            return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12.0}])
 
-    class ForbiddenClient:
-        def __init__(self, **kwargs):
-            raise AssertionError("screener must use Finance with an explicit VCI source")
+    def import_symbol(name):
+        assert name == "Fundamental"
+        return Fundamental, "vnstock"
 
-    community = types.ModuleType("vnstock")
-    community.Finance = Finance
-    community.Vnstock = ForbiddenClient
-    monkeypatch.setitem(sys.modules, "vnstock", community)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", import_symbol)
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     async def wait(bucket):
@@ -643,7 +652,7 @@ async def test_modular_screener_uses_explicit_community_vci_finance(monkeypatch)
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", wait)
 
     assert await pipeline.sync_screener_data(symbols=["vnm"]) == 1
-    assert calls == [("finance", "VNM", "VCI", "year"), ("ratio", "year", "en")]
+    assert calls == [("equity", "VNM"), ("ratio", "VCI", "year", "en", "long")]
 
 
 @pytest.fixture
@@ -879,6 +888,36 @@ async def test_scheduled_cached_listing_confirms_stock_without_live_provider(mon
     monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: types.SimpleNamespace(enabled=True, _get_collection=Collection))
     rows = await DataPipeline()._fetch_trading_listing_rows(VietcapClient())
     assert rows == [{"symbol": "VNM", "type": "STOCK", "board": "HOSE"}]
+
+
+@pytest.mark.asyncio
+async def test_sdk_listing_fallback_preserves_instrument_type_and_vci_source(monkeypatch, force_free_vci_history_fallback):
+    from vnibb.providers.vnstock import runtime
+
+    calls = []
+
+    class Listing:
+        def __init__(self, *, source):
+            calls.append(source)
+
+        def symbols_by_exchange(self):
+            return pd.DataFrame([
+                {"symbol": "VNM", "exchange": "HSX", "type": "STOCK"},
+                {"symbol": "ETF1", "exchange": "HSX", "type": "ETF"},
+            ])
+
+    class Client:
+        def get_all_symbols(self):
+            raise RuntimeError("IQ unavailable")
+
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(DataPipeline, "_fetch_trading_listing_rows", force_free_vci_history_fallback)
+    rows = await DataPipeline()._fetch_trading_listing_rows(Client())
+    assert calls == ["VCI"]
+    assert [(row["symbol"], row["type"], row["_listing_source"]) for row in rows] == [
+        ("VNM", "STOCK", "VCI"), ("ETF1", "ETF", "VCI"),
+    ]
 
 
 @pytest.mark.asyncio

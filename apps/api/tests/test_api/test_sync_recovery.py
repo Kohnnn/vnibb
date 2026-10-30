@@ -99,23 +99,26 @@ async def test_guarded_ratio_job_records_failed_partial_and_complete(test_engine
 
 
 @pytest.mark.asyncio
-async def test_modular_community_finance_is_used_without_legacy_wrapper(monkeypatch):
+async def test_unified_fundamental_is_used_without_legacy_wrapper(monkeypatch):
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source):
-            calls.append((symbol, source))
+    class Fundamental:
+        def equity(self, symbol):
+            calls.append(("equity", symbol))
+            return self
 
-        def ratio(self, period, lang="en"):
-            return pd.DataFrame([{"period": "2025", "pe": 12.0}])
+        def ratio(self, *, source, period, lang, format):
+            calls.append((source, period, lang, format))
+            return pd.DataFrame([{"item_id": "pe", "2025": 12.0}])
 
     module = types.ModuleType("vnstock")
-    module.Finance = Finance
+    module.status = lambda: {"authenticated": False, "tier": "guest"}
+    module.Fundamental = Fundamental
     monkeypatch.setitem(sys.modules, "vnstock", module)
     monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "year"})
-    assert rows[0]["pe"] == 12.0
-    assert calls == [("VNM", "VCI")]
+    assert rows[0]["2025"] == 12.0
+    assert calls == [("equity", "VNM"), ("VCI", "year", "en", "long")]
 
 
 @pytest.mark.asyncio
@@ -490,44 +493,48 @@ async def test_unsuccessful_daily_stage_reaches_guarded_failure(test_engine, mon
 
 
 @pytest.mark.asyncio
-async def test_community_constructor_period_is_preserved_for_quarter_ratios(monkeypatch):
+async def test_unified_ratio_receives_requested_quarter(monkeypatch):
     periods = []
 
-    class Finance:
-        def __init__(self, symbol, source, period):
-            periods.append(period)
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
-        def ratio(self, lang="en"):
-            return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
+        def ratio(self, *, source, period, lang, format):
+            periods.append(period)
+            return pd.DataFrame([{"item_id": "pe", "2025-Q4": 12}])
 
     module = types.ModuleType("vnstock")
-    module.Finance = Finance
+    module.status = lambda: {"authenticated": False, "tier": "guest"}
+    module.Fundamental = Fundamental
     monkeypatch.setitem(sys.modules, "vnstock", module)
     monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
-    assert periods and all(period == "quarter" for period in periods)
+    assert periods == ["quarter"]
 
 
 @pytest.mark.asyncio
-async def test_community_finance_does_not_repeat_ratio_call(monkeypatch):
+async def test_unified_finance_does_not_repeat_ratio_call(monkeypatch):
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source):
-            assert (symbol, source) == ("VNM", "VCI")
+    class Fundamental:
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
-        def ratio(self, period):
-            calls.append(period)
-            return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
+        def ratio(self, *, source, period, lang, format):
+            calls.append((source, period, lang, format))
+            return pd.DataFrame([{"item_id": "pe", "2025-Q4": 12}])
 
     community = types.ModuleType("vnstock")
-    community.Finance = Finance
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    community.Fundamental = Fundamental
     monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
-    assert calls == ["quarter"]
+    assert calls == [("VCI", "quarter", "en", "long")]
 
 
 @pytest.mark.asyncio
@@ -561,21 +568,21 @@ async def test_cycle_deadline_expiry_is_partial_and_next_stage_is_not_starved(te
 
 
 @pytest.mark.asyncio
-async def test_variadic_finance_method_receives_requested_quarter(monkeypatch):
+async def test_unified_ratio_explicitly_selects_vci(monkeypatch):
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source):
-            pass
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
-        def ratio(self, *args, **kwargs):
+        def ratio(self, **kwargs):
             calls.append(kwargs)
-            return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
+            return pd.DataFrame([{"item_id": "pe", "2025-Q4": 12}])
 
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
-    assert calls and all(call["period"] == "quarter" for call in calls)
+    assert calls == [{"source": "VCI", "period": "quarter", "lang": "en", "format": "long"}]
 
 
 @pytest.mark.asyncio
@@ -601,14 +608,14 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
         symbols_by_exchange = all_symbols
         symbols_by_industries = all_symbols
 
-    class Finance:
-        def __init__(self, **kwargs):
-            pass
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
         def ratio(self, **kwargs):
             if not available[0]:
                 return pd.DataFrame()
-            return pd.DataFrame([{"period": "2025", "pe": 12}])
+            return pd.DataFrame([{"id": "pe", "period": "2025", "value": 12}])
 
     class Quote:
         def __init__(self, symbol, source):
@@ -626,7 +633,7 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
         cache.append(value)
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", pace)
@@ -680,9 +687,9 @@ def screener_base_pipeline(test_engine, monkeypatch):
         symbols_by_exchange = all_symbols
         symbols_by_industries = all_symbols
 
-    class Finance:
-        def __init__(self, **kwargs):
-            pass
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
         def ratio(self, **kwargs):
             raise TimeoutError("annual ratios unavailable")
@@ -691,7 +698,7 @@ def screener_base_pipeline(test_engine, monkeypatch):
         pass
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", no_io)
     monkeypatch.setattr(pipeline, "_cache_set_json", no_io)

@@ -87,7 +87,7 @@ PY
 After the approved Mongo recreation, confirm `docker inspect --format '{{.HostConfig.Init}}' vnibb-mongo` reports `true`, health returns `healthy`, and `docker top vnibb-mongo -eo pid,ppid,stat,args` has no zombie or accumulating `mongosh` processes across multiple probe intervals. This is a targeted maintenance operation, separate from application-only rollout commands below.
 
 
-New Vietnamese ingestion uses Vietcap IQ/Trading as primary and free vnstock VCI as the only supplementary provider. Do not enable historical premium mounts, KBS or TCBS routing. Preserve historical release evidence below; its old premium runtime instructions are not the new provider policy.
+New Vietnamese ingestion uses Vietcap IQ/Trading as primary and explicitly sourced vnstock VCI as the only supplementary provider. Do not enable historical premium mounts, KBS or TCBS routing. Preserve historical release evidence below; its old premium runtime instructions are not the new provider policy.
 
 ### Exact frontend origin and screener freshness gates
 
@@ -312,7 +312,7 @@ Edit `deployment/env.oracle` and set:
 - `VNIBB_MCP_SHARED_BEARER_TOKEN`
 - `MCP_PUBLIC_BIND=127.0.0.1`
 - `MCP_PUBLIC_PORT=8001`
-- `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI`; paid tiers and alternate source routing are rejected
+- `VNSTOCK_RUNTIME_TIER=free` by default; `golden` requires `VNSTOCK_API_KEY` from a secret store and successful Golden or Diamond registration. Both tiers require `VNSTOCK_SOURCE=VCI`; alternate VNStock source routing is rejected. Registration verifies remotely and persists the credential locally; plan secure storage before enabling it.
 - `REDIS_URL` if the cache tier remains enabled
 - `MEMORY_CACHE_MAX_ENTRY_BYTES=1048576` or larger if the cache tier is disabled and microstructure payloads must fit memory fallback
 - `SENTRY_DSN`
@@ -394,7 +394,7 @@ the timeout to the constraint was observed.
 
 ### Build and publish the release image
 
-Build the credential-free image outside OCI. The Docker build rejects discoverable sponsor packages, including `vnii`; never reuse historical premium runtime mounts or supply sponsor installer credentials. Existing dated rollout evidence above is historical, not the current build policy.
+Build the image without credentials outside OCI. The Docker build rejects discoverable legacy sponsor packages, including `vnii`; do not reuse historical premium runtime mounts or supply installer credentials. Golden, if authorized and configured at runtime, uses the same unified SDK rather than an authenticated image installer. Existing dated rollout evidence above is historical, not the current build policy. SDK entitlement does not authorize production acquisition or deployment.
 
 ```bash
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"

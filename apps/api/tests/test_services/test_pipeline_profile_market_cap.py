@@ -61,11 +61,12 @@ async def test_scheduled_cap_from_camel_case_profile_shares(test_engine, monkeyp
         symbols_by_industries = all_symbols
 
     class Finance:
-        def __init__(self, **kwargs):
-            pass
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
         def ratio(self, **kwargs):
-            return pd.DataFrame([{"item_id": "pe", "2025": 12}])
+            return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12}])
 
     class Quote:
         def __init__(self, **kwargs):
@@ -81,7 +82,7 @@ async def test_scheduled_cap_from_camel_case_profile_shares(test_engine, monkeyp
         cached.append(value)
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", noop)
@@ -160,8 +161,8 @@ async def test_carried_snapshot_cap_refresh_respects_evidence_dates(test_engine,
         symbols_by_industries = all_symbols
 
     class Finance:
-        def __init__(self, **kwargs): pass
-        def ratio(self, **kwargs): return pd.DataFrame([{"item_id": "pe", "2025": 12}])
+        def equity(self, symbol): return self
+        def ratio(self, **kwargs): return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12}])
 
     class Quote:
         def __init__(self, **kwargs): pass
@@ -170,7 +171,7 @@ async def test_carried_snapshot_cap_refresh_respects_evidence_dates(test_engine,
     async def noop(*args, **kwargs): pass
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", noop)

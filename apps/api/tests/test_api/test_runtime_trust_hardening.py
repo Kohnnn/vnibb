@@ -129,3 +129,52 @@ async def test_trading_movers_return_sanitized_502_on_provider_failure(monkeypat
 
     assert error.value.status_code == 502
     assert "provider secret" not in error.value.detail
+
+
+@pytest.mark.asyncio
+async def test_top_movers_filters_exchange_when_group_unavailable(monkeypatch):
+    import pandas as pd
+
+    from vnibb.providers.vnstock import runtime
+    from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
+
+    seen = {}
+
+    class Listing:
+        def __init__(self, source):
+            seen["listing_source"] = source
+
+        def symbols_by_group(self, group):
+            return pd.Series(dtype="object")
+
+        def symbols_by_exchange(self):
+            return pd.DataFrame({"symbol": ["AAA", "BBB"], "exchange": ["HOSE", "HNX"]})
+
+    class Trading:
+        def __init__(self, source):
+            seen["trading_source"] = source
+
+        def price_board(self, symbols_list):
+            seen["symbols"] = symbols_list
+            return pd.DataFrame({"symbol": symbols_list, "match_price": [11], "ref_price": [10]})
+
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_trading_class", lambda: Trading)
+    result = await VnstockTopMoversFetcher.fetch(index="HNX")
+
+    assert seen == {"listing_source": "VCI", "trading_source": "VCI", "symbols": ["BBB"]}
+    assert [(item.symbol, item.price_change_pct) for item in result] == [("BBB", 10.0)]
+    assert result[0].last_price is None
+    assert result[0].price_change is None
+
+
+def test_mover_board_price_requires_explicit_units():
+    from vnibb.providers.vnstock.top_movers import _parse_price_board_record
+
+    row = {"symbol": "AAA", "match_price": 11, "ref_price": 10}
+    unknown = _parse_price_board_record(row)
+    known = _parse_price_board_record({**row, "price_unit": "THOUSAND_VND"})
+
+    assert unknown["price"] is None and unknown["change"] is None
+    assert unknown["change_pct"] == 10
+    assert known["price"] == 11000 and known["change"] == 1000
