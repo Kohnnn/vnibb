@@ -1,4 +1,8 @@
-# Publisher-hosted wheels; SHA-256 is from https://vnstocks.com/api/simple/.
-# Keep PyPI as the sole package index for non-VNStock dependencies.
-vnstock @ https://vnstocks.com/api/packages/files/vnstock/4.0.9/vnstock-4.0.9-py3-none-any.whl#sha256=b51358c58c1fd9a299379f2d49b5c29e692fbae49e75f2ebc7cbfcc1cb996e64
-vnai @ https://vnstocks.com/api/packages/files/vnai/2.6.2/vnai-2.6.2-py3-none-any.whl#sha256=5b2852157031322f817ac9a306d67fbf138ec824292eaeb0b75e4e884f093081
+# Publisher wheel lock; SHA-256 values are from https://vnstocks.com/api/packages/vnstock/.
+# Keep PyPI as the sole index for other dependencies; generation 5 no longer requires vnai.
+# CPython >=3.10 ABI3; Linux wheels require glibc >=2.17 (not musl).
+vnstock @ https://vnstocks.com/api/packages/files/vnstock/5.2.1/vnstock-5.2.1-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl#sha256=7ed7016a8aef823a20f4f8847196a4072cb97cb19801ce08a6981ac628200fc5 ; sys_platform == 'linux' and platform_machine == 'x86_64' and implementation_name == 'cpython'
+vnstock @ https://vnstocks.com/api/packages/files/vnstock/5.2.1/vnstock-5.2.1-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl#sha256=12cbc32083cae37c9a3dd1a2b81a6d3bc507aee191525cd39e3c44b65ea2e90f ; sys_platform == 'linux' and platform_machine == 'aarch64' and implementation_name == 'cpython'
+vnstock @ https://vnstocks.com/api/packages/files/vnstock/5.2.1/vnstock-5.2.1-cp310-abi3-macosx_10_12_x86_64.whl#sha256=a51da4a69aa54dc822f70d8517f55e46185b12658c2181c7819b1557f96d9b78 ; sys_platform == 'darwin' and platform_machine == 'x86_64' and implementation_name == 'cpython'
+vnstock @ https://vnstocks.com/api/packages/files/vnstock/5.2.1/vnstock-5.2.1-cp310-abi3-macosx_11_0_arm64.whl#sha256=fd1c348ee83cc9c96887d25bf9c4026d8f33afe24334d422fe9e4f910974e522 ; sys_platform == 'darwin' and platform_machine == 'arm64' and implementation_name == 'cpython'
+vnstock @ https://vnstocks.com/api/packages/files/vnstock/5.2.1/vnstock-5.2.1-cp310-abi3-win_amd64.whl#sha256=dfc021041a87d86dbb161179e04f36bb9596355e37e3ba7816cb673054174539 ; sys_platform == 'win32' and platform_machine == 'AMD64' and implementation_name == 'cpython'

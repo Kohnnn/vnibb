@@ -14,6 +14,7 @@ import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement, u
 import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent, formatUnitValuePlain, getUnitLegend, readCanonicalStatementValue, resolveUnitScale } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { certifiedProfileShares } from './utils';
 import type { BalanceSheetData, CashFlowData, FinancialRatioData, IncomeStatementData } from '@/types/equity';
 interface FinancialSnapshotWidgetProps {
     id: string;
@@ -48,6 +49,7 @@ interface SnapshotContext {
     cashByPeriod: Map<string, CashFlowData>;
     ratiosByPeriod: Map<string, FinancialRatioData>;
     profileSharesOutstanding: number | null;
+    profileSharesAsOf: string | null;
 }
 
 const SNAPSHOT_PERIOD_OPTIONS: SnapshotPeriod[] = ['FY', 'Q', 'TTM'];
@@ -68,7 +70,6 @@ const RAW_BALANCE_ALIASES: Record<string, string[]> = {
     share_premium: ['share_premium', 'capital_surplus'],
     other_equity: ['other_equity'],
     minority_interest: ['minority_interest', 'non_controlling_interest'],
-    shares_outstanding: ['shares_outstanding', 'year_end_shares_outstanding', 'shares_out'],
 };
 
 const RAW_INCOME_ALIASES: Record<string, string[]> = {
@@ -247,7 +248,6 @@ function valueFromIncome(context: SnapshotContext, periodKey: string, directKeys
 function valueFromBalance(context: SnapshotContext, periodKey: string, directKeys: string[], rawKeys: string[] = []): number | null {
     const entry = context.balanceByPeriod.get(periodKey) as Record<string, unknown> | undefined;
     if (!entry) return null;
-    if ([...directKeys, ...rawKeys].some((key) => RAW_BALANCE_ALIASES.shares_outstanding.includes(key))) return readEntryNumber(entry, [...directKeys, ...rawKeys]);
     for (const key of [...directKeys, ...rawKeys]) {
         const value = readCanonicalStatementValue(entry, key, false);
         if (value !== null) return value;
@@ -395,9 +395,8 @@ const BS_SECTION: SnapshotSectionDefinition = {
             label: 'Y/E shares out, mn',
             kind: 'shares_mn',
             getValue: (periodKey, context) => {
-                const direct = valueFromBalance(context, periodKey, [], RAW_BALANCE_ALIASES.shares_outstanding);
-                if (direct !== null) return direct >= 1_000_000 ? direct / 1_000_000 : direct;
-                return context.profileSharesOutstanding !== null ? context.profileSharesOutstanding / 1_000_000 : null;
+                if (context.periodMode !== 'year' || context.profileSharesOutstanding === null || context.profileSharesAsOf?.slice(0, 10) !== `${periodKey}-12-31`) return null;
+                return context.profileSharesOutstanding / 1_000_000;
             },
         },
     ],
@@ -688,9 +687,10 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
             balanceByPeriod,
             cashByPeriod,
             ratiosByPeriod,
-            profileSharesOutstanding: profileQuery.data?.data?.outstanding_shares ?? null,
+            profileSharesOutstanding: certifiedProfileShares(profileQuery.data?.data),
+            profileSharesAsOf: profileQuery.data?.data?.shares_as_of ?? null,
         }),
-        [balanceByPeriod, cashByPeriod, incomeByPeriod, periodMode, periods, profileQuery.data?.data?.outstanding_shares, ratiosByPeriod]
+        [balanceByPeriod, cashByPeriod, incomeByPeriod, periodMode, periods, profileQuery.data?.data, ratiosByPeriod]
     );
 
     const sectionTables = useMemo(() => {
@@ -852,7 +852,12 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                                                 if (definition.kind === 'ratio') {
                                                     return formatNumber(value as number | null | undefined, { decimals: 2 });
                                                 }
-                                                if (definition.kind === 'per_share' || definition.kind === 'shares_mn') {
+                                                if (definition.kind === 'shares_mn') {
+                                                    const shares = value as number | null | undefined;
+                                                    if (shares == null || !Number.isFinite(shares)) return 'Unavailable';
+                                                    return formatNumber(shares, { decimals: shares != null && shares > 0 && shares < 0.01 ? 6 : 2 });
+                                                }
+                                                if (definition.kind === 'per_share') {
                                                     return formatNumber(value as number | null | undefined, { decimals: 2 });
                                                 }
                                                 return formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig);

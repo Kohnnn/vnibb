@@ -75,16 +75,12 @@ def financial_sync(monkeypatch):
                 entry for entry in entries if entry.statement_type == params.statement_type.value
             ],
         )
-        total = await pipeline.sync_financials(
+        await pipeline.sync_financials(
             symbols=["VNM"],
             period=period,
             statement_types=list(dict.fromkeys(entry.statement_type for entry in entries)),
             count=1,
         )
-        expected_complete = all(any(entry.period == "Q1-2026" for entry in entries
-                                    if entry.statement_type == kind)
-                                for kind in {entry.statement_type for entry in entries})
-        assert total == int(expected_complete)
         return persisted, cached
 
     return sync
@@ -142,6 +138,54 @@ async def test_persistence_keeps_source_rows_and_full_canonical_lineage(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("statement_type, metric, amount", [
+    ("income", "depreciation", 10.0),
+    ("balance", "customer_deposits", 0.0),
+])
+async def test_canonical_only_admitted_metrics_remain_in_lineage(financial_sync, statement_type, metric, amount):
+    entry = statement(statement_type, **{metric: amount},
+                      unit_metadata={metric: {"source_unit": "VND", "value_unit": "VND"}})
+    persisted, cached = await financial_sync([entry])
+    assert persisted[0]["raw_data"]["_financial_lineage"]["canonical_data"][metric] == amount
+    assert cached[0][metric] == amount
+
+
+@pytest.mark.asyncio
+async def test_income_depreciation_only_remains_available_for_cashflow_crossfill(financial_sync):
+    income = statement("income", depreciation=10.0,
+                       unit_metadata={"depreciation": {"source_unit": "VND", "value_unit": "VND"}})
+    cashflow = statement("cashflow", operating_cash_flow=80.0,
+                         unit_metadata={"operating_cash_flow": {"source_unit": "VND", "value_unit": "VND"}})
+    persisted, _ = await financial_sync([income, cashflow])
+    assert persisted[0]["raw_data"]["_financial_lineage"]["canonical_data"]["depreciation"] == 10.0
+    assert persisted[1]["depreciation"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_cashflow_with_only_admitted_crossfill_is_persisted(financial_sync):
+    income = statement("income", depreciation=10.0,
+                       unit_metadata={"depreciation": {"source_unit": "VND", "value_unit": "VND"}})
+    cashflow = statement("cashflow")
+    persisted, cached = await financial_sync([income, cashflow])
+    assert len(persisted) == len(cached) == 2
+    assert persisted[1]["depreciation"] == 10.0
+    assert persisted[1]["raw_data"]["_financial_lineage"]["canonical_data"]["depreciation"] == 10.0
+
+
+
+@pytest.mark.asyncio
+async def test_withheld_empty_balance_does_not_erase_income_crossfill(financial_sync):
+    income = statement("income", revenue=100.0, depreciation=10.0,
+                       unit_metadata={field: {"source_unit": "VND", "value_unit": "VND"}
+                                      for field in ("revenue", "depreciation")})
+    balance = statement("balance")
+    cashflow = statement("cashflow", operating_cash_flow=80.0,
+                         unit_metadata={"operating_cash_flow": {"source_unit": "VND", "value_unit": "VND"}})
+    persisted, cached = await financial_sync([income, balance, cashflow])
+    assert len(persisted) == len(cached) == 2
+    assert persisted[1]["depreciation"] == 10.0
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("value_unit, reason", [(None, None), ("VND", "unknown_source_unit")])
 @pytest.mark.parametrize(
     "statement_type, metric",
@@ -156,13 +200,8 @@ async def test_unavailable_statement_never_persists_guessed_numbers(
     )
     persisted, cached = await financial_sync([entry])
 
-    assert persisted[0][metric] is None
-    assert cached[0][metric] is None
-    assert persisted[0]["raw_data"][metric] == 999.0
-    lineage = persisted[0]["raw_data"]["_financial_lineage"]
-    assert lineage["unavailable_reason"] == "unknown_source_unit"
-    assert lineage["canonical_data"][metric] is None
-    assert lineage["derived_data"] == {}
+    assert persisted == []
+    assert cached == []
 
 
 
@@ -176,12 +215,8 @@ async def test_ingestion_withholds_broad_interest_alias_without_rewriting_source
         })
     original = deepcopy(entry.model_dump(mode="json"))
     persisted, cached = await financial_sync([entry])
-    assert persisted[0]["interest_expense"] is None
-    assert cached[0]["interest_expense"] is None
-    assert persisted[0]["revenue"] == 1000
-    lineage = persisted[0]["raw_data"]["_financial_lineage"]
-    assert lineage["unit_metadata"]["interest_expense"]["unavailable_reason"] == "interest_semantics_unverified"
-    assert persisted[0]["raw_data"]["financial_expenses"] == 900
+    assert persisted == []
+    assert cached == []
     assert entry.model_dump(mode="json") == original
 
 @pytest.mark.asyncio
@@ -237,8 +272,9 @@ async def test_depreciation_crossfill_requires_matching_period_and_basis(financi
         unit_metadata={"operating_cash_flow": {"source_unit": "billion VND", "value_unit": "VND"}})
     persisted, _ = await financial_sync([income, cashflow])
 
-    assert persisted[1]["depreciation"] is None
-    assert "depreciation" not in persisted[1]["raw_data"]["_financial_lineage"]["derived_data"]
+    cashflow_values = next(row for row in persisted if "operating_cash_flow" in row)
+    assert cashflow_values["depreciation"] is None
+    assert "depreciation" not in cashflow_values["raw_data"]["_financial_lineage"]["derived_data"]
 
 
 @pytest.mark.asyncio
@@ -267,13 +303,7 @@ async def test_missing_normalized_operands_never_use_raw_supplements(financial_s
     )
     persisted, _ = await financial_sync([entry])
 
-    assert persisted[0]["operating_expenses"] is None
-    assert persisted[0]["ebitda"] is None
-    assert persisted[0]["source"] == "unknown"
-    lineage = persisted[0]["raw_data"]["_financial_lineage"]
-    assert lineage["source"] is None
-    assert lineage["canonical_data"]["research_development"] is None
-    assert lineage["derived_data"] == {}
+    assert persisted == []
 
 
 @pytest.mark.asyncio
@@ -305,19 +335,5 @@ async def test_rejected_provider_metrics_are_not_derived_or_crossfilled(financia
 
     persisted, cached = await financial_sync([income, cashflow])
 
-    income_lineage = persisted[0]["raw_data"]["_financial_lineage"]
-    cashflow_lineage = persisted[1]["raw_data"]["_financial_lineage"]
-    assert persisted[0]["ebitda"] is None
-    assert "ebitda" not in income_lineage["derived_data"]
-    assert persisted[1]["depreciation"] is None
-    assert "depreciation" not in cashflow_lineage["derived_data"]
-    assert cached[0]["ebitda"] is None
-    assert cached[1]["depreciation"] is None
-    assert (
-        income_lineage["unit_metadata"]["ebitda"]["unavailable_reason"]
-        == "conflicting_metric_rows"
-    )
-    assert (
-        cashflow_lineage["unit_metadata"]["depreciation"]["unavailable_reason"]
-        == "conflicting_metric_rows"
-    )
+    assert persisted == []
+    assert cached == []

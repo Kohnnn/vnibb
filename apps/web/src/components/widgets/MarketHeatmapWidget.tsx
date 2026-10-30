@@ -10,6 +10,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { useMarketHeatmap } from '@/lib/queries';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { marketCapExplanation, resolveMarketCap } from '@/lib/marketCap';
 import type { SectorGroup } from '@/lib/api';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
@@ -41,6 +42,16 @@ const HEATMAP_GROUP_LABELS: Record<HeatmapGroupBy, string> = {
     vn30: 'VN30',
     hnx30: 'HNX30',
 };
+
+const SIZE_LABELS: Record<string, string> = {
+    market_cap: 'Market cap',
+    volume: 'Volume',
+    value_traded: 'Traded value',
+};
+
+function validSize(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
 
 function clampLabelSize(width: number, height: number): number {
     return Math.max(10, Math.min(18, Math.min(width / 7.5, height / 2.4)));
@@ -114,31 +125,25 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
             const group = data.sectors.find((sector: SectorGroup) => sector.sector === selectedGroup);
             if (!group) return null;
 
-            return {
-                name: group.sector,
-                children: group.stocks.map((stock) => ({
-                    name: stock.symbol,
-                    symbol: stock.symbol,
-                    sector: group.sector,
-                    value: stock.market_cap || 0,
-                    changePct: stock.change_pct,
-                    price: stock.price,
-                    volume: stock.volume,
-                })),
-            };
+            const children = group.stocks.flatMap((stock) => {
+                const marketCap = resolveMarketCap({ label: stock.symbol, value: stock.market_cap, provenance: stock.market_cap_provenance });
+                if (!validSize(stock.size_value) || (data.size_metric === 'market_cap' && marketCap.value !== stock.size_value)) return [];
+                return [{ name: stock.symbol, symbol: stock.symbol, sector: group.sector, value: stock.size_value,
+                    changePct: stock.change_pct, price: stock.price, volume: stock.volume, marketCap }];
+            });
+            return children.length ? { name: group.sector, children } : null;
         }
 
-        return {
-            name: 'Market',
-            children: data.sectors.map((sector: SectorGroup) => ({
-                name: sector.sector,
-                sector: sector.sector,
-                changePct: sector.avg_change_pct,
-                stockCount: sector.stock_count,
-                value: sector.total_market_cap,
-                avgMarketCap: sector.total_market_cap,
-            })),
-        };
+        const children = data.sectors.filter((sector: SectorGroup) => validSize(sector.total_size_value) && (data.size_metric !== 'market_cap' || (Number.isInteger(sector.cap_count) && sector.cap_count > 0 && sector.cap_count <= sector.stock_count && sector.total_market_cap === sector.total_size_value))).map((sector: SectorGroup) => ({
+            name: sector.sector,
+            sector: sector.sector,
+            changePct: sector.avg_change_pct,
+            stockCount: sector.stock_count,
+            value: sector.total_size_value,
+            totalMarketCap: Number.isInteger(sector.cap_count) && sector.cap_count > 0 && sector.cap_count <= sector.stock_count && validSize(sector.total_market_cap) ? sector.total_market_cap : null,
+            capCount: sector.cap_count,
+        }));
+        return children.length ? { name: 'Market', children } : null;
     }, [data, selectedGroup]);
 
     const handleExport = async () => {
@@ -226,6 +231,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
         ? `Constituents ${formatShortDate(constituentDate)}${data?.constituents_stale ? ' (stale)' : ''}`
         : 'Constituents date unknown';
     const freshnessNote = `${data?.partial ? 'Partial universe · ' : ''}Price ${data?.price_updated_at ? formatShortDate(data.price_updated_at) : 'date unknown'} · ${constituentNote}`;
+    const sizeLabel = SIZE_LABELS[data?.size_metric ?? ''] ?? 'Unknown metric';
+    const formatSize = (value: number) => data?.size_metric === 'volume'
+        ? value.toLocaleString()
+        : formatCompactValueForUnit(value, unitConfig, { decimals: 1 });
 
     useEffect(() => {
         onDataChange?.(
@@ -243,10 +252,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                 coverage: data?.partial ? 'partial' : undefined,
                 stale: isFallback || Boolean(data?.constituents_stale),
                 warnings: error ? [error.message] : undefined,
-                extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0, endpoint: heatmapEndpoint } : undefined,
+                extra: hasData ? { groupBy, exchange, groupCount: data?.sectors?.length ?? 0, endpoint: heatmapEndpoint, sizeMetric: data?.size_metric, sectors: data?.sectors } : undefined,
             }),
         );
-    }, [hasData, constituentDate, dataUpdatedAt, data?.cached, data?.constituents_stale, data?.partial, isFallback, error, groupBy, exchange, data?.sectors?.length, onDataChange, heatmapEndpoint]);
+    }, [hasData, constituentDate, dataUpdatedAt, data?.cached, data?.constituents_stale, data?.partial, isFallback, error, groupBy, exchange, data?.sectors, data?.size_metric, onDataChange, heatmapEndpoint]);
 
     return (
         <WidgetContainer
@@ -290,6 +299,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                         </button>
                                     ) : null}
                                     <span>{selectedGroup ? `${selectedGroup} Constituents` : `${HEATMAP_GROUP_LABELS[groupBy]} Heatmap`}</span>
+                                    <span>Size: {sizeLabel}</span>
                                 </div>
                                 <span className="text-[10px] text-[var(--text-muted)]">
                                     {selectedGroup ? 'Click a stock to sync the dashboard symbol' : 'Click a block to drill down'}
@@ -352,7 +362,9 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                     {node.data.symbol || node.data.name}
                                                                     {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
                                                                     {'\n'}Change: {changePct === null ? '—' : `${changePct.toFixed(2)}%`}
-                                                                    {'\n'}Value: {formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}
+                                                                    {'\n'}Size ({sizeLabel}): {formatSize(node.data.value)}
+                                                                    {selectedGroup && node.data.marketCap ? `\nMarket cap: ${node.data.marketCap.value === null ? 'Unavailable' : formatCompactValueForUnit(node.data.marketCap.value, unitConfig, { decimals: 1 })}\n${marketCapExplanation(node.data.marketCap)}` : ''}
+                                                                    {!selectedGroup ? `\nAdmitted market cap: ${node.data.totalMarketCap === null ? 'Unavailable' : formatCompactValueForUnit(node.data.totalMarketCap, unitConfig, { decimals: 1 })}\nCap coverage: ${node.data.capCount ?? 'unknown'} of ${node.data.stockCount} returned stocks${node.data.capCount < node.data.stockCount || data?.partial ? ' (partial coverage)' : ''}` : ''}
                                                                     {!selectedGroup && node.data.stockCount ? `\nStocks: ${node.data.stockCount}` : ''}
                                                                 </title>
                                                             </rect>
@@ -390,8 +402,8 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                     style={{ fontSize: 10 }}
                                                                 >
                                                                     {selectedGroup
-                                                                        ? `${node.data.sector || selectedGroup} • ${formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}`
-                                                                        : `${node.data.stockCount || 0} stocks • ${formatCompactValueForUnit(node.data.value || 0, unitConfig, { decimals: 1 })}`}
+                                                                        ? `${node.data.sector || selectedGroup} • ${sizeLabel}: ${formatSize(node.data.value)}`
+                                                                        : `${node.data.stockCount || 0} stocks • ${sizeLabel}: ${formatSize(node.data.value)}`}
                                                                 </text>
                                                             )}
                                                         </g>

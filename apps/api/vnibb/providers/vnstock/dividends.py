@@ -109,7 +109,7 @@ class VnstockDividendsFetcher:
 
             def _is_dividend_record(record: dict) -> bool:
                 code = str(
-                    record.get("event_list_code") or record.get("eventListCode") or ""
+                    record.get("event_code") or record.get("event_list_code") or record.get("eventListCode") or ""
                 ).upper()
                 if code == "DIV":
                     return True
@@ -121,7 +121,8 @@ class VnstockDividendsFetcher:
             def _fetch():
                 from vnibb.providers.vnstock.runtime import get_company_class, validate_source
 
-                company = get_company_class()(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
+                source = validate_source(settings.vnstock_source)
+                company = get_company_class()(symbol=symbol.upper(), source=source)
                 if hasattr(company, "dividends"):
                     df = company.dividends()
                     if df is not None and len(df) > 0:
@@ -154,12 +155,13 @@ class VnstockDividendsFetcher:
                         record_date=_clean_str(r.get("recordDate") or r.get("record_date")),
                         payment_date=_clean_str(
                             r.get("paymentDate")
+                            or r.get("payout_date")
                             or r.get("executeDate")
                             or r.get("issue_date")
                             or r.get("public_date")
                         ),
                         dividend_type=_clean_str(
-                            r.get("type") or r.get("eventType") or r.get("event_type")
+                            r.get("type") or r.get("eventType") or r.get("event_type") or r.get("event_code")
                         ),
                         cash_dividend=_clean_number(
                             r.get("cashDividend") or r.get("cashDividen") or r.get("value")
@@ -172,6 +174,7 @@ class VnstockDividendsFetcher:
                         issue_year=_clean_int(r.get("issueYear")),
                         description=_clean_str(
                             r.get("description") or r.get("eventDesc") or r.get("event_name")
+                            or r.get("event_name_vi")
                         ),
                     )
                 )

@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 from vnibb.api.v1 import equity
-from vnibb.core.price_units import normalize_price_record, persisted_price_record
+from vnibb.core.price_units import (
+    history_price_records,
+    normalize_price_record,
+    persisted_price_record,
+    persisted_price_source,
+)
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
@@ -17,10 +22,10 @@ def bar(**extra):
             "low": 0.3, "close": 0.5, "volume": 123, "value": 5000,
             "adj_close": 0.45, **extra}
 
-def test_history_source_contract_scales_even_sub_thousand_vnd():
+def test_explicit_history_contract_scales_even_sub_thousand_vnd():
     rows = VnstockEquityHistoricalFetcher.transform_data(
         EquityHistoricalQueryParams(symbol="XYZ", start_date=date(2026, 6, 8),
-                                    end_date=date(2026, 6, 8), source="VCI"), [bar()],
+                                    end_date=date(2026, 6, 8), source="VCI"), [bar(price_unit="THOUSAND_VND")],
     )
     assert rows[0].price_unit == "VND"
     assert (rows[0].open, rows[0].high, rows[0].low, rows[0].close) == (400, 600, 300, 500)
@@ -28,6 +33,24 @@ def test_history_source_contract_scales_even_sub_thousand_vnd():
     assert rows[0].adjusted_close == 450
     assert rows[0].volume == 123
     assert rows[0].value == 5000
+
+
+def test_unmarked_sdk5_historical_transform_preserves_unknown_units():
+    rows = VnstockEquityHistoricalFetcher.transform_data(
+        EquityHistoricalQueryParams(symbol="XYZ", source="VCI"), [bar()],
+    )
+    assert rows[0].price_unit == "unknown"
+    assert rows[0].price_source == "vnstock5_history:VCI"
+    assert (rows[0].open, rows[0].high, rows[0].low, rows[0].close) == (0.4, 0.6, 0.3, 0.5)
+    assert rows[0].raw_close == 0.5
+    assert rows[0].adjusted_close == 0.45
+
+
+@pytest.mark.parametrize("source", ["KBS", "VCI", "TCBS"])
+def test_retained_legacy_history_source_contract_stays_supported(source):
+    row = normalize_price_record(bar(), source=f"vnstock_history:{source}")
+    assert row["price_unit"] == "VND"
+    assert row["close"] == 500
 
 
 def test_explicit_vnd_prevents_double_scaling_and_preserves_low_price():
@@ -183,12 +206,15 @@ async def test_unmarked_cache_is_not_spliced_into_vnd(monkeypatch):
 async def test_quote_provider_scales_all_price_fields_but_not_volume(monkeypatch):
     class History:
         empty = False
+        attrs = {"price_unit": "THOUSAND_VND"}
         def to_dict(self, orient):
             return [bar(close=0.4), bar(time="2026-06-09", close=0.5)]
     class Provider:
-        def stock(self, **kwargs):
-            return SimpleNamespace(quote=SimpleNamespace(history=lambda **kwargs: History()))
-    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_vnstock_class", lambda: Provider)
+        def __init__(self, *, symbol, source):
+            assert (symbol, source) == ("XYZ", "VCI")
+        def history(self, **kwargs):
+            return History()
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_quote_class", lambda: Provider)
     quote, cached = await VnstockStockQuoteFetcher.fetch("XYZ", source="VCI", use_cache=False)
     assert not cached
     assert quote.price_unit == "VND"
@@ -196,6 +222,7 @@ async def test_quote_provider_scales_all_price_fields_but_not_volume(monkeypatch
     assert quote.change == 100
     assert quote.change_pct == 25
     assert quote.volume == 123
+    assert quote.upstream_source == "vnstock5_history:VCI"
 
 
 def test_screener_quote_uses_compatible_settled_prices_only():
@@ -244,13 +271,15 @@ async def test_quote_memory_cache_is_scoped_by_provider_source(monkeypatch):
     calls = []
     class History:
         empty = False
+        attrs = {"price_unit": "THOUSAND_VND"}
         def to_dict(self, orient):
             return [bar(close=0.6)]
     class Provider:
-        def stock(self, **kwargs):
-            calls.append(kwargs["source"])
-            return SimpleNamespace(quote=SimpleNamespace(history=lambda **kwargs: History()))
-    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_vnstock_class", lambda: Provider)
+        def __init__(self, *, symbol, source):
+            calls.append(source)
+        def history(self, **kwargs):
+            return History()
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_quote_class", lambda: Provider)
     quote, cached = await VnstockStockQuoteFetcher.fetch("XYZ", source="VCI")
     assert not cached
     assert quote.price == 600
@@ -320,7 +349,83 @@ def test_frame_actual_source_overrides_requested_provider():
     row = history_price_records(frame, symbol="XYZ", source="KBS", provider="vnstock.explorer.kbs.quote")[0]
     assert row["price_unit"] == "unknown"
     assert row["close"] == 0.5
-    assert row["price_source"] == "vnstock_history:MSN"
+    assert row["price_source"] == "vnstock5_history:MSN"
+
+
+@pytest.mark.parametrize("provider", [
+    "vnstock.api.quote", "vnstock.ui.market", "vnstock.explorer.vci.quote", None,
+])
+@pytest.mark.parametrize("symbol", ["XYZ", "VNINDEX", "VN30F1M"])
+def test_sdk5_history_without_unit_metadata_never_inherits_legacy_contract(provider, symbol):
+    import pandas as pd
+
+    frame = pd.DataFrame([bar(symbol=symbol, price_source="vnstock_history:VCI")])
+    row = history_price_records(frame, symbol=symbol, source="VCI", provider=provider)[0]
+    assert row["price_unit"] == "unknown"
+    assert row["price_source"] == "vnstock5_history:VCI"
+    assert (row["open"], row["high"], row["low"], row["close"]) == (0.4, 0.6, 0.3, 0.5)
+    assert row["adj_close"] == 0.45
+    assert persisted_price_source(row) == "vnstock_unknown"
+
+
+@pytest.mark.parametrize("field", ["price_unit", "priceUnit"])
+@pytest.mark.parametrize("marker,expected,unit,persisted_source", [
+    ("VND", 0.5, "VND", "vnstock_vnd:VCI"),
+    ("THOUSAND_VND", 500, "VND", "vnstock_vnd:VCI"),
+    ("index_points", 0.5, "index_points", "vnstock_points:VCI"),
+    ("unknown", 0.5, "unknown", "vnstock_unknown"),
+    ("USD", 0.5, "unknown", "vnstock_unknown"),
+])
+def test_sdk5_history_uses_declared_frame_units_once(field, marker, expected, unit, persisted_source):
+    import pandas as pd
+
+    frame = pd.DataFrame([bar()])
+    frame.attrs[field] = marker
+    row = history_price_records(frame, symbol="XYZ", source="VCI", provider="vnstock.api.quote")[0]
+    assert (row["price_unit"], row["close"]) == (unit, expected)
+    assert row["price_source"] == "vnstock5_history:VCI"
+    assert (row["volume"], row["value"]) == (123, 5000)
+    assert normalize_price_record(row) == row
+    assert persisted_price_source(row) == persisted_source
+    assert persisted_price_record({**row, "source": "VCI"}) == {**row, "source": "VCI"}
+
+
+@pytest.mark.parametrize("marker,unit", [("VND", "VND"), ("unknown", "unknown")])
+def test_sdk5_history_record_unit_takes_precedence_over_frame(marker, unit):
+    import pandas as pd
+
+    frame = pd.DataFrame([bar(priceUnit=marker)])
+    frame.attrs["price_unit"] = "THOUSAND_VND"
+    row = history_price_records(frame, symbol="XYZ", source="VCI", provider="vnstock.api.quote")[0]
+    assert row["price_unit"] == unit
+    assert row["close"] == 0.5
+
+
+@pytest.mark.asyncio
+async def test_quote_provider_withholds_unmarked_sdk5_history(monkeypatch):
+    calls = []
+
+    class History:
+        empty = False
+
+        def to_dict(self, orient):
+            return [bar()]
+
+    class Provider:
+        def __init__(self, *, symbol, source):
+            calls.append((symbol, source))
+
+        def history(self, **kwargs):
+            calls.append("history")
+            return History()
+
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_quote_class", lambda: Provider)
+    quote, cached = await VnstockStockQuoteFetcher.fetch("XYZ", source="VCI", use_cache=False)
+    assert calls == [("XYZ", "VCI"), "history"]
+    assert not cached
+    assert quote.price_unit == "unknown"
+    assert quote.price is None
+    assert quote.change is None
 
 
 def test_sponsor_frame_requires_explicit_unit_contract():
@@ -411,7 +516,10 @@ async def test_vci_backfill_preserves_provider_trading_dates(monkeypatch, date_l
     frame.attrs["price_unit"] = "THOUSAND_VND"
     provider = SimpleNamespace(source="VCI", __module__="vnstock.explorer.vci.quote",
                                history=lambda **kwargs: frame)
-    monkeypatch.setitem(sys.modules, "vnstock", SimpleNamespace(Quote=lambda **kwargs: provider))
+    monkeypatch.setitem(sys.modules, "vnstock", SimpleNamespace(
+        Quote=lambda **kwargs: provider,
+        status=lambda: {"authenticated": False, "tier": "guest"},
+    ))
     session = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
     @asynccontextmanager
     async def session_maker():

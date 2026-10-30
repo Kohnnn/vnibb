@@ -26,10 +26,22 @@ def test_runtime_tier_rejects_premium(monkeypatch, tier):
         Settings()
 
 
+@pytest.mark.parametrize("tier", ["golden", " GOLDEN "])
+def test_runtime_tier_accepts_golden(monkeypatch, tier):
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", tier)
+    assert Settings().vnstock_runtime_tier == "golden"
+
+
 def test_runtime_tier_rejects_unknown_value(monkeypatch):
-    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "unknown")
     with pytest.raises(ValidationError, match="VNSTOCK_RUNTIME_TIER"):
         Settings()
+
+
+def test_settings_do_not_expose_api_key():
+    settings = Settings(vnstock_api_key="synthetic-secret")
+    assert "synthetic-secret" not in repr(settings)
+    assert "vnstock_api_key" not in settings.model_dump()
 
 
 @pytest.mark.parametrize("source", ["KBS", "TCBS", "MSN", " kbs "])
@@ -93,23 +105,52 @@ def test_free_runtime_guard_rejects_each_paid_package(monkeypatch, paid_module):
 def test_free_runtime_guard_accepts_clean_community_environment(monkeypatch):
     from vnibb.providers.vnstock import runtime
 
+    community = types.ModuleType("vnstock")
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
 
     assert runtime.validate_free_runtime() is None
 
 
-@pytest.mark.parametrize("symbol", ["Vnstock", "Listing", "Trading", "Quote", "Finance", "Company"])
+@pytest.mark.parametrize("symbol", ["Listing", "Trading", "Quote", "Finance", "Company"])
 def test_runtime_imports_community_in_clean_free_environment(monkeypatch, symbol):
     from vnibb.providers.vnstock import runtime
 
     community = types.ModuleType("vnstock")
     community_symbol = type(symbol, (), {})
     setattr(community, symbol, community_symbol)
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
     monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
 
     assert runtime.import_vnstock_symbol(symbol) == (community_symbol, "vnstock")
     assert getattr(runtime, f"get_{symbol.lower()}_class")() is community_symbol
+
+
+def test_golden_imports_unified_sdk_even_with_paid_modules(monkeypatch):
+    from vnibb.core.config import settings
+    from vnibb.providers.vnstock import runtime
+
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
+    monkeypatch.setattr(runtime, "find_spec", lambda name: object())
+    sdk = types.ModuleType("vnstock")
+    sdk.Fundamental = object()
+    monkeypatch.setitem(sys.modules, "vnstock", sdk)
+    assert runtime.import_vnstock_symbol("Fundamental") == (sdk.Fundamental, "vnstock")
+
+
+def test_reference_company_passes_explicit_vci_before_import(monkeypatch):
+    from vnibb.providers.vnstock import runtime
+
+    calls = []
+    monkeypatch.setattr(runtime, "get_company_class", lambda: lambda **kwargs: calls.append(kwargs))
+    runtime.create_reference_company("VNM", " vci ")
+    assert calls == [{"symbol": "VNM", "source": "VCI"}]
+    with pytest.raises(ValueError):
+        runtime.create_reference_company("VNM", "KBS")
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(
@@ -162,7 +203,9 @@ def test_direct_importer_rejects_non_free_vci_policy_before_import(monkeypatch, 
 def test_finance_does_not_supply_missing_community_symbols(monkeypatch):
     from vnibb.providers.vnstock import runtime
 
-    monkeypatch.setitem(sys.modules, "vnstock", types.ModuleType("vnstock"))
+    community = types.ModuleType("vnstock")
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
     with pytest.raises(AttributeError, match="Finance"):
         runtime.get_finance_class()
@@ -204,20 +247,27 @@ async def test_unsupported_free_capabilities_raise_provider_error(monkeypatch, k
         def __init__(self, symbol, source):
             calls.append((symbol, source))
 
+    class Market:
+        def equity(self, symbol):
+            calls.append((symbol, "VCI"))
+            return self
+
     if unsupported == "not_implemented":
-        def unavailable(self):
+        def unavailable(self, **kwargs):
             raise NotImplementedError("Unavailable in free VCI")
 
-        setattr(CommunityClient, "price_depth" if kind == "depth" else "insider_deals", unavailable)
+        setattr(Market if kind == "depth" else CommunityClient,
+                "order_book" if kind == "depth" else "events", unavailable)
 
     community = types.ModuleType("vnstock")
-    community.Quote = CommunityClient
+    community.Market = Market
     community.Company = CommunityClient
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
     monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     fetcher = VnstockPriceDepthFetcher if kind == "depth" else VnstockInsiderDealsFetcher
-    with pytest.raises(ProviderError, match="[Uu]navailable in free VCI"):
+    with pytest.raises(ProviderError, match="[Uu]navailable in free VCI|order_book"):
         await fetcher.fetch("vnm")
     assert calls == [("VNM", "VCI")]
 
@@ -265,6 +315,11 @@ def test_free_tier_ignores_unavailable_premium_modules(tmp_path):
         tier="free",
         required_modules="module_that_does_not_exist",
     )
+    assert result.returncode == 0, result.stderr
+
+
+def test_golden_tier_entrypoint_accepts_unified_sdk(tmp_path):
+    result = _run_entrypoint(tmp_path, tier="golden", required_modules="")
     assert result.returncode == 0, result.stderr
 
 

@@ -50,14 +50,7 @@ async def _stored(db, symbol: str, snapshot_date: date = TODAY) -> ScreenerSnaps
 
 
 @pytest.mark.asyncio
-async def test_partial_live_write_cannot_blank_a_field_the_sync_populated(test_db):
-    """A narrower writer must not regress a populated column to NULL.
-
-    The live path persists its pre-filter fetch, and only some enrichers run
-    on it, so incoming values are frequently NULL for fields the scheduled
-    sync already filled. Letting NULL win blanks price/pe/market_cap for every
-    other reader of the snapshot.
-    """
+async def test_partial_live_write_keeps_legacy_cap_without_fabricating_provenance(test_db):
     test_db.add(_row("VNM", source="KBS", price=60.3, pe=14.2, market_cap=1.26e14))
     await test_db.commit()
 
@@ -72,6 +65,7 @@ async def test_partial_live_write_cannot_blank_a_field_the_sync_populated(test_d
     assert stored.price == 60.3
     assert stored.pe == 14.2
     assert stored.market_cap == 1.26e14
+    assert "market_cap_provenance" not in stored.extended_metrics
     # A non-null incoming value still lands.
     assert stored.roe == 31
 

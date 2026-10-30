@@ -78,6 +78,8 @@ class ScreenerFilterService:
         if cond.field not in df.columns:
             logger.warning(f"Field {cond.field} not found in DataFrame columns")
             return df
+        if cond.field == "shares_outstanding":
+            df = df[df[cond.field].notna()]
 
         # A present-but-entirely-empty column filters everything out while
         # looking like a legitimate no-match. Enrichment probably failed.

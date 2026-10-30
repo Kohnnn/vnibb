@@ -155,7 +155,10 @@ MONGODB_URL=mongodb://<user>:<pass>@<tailscale-ip>:27017/vnibb-market?authSource
 MONGODB_TIMEOUT_MS=10000
 ```
 
-Use the same free-only runtime intent for the API, scheduler, and sidecar:
+Use the same runtime intent for the API, scheduler and sidecar. `free` is the
+default and runs no startup account check; `golden` requires `VNSTOCK_API_KEY`
+from a deployment secret and fails closed without a Golden or Diamond
+registration. `VNSTOCK_SOURCE=VCI` is required in both cases.
 
 ```env
 VNSTOCK_SOURCE=VCI

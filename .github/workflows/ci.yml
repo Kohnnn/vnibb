@@ -46,9 +46,7 @@ jobs:
       - name: Install API dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --isolated --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
-      - name: Verify credential-free VNStock resolution
-        run: python -m pytest apps/api/scripts/test_vnstock_install.py -q
+          pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
       - name: Run root CI gate
         run: pnpm run ci:gate
 
@@ -82,7 +80,7 @@ jobs:
       - name: Install API dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install --isolated --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
+          pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
       - name: Apply migrations to an empty PostgreSQL database
         working-directory: apps/api
         run: python -m alembic -c alembic.ini upgrade head
@@ -124,10 +122,55 @@ jobs:
       - name: Install API dependencies for local smoke service
         run: |
           python -m pip install --upgrade pip
-          pip install --isolated --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
+          pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
       - name: Install Chromium
         run: pnpm --filter frontend exec playwright install --with-deps chromium
       - name: Build frontend
         run: pnpm --filter frontend build
       - name: Run Chromium release smoke
         run: pnpm --filter frontend test:e2e:smoke
+
+  vnstock-wheel-resolution:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        python-version: ['3.11', '3.12']
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up target Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install API dependencies from the platform wheel lock
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
+      - name: Verify credential-free publisher wheel resolution
+        run: python -m pytest apps/api/scripts/test_vnstock_install.py -q
+
+  vnstock-target-images:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build credential-free target image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          file: apps/api/Dockerfile
+          platforms: linux/${{ matrix.architecture }}
+          push: false
+          build-args: IMAGE_RELEASE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=vnstock5-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=vnstock5-${{ matrix.architecture }}

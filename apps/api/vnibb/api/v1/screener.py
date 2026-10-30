@@ -16,7 +16,7 @@ from typing import Any, List, Literal, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1.schemas import MetaData, StandardResponse
@@ -25,6 +25,8 @@ from vnibb.core.cache_constants import REDIS_TTL_INDEX_CONSTITUENTS
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
 from vnibb.core.exceptions import ProviderError, ProviderRateLimitError, ProviderTimeoutError
+from vnibb.core.market_cap import resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
 from vnibb.core.retry import vnstock_cb
@@ -198,6 +200,14 @@ def _to_screener_data_row(row: object) -> ScreenerData:
                 value = extended_metrics.get("debt_to_assets", extended_metrics.get(metric))
         return value
     price_record = screener_price_record(row)
+    market_cap_provenance = resolve_market_cap(row, source="postgres:screener_snapshot")
+    share_record = dict(extended_metrics)
+    if getattr(row, "shares_outstanding", None) is not None:
+        share_record = {"shares_outstanding": row.shares_outstanding}
+        provenance = extended_metrics.get("shares_outstanding_provenance")
+        if isinstance(provenance, dict) and provenance.get("status") == "conflict":
+            share_record["shares_outstanding_provenance"] = provenance
+    shares = resolve_screener_shares(share_record, source="postgres:screener_snapshot")
     session_declared = "market_session" in extended_metrics
     now = datetime.now(UTC)
     coverage = (
@@ -252,7 +262,10 @@ def _to_screener_data_row(row: object) -> ScreenerData:
             extended_metrics.get("perf_ytd"),
             extended_metrics.get("price_change_ytd_pct"),
         ),
-        market_cap=getattr(row, "market_cap", None),
+        market_cap=market_cap_provenance["value"],
+        market_cap_provenance=market_cap_provenance,
+        shares_outstanding=shares["value"],
+        shares_outstanding_provenance=shares,
         pe=getattr(row, "pe", None),
         pb=getattr(row, "pb", None),
         ps=getattr(row, "ps", None),
@@ -327,18 +340,10 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
             return True
         return False
 
-    def _estimate_market_cap(price: object, shares_outstanding: object) -> Optional[float]:
-        if _is_missing(price) or _is_missing(shares_outstanding):
-            return None
-        try:
-            price_value = float(price)
-            shares_value = float(shares_outstanding)
-            # vnstock sometimes returns shares in millions, while company profiles
-            # can store absolute share counts.
-            multiplier = 1.0 if shares_value >= 1_000_000 else 1_000_000.0
-            return price_value * shares_value * multiplier
-        except (TypeError, ValueError):
-            return None
+    for row in rows:
+        shares = resolve_screener_shares(row.model_dump(), source="screener:response")
+        row.shares_outstanding = shares["value"]
+        row.shares_outstanding_provenance = shares
 
     missing_symbols = [
         row.symbol
@@ -348,15 +353,12 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
             _is_missing(row.organ_name)
             or _is_missing(row.exchange)
             or _is_missing(row.industry_name)
-            or _is_missing(row.shares_outstanding)
-            or _is_missing(row.market_cap)
+            or not (row.shares_outstanding_provenance or {}).get("observations")
         )
     ]
     symbols = sorted({symbol for symbol in missing_symbols if symbol})
     stock_map: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {}
-    company_map: dict[
-        str, tuple[Optional[str], Optional[str], Optional[str], Optional[float], Optional[float]]
-    ] = {}
+    company_map: dict[str, tuple[Any, Any, Any, Any, Any]] = {}
     if symbols:
         stock_result = await db.execute(
             select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry).where(
@@ -374,25 +376,12 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
                 Company.exchange,
                 Company.industry,
                 Company.outstanding_shares,
-                Company.listed_shares,
+                Company.raw_data,
             ).where(Company.symbol.in_(symbols))
         )
         company_map = {
-            symbol: (
-                company_name,
-                exchange,
-                industry,
-                outstanding_shares,
-                listed_shares,
-            )
-            for (
-                symbol,
-                company_name,
-                exchange,
-                industry,
-                outstanding_shares,
-                listed_shares,
-            ) in company_result.fetchall()
+            symbol: (company_name, exchange, industry, outstanding_shares, raw_data)
+            for symbol, company_name, exchange, industry, outstanding_shares, raw_data in company_result.fetchall()
         }
 
     hydrated: List[ScreenerData] = []
@@ -403,13 +392,11 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
         exchange = None
         industry = None
         outstanding_shares = None
-        listed_shares = None
+        raw_data = None
 
         if symbol:
             if symbol in company_map:
-                company_name, exchange, industry, outstanding_shares, listed_shares = company_map[
-                    symbol
-                ]
+                company_name, exchange, industry, outstanding_shares, raw_data = company_map[symbol]
             if symbol in stock_map:
                 stock_company, stock_exchange, stock_industry = stock_map[symbol]
                 if not company_name:
@@ -425,18 +412,13 @@ async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> 
                 updates["exchange"] = exchange
             if industry and _is_missing(row.industry_name):
                 updates["industry_name"] = industry
-            if outstanding_shares and _is_missing(row.shares_outstanding):
-                updates["shares_outstanding"] = outstanding_shares
-            elif listed_shares and _is_missing(row.shares_outstanding):
-                updates["shares_outstanding"] = listed_shares
-
-        shares_for_market_cap = updates.get("shares_outstanding", row.shares_outstanding)
-        if _is_missing(row.market_cap):
-            estimated_market_cap = _estimate_market_cap(
-                row.price if row.price_unit == "VND" else None, shares_for_market_cap
-            )
-            if estimated_market_cap is not None:
-                updates["market_cap"] = estimated_market_cap
+            if outstanding_shares is not None and not (row.shares_outstanding_provenance or {}).get("observations"):
+                raw_data = raw_data if isinstance(raw_data, dict) else {}
+                recorded = [raw_data[key] for key in ("outstanding_shares", "shares_outstanding", "sharesOutstanding") if raw_data.get(key) is not None]
+                share_record = raw_data if recorded and all(value == outstanding_shares for value in recorded) else {"outstanding_shares": outstanding_shares}
+                shares = resolve_screener_shares(share_record, source="postgres:company_profile")
+                updates["shares_outstanding"] = shares["value"]
+                updates["shares_outstanding_provenance"] = shares
 
         if updates:
             row = row.model_copy(update=updates)
@@ -645,8 +627,6 @@ async def _resolve_index_universe(universe: str) -> tuple[Optional[set[str]], di
     return set(record["members"]) if not is_stale else set(), meta
 
 
-def _shares_multiplier(shares: float) -> float:
-    return 1.0 if shares >= 1_000_000 else 1_000_000.0
 
 
 def _compute_growth(current: Optional[float], previous: Optional[float]) -> Optional[float]:
@@ -694,7 +674,6 @@ async def _enrich_screener_metrics(
                 or row.perf_ytd is None
                 or row.debt_to_asset is None
                 or row.equity_on_total_asset is None
-                or row.market_cap is None
             )
         }
     )
@@ -717,7 +696,6 @@ async def _enrich_screener_metrics(
                 or row.dividend_yield is None
                 or row.debt_to_asset is None
                 or row.equity_on_total_asset is None
-                or row.market_cap is None
                 or row.foreign_ownership is None
                 or row.state_ownership is None
                 or row.year is None
@@ -744,7 +722,6 @@ async def _enrich_screener_metrics(
     income_by_symbol: dict[str, list[dict[str, Optional[float]]]] = {}
     balance_by_symbol: dict[str, dict[str, Optional[float]]] = {}
     dividends_by_symbol: dict[str, Optional[float]] = {}
-    shares_by_symbol: dict[str, Optional[float]] = {}
 
     if fundamental_symbols:
         ratio_rows = (
@@ -754,6 +731,7 @@ async def _enrich_screener_metrics(
                     .where(
                         FinancialRatio.symbol.in_(fundamental_symbols),
                         FinancialRatio.period_type == "year",
+                        or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"),
                     )
                     .order_by(
                         FinancialRatio.symbol.asc(),
@@ -780,6 +758,7 @@ async def _enrich_screener_metrics(
                 .where(
                     IncomeStatement.symbol.in_(fundamental_symbols),
                     IncomeStatement.period_type == "year",
+                    or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
                 )
                 .order_by(IncomeStatement.symbol.asc(), IncomeStatement.fiscal_year.desc())
             )
@@ -808,6 +787,7 @@ async def _enrich_screener_metrics(
                 .where(
                     BalanceSheet.symbol.in_(fundamental_symbols),
                     BalanceSheet.period_type == "year",
+                    or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"),
                 )
                 .order_by(BalanceSheet.symbol.asc(), BalanceSheet.fiscal_year.desc())
             )
@@ -824,7 +804,11 @@ async def _enrich_screener_metrics(
         cashflow_rows = (
             await db.execute(
                 select(CashFlow.symbol, CashFlow.dividends_paid)
-                .where(CashFlow.symbol.in_(fundamental_symbols), CashFlow.period_type == "year")
+                .where(
+                    CashFlow.symbol.in_(fundamental_symbols),
+                    CashFlow.period_type == "year",
+                    or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"),
+                )
                 .order_by(CashFlow.symbol.asc(), CashFlow.fiscal_year.desc())
             )
         ).all()
@@ -832,26 +816,6 @@ async def _enrich_screener_metrics(
             if symbol not in dividends_by_symbol:
                 dividends_by_symbol[symbol] = _coerce_float(dividends_paid)
 
-        company_rows = (
-            await db.execute(
-                select(
-                    Company.symbol,
-                    Company.outstanding_shares,
-                    Company.listed_shares,
-                    Company.raw_data,
-                ).where(Company.symbol.in_(fundamental_symbols))
-            )
-        ).all()
-        for symbol, outstanding_shares, listed_shares, raw_data in company_rows:
-            payload = raw_data if isinstance(raw_data, dict) else {}
-            shares_by_symbol[symbol] = _pick_float(
-                outstanding_shares,
-                listed_shares,
-                payload.get("outstanding_shares"),
-                payload.get("listed_shares"),
-                payload.get("issue_share"),
-                payload.get("financial_ratio_issue_share"),
-            )
 
     normalized_price_series_by_symbol: dict[str, list[tuple[Any, float | None]]] = {}
     if price_symbols:
@@ -1121,14 +1085,6 @@ async def _enrich_screener_metrics(
         elif normalized_perf_ytd is not None and abs(normalized_perf_ytd) <= 140:
             updates["perf_ytd"] = normalized_perf_ytd
 
-        if row.market_cap is None:
-            shares = _coerce_float(row.shares_outstanding) or _coerce_float(
-                shares_by_symbol.get(symbol)
-            )
-            price = _coerce_float(row.price) if row.price_unit == "VND" else None
-            if shares not in (None, 0) and price not in (None, 0):
-                updates["market_cap"] = price * shares * _shares_multiplier(shares)
-
         if "market_session" in row.model_fields_set and (
             row.market_session is None or row.market_session.get("status") != "traded"
         ):
@@ -1158,6 +1114,10 @@ def apply_advanced_filters(
     """Apply dynamic filters and sorting using ScreenerFilterService."""
     if not data:
         return []
+    for row in data:
+        shares = resolve_screener_shares(row.model_dump(), source="screener:response")
+        row.shares_outstanding = shares["value"]
+        row.shares_outstanding_provenance = shares
 
     range_filter_keys = (
         "pe_min",
@@ -1205,14 +1165,21 @@ def apply_advanced_filters(
         sort_order = kwargs.get("sort_order", "desc")
         df = ScreenerFilterService.apply_multi_sort(df, f"{sort_by}:{sort_order}")
 
-    return [ScreenerData(**row) for row in df.to_dict("records")]
+    records = df.to_dict("records")
+    for record in records:
+        if pd.isna(record.get("shares_outstanding")):
+            record["shares_outstanding"] = None
+    return [ScreenerData(**record) for record in records]
 
 
 def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
     for row in rows:
-        if row.price_unit == "VND" and row.market_cap is None and row.price is not None and row.shares_outstanding:
-            multiplier = 1 if row.shares_outstanding >= 1_000_000 else 1_000_000
-            row.market_cap = row.price * row.shares_outstanding * multiplier
+        provenance = resolve_market_cap(row, source="screener:response")
+        row.market_cap = provenance["value"]
+        row.market_cap_provenance = provenance
+        shares = resolve_screener_shares(row.model_dump(), source="screener:response")
+        row.shares_outstanding = shares["value"]
+        row.shares_outstanding_provenance = shares
     return rows
 
 

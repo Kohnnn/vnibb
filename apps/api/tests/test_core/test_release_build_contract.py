@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[4]
 WINDOWS_BASH = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe"
 BASH = str(WINDOWS_BASH) if os.name == "nt" and WINDOWS_BASH.exists() else shutil.which("bash") or "bash"
@@ -35,7 +37,8 @@ def test_release_build_passes_the_git_revision_without_a_secret() -> None:
     assert "Published image digest unavailable" in script
 
 
-def test_release_build_emits_the_published_immutable_manifest(tmp_path: Path) -> None:
+@pytest.mark.parametrize("platform", ["linux/amd64", "linux/arm64"])
+def test_release_build_emits_the_published_immutable_manifest(tmp_path: Path, platform: str) -> None:
     digest = "sha256:" + "a" * 64
     docker = tmp_path / "docker"
     docker.write_text(
@@ -54,7 +57,7 @@ def test_release_build_emits_the_published_immutable_manifest(tmp_path: Path) ->
     docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
     environment = os.environ | {
         "IMAGE_RELEASE_REVISION": "abc1234",
-        "PLATFORM": "linux/arm64",
+        "PLATFORM": platform,
         "PYTHON_BIN": sys.executable,
         "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
     }
@@ -74,9 +77,26 @@ def test_release_build_emits_the_published_immutable_manifest(tmp_path: Path) ->
         "digest": digest,
         "image": f"registry.example.com/vnibb/api@{digest}",
         "revision": "abc1234",
-        "platform": "linux/arm64",
+        "platform": platform,
         "tag": "v1.6.1",
     }
+
+
+@pytest.mark.parametrize("platform", ["linux/arm/v7", "linux/ppc64le", "linux/amd64,linux/arm64"])
+def test_release_build_rejects_unsupported_platform_before_invoking_tools(platform: str) -> None:
+    result = subprocess.run(
+        [BASH, "scripts/oracle/build_release_image.sh", "registry.example.com/vnibb/api:v1.6.1"],
+        cwd=ROOT,
+        env=os.environ | {"PLATFORM": platform, "IMAGE_RELEASE_REVISION": "abc1234", "PATH": ""},
+        executable=BASH,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert f"Unsupported VNStock 5.2.1 image platform: {platform}" in result.stderr
+    assert "use linux/amd64 or linux/arm64" in result.stderr
 
 
 def test_release_workflow_publishes_only_immutable_main_revisions() -> None:
@@ -92,6 +112,36 @@ def test_release_workflow_publishes_only_immutable_main_revisions() -> None:
     assert "Require unused release tag" in workflow
     assert 'build_release_image.sh "${repository}:${RELEASE_TAG}"' in workflow
     assert "VNSTOCK_API_KEY" not in workflow
+
+
+def test_generation_five_images_resolve_wheels_inside_each_target_platform() -> None:
+    dockerfile = (ROOT / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    release = (ROOT / ".github/workflows/publish-release-image.yml").read_text(encoding="utf-8")
+
+    assert "FROM python:3.12-slim" in dockerfile
+    assert "ARG TARGETPLATFORM" in dockerfile
+    assert 'case "$TARGETPLATFORM"' in dockerfile
+    assert "linux/amd64|linux/arm64" in dockerfile
+    assert "BUILDPLATFORM" not in dockerfile
+    assert "--only-binary=vnstock" in dockerfile
+    assert "-c constraints-vnstock.txt" in dockerfile
+    assert "installed == '5.2.1'" in dockerfile
+    assert 'version("vnai")' not in dockerfile
+    assert "runner: [ubuntu-24.04, ubuntu-24.04-arm]" in ci
+    assert "python-version: ['3.11', '3.12']" in ci
+    assert "architecture: [amd64, arm64]" in ci
+    assert "platforms: linux/${{ matrix.architecture }}" in ci
+    assert "scope=vnstock5-${{ matrix.architecture }}" in ci
+    assert "docker/setup-qemu-action@v3" in ci
+    assert "platforms: arm64" in ci
+    assert "platforms: arm64" in release
+    assert "VNSTOCK_API_KEY" not in ci
+    for workflow in ("ci.yml", "reliability-gate.yml"):
+        content = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+        installs = [line for line in content.splitlines() if "-c apps/api/constraints-vnstock.txt" in line]
+        assert installs
+        assert all("--only-binary=vnstock" in line for line in installs)
 
 
 def test_runtime_verification_checks_expected_revision_and_configured_digest() -> None:

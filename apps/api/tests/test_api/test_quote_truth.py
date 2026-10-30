@@ -218,14 +218,14 @@ async def test_provider_history_without_close_is_not_a_zero_price_trade(monkeypa
         def to_dict(self, orient):
             return [{"close": None, "date": "2026-03-14"}]
 
-    class Stock:
-        quote = type("Quote", (), {"history": lambda self, **_kwargs: History()})()
-
     class Provider:
-        def stock(self, **_kwargs):
-            return Stock()
+        def __init__(self, *, symbol, source):
+            assert (symbol, source) == ("ZZZ", "VCI")
 
-    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_vnstock_class", lambda: Provider)
+        def history(self, **_kwargs):
+            return History()
+
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_quote_class", lambda: Provider)
 
     quote, _ = await VnstockStockQuoteFetcher.fetch("ZZZ", use_cache=False)
 

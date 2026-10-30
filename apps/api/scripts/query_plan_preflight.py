@@ -879,6 +879,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mongo-max-time-ms", type=int, default=bounded_int(os.getenv("VNIBB_PREFLIGHT_MONGO_MAX_TIME_MS"), 5000, 1000, 30000))
     parser.add_argument("--mongo-audit-sample-limit", type=int, default=20)
     parser.add_argument("--audit-mongo-eod", action="store_true")
+    parser.add_argument("--readiness-census", action="store_true", help="Datastore-only census; skips HTTP benchmarks and other preflight checks")
+    parser.add_argument("--expected-revision", help="Independently pinned serving revision required by --readiness-census")
     parser.add_argument("--standard-budget-ms", type=int, default=bounded_int(os.getenv("VNIBB_SCREENER_STANDARD_BUDGET_MS"), DEFAULT_STANDARD_BUDGET_MS, 1, 60000))
     parser.add_argument("--advanced-budget-ms", type=int, default=bounded_int(os.getenv("VNIBB_SCREENER_ADVANCED_BUDGET_MS"), DEFAULT_ADVANCED_BUDGET_MS, 1, 60000))
     parser.add_argument("--require-postgres", action="store_true")
@@ -889,6 +891,27 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.readiness_census:
+        from scripts.readiness_census import readiness_census
+
+        if args.api_base_url or args.require_screener or args.output_markdown:
+            raise ValueError("Census forbids HTTP benchmarks and markdown containing per-symbol evidence")
+        try:
+            report = readiness_census(args.expected_revision, max(1000, min(args.mongo_max_time_ms, 5000)))
+        except Exception as exc:
+            print(json.dumps({"contract": "database-readiness-census-v1", "status": "failed", "error": safe_error(exc)}))
+            return 1
+        output = json.dumps(report, default=str, sort_keys=True)
+        if args.output_json:
+            descriptor = os.open(args.output_json, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(output + "\n")
+            summary = {key: report[key] for key in ("at", "revision", "expected_completed_session", "active_count", "active_sha256", "durable", "reason_counts")}
+            summary["admitted"] = {key: value for key, value in report["admitted"].items() if key != "symbols"}
+            print(json.dumps(summary))
+        else:
+            print(output)
+        return 0
     symbol = re.sub(r"[^A-Za-z0-9]", "", args.symbol).upper()[:10] or "FPT"
     checks = [
         postgres_preflight(args.require_postgres, symbol),

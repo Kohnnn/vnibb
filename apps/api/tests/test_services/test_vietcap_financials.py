@@ -44,7 +44,7 @@ def test_decodes_descriptor_code_not_fixed_provider_code_and_preserves_zero(enve
 
 
 @pytest.mark.parametrize("field", ["eps_diluted", "epsDiluted", "dilutedEps"])
-def test_income_provider_preserves_diluted_eps_zero(field):
+def test_income_provider_withholds_unitless_diluted_eps_zero(field):
     from vnibb.providers.vnstock.income_statement import (
         IncomeStatementQueryParams,
         VnstockIncomeStatementFetcher,
@@ -53,7 +53,7 @@ def test_income_provider_preserves_diluted_eps_zero(field):
     rows = VnstockIncomeStatementFetcher.transform_data(
         IncomeStatementQueryParams(symbol="FPT"), [{"yearReport": 2025, field: 0}],
     )
-    assert rows[0].eps_diluted == 0
+    assert rows[0].eps_diluted is None
 
 
 @pytest.mark.parametrize("failure", ["null", "source", "scope", "fiscal"])
@@ -443,6 +443,59 @@ async def test_cache_storage_keeps_lineage_without_inventing_null_metrics(envelo
     assert "net_income" not in rows[0]
     assert rows[0]["raw_data"]["descriptorEvidence"] == envelope["descriptorEvidence"]
     assert rows[0]["raw_data"]["rawFiscalBasis"] == envelope["rawFiscalBasis"]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow", "ratio"])
+async def test_structured_writer_rejects_issuer_before_database_access(monkeypatch, statement_type):
+    from vnibb.services.cache_manager import CacheManager
+
+    cache = CacheManager()
+    writer = AsyncMock()
+    monkeypatch.setattr(cache, "_store_rows", writer)
+    with pytest.raises(ValueError, match="issuer_report persistence is not enabled"):
+        await cache.store_financial_data("FPT", statement_type, "year", [{
+            "fiscal_year": 2025, "period": "2025", "revenue": 100,
+        }], source="issuer_report")
+    writer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["vietcap", "vietcap_vnd", "VCI", "vnstock"])
+async def test_structured_refresh_does_not_overwrite_retained_issuer_row(test_db, source):
+    from sqlalchemy import select
+    from vnibb.models import IncomeStatement
+    from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
+
+    raw = {"original": "retained"}
+    test_db.add(IncomeStatement(id=186780, symbol="FPT", period="2025", period_type="year",
+        fiscal_year=2025, source="issuer_report", revenue=0, raw_data=raw))
+    await test_db.commit()
+    with pytest.raises(StructuredPersistenceConflict):
+        await CacheManager(test_db).store_financial_data("FPT", "income", "year", [{
+            "fiscal_year": 2025, "period": "2025", "revenue": 100,
+        }], source=source)
+    test_db.expire_all()
+    stored = (await test_db.execute(select(IncomeStatement).where(IncomeStatement.id == 186780))).scalar_one()
+    assert (stored.source, stored.revenue, stored.raw_data) == ("issuer_report", 0, raw)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["VCI", "vnstock", "derived", None])
+async def test_pipeline_source_guard_preserves_retained_issuer_atomically(test_db, source):
+    from sqlalchemy import select, update
+    from vnibb.models import IncomeStatement
+    from vnibb.services.cache_manager import source_update_condition
+
+    test_db.add(IncomeStatement(id=186780, symbol="FPT", period="2025", period_type="year",
+        fiscal_year=2025, source="issuer_report", revenue=-42, raw_data={"original": "retained"}))
+    await test_db.commit()
+    await test_db.execute(update(IncomeStatement).where(
+        IncomeStatement.id == 186780, source_update_condition(IncomeStatement, source),
+    ).values(source=source, revenue=100))
+    await test_db.commit()
+    test_db.expire_all()
+    stored = (await test_db.execute(select(IncomeStatement).where(IncomeStatement.id == 186780))).scalar_one()
+    assert (stored.source, stored.revenue, stored.raw_data) == ("issuer_report", -42, {"original": "retained"})
 
 
 @pytest.mark.asyncio

@@ -99,23 +99,26 @@ async def test_guarded_ratio_job_records_failed_partial_and_complete(test_engine
 
 
 @pytest.mark.asyncio
-async def test_modular_community_finance_is_used_without_legacy_wrapper(monkeypatch):
+async def test_unified_fundamental_is_used_without_legacy_wrapper(monkeypatch):
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source):
-            calls.append((symbol, source))
+    class Fundamental:
+        def equity(self, symbol):
+            calls.append(("equity", symbol))
+            return self
 
-        def ratio(self, period, lang="en"):
-            return pd.DataFrame([{"period": "2025", "pe": 12.0}])
+        def ratio(self, *, source, period, lang, format):
+            calls.append((source, period, lang, format))
+            return pd.DataFrame([{"item_id": "pe", "2025": 12.0}])
 
     module = types.ModuleType("vnstock")
-    module.Finance = Finance
+    module.status = lambda: {"authenticated": False, "tier": "guest"}
+    module.Fundamental = Fundamental
     monkeypatch.setitem(sys.modules, "vnstock", module)
     monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "year"})
-    assert rows[0]["pe"] == 12.0
-    assert calls == [("VNM", "VCI")]
+    assert rows[0]["2025"] == 12.0
+    assert calls == [("equity", "VNM"), ("VCI", "year", "en", "long")]
 
 
 @pytest.mark.asyncio
@@ -490,44 +493,48 @@ async def test_unsuccessful_daily_stage_reaches_guarded_failure(test_engine, mon
 
 
 @pytest.mark.asyncio
-async def test_community_constructor_period_is_preserved_for_quarter_ratios(monkeypatch):
+async def test_unified_ratio_receives_requested_quarter(monkeypatch):
     periods = []
 
-    class Finance:
-        def __init__(self, symbol, source, period):
-            periods.append(period)
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
-        def ratio(self, lang="en"):
-            return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
+        def ratio(self, *, source, period, lang, format):
+            periods.append(period)
+            return pd.DataFrame([{"item_id": "pe", "2025-Q4": 12}])
 
     module = types.ModuleType("vnstock")
-    module.Finance = Finance
+    module.status = lambda: {"authenticated": False, "tier": "guest"}
+    module.Fundamental = Fundamental
     monkeypatch.setitem(sys.modules, "vnstock", module)
     monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
-    assert periods and all(period == "quarter" for period in periods)
+    assert periods == ["quarter"]
 
 
 @pytest.mark.asyncio
-async def test_community_finance_does_not_repeat_ratio_call(monkeypatch):
+async def test_unified_finance_does_not_repeat_ratio_call(monkeypatch):
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source):
-            assert (symbol, source) == ("VNM", "VCI")
+    class Fundamental:
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
-        def ratio(self, period):
-            calls.append(period)
-            return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
+        def ratio(self, *, source, period, lang, format):
+            calls.append((source, period, lang, format))
+            return pd.DataFrame([{"item_id": "pe", "2025-Q4": 12}])
 
     community = types.ModuleType("vnstock")
-    community.Finance = Finance
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    community.Fundamental = Fundamental
     monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(scheduler.settings, "vnstock_source", "VCI")
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
-    assert calls == ["quarter"]
+    assert calls == [("VCI", "quarter", "en", "long")]
 
 
 @pytest.mark.asyncio
@@ -561,21 +568,21 @@ async def test_cycle_deadline_expiry_is_partial_and_next_stage_is_not_starved(te
 
 
 @pytest.mark.asyncio
-async def test_variadic_finance_method_receives_requested_quarter(monkeypatch):
+async def test_unified_ratio_explicitly_selects_vci(monkeypatch):
     calls = []
 
-    class Finance:
-        def __init__(self, symbol, source):
-            pass
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
-        def ratio(self, *args, **kwargs):
+        def ratio(self, **kwargs):
             calls.append(kwargs)
-            return pd.DataFrame([{"period": "2025-Q4", "pe": 12}])
+            return pd.DataFrame([{"item_id": "pe", "2025-Q4": 12}])
 
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
     rows = await VnstockFinancialRatiosFetcher.extract_data({"symbol": "VNM", "period": "quarter"})
     assert rows
-    assert calls and all(call["period"] == "quarter" for call in calls)
+    assert calls == [{"source": "VCI", "period": "quarter", "lang": "en", "format": "long"}]
 
 
 @pytest.mark.asyncio
@@ -601,14 +608,14 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
         symbols_by_exchange = all_symbols
         symbols_by_industries = all_symbols
 
-    class Finance:
-        def __init__(self, **kwargs):
-            pass
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
         def ratio(self, **kwargs):
             if not available[0]:
                 return pd.DataFrame()
-            return pd.DataFrame([{"period": "2025", "pe": 12}])
+            return pd.DataFrame([{"id": "pe", "period": "2025", "value": 12}])
 
     class Quote:
         def __init__(self, symbol, source):
@@ -626,7 +633,7 @@ async def test_screener_modular_quote_and_failed_rerun_preserve_certified_row(te
         cache.append(value)
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", pace)
@@ -680,9 +687,9 @@ def screener_base_pipeline(test_engine, monkeypatch):
         symbols_by_exchange = all_symbols
         symbols_by_industries = all_symbols
 
-    class Finance:
-        def __init__(self, **kwargs):
-            pass
+    class Fundamental:
+        def equity(self, symbol):
+            return self
 
         def ratio(self, **kwargs):
             raise TimeoutError("annual ratios unavailable")
@@ -691,7 +698,7 @@ def screener_base_pipeline(test_engine, monkeypatch):
         pass
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", no_io)
     monkeypatch.setattr(pipeline, "_cache_set_json", no_io)
@@ -764,6 +771,298 @@ async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_
         marker = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
         assert marker.additional_data["expected_symbols"] == ["FPT", "VNM"]
         assert marker.success_count == 2 and progress["base_count"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix_damage", ["missing", "invalid"])
+async def test_screener_resume_repairs_only_uncommitted_prefix_members(
+    screener_base_pipeline, prefix_damage,
+):
+    from datetime import datetime
+
+    from vnibb.models.screener import ScreenerSnapshot
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services.cache_manager import CacheManager
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    symbols = [f"B{index:02d}" for index in range(22)]
+    async with sessions.begin() as session:
+        session.add_all([Stock(id=index + 1, symbol=symbol, is_active=1) for index, symbol in enumerate(symbols)])
+        session.add_all([
+            StockPrice(id=index + 1, stock_id=index + 1, symbol=symbol, time=today,
+                       open=110, high=110, low=110, close=110, volume=0,
+                       source="vnstock_vnd:VCI", interval="1D")
+            for index, symbol in enumerate(symbols)
+        ])
+        session.add_all([
+            ScreenerSnapshot(symbol=symbol, snapshot_date=today, trade_date=today, price=100,
+                             extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"})
+            for symbol in symbols[1:21]
+        ])
+        if prefix_damage == "invalid":
+            session.add(ScreenerSnapshot(
+                symbol="B00", snapshot_date=today, trade_date=today, price=0,
+                extended_metrics={"price_unit": "VND", "price_source": "vnstock_vnd:VCI"},
+            ))
+    progress = {"stage": "screener", "last_index": 20, "last_symbol": "B20"}
+
+    assert await pipeline.sync_screener_data(progress=progress) == 2
+
+    async with sessions() as session:
+        marker = (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe",
+        ))).one()
+        assert marker.additional_data["expected_symbols"] == symbols
+        assert marker.additional_data["expected_count"] == marker.success_count == progress["base_count"] == 22
+        rows = (await session.scalars(select(ScreenerSnapshot).order_by(ScreenerSnapshot.symbol))).all()
+        assert [(row.symbol, row.price) for row in rows] == [
+            (symbol, 110 if symbol in {"B00", "B21"} else 100) for symbol in symbols
+        ]
+        cached = await CacheManager(db=session).get_screener_data(allow_stale=False)
+        assert cached.hit and not cached.is_stale
+        assert {row.symbol for row in cached.data} == set(symbols)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interrupt", [False, True])
+async def test_file_sqlite_screener_checkpoint_preserves_publication_and_resume(tmp_path, monkeypatch, interrupt):
+    from datetime import datetime
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from vnibb.core.database import Base
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services import data_pipeline as pipeline_module
+    from vnibb.services.cache_manager import CacheManager
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'screener.db'}", connect_args={"timeout": 0.1})
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(pipeline_module, "engine", engine)
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    pipeline = DataPipeline()
+    today = datetime.utcnow().date()
+    symbols = [f"B{index:02d}" for index in range(22)]
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessions.begin() as session:
+            session.add_all([Stock(id=index, symbol=symbol, is_active=1) for index, symbol in enumerate(symbols, 1)])
+            session.add_all([
+                StockPrice(id=index, stock_id=index, symbol=symbol, time=today, open=100, high=100,
+                           low=100, close=100, volume=1, source="vnstock_vnd:VCI", interval="1D")
+                for index, symbol in enumerate(symbols, 1)
+            ])
+        assert await pipeline.sync_screener_data(enrich_ratios=False) == 22
+        sync_id = await pipeline._create_sync_record("full", "sqlite-checkpoint", 1)
+        async with sessions.begin() as session:
+            await session.execute(update(StockPrice).values(close=110, high=110))
+
+        progress = {"job_id": "sqlite-checkpoint", "sync_id": sync_id, "status": "running"}
+        original_save = pipeline._save_progress
+        if interrupt:
+            async def cancel_after_batch(data, *args, **kwargs):
+                await original_save(data, *args, **kwargs)
+                raise asyncio.CancelledError()
+
+            monkeypatch.setattr(pipeline, "_save_progress", cancel_after_batch)
+            with pytest.raises(asyncio.CancelledError):
+                await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=sync_id)
+            async with sessions() as session:
+                reader = await CacheManager(db=session).get_screener_data()
+                assert reader.hit and {row.symbol for row in reader.data} == set(symbols)
+                assert {row.price for row in reader.data} == {100}
+                receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+                assert len(receipts) == 1
+                assert (await session.get(SyncStatus, sync_id)).status == "running"
+            assert progress.get("last_index") is None and progress.get("last_symbol") is None
+            monkeypatch.setattr(pipeline, "_save_progress", original_save)
+
+        assert await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=sync_id) == 22
+        async with sessions() as session:
+            reader = await CacheManager(db=session).get_screener_data()
+            assert reader.hit and {row.symbol for row in reader.data} == set(symbols)
+            assert {row.price for row in reader.data} == {110}
+            receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+            assert len(receipts) == 2 and receipts[-1].additional_data["expected_symbols"] == symbols
+            record = await session.get(SyncStatus, sync_id)
+            assert record.additional_data["committed_count"] == 22
+            assert record.additional_data["last_index"] is None
+            assert record.additional_data["last_symbol"] is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_path, monkeypatch):
+    from copy import deepcopy
+    from datetime import UTC, datetime
+
+    from sqlalchemy import BigInteger, Integer
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from vnibb.core.database import Base
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services import cache_manager as cache_module
+    from vnibb.services import data_pipeline as pipeline_module
+    from vnibb.services.cache_manager import CacheManager
+    from vnibb.services.vietcap_client import VietcapClient
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 26, 9, tzinfo=UTC).astimezone(tz)
+
+        @classmethod
+        def utcnow(cls):
+            return datetime(2026, 10, 26, 9)
+
+    class RetainedSessions:
+        def retain_price_board_envelope(self, requested, raw, session, observed):
+            pass
+
+        def retain_market_sessions(self, records):
+            return {record["symbol"]: record for record in records}
+
+        def verified_market_sessions(self, records, envelopes):
+            return set(records)
+
+    symbols = [f"B{index:02d}" for index in range(22)]
+    def board_row(symbol):
+        return {
+            "listingInfo": {"symbol": symbol, "ticker": symbol, "stockType": "STOCK", "type": "STOCK",
+                            "isDelisted": 0, "tradingDate": "2026-10-26", "receivedTime": "2026-10-26T01:44:00Z",
+                            "tradingStatus": "TRADING_ACTIVATED", "tradingStatusCode": "20", "securityStatus": "N"},
+            "bidAsk": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z"},
+            "matchPrice": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z",
+                           "receivedTime": "2026-10-26T08:00:03Z", "openPrice": 10000, "highest": 12000,
+                           "lowest": 9000, "matchPrice": 11000, "accumulatedVolume": 100},
+        }
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'sessions.db'}", connect_args={"timeout": 0.1})
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(pipeline_module, "engine", engine)
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(pipeline_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(cache_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: RetainedSessions())
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda self, requested, **kwargs: deepcopy([board_row(symbol) for symbol in requested]))
+    pipeline = DataPipeline()
+    try:
+        async with engine.begin() as connection:
+            # Mirror the migration's SQLite INTEGER variant so inserts generate price IDs.
+            price_id = StockPrice.__table__.c.id
+            original_type = price_id.type
+            price_id.type = BigInteger().with_variant(Integer, "sqlite")
+            try:
+                await connection.run_sync(Base.metadata.create_all)
+            finally:
+                price_id.type = original_type
+        async with sessions.begin() as session:
+            session.add_all([Stock(symbol=symbol, is_active=1) for symbol in symbols])
+        sync_id = await pipeline._create_sync_record("full", "sqlite-acquire", 1)
+        progress = {"job_id": "sqlite-acquire", "sync_id": sync_id, "status": "running"}
+        original_save = pipeline._save_progress
+
+        async def interrupt_after_batch(data, *args, **kwargs):
+            assert data["stage_stats"]["screener"]["success"] >= 20
+            raise asyncio.CancelledError()
+
+        monkeypatch.setattr(pipeline, "_save_progress", interrupt_after_batch)
+        with pytest.raises(asyncio.CancelledError):
+            await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=sync_id)
+        async with sessions() as session:
+            assert len((await session.scalars(select(StockPrice))).all()) == 22
+            assert not (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
+            assert not (await CacheManager(db=session).get_screener_data()).hit
+        assert progress.get("last_index") is None and progress.get("last_symbol") is None
+        monkeypatch.setattr(pipeline, "_save_progress", original_save)
+        assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=sync_id) == 22
+        async with sessions() as session:
+            reader = await CacheManager(db=session).get_screener_data()
+            assert reader.hit and {row.symbol for row in reader.data} == set(symbols)
+            assert {row.price for row in reader.data} == {11000}
+            receipt = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).one()
+            assert receipt.additional_data["expected_symbols"] == symbols
+            assert (await session.get(SyncStatus, sync_id)).additional_data["committed_count"] == 22
+            before_replay = sorted((row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in reader.data)
+        assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=sync_id) == 22
+        async with sessions() as session:
+            replay = await CacheManager(db=session).get_screener_data()
+            assert replay.hit
+            assert sorted((row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in replay.data) == before_replay
+            assert len((await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()) == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", ["checkpoint", "final_commit"])
+async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(screener_base_pipeline, monkeypatch, interruption):
+    from datetime import datetime
+
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services.cache_manager import CacheManager
+
+    pipeline, sessions = screener_base_pipeline
+    today = datetime.utcnow().date()
+    symbols = [f"B{index:02d}" for index in range(50)]
+    async with sessions.begin() as session:
+        session.add_all([Stock(id=index, symbol=symbol, is_active=1) for index, symbol in enumerate(symbols, 1)])
+        session.add_all([
+            StockPrice(id=index, stock_id=index, symbol=symbol, time=today, open=100, high=100,
+                       low=100, close=100, volume=1, source="vnstock_vnd:VCI", interval="1D")
+            for index, symbol in enumerate(symbols, 1)
+        ])
+    assert await pipeline.sync_screener_data(enrich_ratios=False) == 50
+    async with sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and len(reader.data) == 50
+        before = sorted((row.id, row.symbol, row.price, row.created_at) for row in reader.data)
+    async with sessions.begin() as session:
+        await session.execute(update(StockPrice).values(close=110, high=110))
+
+    original_commit = AsyncSession.commit
+    interrupt = [True]
+    checkpoints = []
+
+    async def save_progress(progress, *args, **kwargs):
+        checkpoints.append(dict(progress))
+        if interrupt[0] and interruption == "checkpoint" and progress["stage_stats"]["screener"]["success"] >= 40:
+            raise asyncio.CancelledError()
+
+    async def cancel_publication(session):
+        if interrupt[0] and interruption == "final_commit" and any(isinstance(row, SyncStatus) and row.sync_type == "screener_universe" for row in session.new):
+            raise asyncio.CancelledError()
+        await original_commit(session)
+
+    monkeypatch.setattr(AsyncSession, "commit", cancel_publication)
+    monkeypatch.setattr(pipeline, "_save_progress", save_progress)
+    progress = {}
+    with pytest.raises(asyncio.CancelledError):
+        await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123)
+    async with sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and len(reader.data) == 50
+        assert sorted((row.id, row.symbol, row.price, row.created_at) for row in reader.data) == before
+        assert len((await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()) == 1
+        assert set(await session.scalars(select(StockPrice.close))) == {110}
+    assert len(checkpoints) == 2
+    assert progress.get("last_index") is None and progress.get("last_symbol") is None
+    interrupt[0] = False
+    assert await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123) == 50
+    async with sessions() as session:
+        reader = await CacheManager(db=session).get_screener_data()
+        assert reader.hit and len(reader.data) == 50
+        assert {row.symbol for row in reader.data} == set(symbols)
+        assert all(row.price == 110 for row in reader.data)
+        assert sorted((row.id, row.symbol, row.created_at) for row in reader.data) == [
+            (row_id, symbol, created_at) for row_id, symbol, _, created_at in before
+        ]
+        receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe").order_by(SyncStatus.id))).all()
+        assert len(receipts) == 2 and receipts[-1].additional_data["expected_symbols"] == symbols
+        assert receipts[-1].success_count == progress["base_count"] == progress["committed_count"] == 50
 
 
 @pytest.mark.asyncio

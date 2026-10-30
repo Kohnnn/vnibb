@@ -1,6 +1,6 @@
 # Vietcap Backfill Scripts
 
-Bounded public Vietcap IQ/trading ingestion into MongoDB `vnibb-market`. Vietcap is primary; only free vnstock VCI is an eligible fallback. VCI uses the same upstream and is not an independent outage fallback.
+Bounded public Vietcap IQ/trading ingestion into MongoDB `vnibb-market`. Vietcap is primary; explicitly sourced vnstock VCI is the only eligible supplementary VNStock source. VCI uses the same upstream and is not an independent outage fallback. Acquisition requires the applicable source-owner permission and coverage contract.
 
 ## Quick start
 
@@ -98,6 +98,20 @@ python scripts/verify_database_selfcheck.py
 The opt-in JSON report separates physical SQL and Mongo datasets, stock-type/currently-listed/active-SQL universes, expected/present/missing symbols, retained time/fiscal-period bounds, SQL null/nonnull/descriptor-unit-admitted fields, and raw Mongo admission-unavailable reasons. It discovers the current premium allowlist without importing MCP or invoking providers. SQL statements run in a rolled-back read-only transaction; Mongo uses only read queries. Missing collections/tables are `unavailable`, not failed reads or proof of full-session replay. Query failures return a sanitized exception type and exit 1; valid empty/unavailable inventories return 0. No payloads, credentials or database URLs are printed.
 
 Refresh/history declarations cite existing ingestion owners; unknown scopes remain explicit rather than inventing a symbol denominator. SQL flows, SQL ticks, Mongo raw ticks, typed ticks and depth are separate inventories. Bounds and ingestion times are not exchange-session completeness or source freshness. IQ field admission uses retained scoped descriptors/unit evidence; free VCI and legacy fields remain counted but unverified by this inventory. QA contract IDs refer to the authoritative #111 extension index; inventory does not certify ticket outcomes or authenticated Matrix acceptance. The legacy no-argument invocation remains unchanged, including its VCI connectivity call; use `--inventory` for provider-free operation. Neither command above was executed during this change.
+
+### Bounded SQL statement admission inventory
+
+For a separate field-level baseline, run from `apps/api` against the retained SQL store using a **read-only database account** and a private dotenv file containing `DATABASE_URL_SYNC` (or `DATABASE_URL`). With `--env-file`, only its explicit URL is used; inherited database URLs and the working directory's dotenv files are ignored. If both keys are present, `DATABASE_URL_SYNC` takes precedence. Missing URLs, duplicate URL keys, malformed dotenv syntax and `${...}` interpolation fail closed. Without `--env-file`, the corresponding process environment URL is used instead. Provision only SELECT permissions on `income_statements`, `balance_sheets`, and `cash_flows`. This command makes no provider or Mongo requests and performs no writes:
+
+```bash
+python -m scripts.financial_admission_inventory \
+  --symbols FPT,VCI,VNM,MSR --periods 2025,Q1-2025,Q2-2025,Q3-2025,Q4-2025 \
+  --env-file /path/to/private-readonly.env > /path/to/private-financial-inventory.json
+```
+
+The symbol/period list is an operator-selected denominator, not a claim that every listed company must publish every report. Supply the exact years and quarters intended for the QA cases; at most 50 symbols and 40 periods per run. The output enumerates each symbol × period × statement cell and each SQL monetary column, including nulls, zeroes, source identity, lineage presence, admission/withholding reason, unsupported source, missing row, and consumer faults. Invalid fiscal years outside 1900–2100 and unclassified fiscal identities are reported separately, outside the cell denominator. Matching cells use stored fiscal columns, not a guessed period inferred from text. Reads exceeding 10,000 rows per table fail rather than silently truncate. A failed SQL query or consumer fault exits nonzero; no credentials, SQL values, or raw evidence are printed. Store the output privately and review source-use rights independently.
+
+Admission calls the actual MCP generic SQL collection serializer and its source allowlist, before sorting and pagination. It does not determine whether a particular limited MCP request selects the row; it is not the MCP latest/snapshot, equity HTTP merged response, or a provider-availability test. It does not establish source provenance, source rights, or deployed image identity. Record the deployed API/frontend identities separately; run the inventory with code matching the serving API artifact. PostgreSQL uses a verified repeatable-read read-only transaction, local timeouts and rollback; SQLite opens an existing file in read-only mode and rolls back. This is distinct from the descriptor heuristic in `verify_database.py` above.
 
 
 ## Regression check

@@ -321,25 +321,38 @@ async def _safe_warmup():
 
 
 def _warmup_vnstock_sync():
-    """
-    Synchronous warmup of vnstock to avoid module lock deadlocks.
-    Imports and initializes vnstock in the main thread during startup.
-    """
+    """Preload SDK facades without issuing provider requests."""
     try:
-        from vnibb.providers.vnstock import get_vnstock
+        from vnibb.providers.vnstock.runtime import import_vnstock_symbol
 
-        logger.info("Pre-initializing vnstock instance...")
-        # This will trigger Vnstock() initialization which is protected by our lock
-        get_vnstock()
-
-        # Pre-import key modules to avoid _ModuleLock deadlocks in threads
-        vnstock_module = sys.modules["vnstock"]
-        for class_name in ("Company", "Finance", "Listing"):
-            getattr(vnstock_module, class_name)
-
+        for name in ("Company", "Finance", "Listing"):
+            import_vnstock_symbol(name)
         logger.info("vnstock modules pre-loaded successfully.")
-    except Exception as e:
-        logger.warning(f"vnstock pre-initialization failed: {e}")
+    except Exception:
+        logger.warning("vnstock pre-initialization failed")
+
+
+async def _register_vnstock_on_startup() -> None:
+    from vnibb.services.vnstock_registration import ensure_vnstock_registration
+
+    try:
+        result = await asyncio.wait_for(
+            ensure_vnstock_registration(),
+            timeout=_env_int("STARTUP_VNSTOCK_REG_TIMEOUT_SECONDS", 10),
+        )
+    except Exception:
+        if settings.vnstock_runtime_tier == "golden":
+            raise RuntimeError("VNStock Golden registration failed") from None
+        logger.warning("VNStock registration failed")
+    else:
+        if not result.registered and settings.vnstock_runtime_tier == "golden":
+            raise RuntimeError("VNStock Golden registration failed")
+        if result.registered:
+            logger.info("VNStock registration succeeded")
+        elif result.retryable:
+            logger.warning("VNStock registration retryable: %s", result.reason)
+        elif result.reason != "no_api_key":
+            logger.warning("VNStock registration skipped: %s", result.reason)
 
 
 @asynccontextmanager
@@ -353,38 +366,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from vnibb.core.database import check_database_connection
     from vnibb.core.scheduler import shutdown_scheduler, start_scheduler
 
-    # Pre-initialize vnstock in main thread to prevent deadlocks
-    # Non-blocking with timeout for robustness
-    if settings.environment != "test":
-        from vnibb.providers.vnstock.runtime import validate_free_runtime
-
-        validate_free_runtime()
-        import os
-        import threading
-
-        skip_warmup_default = "true" if settings.environment == "production" else "false"
-        skip_warmup = os.getenv("SKIP_WARMUP", skip_warmup_default).lower() == "true"
-        if skip_warmup:
-            logger.info("Warmup skipped (SKIP_WARMUP=true)")
-        else:
-
-            def warmup_with_timeout():
-                try:
-                    _warmup_vnstock_sync()
-                except Exception as e:
-                    logger.warning(f"vnstock pre-init failed (non-fatal): {e}")
-
-            # Run in thread with 5s timeout to avoid blocking event loop startup
-            t = threading.Thread(target=warmup_with_timeout)
-            t.daemon = True
-            t.start()
-            t.join(timeout=5.0)
-            if t.is_alive():
-                logger.warning("vnstock pre-init timed out (continuing anyway)")
-
-            # Startup - schedule async warmup but don't wait
-            asyncio.create_task(_safe_warmup())
-            logger.info("Server ready. Warmup scheduled (5s delay).")
 
     # Log startup
     logger.info(
@@ -459,28 +440,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Redis connection failed (non-fatal): {e}")
 
-    # Register VNStock API key once per deployment
-    try:
-        if settings.vnstock_api_key:
-            from vnibb.services.vnstock_registration import ensure_vnstock_registration
+    # Register before any provider warmup; Golden must not run as a guest.
+    await _register_vnstock_on_startup()
 
-            registration_timeout = _env_int("STARTUP_VNSTOCK_REG_TIMEOUT_SECONDS", 10)
-            result = await asyncio.wait_for(
-                ensure_vnstock_registration(),
-                timeout=registration_timeout,
-            )
-            if result.registered:
-                logger.info(
-                    f"VNStock registration status: {result.reason} (source={result.source})"
-                )
-            elif result.reason in {"lock_busy", "no_api_key", "cached_local", "cached_persistent"}:
-                logger.info(f"VNStock registration skipped: {result.reason}")
-            else:
-                logger.warning(f"VNStock registration skipped: {result.reason}")
-    except asyncio.TimeoutError:
-        logger.warning("VNStock registration timed out (non-fatal)")
-    except Exception as e:
-        logger.warning(f"VNStock registration failed (non-fatal): {e}")
+    if settings.environment != "test":
+        from vnibb.providers.vnstock.runtime import validate_runtime
+
+        validate_runtime()
+        import threading
+
+        skip_warmup_default = "true" if settings.environment == "production" else "false"
+        skip_warmup = os.getenv("SKIP_WARMUP", skip_warmup_default).lower() == "true"
+        if skip_warmup:
+            logger.info("Warmup skipped (SKIP_WARMUP=true)")
+        else:
+            thread = threading.Thread(target=_warmup_vnstock_sync, daemon=True)
+            thread.start()
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                logger.warning("vnstock pre-init timed out (continuing anyway)")
+            asyncio.create_task(_safe_warmup())
+            logger.info("Server ready. Warmup scheduled (5s delay).")
 
     # Start scheduler for background data sync jobs
     if not should_start_scheduler():

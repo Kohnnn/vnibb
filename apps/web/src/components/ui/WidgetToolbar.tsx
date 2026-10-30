@@ -75,10 +75,11 @@ export function WidgetToolbar({
 
   useLayoutEffect(() => {
     const header = headerRef.current;
-    if (!header || typeof ResizeObserver === 'undefined') return;
+    const container = header?.parentElement;
+    if (!header || !container || typeof ResizeObserver === 'undefined') return;
 
     const measure = () => {
-      const width = header.getBoundingClientRect().width;
+      const width = container.getBoundingClientRect().width;
       if (!width) return;
       if (!isCompact) {
         requiredWidth.current = Math.ceil((leadingRef.current?.scrollWidth ?? 0) +
@@ -87,7 +88,7 @@ export function WidgetToolbar({
       setIsCompact(width < requiredWidth.current);
     };
     const observer = new ResizeObserver(measure);
-    observer.observe(header);
+    observer.observe(container);
     if (leadingRef.current) observer.observe(leadingRef.current);
     if (trailingRef.current) observer.observe(trailingRef.current);
     measure();

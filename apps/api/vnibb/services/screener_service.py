@@ -9,14 +9,15 @@ from datetime import datetime
 
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.core.price_units import normalize_screener_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
-from vnibb.services.screener_metadata import screener_metadata_updates
+from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
@@ -65,13 +66,14 @@ class ScreenerService:
                         # Use upsert logic
                         # We map all available fields from the fetcher's model to our DB model.
                         # Note: We need to ensure we map fields correctly.
+                        cap = resolve_market_cap(item, source="vnstock:screener_sync")
 
                         values = {
                             "symbol": item.symbol,
                             "snapshot_date": datetime.utcnow().date(),
                             "company_name": getattr(item, "organ_name", None)
                             or getattr(item, "company_name", None),
-                            "market_cap": item.market_cap,
+                            "market_cap": cap["value"],
                             "pe": item.pe,
                             "pb": item.pb,
                             "roe": item.roe,
@@ -104,6 +106,11 @@ class ScreenerService:
                         values["extended_metrics"] = {
                             "ratio_units": getattr(item, "ratio_units", {}),
                         }
+                        if cap["observations"] or cap["status"] == "conflict":
+                            values["extended_metrics"]["market_cap_provenance"] = cap
+                        share_evidence = getattr(item, "shares_outstanding_provenance", None)
+                        if isinstance(share_evidence, dict) and share_evidence.get("observations"):
+                            values["extended_metrics"]["shares_outstanding_provenance"] = share_evidence
                         evidence = getattr(item, "provider_evidence", None)
                         if evidence is not None:
                             values["extended_metrics"]["provider_evidence"] = evidence
@@ -123,7 +130,8 @@ class ScreenerService:
                         # a scheduled sync must not blank a column another writer
                         # already populated, and `source` is insert-only so the
                         # row's provenance survives a second writer.
-                        stmt = pg_insert(ScreenerSnapshot).values(**values)
+                        dialect_insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+                        stmt = dialect_insert(ScreenerSnapshot).values(**values)
                         update_cols = {
                             k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
                             for k in values
@@ -133,10 +141,11 @@ class ScreenerService:
                             stmt, session.bind.dialect.name, stmt.excluded.price.is_(None)
                         ))
                         stmt = stmt.on_conflict_do_update(
-                            constraint="uq_screener_snapshot_symbol_date", set_=update_cols
+                            index_elements=["symbol", "snapshot_date"], set_=update_cols
                         )
 
-                        await session.execute(stmt)
+                        stored = await session.execute(stmt.returning(*ScreenerSnapshot.__table__.c))
+                        await reconcile_snapshot_cap(session, dict(stored.mappings().one()), values)
                         count += 1
 
                     await session.commit()

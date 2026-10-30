@@ -175,9 +175,19 @@ async def test_industry_bubble_retained_points_do_not_wait_for_owned_provider(
             await started.wait()
             timed_out = await pending
             assert timed_out.status_code == 503
+            def certified_cap(value):
+                provenance = market.resolve_market_cap({
+                    "market_cap": value, "market_cap_source": "fixture:cap",
+                    "market_cap_unit": "VND", "market_cap_currency": "VND",
+                    "market_cap_as_of": "2026-10-26", "outstanding_shares": 100,
+                    "shares_unit": "shares", "shares_as_of": "2026-10-26",
+                    "shares_source": "fixture:shares", "share_basis": "outstanding",
+                }, source="fixture:cap")
+                return {"market_cap": provenance["value"], "market_cap_provenance": provenance}
+
             bubble_inputs.extend([
-                {"symbol": "FPT", "industry": "technology", "market_cap": 100.0},
-                {"symbol": "CMG", "industry": "technology", "market_cap": 200.0},
+                {"symbol": "FPT", "industry": "technology", **certified_cap(100.0)},
+                {"symbol": "CMG", "industry": "technology", **certified_cap(200.0)},
             ])
 
             async def ratios(_symbols):
@@ -208,17 +218,32 @@ async def test_industry_bubble_retained_points_do_not_wait_for_owned_provider(
 async def test_industry_bubble_reference_refresh_selects_useful_peer_observation(
     client, monkeypatch, bubble_inputs, retained_cap, provider_cap, expected_date,
 ):
+    retained_provenance = market.resolve_market_cap({
+        "market_cap": retained_cap, "market_cap_source": "fixture:cap",
+        "market_cap_unit": "VND", "market_cap_currency": "VND",
+        "market_cap_as_of": "2026-10-23", "outstanding_shares": 100,
+        "shares_unit": "shares", "shares_as_of": "2026-10-23",
+        "shares_source": "fixture:shares", "share_basis": "outstanding",
+    }, source="fixture:cap") if retained_cap is not None else None
     bubble_inputs.append({
         "symbol": "CMG", "industry": "technology", "market_cap": retained_cap,
-        "snapshot_date": "2026-10-23",
+        "market_cap_provenance": retained_provenance, "snapshot_date": "2026-10-23",
     })
 
+    def provider_cap_row(symbol, cap, as_of):
+        provenance = market.resolve_market_cap({
+            "market_cap": cap, "market_cap_source": "fixture:cap",
+            "market_cap_unit": "VND", "market_cap_currency": "VND",
+            "market_cap_as_of": as_of, "outstanding_shares": 100,
+            "shares_unit": "shares", "shares_as_of": as_of,
+            "shares_source": "fixture:shares", "share_basis": "outstanding",
+        }, source="fixture:cap")
+        return {"symbol": symbol, "industry": "technology", "market_cap": cap,
+                "market_cap_provenance": provenance, "snapshot_date": as_of}
+
     async def provider(_params):
-        return [
-            {"symbol": "FPT", "industry": "technology", "market_cap": 100.0},
-            {"symbol": "CMG", "industry": "technology", "market_cap": provider_cap,
-             "snapshot_date": "2026-10-24"},
-        ]
+        return [provider_cap_row("FPT", 100.0, "2026-10-23"),
+                provider_cap_row("CMG", provider_cap, "2026-10-24")]
 
     async def ratios(_symbols):
         return {"FPT": {"pb_ratio": 2.0, "pe_ratio": 20.0},

@@ -103,11 +103,11 @@ class VnstockOwnershipFetcher:
         try:
 
             def _fetch():
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+                from vnibb.providers.vnstock.runtime import get_company_class, validate_source
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
-                df = stock.company.ownership()
+                source = validate_source(settings.vnstock_source)
+                company = get_company_class()(symbol=symbol.upper(), source=source)
+                df = company.ownership()
                 if df is None or len(df) == 0:
                     return []
                 return df.to_dict(orient="records")
@@ -153,4 +153,4 @@ class VnstockOwnershipFetcher:
 
         except Exception as e:
             logger.error(f"Ownership fetch failed for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch ownership for {symbol}: {e}")
+            raise ProviderError(f"Failed to fetch ownership for {symbol}: {e}", provider="vnstock") from e

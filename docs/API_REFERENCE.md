@@ -66,7 +66,9 @@ Provider deadlines do not stop already-running synchronous VNStock calls. Identi
 Financial statement units and fiscal basis:
 - `/equity/{symbol}/financials` first reads verified IQ records. An empty or unavailable IQ corpus triggers symbol-scoped public IQ acquisition of financial rows and matching descriptors before free VCI supplementation; it does not backfill the market. Verified groups are persisted through the existing structured SQL bridge and remain usable if another dataset fails. Unknown monetary units remain null; descriptor-confirmed VND/share EPS may still be returned. Partial acquisition or persistence is disclosed in `error`, and degraded responses are not cached. Cancellation propagates to the caller; an already-running blocking provider request may finish in its worker thread.
 - IQ income `eps` and `eps_diluted` accept the exact descriptor titles `EPS basic (VND)` and `EPS diluted (VND)` as per-share evidence (`VND/share`). These values, including zero, are not monetary totals and are not multiplied by statement amount scales. Explicit unknown/conflicting units or scales still withhold the affected EPS field; unsupported monetary totals remain null. Scoped descriptors, raw values, fiscal identity and field-level unit evidence survive SQL and MCP serving.
-- Installed free KBS financial parsing already converts its `unit=1000` response into VND. VNIBB does not multiply it again. This contract applies to the actual KBS implementation, not unmarked sponsor/VCI records. Original values, labels, report `Head`, source dates, consolidation and normalization remain in the retained lineage.
+- The legacy `/equity/{symbol}/income-statement` applies final EPS admission after ratio enrichment. Ratio EPS is filled only from decoded source evidence with matching fiscal period and consolidation basis; quarterly data must also match flow basis. Missing or conflicting lineage remains unavailable rather than inheriting another quarter.
+- Profile, screener and comparison market-cap responses expose `market_cap_provenance` with raw observations and admission status. Unverified units, dates or share bases are withheld; incompatible certified observations are conflicts. Consumers must not infer market-cap units from magnitude or reconstruct a value from undated shares.
+- Retained legacy KBS financial rows already convert the provider's `unit=1000` response into VND; VNIBB does not scale them twice. KBS is not an execution source or fallback, so this applies only to already-retained rows, not unmarked sponsor/VCI records. Original values, labels, report `Head`, source dates, consolidation and normalization remain in the retained lineage.
 - Unknown unit or conflicting observations produce null monetary fields and an explicit `unavailable_reason`; missing data is not zero. Persisted canonical values are read from `raw_data._financial_lineage`, not guessed from raw field magnitudes. Legacy annual values retain an unconfirmed-basis disclosure.
 - Accepted wide-row aliases pass through the same unit normalization as mapped metrics, retain selected-field lineage, and follow deterministic field precedence. Unit rejection cannot fall through to a lower-priority alias.
 - TTM balance sheets use the latest confirmed quarterly snapshot, not a sum. Income/cash flows require four consecutive quarters with matching units and consolidation. Explicit cumulative-YTD observations are differenced against the preceding quarter; unsupported EPS/share aggregation is unavailable. Incomplete or ambiguous TTM returns a null-valued row explaining the cause.
@@ -93,13 +95,17 @@ Pre-review integration limitation: source `37745d91f29face8393af0a16ce2d28faf613
 Quote and historical rows expose `price_unit`: `VND`, `index_points`, or
 `unknown`. Confirmed equity OHLC, price, previous/raw/adjusted close and absolute
 change use VND; percentage change, volume and trading value are not rescaled.
-Explicit source unit markers take precedence. Verified free vnstock equity
-history lineage converts thousand-VND once; already-VND values and legitimate
-low-VND prices are preserved. Indices/futures retain points, not currency.
+Explicit source unit markers take precedence. Retained legacy
+`vnstock_history:KBS`, `vnstock_history:VCI` and `vnstock_history:TCBS` equity
+lineage converts thousand-VND once; already-VND values and legitimate low-VND
+prices are preserved. New SDK 5 history uses `vnstock5_history:<source>` and
+has no established implicit price-unit contract: unmarked values stay unchanged
+and `unknown`, including indices, until explicit unit evidence is supplied.
+Explicit `VND`, `THOUSAND_VND` and `index_points` markers remain supported.
 
-Unmarked sponsor/premium records and generic legacy PostgreSQL/Redis values are
-not certified by their numeric magnitude. Canonical history excludes incompatible
-or unconfirmed rows and discloses excluded rows/partial coverage in `meta.warnings`.
+Unmarked SDK 5 and sponsor/premium records and generic legacy PostgreSQL/Redis
+values are not certified by their numeric magnitude. Canonical history excludes
+incompatible or unconfirmed rows and discloses excluded rows/partial coverage in `meta.warnings`.
 `meta.unit_status` describes selected returned rows, not only the Mongo source.
 This can reduce legacy coverage until trusted acquisition fills it; no automatic
 production data rewrite is part of this contract. Endpoint cache namespaces are
@@ -164,6 +170,7 @@ Whole-Universe reads recheck the receipt's expected symbols against the current 
 - `GET /market/research/rss-feed`
 
 Heatmap responses separate `price_updated_at` from `constituents_as_of`, and return `constituents_stale`, `cached` and `partial`; a fresh price does not prove the constituent partition current. A request-limited live provider response is marked partial. Breadth requires a verified screener Universe; without one it returns an error instead of treating a partial day as the whole market.
+Heatmap `market_cap` is a nullable admitted capitalization with its own provenance; `size_value` is the selected sizing metric and `total_size_value` its aggregate. Volume/value sizing does not relabel those metrics as capitalization. `cap_count` counts admitted caps in the returned constituents, not verified whole-Universe coverage.
 
 `GET /market/top-movers` resolves admitted retained last-session SQL rankings before any live-provider acquisition. Rows preserve `source`, `price_source`, `price_unit`, the observation date in `updated_at` / `session_label`, and `is_last_session` / `is_stale`; response-level source/session/staleness describe those selected rows. Retained status does not certify a complete market universe or successful live acquisition. VN30 membership and exchange restrictions apply before ranking and limiting; daily changes use each symbol's prior admitted observation.
 

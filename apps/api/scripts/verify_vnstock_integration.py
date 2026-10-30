@@ -82,23 +82,23 @@ def check_vnstock_library():
         "modules": {},
     }
     
-    # Check installation
+    from vnibb.providers.vnstock.runtime import import_vnstock_symbol
+
+    # Check installation through the runtime policy before importing vnstock.
     try:
-        import vnstock
+        results["version"], _ = import_vnstock_symbol("__version__")
         results["installed"] = True
-        results["version"] = getattr(vnstock, '__version__', 'unknown')
         print(f"✓ vnstock installed (version: {results['version']})")
-    except ImportError as e:
-        print(f"✗ vnstock not installed: {e}")
+    except Exception as e:
+        print(f"✗ vnstock unavailable: {e}")
         return results
     
     # Check available modules
     modules_to_check = [
-        ("Vnstock", "vnstock", "Vnstock"),
         ("Listing", "vnstock", "Listing"),
+        ("Quote", "vnstock", "Quote"),
         ("Company", "vnstock", "Company"),
         ("Finance", "vnstock", "Finance"),
-        ("Screener", "vnstock", "Screener"),
         ("Trading", "vnstock", "Trading"),
         ("Fund", "vnstock", "Fund"),
     ]
@@ -106,11 +106,10 @@ def check_vnstock_library():
     print("\n  Available modules:")
     for name, module_name, class_name in modules_to_check:
         try:
-            module = __import__(module_name, fromlist=[class_name])
-            cls = getattr(module, class_name)
+            import_vnstock_symbol(class_name)
             results["modules"][name] = True
             print(f"    ✓ {name}")
-        except (ImportError, AttributeError) as e:
+        except Exception as e:
             results["modules"][name] = False
             print(f"    ✗ {name}: {e}")
     
@@ -121,9 +120,7 @@ def test_vnstock_apis():
     """Test basic vnstock API calls."""
     print_section("3. VNSTOCK API TESTS")
     
-    from vnibb.core.config import settings
-    from vnibb.providers.vnstock.runtime import validate_source
-    default_source = validate_source(getattr(settings, 'vnstock_source', 'VCI'))
+    default_source = "VCI"
     print(f"  Using data source: {default_source}\n")
     
     results = {}
@@ -131,8 +128,8 @@ def test_vnstock_apis():
     # Test 1: Listing.all_symbols()
     print("  Testing Listing API...")
     try:
-        from vnstock import Listing
-        listing = Listing(source=default_source)
+        from vnibb.providers.vnstock.runtime import get_listing_class
+        listing = get_listing_class()(source=default_source)
         df = listing.all_symbols()
         results["listing_all_symbols"] = len(df) if df is not None else 0
         print(f"    ✓ all_symbols(): {len(df)} stocks")
@@ -143,9 +140,9 @@ def test_vnstock_apis():
     # Test 2: Stock quote for a sample symbol
     print("\n  Testing Quote API (VCB)...")
     try:
-        from vnstock import Vnstock
-        stock = Vnstock().stock(symbol='VCB', source=default_source)
-        df = stock.quote.history(start='2024-01-01', end='2024-01-31')
+        from vnibb.providers.vnstock.runtime import get_quote_class
+        quote = get_quote_class()(symbol='VCB', source=default_source)
+        df = quote.history(start='2024-01-01', end='2024-01-31')
         results["quote_history"] = len(df) if df is not None else 0
         print(f"    ✓ quote.history(): {len(df)} price records")
     except Exception as e:
@@ -155,7 +152,8 @@ def test_vnstock_apis():
     # Test 3: Company overview
     print("\n  Testing Company API (VCB)...")
     try:
-        company = stock.company
+        from vnibb.providers.vnstock.runtime import get_company_class
+        company = get_company_class()(symbol='VCB', source=default_source)
         overview = company.overview()
         has_data = overview is not None and (not hasattr(overview, 'empty') or not overview.empty)
         results["company_overview"] = 1 if has_data else 0
@@ -167,7 +165,8 @@ def test_vnstock_apis():
     # Test 4: Financial statements
     print("\n  Testing Finance API (VCB)...")
     try:
-        finance = stock.finance
+        from vnibb.providers.vnstock.runtime import get_finance_class
+        finance = get_finance_class()(symbol='VCB', source=default_source)
         bs = finance.balance_sheet(period='year', lang='en')
         has_data = bs is not None and (not hasattr(bs, 'empty') or not bs.empty)
         results["finance_balance_sheet"] = 1 if has_data else 0
@@ -176,17 +175,6 @@ def test_vnstock_apis():
         results["finance_balance_sheet"] = 0
         print(f"    ✗ finance.balance_sheet() failed: {e}")
     
-    # Test 5: Screener (most efficient API)
-    print("\n  Testing Screener API...")
-    try:
-        from vnstock import Screener
-        screener = Screener(source=default_source)
-        df = screener.stock(params={"exchangeName": "HOSE"}, limit=100)
-        results["screener_stock"] = len(df) if df is not None else 0
-        print(f"    ✓ screener.stock(): {len(df)} stocks with 84 metrics")
-    except Exception as e:
-        results["screener_stock"] = 0
-        print(f"    ✗ screener.stock() failed: {e}")
     
     return results
 
@@ -228,29 +216,14 @@ def compare_vnstock_vs_database():
             "all_symbols", "symbols_by_exchange", "symbols_by_industries",
             "symbols_by_group", "industries_icb", "all_indices", "indices_by_group"
         ],
-        "Quote": [
-            "history", "intraday", "price_depth", "price_board"
-        ],
+        "Quote": ["history", "intraday", "price_depth"],
         "Company": [
             "overview", "profile", "shareholders", "subsidiaries", "officers",
-            "news", "events", "dividends", "insider_deals", "insider_trading",
-            "trading_stats", "ratio_summary"
+            "events", "insider_trading", "trading_stats"
         ],
-        "Finance": [
-            "balance_sheet", "income_statement", "cash_flow", "ratio"
-        ],
-        "Trading": [
-            "price_board"
-        ],
-        "Screener": [
-            "stock"
-        ],
-        "Fund": [
-            "listing", "filter", "details.top_holding", "details.nav_report"
-        ],
-        "Misc": [
-            "vcb_exchange_rate", "sjc_gold_price", "btmc_goldprice"
-        ]
+        "Finance": ["balance_sheet", "income_statement", "cash_flow", "ratio"],
+        "Trading": ["price_board", "foreign_trade", "insider_deal"],
+        "Fund": ["listing", "filter", "top_holding", "nav_report"],
     }
     
     # Database tables mapped to vnstock APIs
@@ -264,26 +237,25 @@ def compare_vnstock_vs_database():
         "shareholders": ["Company.shareholders"],
         "officers": ["Company.officers"],
         "subsidiaries": ["Company.subsidiaries"],
-        "company_news": ["Company.news"],
+        "company_news": ["vnstock_news (separate package)"],
         "company_events": ["Company.events"],
-        "dividends": ["Company.dividends"],
-        "insider_deals": ["Company.insider_deals", "Company.insider_trading"],
+        "dividends": ["Company.events"],
+        "insider_deals": ["Company.insider_trading"],
         "income_statements": ["Finance.income_statement"],
         "balance_sheets": ["Finance.balance_sheet"],
         "cash_flows": ["Finance.cash_flow"],
-        "financial_ratios": ["Finance.ratio", "Company.ratio_summary"],
-        "screener_snapshots": ["Screener.stock"],
-        "foreign_trading": ["Screener.stock (foreign_vol_pct columns)"],
+        "financial_ratios": ["Finance.ratio"],
+        "screener_snapshots": ["application screener aggregation"],
+        "foreign_trading": ["Trading.foreign_trade"],
         "market_sectors": ["Listing.industries_icb", "Listing.symbols_by_industries"],
-        "sector_performance": ["derived from Screener.stock"],
+        "sector_performance": ["application screener aggregation"],
         "technical_indicators": ["derived from Quote.history + calculation"],
-        "market_news": ["Company.news (aggregated)"],
+        "market_news": ["vnstock_news (separate package)"],
     }
     
     # APIs NOT implemented in database
     missing_tables = {
-        "Fund": ["No fund-related tables - Fund.listing, Fund.filter, Fund.details.*"],
-        "Misc": ["No FX rate or gold price tables"],
+        "Fund": ["No fund-related tables - Fund.listing, Fund.filter, Fund.top_holding, Fund.nav_report"],
     }
     
     print("  Database Tables → Vnstock APIs:")
@@ -347,7 +319,7 @@ def main():
     print(f"  Modules: {sum(lib_results.get('modules', {}).values())}/{len(lib_results.get('modules', {}))}")
     
     if run_api_tests:
-        print(f"  API Tests: {sum(1 for v in api_results.values() if v > 0)}/5 passed")
+        print(f"  API Tests: {sum(1 for v in api_results.values() if v > 0)}/{len(api_results)} passed")
     
     print("\n  Run with flags:")
     print("    --api       Run vnstock API tests")

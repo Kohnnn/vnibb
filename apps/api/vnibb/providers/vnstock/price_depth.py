@@ -2,7 +2,7 @@
 Price Depth Provider - Order Book / Bid-Ask Depth
 
 Provides real-time order book data showing bid and ask levels.
-Uses vnstock Quote.price_depth() method.
+Uses vnstock Market.equity().order_book() method.
 """
 
 import asyncio
@@ -76,7 +76,7 @@ class VnstockPriceDepthFetcher:
     """
     Fetcher for order book / price depth data.
 
-    Wraps vnstock Quote.price_depth() for real-time
+    Wraps vnstock Market.equity().order_book() for real-time
     bid/ask order levels.
     """
 
@@ -95,15 +95,15 @@ class VnstockPriceDepthFetcher:
         Returns:
             PriceDepthData with bid/ask levels
         """
-        from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+        from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
         source = validate_source(source)
         try:
             def _fetch():
-                quote = get_quote_class()(symbol=symbol.upper(), source=source)
-                if not hasattr(quote, "price_depth"):
-                    raise AttributeError("Price depth is unavailable in free VCI")
-                df = quote.price_depth()
+                market = import_vnstock_symbol("Market")[0]()
+                df = market.equity(symbol.upper()).order_book(source=source)
+                if df is not None and len(df) > 0 and str(df.attrs.get("price_unit", "")).upper() != "VND":
+                    raise ValueError("VCI order book price unit is unavailable")
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
             loop = asyncio.get_event_loop()
@@ -140,29 +140,34 @@ class VnstockPriceDepthFetcher:
             # If no side info, try to parse from column-based format
             if not bids and not asks and records:
                 r = records[0]
-                if "buyVol" in r or "sellVol" in r:
-                    total_bid_volume = sum((row.get("buyVol") or 0) for row in records)
-                    total_ask_volume = sum((row.get("sellVol") or 0) for row in records)
-                    return PriceDepthData(
-                        symbol=symbol.upper(),
-                        total_bid_volume=total_bid_volume,
-                        total_ask_volume=total_ask_volume,
-                        raw_levels=records,
-                    )
                 for i in range(1, 4):
-                    bid_price = r.get(f"bidPrice{i}") or r.get(f"bid{i}")
-                    bid_vol = r.get(f"bidVol{i}") or r.get(f"bidVolume{i}")
+                    # vnstock 5.x native order_book emits canonical
+                    # bid_price_1..3/bid_vol_1..3/ask_price_1..3/ask_vol_1..3.
+                    bid_price = r.get(f"bidPrice{i}") or r.get(f"bid{i}") or r.get(f"bid_price_{i}")
+                    bid_vol = (
+                        r.get(f"bidVol{i}") or r.get(f"bidVolume{i}")
+                        or r.get(f"bid_vol_{i}")
+                    )
                     if bid_price:
                         bids.append(
                             OrderLevel(price=float(bid_price), volume=int(bid_vol or 0))
                         )
 
-                    ask_price = r.get(f"offerPrice{i}") or r.get(f"askPrice{i}") or r.get(f"ask{i}")
-                    ask_vol = r.get(f"offerVol{i}") or r.get(f"askVolume{i}") or r.get(f"askVol{i}")
+                    ask_price = (
+                        r.get(f"offerPrice{i}") or r.get(f"askPrice{i}")
+                        or r.get(f"ask{i}") or r.get(f"ask_price_{i}")
+                    )
+                    ask_vol = (
+                        r.get(f"offerVol{i}") or r.get(f"askVolume{i}")
+                        or r.get(f"askVol{i}") or r.get(f"ask_vol_{i}")
+                    )
                     if ask_price:
                         asks.append(
                             OrderLevel(price=float(ask_price), volume=int(ask_vol or 0))
                         )
+            if not bids and not asks:
+                raise ValueError("Unrecognized VCI order book response")
+
 
             return PriceDepthData(
                 symbol=symbol.upper(),

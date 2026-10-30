@@ -1,4 +1,5 @@
 // TypeScript types for equity/stock data from backend API
+import type { MarketCapProvenance } from '@/lib/marketCap';
 
 export interface EquityHistoricalData {
   symbol: string;
@@ -62,7 +63,12 @@ export interface EquityProfileData {
   employee_count?: number;
   number_of_employees?: number;
   outstanding_shares?: number;
-  market_cap?: number;
+  shares_unit?: string | null;
+  shares_as_of?: string | null;
+  shares_source?: string | null;
+  share_basis?: string | null;
+  market_cap?: number | null;
+  market_cap_provenance?: MarketCapProvenance | null;
   listed_date?: string;
   description?: string | null;
 }

@@ -108,7 +108,7 @@ async def test_heatmap_cached_sparse_retries_fresh_and_returns_cached_false(
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
 
     # ---- act ----
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -178,7 +178,7 @@ async def test_heatmap_group_by_industry_groups_by_industry(client, monkeypatch)
 
     # ---- act ----
     response = await client.get(
-        "/api/v1/market/heatmap?group_by=industry&limit=10&exchange=ALL&use_cache=false"
+        "/api/v1/market/heatmap?group_by=industry&limit=10&exchange=ALL&use_cache=false&size_metric=volume"
     )
     assert response.status_code == 200
 
@@ -274,7 +274,7 @@ async def test_heatmap_cached_snapshot_preserves_price_change_1d_pct_alias(clien
     monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -323,7 +323,7 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(None))
 
     # ---- act ----
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false&size_metric=volume")
     assert response.status_code == 200
 
     payload = response.json()
@@ -340,7 +340,7 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     assert payload["count"] == 1
     assert payload["group_by"] == "sector"  # default
     assert payload["color_metric"] == "change_pct"  # default
-    assert payload["size_metric"] == "market_cap"  # default
+    assert payload["size_metric"] == "volume"
     assert payload["cached"] is False
     assert payload["partial"] is True
     assert payload["constituents_as_of"] is None
@@ -357,7 +357,9 @@ async def test_heatmap_smoke_shape(client, monkeypatch):
     assert "stock_count" in sector
 
     assert sector["stock_count"] == 1
-    assert sector["total_market_cap"] > 0
+    assert sector["total_market_cap"] is None
+    assert sector["total_size_value"] == 300_000
+    assert sector["cap_count"] == 0
 
     stock = sector["stocks"][0]
 
@@ -410,7 +412,7 @@ async def test_heatmap_reports_oldest_included_constituent_separately_from_price
         lambda _syms: _async(recent_day.isoformat()),
     )
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 2
@@ -443,7 +445,7 @@ async def test_heatmap_db_rows_do_not_call_old_trades_current(client, monkeypatc
     monkeypatch.setattr("vnibb.api.v1.market._load_change_pct_map", lambda _syms: _async({}))
     monkeypatch.setattr("vnibb.api.v1.market._load_latest_price_time", lambda _syms: _async(today.isoformat()))
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&size_metric=volume")
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 1
@@ -477,7 +479,7 @@ async def test_heatmap_current_provider_rows_keep_current_dates_without_cache(cl
         lambda _syms: _async(today.isoformat()),
     )
 
-    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false")
+    response = await client.get("/api/v1/market/heatmap?limit=10&exchange=ALL&use_cache=false&size_metric=volume")
     assert response.status_code == 200
     payload = response.json()
     assert payload["count"] == 1
@@ -654,7 +656,6 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
 
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
     monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace())
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: object)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
@@ -749,9 +750,6 @@ async def test_heatmap_distinct_batches_progress_at_child_worker_capacity(client
                     active -= 1
 
     monkeypatch.setattr(equity_screener, "_executor", pool)
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=Quote(**kwargs)),
-    ))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 6)
@@ -881,9 +879,6 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
 
     calls = {"broad_stock": 0, "listing": 0, "quotes": []}
 
-    def broad_stock_is_forbidden():
-        calls["broad_stock"] += 1
-        raise AssertionError("Quote-only acquisition must not construct Finance")
 
     class Listing:
         def __init__(self, *, source):
@@ -907,10 +902,11 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
 
         def history(self, *, start, end):
             return pd.DataFrame([{
-                "time": date.today().isoformat(), "close": 100.0, "volume": 1_000_000,
+                "time": date.today().isoformat(), "close": 100_000.0, "volume": 1_000_000,
+                "price_unit": "VND",
             }])
 
-    monkeypatch.setattr(equity_screener, "get_vnstock", broad_stock_is_forbidden)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda *_args: (_ for _ in ()).throw(AssertionError("Quote-only acquisition must not construct Fundamental")))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
@@ -928,7 +924,8 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
     assert payload["count"] == 1
     stock = _find_stock(payload, "VNM")
     assert stock["price"] == 100_000.0
-    assert stock["market_cap"] == 1_000_000
+    assert stock["market_cap"] is None
+    assert stock["size_value"] == 1_000_000
 
 
 @pytest.fixture
@@ -955,7 +952,10 @@ def screener_supplier(monkeypatch):
 
     def ratios(**kwargs):
         calls["ratios"] += 1
-        return pd.DataFrame([{"pe": 12.0, "pb": 2.0}])
+        return pd.DataFrame([
+            {"period": "2025", "id": "RT_VALUE_PE", "name": "P/E", "unit": "lần", "value": 12.0},
+            {"period": "2025", "id": "RT_VALUE_PB", "name": "P/B", "unit": "lần", "value": 2.0},
+        ])
 
     def history(**kwargs):
         calls["quotes"] += 1
@@ -976,12 +976,18 @@ def screener_supplier(monkeypatch):
             return history(**kwargs)
 
 
-    supplier = SimpleNamespace(
-        finance=SimpleNamespace(ratio=ratios), quote=SimpleNamespace(history=history),
-    )
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(stock=lambda **_kw: supplier))
+    class Fundamental:
+        def equity(self, symbol):
+            return SimpleNamespace(ratio=ratios)
+
+    def import_symbol(name):
+        if name != "Fundamental":
+            raise AssertionError(name)
+        return Fundamental, "vnstock"
+
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", import_symbol)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
     monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
     monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({"VNM": 3.2}))
@@ -1010,7 +1016,8 @@ async def test_heatmap_acquires_quotes_without_financial_ratios(client, screener
     assert payload["cached"] is False
     stock = _find_stock(payload, "VNM")
     assert stock["price"] == 100_000.0
-    assert stock["market_cap"] == 1_000_000
+    assert stock["market_cap"] is None
+    assert stock["size_value"] == 1_000_000
     assert stock["change_pct"] == 3.2
 
 

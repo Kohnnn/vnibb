@@ -6,7 +6,7 @@ jest.mock('@/lib/queries', () => ({
   useFinancialRatios: jest.fn(), useProfile: jest.fn(), useScreenerData: jest.fn(), useStockQuote: jest.fn(),
 }));
 jest.mock('@/components/ui/WidgetContainer', () => ({
-  WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  WidgetContainer: ({ children, exportData }: { children: React.ReactNode; exportData?: unknown }) => <div>{children}<output data-testid="share-export">{JSON.stringify(exportData)}</output></div>,
 }));
 jest.mock('@/components/ui/widget-skeleton', () => ({ WidgetSkeleton: () => <div /> }));
 jest.mock('@/components/ui/widget-states', () => ({
@@ -14,6 +14,7 @@ jest.mock('@/components/ui/widget-states', () => ({
   WidgetError: ({ error }: { error: Error }) => <div>{error.message}</div>,
 }));
 jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }));
+jest.mock('@/lib/widgetRuntime', () => ({ buildWidgetRuntime: (payload: Record<string, unknown>) => payload }));
 
 const mockStockQuote = useStockQuote as jest.Mock;
 const mockProfile = useProfile as jest.Mock;
@@ -75,25 +76,60 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
         isLoading: false, isFetching: false, error: null, refetch: jest.fn(),
       });
       render(<ShareStatisticsWidget id="share-1" symbol="FPT" />);
-      expect(within(screen.getByText('Market Cap').parentElement!).getByText('-')).toBeInTheDocument();
+      expect(within(screen.getByText('Market Cap').parentElement!).getByText('Unavailable')).toBeInTheDocument();
       expect(screen.queryByText('MCap derived')).not.toBeInTheDocument();
     },
   );
 
-  test('derives market cap from an explicitly low VND price without rescaling', () => {
-    mockStockQuote.mockReturnValue({
-      data: { symbol: 'FPT', price: 57.3, price_unit: 'VND' },
-      isLoading: false, isFetching: false, error: null, refetch: jest.fn(),
-    });
-    render(<ShareStatisticsWidget id="share-1" symbol="FPT" />);
-    expect(within(screen.getByText('Market Cap').parentElement!).getByText('VND57.3mn')).toBeInTheDocument();
-    expect(within(screen.getByText('Market Cap').parentElement!).getByText('Profile+Quote')).toBeInTheDocument();
-    expect(screen.getByText('MCap derived')).toBeInTheDocument();
+  test('does not derive market cap from VND price and undated unknown-unit profile shares', () => {
+    const onDataChange = jest.fn();
+    mockProfile.mockReturnValue({ data: { data: { outstanding_shares: 850.1 } }, isLoading: false, refetch: jest.fn() });
+    render(<ShareStatisticsWidget id="share-1" symbol="FPT" onDataChange={onDataChange} />);
+    expect(within(screen.getByText('Market Cap').parentElement!).getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/lacks certified VND unit/)).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ extra: expect.objectContaining({
+      profile: expect.objectContaining({ outstanding_shares: 850.1 }),
+      quote: expect.objectContaining({ price: 57.3 }),
+      marketCap: expect.objectContaining({ status: 'unavailable', value: null }),
+    }) }));
   });
 
-  test('retains the reported screener market cap even when the quote unit is unknown', () => {
+  test.each([
+    ['unknown unit', { outstanding_shares: 850.1 }, 'Unavailable', null],
+    ['missing source', { outstanding_shares: 100, shares_unit: 'shares', share_basis: 'outstanding' }, 'Unavailable', null],
+    ['wrong basis', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'listed' }, 'Unavailable', null],
+    ['missing date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding' }, 'Unavailable', null],
+    ['malformed date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: 'not-a-date' }, 'Unavailable', null],
+    ['impossible date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-02-30' }, 'Unavailable', null],
+    ['future date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-10-28' }, 'Unavailable', null],
+    ['future source timestamp date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-10-28T00:00:00+07:00' }, 'Unavailable', null],
+    ['source date retained across timezone', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-10-27T18:00:00Z' }, '100.00', 100],
+    ['current Vietnam date', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-10-27' }, '100.00', 100],
+    ['current Vietnam timestamp', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2026-10-26T18:00:00Z' }, '100.00', 100],
+    ['certified small count', { outstanding_shares: 100, shares_unit: 'shares', shares_source: 'issuer', share_basis: 'outstanding', shares_as_of: '2025-12-31' }, '100.00', 100],
+  ])('renders profile shares only with evidence: %s', (_name, profileData, expected, exported) => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-26T17:30:00Z'));
+    mockProfile.mockReturnValue({ data: { data: profileData }, isLoading: false, refetch: jest.fn() });
+    render(<ShareStatisticsWidget id="share-1" symbol="FPT" />);
+    expect(within(screen.getByText('Shares Outstanding').parentElement!).getByText(expected)).toBeInTheDocument();
+    expect(JSON.parse(screen.getByTestId('share-export').textContent!).outstandingShares).toBe(exported);
+    expect(screen.queryByText('850.10')).not.toBeInTheDocument();
+    jest.useRealTimers();
+  });
+
+  test('withholds captured VCI uncertified cap values', () => {
+    mockProfile.mockReturnValue({ data: { data: { outstanding_shares: 1152231925, market_cap: 22065241363750 } }, isLoading: false, refetch: jest.fn() });
+    mockScreener.mockReturnValue({ data: { data: [{ ticker: 'VCI', pe: 12.3, market_cap: 22410910941.25 }] }, isLoading: false, refetch: jest.fn() });
+    render(<ShareStatisticsWidget id="share-1" symbol="VCI" />);
+    expect(within(screen.getByText('Market Cap').parentElement!).getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/22065241363750/)).toBeInTheDocument();
+    expect(screen.getByText(/22410910941.25/)).toBeInTheDocument();
+  });
+
+  test('retains a certified screener market cap even when the quote unit is unknown', () => {
+    const provenance = { status: 'available', value: 60_000_000_000, source: 'certified screener', unit: 'VND', currency: 'VND', as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 60_000_000_000, source: 'certified screener' }] };
     mockScreener.mockReturnValue({
-      data: { data: [{ ticker: 'FPT', pe: 12.3, market_cap: 60_000_000_000 }] },
+      data: { data: [{ ticker: 'FPT', pe: 12.3, market_cap: provenance.value, market_cap_provenance: provenance }] },
       isLoading: false, isFetching: false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
     });
     mockStockQuote.mockReturnValue({
@@ -102,8 +138,17 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
     });
     render(<ShareStatisticsWidget id="share-1" symbol="FPT" />);
     expect(within(screen.getByText('Market Cap').parentElement!).getByText('VND60.0bn')).toBeInTheDocument();
-    expect(within(screen.getByText('Market Cap').parentElement!).getByText('Screener')).toBeInTheDocument();
+    expect(within(screen.getByText('Market Cap').parentElement!).getByText('certified screener')).toBeInTheDocument();
     expect(screen.queryByText('MCap derived')).not.toBeInTheDocument();
+  });
+
+  test('shows certified conflicting caps with their provenance', () => {
+    const provenance = { status: 'available', value: 100, source: 'profile source', unit: 'VND', currency: 'VND', as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 100, source: 'profile source' }] };
+    mockProfile.mockReturnValue({ data: { data: { market_cap: 100, market_cap_provenance: provenance } }, isLoading: false, refetch: jest.fn() });
+    mockScreener.mockReturnValue({ data: { data: [{ ticker: 'FPT', pe: 12.3, market_cap: 200, market_cap_provenance: { ...provenance, value: 200, source: 'screener source' } }] }, isLoading: false, refetch: jest.fn() });
+    render(<ShareStatisticsWidget id="share-1" symbol="FPT" />);
+    expect(within(screen.getByText('Market Cap').parentElement!).getByText('Conflict')).toBeInTheDocument();
+    expect(screen.getByText(/Certified market-cap values, dates, or share bases disagree/)).toBeInTheDocument();
   });
 
   test.each([

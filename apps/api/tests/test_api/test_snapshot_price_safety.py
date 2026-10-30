@@ -65,6 +65,35 @@ def test_configured_closures_are_not_missing_observations(monkeypatch):
     assert window["expected_observations"] == 6 and window["observed_observations"] == 6
 
 
+@pytest.mark.parametrize("end,configured,verified", [
+    (date(2026, 4, 28), [], True),
+    (date(2026, 4, 29), ["2026-04-28"], True),
+    (date(2026, 1, 5), [], False),
+    (date(2027, 1, 4), ["2027-01-01"], False),
+])
+def test_official_closures_preserve_price_windows_without_certifying_unverified_years(
+    monkeypatch, end, configured, verified
+):
+    monkeypatch.setattr(settings, "market_holiday_dates", configured)
+    days = sessions(21, end=end, holidays=["2026-01-01", "2026-01-02", "2026-04-27", *configured])
+    rows = [{"time": day.isoformat(), "close": 100 + index, "volume": 100,
+             "source": "vnstock_vnd:VCI"} for index, day in enumerate(days)]
+
+    context = _build_price_context(rows)
+
+    assert context["summary"]["change_20d_pct"] == 20.0
+    assert context["summary"]["change_5d_pct"] == 4.35
+    assert context["summary"]["average_volume_20d"] == 100
+    assert context["summary"]["return_windows"]["20d"]["expected_dates"] == [row["time"] for row in rows]
+    assert context["summary"]["range_window_20d"]["status"] == "available"
+    assert context["calendar"]["exchange_calendar_verified"] is verified
+    assert "HOSE/HNX 2026" in context["calendar"]["holiday_source"]
+
+    context = _build_price_context(rows[:10] + rows[11:])
+    assert context["summary"]["change_20d_pct"] is None
+    assert context["summary"]["return_windows"]["20d"]["reason"] == "missing_exchange_sessions"
+
+
 def test_unknown_and_conflicting_observations_are_unavailable_without_move_clamping():
     rows = prices(6)
     rows[-1]["close"] = 100000

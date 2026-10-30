@@ -333,6 +333,46 @@ async def test_ratio_history_reads_certified_fiscal_quarters(client, test_db, mo
     provider.assert_not_awaited()
 
 
+
+@pytest.mark.asyncio
+async def test_ratio_history_admits_fraction_metrics_from_stored_mongo_rows(client, monkeypatch):
+    """History publishes stored rows directly, so it must admit units itself.
+
+    A declared fraction is scaled once; an undeclared provider value is withheld
+    rather than published as a raw magnitude.
+    """
+    from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
+
+    stored = [
+        FinancialRatioData(
+            symbol="VNM", period="2024", ocf_sales=0.175, fcf_yield=0.052,
+            ratio_units={"ocf_sales": "fraction", "fcf_yield": "fraction"},
+        ),
+        FinancialRatioData(symbol="VNM", period="2023", ocf_sales=0.175, fcf_yield=0.052),
+        FinancialRatioData(
+            symbol="VNM", period="2022", ocf_sales=17.5, fcf_yield=5.2,
+            ratio_units={"ocf_sales": "percent", "fcf_yield": "percent"},
+        ),
+    ]
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=stored))
+    monkeypatch.setattr(
+        equity.VnstockFinancialRatiosFetcher, "fetch",
+        AsyncMock(side_effect=AssertionError("stored history must bypass provider")),
+    )
+
+    response = await client.get(
+        "/api/v1/equity/VNM/ratios/history?period=year&ratios=ocf_sales,fcf_yield"
+    )
+
+    assert response.status_code == 200
+    rows = {row["period"]: row for row in response.json()["data"]}
+    assert rows["2024"]["ocf_sales"] == pytest.approx(17.5)
+    assert rows["2024"]["fcf_yield"] == pytest.approx(5.2)
+    assert rows["2023"]["ocf_sales"] is None
+    assert rows["2023"]["fcf_yield"] is None
+    assert rows["2022"]["ocf_sales"] == pytest.approx(17.5)
+    assert rows["2022"]["fcf_yield"] == pytest.approx(5.2)
+
 @pytest.mark.asyncio
 async def test_ratio_history_deadline_is_unavailable_not_empty_success(test_db, monkeypatch):
     async def stalled_provider(*args, **kwargs):
@@ -386,12 +426,13 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
 ):
     from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
     from vnibb.providers.vnstock import runtime
+    from types import SimpleNamespace
 
     class QuotaFinance:
         def ratio(self, **kwargs):
             raise SystemExit("API usage quota exceeded")
 
-    monkeypatch.setattr(runtime, "create_finance", lambda *args: QuotaFinance())
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (lambda: SimpleNamespace(equity=lambda symbol: QuotaFinance()), "vnstock"))
 
     if retained:
         test_db.add(FinancialRatio(

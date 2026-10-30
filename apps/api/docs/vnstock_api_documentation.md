@@ -4,618 +4,182 @@
 > **Official version history**: [vnstocks.com/docs/tai-lieu/lich-su-phien-ban](https://vnstocks.com/docs/tai-lieu/lich-su-phien-ban)
 > **Upstream repo**: [github.com/thinh-vu/vnstock](https://github.com/thinh-vu/vnstock)
 > **MCP/CLI companion**: [github.com/mrgoonie/vnstock-agent](https://github.com/mrgoonie/vnstock-agent)
-> **VNIBB runtime target**: `vnstock>=4.0.4,<4.1` in `apps/api/pyproject.toml`; community VCI only
+> **VNIBB runtime target**: `vnstock` 5.2.1; explicitly sourced VCI for supported Vietnamese equity routes
 
 This document is a VNIBB-facing reference, not the canonical upstream manual. It is audited against the public docs site, the official version history, the upstream GitHub README/CHANGELOG, and the `vnstock-agent` README.
 
-When those sources disagree, use this order of precedence:
-- `vnstocks.com/docs` and the official version-history page for stable public behavior
-- GitHub `main` for newer runtime changes that may not be mirrored on the docs site yet
-- VNIBB config and `pyproject.toml` for local integration assumptions
+The [official distribution index](https://vnstocks.com/api/packages/vnstock/) establishes published versions. VNIBB configuration and its dependency constraints define the runtime deployed here; upstream route availability does not itself establish VNIBB support or data admission.
 
 Context7 is still useful for deeper API lookup, but it should be treated as a supporting source rather than the primary source of truth.
 
-VNIBB uses Vietcap IQ as its primary Vietnamese ingestion source. Only free
-`vnstock` with `source="VCI"` may fill supported gaps. Sponsor packages are never
-imported by provider routing, even when installed. Other source examples below
-describe upstream interfaces, not enabled VNIBB runtime alternatives. Unsupported
-VCI datasets remain unavailable; existing historical source lineage stays readable.
-The image and API startup reject discoverable sponsor modules, including `vnii`,
-before VNStock import because VNAI can otherwise authenticate an installed `vnii`
-package during tier discovery. Use a clean community environment; old stored
-lineage is readable and is not subject to package-availability checks.
+VNIBB uses Vietcap IQ as its primary Vietnamese ingestion source and explicit
+`source="VCI"` for supported supplementary routes. Free runtime rejects separate
+sponsor packages; Golden permits but does not use them. Other VNStock sources
+are not execution fallbacks. Generation 5 combines the core into `vnstock` and
+exposes `Fundamental`, `Market` and `Reference`; `Vnstock().stock()` is removed.
+See the [official 4.x migration guide](https://vnstocks.com/docs/vnstock/chuyen-doi/tu-vnstock-4x).
+
+## Generation-5 VCI financial interoperability (#183)
+
+On 30 October 2026 an isolated SDK 5.2.1 review resolved income, balance,
+cash-flow, OHLCV and reference-list routes to `vci` without source queries. This
+route inspection is not evidence of live coverage or authorization.
+
+The existing `VnstockFinancialsFetcher.transform_data` now accepts documented VCI
+VAS `long` rows: `period`, `id`, `name`, `order`, `level`, `unit`, `value`, plus
+`off_balance` for balance sheets. It groups complete periods before applying the
+requested period limit, maps supported documented IDs for all three statement
+families and retains original rows, attributes and taxonomy version. Per-item
+`VNĐ` values are already VND, not billions. Unknown IDs stay raw and unserved;
+unknown units, off-balance metrics, conflicting identity or duplicate values and
+unverified reporting basis cannot become admitted numbers. Consolidation scope
+and annual/quarterly flow basis are not inferred from a period or subscription.
+The existing `admit_statement_rows` gate remains authoritative. Schema and taxonomy references:
+[Fundamental](https://vnstocks.com/docs/vnstock/co-ban-fundamental),
+[VAS analysis](https://vnstocks.com/blog/phan-tich-bao-cao-tai-chinh-tu-cau-truc-du-lieu-vnstock).
+
+The 5.x statement adapter explicitly requests VCI `long` income, balance and
+cash-flow frames via `Fundamental().equity(symbol)`. Registration was previously
+exercised offline with synthetic authentication, not supplier credentials.
+Cancellation does not block the startup deadline while an in-flight registration
+worker completes.
+
+Provider-free verification on 30 October 2026 used a disposable PostgreSQL 17
+instance and synthetic VAS frames. Real extraction, `DataPipeline.sync_financials`,
+SQL read-back and the HTTP reader preserved three finite values and returned
+nine non-finite values as null with `missing_value`, across all three statements.
+All 12 HTTP responses succeeded; the strict JSON serializer rejected direct NaN
+and infinity inputs. No supplier or production database was contacted.
+
+Golden includes Pipeline; Quant is available from Bronze. Neither is needed for
+this reader, and no second scheduler, storage path or ratio engine is installed.
+Software entitlement does not establish source-owner permission to acquire,
+persist or publicly redistribute data. The published policy pages are marked
+effective 30 November 2026, so retain the account's actually accepted terms rather
+than assuming those future terms apply. #168 still requires source-owner/license
+permission and an explicit coverage/finality contract. Acquisition, production
+writes, scheduler enablement and redeployment remain gated. See
+[entitlements](https://vnstocks.com/docs/goi-quyen-su-dung/gioi-thieu) and
+[licence](https://vnstocks.com/policies/license).
+
+### Agent Skills Hub
+
+The isolated generation-5 environment includes the official skills loader; the
+hub skills are fetched on demand and cached in process memory, not installed as
+separate packages or copied into the repository. On 30 October 2026, all 16
+skills available through Golden loaded successfully; `risk-manager` requires
+Diamond. Load the catalog and a task-specific skill with the review environment's
+Python interpreter:
+
+```python
+from vnstock.utils.agents import load_skill, load_skill_catalog
+
+catalog = load_skill_catalog()
+guidance = load_skill("pipeline-cli")
+```
+
+The loader uses the account already configured on the machine. The isolated
+review interpreter is separate from the application environment. Never put keys
+in source, logs or chat. The local `vnstock-env-setup`,
+`vnstock-migration-expert` and `vnstock-solution-architect` skills describe
+previous generations; follow generation-5 guidance. See the [Agent Skills Hub](https://vnstocks.com/agent-skills-hub)
+and [official loader guide](https://vnstocks.com/docs/tai-lieu/vnstock-agent-skills).
+
+### Local financial inventory
+
+A provider-free, read-only transaction against the local PostgreSQL store on
+30 October 2026 covered FPT, VCI, VNM and MSR for 2025 and Q1–Q3 2026. Of 48
+selected symbol/period/statement cells, 12 had a row and 36 did not. The 12 rows
+came from Vietcap; 24 non-null income fields were withheld because currency or
+unit evidence was unverified. No inspected floating-point financial fields were
+admitted in this selected scope.
+This is a local snapshot, not production coverage or proof of source rights.
+The [bounded inventory instructions](../scripts/vietcap/README.md#bounded-sql-statement-admission-inventory)
+require a read-only database account and do not call a provider.
+
+SDK migration does not itself authorize acquisition, publication, production
+writes, scheduler enablement or deployment. Preserve the admission gates and
+the source-owner/license and coverage prerequisites in #168.
 
 ---
 
-## Table of Contents
+## Installation and SDK interfaces
 
-1. [Installation & Setup](#installation--setup)
-2. [Data Sources](#data-sources)
-3. [Proxy Support (3.3.1+)](#proxy-support)
-4. [Listing API](#listing-api)
-5. [Company Information API](#company-information-api)
-6. [Price History API](#price-history-api)
-7. [Financial Statements API](#financial-statements-api)
-8. [Stock Screener API](#stock-screener-api)
-9. [Trading Board API](#trading-board-api)
-10. [Fund API](#fund-api)
-11. [Rate Limit Guidelines](#rate-limit-guidelines)
-12. [Best Practices](#best-practices)
-
----
-
-## Installation & Setup
+From the repository root, install the API with the publisher-wheel constraints:
 
 ```bash
-pip install -U vnstock
-# Legacy package alias kept only for old 3.1.0-era installs:
-# pip install vnstock3
-# GitHub main / unreleased runtime line used by VNIBB:
-# pip install git+https://github.com/thinh-vu/vnstock.git
+python -m pip install --isolated --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
 ```
 
-### Basic Import Pattern
-```python
-from vnstock import Vnstock, Listing, Company, Finance, Trading
-```
+The [publisher's 5.2.1 index](https://vnstocks.com/api/packages/vnstock/) lists
+CPython 3.10+ ABI3 wheels for glibc Linux x86-64/aarch64, macOS x86-64/arm64
+and Windows amd64; musl, Windows ARM64, 32-bit and PyPy wheels are not listed.
+The SDK metadata requires pandas 2.0+ and Windows `tzdata`; it does not declare
+the legacy `vnai` dependency. Unsupported platforms need a publisher-supported
+artifact, not a silent fallback to the 4.x package.
 
----
+### Registration and Golden configuration
 
-## Proxy Support (3.3.1+)
+Both `VNSTOCK_RUNTIME_TIER=free` (default) and `VNSTOCK_RUNTIME_TIER=golden`
+use the unified SDK and require `VNSTOCK_SOURCE=VCI`. Golden requires
+`VNSTOCK_API_KEY`, supplied through the deployment's secret mechanism, never
+source control or logs. Startup calls `vnstock.setup_api_key` and requires an
+authenticated `golden` or `diamond` result. Missing key, timeout, registration
+lock contention, authentication failure or insufficient tier aborts Golden
+startup without disclosing the key. SDK login verifies remotely and persists
+the credential locally; account for that storage in the deployment environment.
+Golden does not automatically raise VNIBB's guest-paced defaults. Entitlement
+does not override VCI source and financial-data admission or establish rights.
 
-VnStock 3.3.1 includes automatic proxy support to avoid IP blocking:
+Free mode performs no startup account or registration check and does not log
+out or delete persisted SDK credentials. Use an isolated `VNSTOCK_HOME` for CLI
+and scripts so a persisted paid account cannot be reused accidentally. Free
+still rejects discoverable legacy sponsor packages before SDK import.
 
-```python
-from vnstock.core.utils.proxy_manager import ProxyManager
-
-# Initialize proxy manager
-proxy_manager = ProxyManager(timeout=15)
-
-# Fetch available proxies
-proxies = proxy_manager.fetch_proxies(limit=10)
-print(f"Got {len(proxies)} proxies")
-
-# Get best working proxy
-best_proxy = proxy_manager.get_best_proxy()
-```
-
-> **Note**: Proxy is useful when accessing from cloud environments (Google Colab, Kaggle) or when experiencing IP blocks.
-
----
-
-## Data Sources
-
-vnstock source behavior differs slightly across the audited sources:
-
-| Source | Upstream status | Recommended use in VNIBB |
-|--------|-----------------|---------------------------|
-| **KBS** | Public docs/README use it as the default from `3.4.0` onward | Primary/default source |
-| **VCI** | Still supported | Fallback and parity with `vnstock-agent` default config |
-| **DNSE** | Still supported | Quote/intraday redundancy |
-| **TCBS** | Removed from GitHub `main` changelog on `2026-03-05` | Do not configure |
-
-Notes:
-- The official docs site currently documents stable releases through `v3.4.2` (`2026-02-01`).
-- GitHub `main` includes later March 2026 changes, including TCBS removal, that VNIBB follows locally.
-- `mrgoonie/vnstock-agent` defaults `VNSTOCK_SOURCE=VCI`; set `KBS` explicitly if you want parity with VNIBB.
-- The `Vnstock` class remains available, but specific classes (`Listing`, `Company`, `Finance`, `Trading`) are preferred in VNIBB.
+Generation 5 exposes the following SDK interfaces. Examples show the source
+parameter explicitly; executing them contacts a supplier and requires the
+appropriate authorization and applicable entitlement.
 
 ```python
-# KBS source (VNIBB default / official docs first choice)
-stock = Vnstock().stock(symbol='VCI', source='KBS')
+from vnstock import Fundamental, Market, Reference
 
-# VCI source (explicit fallback / matches vnstock-agent default)
-stock = Vnstock().stock(symbol='VCI', source='VCI')
-
-# Using specific classes (preferred in VNIBB)
-from vnstock import Listing, Company, Finance
-listing = Listing(source='KBS')  # or just Listing() for default
+history = Market().equity("FPT").ohlcv(start="2026-01-01", end="2026-06-30", source="VCI")
+profile = Reference().company("FPT").info(source="VCI")
+income = Fundamental().equity("FPT").income_statement(period="year", format="long", source="VCI")
 ```
 
----
-
-## Listing API
-
-Get lists of all stocks, indices, and securities.
-
-### List All Symbols
-```python
-from vnstock import Listing
-listing = Listing()  # Uses the current default source; VNIBB sets KBS explicitly for clarity
-
-# Get all stock symbols with company names
-df = listing.all_symbols()
-# Returns: ticker, organ_name
-# ~1,600 stocks
-```
-
-### Symbols by Exchange
-```python
-# Filter by exchange
-df = listing.symbols_by_exchange(exchange='HOSE')  # or 'HNX', 'UPCOM'
-```
-
-### Symbols by Industry (ICB)
-```python
-# Get stocks by industry classification
-df = listing.symbols_by_group(group='VN30')  # VN30, VN100, etc.
-
-# Get stocks by ICB code
-df = listing.symbols_by_industries(icb='banking')
-```
-
-### Market Indices
-```python
-# List all market indices
-df = listing.all_indices()
-
-# Indices by group
-df = listing.indices_by_group(group='HOSE')
-```
-
----
-
-## Company Information API
-
-### Initialize Company Module
-```python
-from vnstock import Company
-
-# Using VCI source
-company = Company(symbol='ACB', source='VCI')
-
-# Using KBS source (default)
-company = Company(symbol='ACB', source='KBS')
-```
-
-### Company Overview
-```python
-df = company.overview()
-# Returns: symbol, id, issue_share, history, company_profile,
-#          icb_name2 (sector), icb_name3 (industry), icb_name4 (sub-industry),
-#          charter_capital
-```
-
-### Major Shareholders
-```python
-df = company.shareholders()
-# Returns: id, share_holder, quantity, share_own_percent, update_date
-```
-
-### Officers & Management
-```python
-df = company.officers(filter_by='working')
-# filter_by options: 'working' (default), 'resigned', 'all'
-# Returns: officer_name, officer_position, officer_own_percent, quantity
-```
-
-### Subsidiaries
-```python
-df = company.subsidiaries()
-# Returns: company information of subsidiaries
-```
-
-### Dividend History
-```python
-company = Company(symbol='VCB', source='VCI')
-df = company.dividends()
-# Returns: exercise_date, cash_year, cash_dividend_percentage, issue_method
-```
-
-### Company Events
-```python
-df = company.events()
-# Returns: corporate events, announcements
-```
-
-### Company News
-```python
-df = company.news()
-# Returns: news articles related to the company
-```
-
-### Insider Trading
-```python
-company = Company(symbol='VCB', source='VCI')
-df = company.insider_trading()
-# Returns: insider buy/sell transactions
-```
-
----
-
-## Price History API
-
-### Initialize Quote Module
-```python
-from vnstock import Vnstock
-stock = Vnstock().stock(symbol='VCI', source='VCI')
-quote = stock.quote
-```
-
-### Historical OHLCV Data
-```python
-df = quote.history(
-    start='2020-01-01',
-    end='2024-12-31',
-    interval='1D'  # Default daily
-)
-# Returns: time, open, high, low, close, volume
-```
-
-### Interval Options
-| Interval | Description |
-|----------|-------------|
-| `1m` | 1 minute |
-| `5m` | 5 minutes |
-| `15m` | 15 minutes |
-| `30m` | 30 minutes |
-| `1H` | 1 hour |
-| `1D` | 1 day (default) |
-| `1W` | 1 week |
-| `1M` | 1 month |
-
-### Intraday Order Matching Data
-```python
-df = quote.intraday(page_size=10000)
-# Returns: time, price, volume, match_type (Buy/Sell/ATO/ATC), id
-# Real-time order matching during market hours (9:15 - 14:45)
-```
-
-### Price Board (Multiple Symbols)
-```python
-from vnstock import Trading
-
-trading = Trading(source='KBS')
-df = trading.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
-# Returns: bid/ask data for multiple symbols simultaneously
-```
-
----
-
-## Financial Statements API
-
-### Initialize Finance Module
-```python
-from vnstock import Finance
-finance = Finance(symbol='VCI', source='VCI')
-```
-
-### Income Statement
-```python
-df = finance.income_statement(
-    period='year',  # or 'quarter'
-    lang='en',      # or 'vi'
-    dropna=False    # Remove empty rows
-)
-# Returns: revenue, gross_profit, operating_profit, net_profit, EPS, etc.
-# 60 columns of detailed P&L data
-```
-
-### Balance Sheet
-```python
-df = finance.balance_sheet(
-    period='year',
-    lang='en'
-)
-# Returns: total_assets, liabilities, equity, cash, debt, etc.
-```
-
-### Cash Flow Statement
-```python
-df = finance.cash_flow(
-    period='year',
-    lang='en'
-)
-# Returns: operating_cash_flow, investing_cash_flow, financing_cash_flow
-```
-
-### Financial Ratios
-```python
-df = finance.ratio(
-    period='year',
-    lang='en'
-)
-# Returns: PE, PB, ROE, ROA, EPS, dividend_yield, debt_equity, etc.
-```
-
----
-
-## Stock Screener API
-
-### Current upstream status
-
-The audited sources disagree slightly on screener messaging:
-- The public docs/README still describe screener historically and mark it as temporarily unavailable.
-- The GitHub `CHANGELOG.md` entry dated `2026-03-05` removes the TCBS-backed OSS screener path.
-- `vnstock-agent` does not expose a screener tool or CLI command.
-
-For VNIBB planning, treat the built-in OSS screener path as unavailable.
-
-Recommended paths in VNIBB:
-
-1. Use VNIBB backend screener endpoints (cached and normalized).
-2. Install premium VNStock modules for full screener parity when needed:
-   - `vnstock_data`
-   - `vnstock_ta`
-   - `vnstock_pipeline`
-   - `vnstock_news`
-   - `vnii`
-
-### Runtime guidance
-
-- Keep `VNSTOCK_SOURCE` on `KBS` (recommended), `VCI`, or `DNSE`.
-- Do not configure `TCBS`; it is removed in the newer upstream runtime line used by VNIBB.
-- For migration/backfill workloads, run the database-stack migration orchestrator after source sync completion.
-
----
-
-## Trading Board API
-
-Real-time price board data with bid/ask information.
-
-### Basic Usage
-```python
-from vnstock import Trading
-
-trading = Trading(source='KBS')
-df = trading.price_board(symbols_list=['VCB', 'ACB', 'TCB', 'BID'])
-```
-
-### Response Structure (36 Columns)
-
-#### Listing Info
-- `symbol`, `ceiling`, `floor`, `ref_price`, `stock_type`, `exchange`
-- `listed_share`, `organ_name`, `prior_close_price`
-
-#### Match Info
-- `match_price`, `match_vol`, `accumulated_volume`, `accumulated_value`
-- `avg_match_price`, `highest`, `lowest`
-- `foreign_buy_volume`, `foreign_sell_volume`, `current_room`, `total_room`
-
-#### Bid/Ask Data
-- `bid_1_price`, `bid_1_volume`, `bid_2_price`, `bid_2_volume`, `bid_3_price`, `bid_3_volume`
-- `ask_1_price`, `ask_1_volume`, `ask_2_price`, `ask_2_volume`, `ask_3_price`, `ask_3_volume`
-
----
-
-## Fund API
-
-Access open-end fund data (fmarket.vn source).
-
-### Initialize Fund Module
-```python
-from vnstock.explorer.fmarket.fund import Fund
-
-fund = Fund()
-```
-
-### List All Open-End Funds
-```python
-df = fund.listing()
-# Returns dataframe of all available funds
-```
-
-### Filter Funds by Symbol
-```python
-df = fund.filter('DC')
-# Returns funds containing 'DC' in symbol
-```
-
-### Top Holdings
-```python
-df = fund.details.top_holding('SSISCA')
-# Returns top assets held by the fund
-```
-
-### NAV Report
-```python
-df = fund.details.nav_report('SSISCA')
-# Returns Net Asset Value history
-```
-
----
-
-## Rate Limit Guidelines
-
-> ⚠️ **CRITICAL**: vnstock rate limits are tier-dependent. Exceeding them can still lead to throttling, degraded responses, or temporary bans.
-
-### Upstream Tier Guidance
-
-| Tier / Context | Guidance from audited sources |
-|----------------|-------------------------------|
-| Guest | ~20 requests/minute, no registration |
-| Community | ~60 requests/minute, free registration |
-| Sponsor | 3-5x the free tier according to the upstream README |
-| VNIBB backend | Guest allowance: `18/min` main plus `2/min` reinforcement; `20/min` per-operation ceiling |
-
-Notes:
-- The 20/min default follows the pinned runtime's VNAI `Authenticator.TIER_LIMITS`: guest `20/min`, `1200/hour`, `5000/day`; registered free `60/min`, `3600/hour`, `10000/day`. Registration is not assumed. These are upstream tier limits, not a guarantee of source availability.
-- Free community registration is not assumed. Installed sponsor packages or an API key never enable a paid VNIBB runtime.
-- Batch endpoints such as `Trading.price_board()` and cached backend screener snapshots are preferred over many per-symbol calls.
-- Local main/reinforcement pacing is not a cross-worker or cross-process quota ledger; pipeline stages can contain multiple upstream operations. Provider throttling and unavailable/error results remain authoritative.
-
-### Rate Limiting Implementation
-
-```python
-import asyncio
-
-class RateLimiter:
-    def __init__(self, calls_per_minute: int):
-        self.delay = 60.0 / calls_per_minute
-        self.last_call = 0
-    
-    async def acquire(self):
-        now = time.time()
-        wait_time = self.delay - (now - self.last_call)
-        if wait_time > 0:
-            await asyncio.sleep(wait_time)
-        self.last_call = time.time()
-```
-
-### Circuit Breaker Pattern
-
-When consecutive failures occur, stop making API calls:
-
-```python
-class CircuitBreaker:
-    def __init__(self, failure_threshold=5, recovery_timeout=300):
-        self.failures = 0
-        self.threshold = failure_threshold
-        self.recovery_timeout = recovery_timeout
-        self.last_failure = None
-    
-    @property
-    def is_open(self):
-        if self.failures >= self.threshold:
-            if time.time() - self.last_failure > self.recovery_timeout:
-                self.failures = 0  # Try again
-                return False
-            return True
-        return False
-```
-
----
-
-## Best Practices
-
-### 1. Use VNIBB cached screener endpoints for bulk data
-```python
-# ✅ GOOD: Consume normalized backend screener payloads
-rows = await fetch_backend_screener(limit=1700)
-
-# ❌ BAD: 1,600 per-symbol calls
-for symbol in all_symbols:
-    stock.quote.history(...)  # Don't do this!
-```
-
-### 2. Batch Price History by Date Range
-```python
-# ✅ GOOD: Collect all needed dates in one call
-df = quote.history(start='2020-01-01', end='2024-12-31')
-
-# ❌ BAD: Multiple calls for same symbol
-for year in range(2020, 2025):
-    quote.history(start=f'{year}-01-01', end=f'{year}-12-31')
-```
-
-### 3. Collect Financial Data Infrequently
-```python
-# Financial reports only update quarterly
-# Collect once per week at most
-if days_since_last_update >= 7:
-    finance.income_statement(period='quarter')
-```
-
-### 4. Use Market Hours Awareness
-```python
-def is_market_hours():
-    now = datetime.now()
-    if now.weekday() >= 5:  # Weekend
-        return False
-    market_open = now.replace(hour=9, minute=0)
-    market_close = now.replace(hour=15, minute=0)
-    return market_open <= now <= market_close
-
-# Only collect intraday during market hours
-if is_market_hours():
-    quote.intraday(page_size=10000)
-```
-
-### 5. Priority-Based Updates
-
-```python
-# Priority Queue for Updates
-VN30_INTERVAL = 5 * 60      # 5 minutes (high priority)
-TOP100_INTERVAL = 15 * 60   # 15 minutes (medium)
-ALL_STOCKS_INTERVAL = 60 * 60  # 1 hour (low priority)
-
-# Backend screener cache refresh
-SCREENER_CACHE_INTERVAL = 30 * 60  # 30 minutes
-```
-
-### 6. Store and Reuse Data
-```python
-# Store listings locally - they rarely change
-# Update once per day at market open
-if last_listing_update.date() < datetime.now().date():
-    listings = listing.all_symbols()
-    save_to_database(listings)
-```
-
----
-
-## API Call Efficiency Matrix
-
-| Data Type | API Method | Efficiency | Update Frequency |
-|-----------|------------|------------|------------------|
-| Bulk screener dataset | Backend screener cache / premium pipeline | ⭐⭐⭐⭐ | Every 30 min |
-| Stock Listings | `Listing().all_symbols()` | ⭐⭐⭐⭐⭐ | Daily |
-| Price History | `quote.history()` | ⭐⭐⭐ | Per symbol |
-| Company Overview | `company.overview()` | ⭐⭐⭐ | Weekly |
-| Financial Statements | `finance.*_statement()` | ⭐⭐ | Quarterly |
-| Intraday Data | `quote.intraday()` | ⭐⭐ | Market hours only |
-| Real-time Prices | `trading.price_board()` | ⭐⭐⭐⭐ | Batch multiple |
-
----
-
-## Summary: Optimal Data Collection Strategy
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                 RECOMMENDED UPDATE SCHEDULE                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   ⏰ DAILY (Market Open):                                       │
-│      • listing.all_symbols() → Update stock list               │
-│                                                                 │
-│   ⏰ EVERY 30 MIN (Market Hours):                               │
-│      • Refresh backend screener cache / premium pipeline        │
-│                                                                 │
-│   ⏰ EVERY 5 MIN (VN30 Only):                                   │
-│      • trading.price_board(VN30_list) → Real-time prices       │
-│                                                                 │
-│   ⏰ WEEKLY:                                                    │
-│      • company.overview() → Company info updates                │
-│      • company.dividends() → Dividend history                   │
-│                                                                 │
-│   ⏰ QUARTERLY:                                                 │
-│      • finance.income_statement() → P&L data                    │
-│      • finance.balance_sheet() → Balance data                   │
-│      • finance.cash_flow() → Cash flow data                     │
-│                                                                 │
-│   ⏰ MONTHLY:                                                   │
-│      • Batch price history for all stocks                       │
-│      • company.shareholders() → Ownership updates               │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Error Handling
-
-```python
-from vnstock import VnstockError
-
-try:
-    df = stock.quote.history(start='2024-01-01', end='2024-12-31')
-except VnstockError as e:
-    logger.error(f"VnStock API error: {e}")
-    # Implement backoff
-    await asyncio.sleep(60)
-except Exception as e:
-    logger.error(f"Unexpected error: {e}")
-    # Trigger circuit breaker
-    circuit_breaker.record_failure()
-```
-
----
-
-*Audited on 2026-04-02 against `vnstocks.com/docs`, the official version-history page, `thinh-vu/vnstock` README/CHANGELOG, and `mrgoonie/vnstock-agent` README.*
-
-## IQ structured persistence contracts (2026-10-13)
-
-- IQ is primary; only free community VCI may supplement it. Fiscal identity must reconcile every supplied year, quarter, and period before a SQL natural key is assigned.
+The SDK's source-computed ratio route is deprecated and its documented
+entitlement requirements apply; neither a ratio response nor a Golden account
+proves unit, fiscal-period or source admission. Never infer units or report basis
+from numeric magnitude or entitlement. Stored lineage and the existing admission
+rules determine what VNIBB can serve.
+
+## Unsupported and independent routes
+
+- Company news was removed in SDK 5; general ratings are absent. The historical
+  aggregate trading-statistics contract is not equivalent to the SDK's current
+  session statistics. VNIBB reports these as provider errors instead of inventing
+  results. Company ownership explicitly requests VCI; an unsupported result does
+  not switch to the SDK's KBS default.
+- VCI company events remain the path for events, insider-event filtering and
+  dividends where supported. A route's presence does not guarantee observations.
+- The commodities endpoint retains its independent Yahoo path. Removed or absent
+  VNStock gold helpers do not manufacture gold prices when Yahoo returns no rows.
+  Forex uses the independent Vietcombank `Retail().exchange_rate()` route, not VCI.
+- The built-in historical OSS screener is not a VNIBB source. Use the existing
+  database-backed screener, subject to its own freshness and admission rules.
+
+## Rate limits and authorization
+
+VNIBB's configured defaults pace 18 main and 2 reinforcement calls per minute,
+with a 20/minute per-operation ceiling. These local controls are not a shared
+cross-process quota ledger, a supplier availability guarantee, or permission to
+collect data. Follow the account's applicable terms and source-owner permissions;
+do not turn on acquisition or schedules merely because the SDK can be imported.
+
+## Retained ingestion contracts (2026-10-13)
+
+- IQ is primary; only explicitly sourced VCI may supplement it. Fiscal identity must reconcile every supplied year, quarter, and period before a SQL natural key is assigned.
 - The shared `financial_fiscal_basis` validator requires the exact dataset variant and checks any supplied `periodType` (trimmed, case-insensitive) against `year`/`quarter`, alongside year/quarter/period identity. An explicit annual `RATIO_YEAR` stays annual even when a secondary opaque `ratioTTMId` is also populated, and `2018`/`"2018"` reconcile identically. The canonical outer period is FY-only: an annual `RATIO_YEAR` may carry the provider quarter alias `5`, while a stored outer period label of the form `YYYY-Q5` matching that explicit annual year is unusable, so that row keeps its valid raw identity and is excluded and disclosed (`legacy_period_labels`) under stripped-period validation instead of being numerically repaired or relabelled. This disclosure is scoped to that explicit-`RATIO_YEAR` mismatch, not a general licence to strip period labels. TTM is never a standalone quarter or fiscal year; `reason` is exactly `None`, `contradictory`, `ratio_ttm` or `unavailable`, distinct from reader-side unsupported-metadata reasons, and the corrected TTM envelope is produced by the writer (`FinancialRepair`) rather than reconstructed at read time. Observation/ingestion timestamps never manufacture a fiscal year, and missing legacy identity is not proof of an annual or quarterly period.
 - Canonical quarter monetary flows require explicit `single_quarter` reporting evidence. Missing/conflicting basis and cumulative YTD values remain disclosed in raw envelopes but are not relabeled as quarter flows. Consolidation remains unknown unless the response explicitly identifies it; descriptor section/company type does not establish scope. Explicit EPS `VND/share` can remain available independently of unknown scope. Amount scales cannot manufacture per-share units.
 - IQ SQL statements retain full acquired envelopes plus the existing `_financial_lineage.canonical_data` shape, including explicit unit/flow/scope evidence. Secondary ratio refreshes cannot overwrite or enrich IQ-owned rows; the shared source guard reports conflicting natural keys and retains already persisted counts. Fresh certified IQ stock prices may upgrade generic IQ-owned price rows, never another source's rows.

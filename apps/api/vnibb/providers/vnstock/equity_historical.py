@@ -7,7 +7,7 @@ for Vietnam-listed stocks using the vnstock library.
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -35,8 +35,8 @@ class EquityHistoricalQueryParams(BaseModel):
         description="Stock ticker symbol (e.g., VNM, FPT, VIC)",
     )
     start_date: date = Field(
-        ...,
-        description="Start date for historical data (YYYY-MM-DD)",
+        default_factory=lambda: date.today() - timedelta(days=365),
+        description="Start date for historical data (YYYY-MM-DD); defaults to one year ago",
     )
     end_date: date = Field(
         default_factory=date.today,
@@ -187,14 +187,10 @@ class VnstockEquityHistoricalFetcher(
         def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_quote_class
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(
-                    symbol=query["symbol"],
-                    source=source,
-                )
-                df = stock.quote.history(
+                quote = get_quote_class()(symbol=query["symbol"], source=source)
+                df = quote.history(
                     start=query["start"],
                     end=query["end"],
                     interval=query["interval"],
@@ -204,7 +200,7 @@ class VnstockEquityHistoricalFetcher(
                     logger.warning(f"No data returned for {query['symbol']}")
                     return []
 
-                return history_price_records(df, symbol=query["symbol"], source=source, provider=stock.quote)
+                return history_price_records(df, symbol=query["symbol"], source=source, provider=quote)
 
             except Exception as e:
                 logger.error(f"vnstock fetch error for {query['symbol']}: {e}")
@@ -237,7 +233,7 @@ class VnstockEquityHistoricalFetcher(
 
         for row in data:
             try:
-                row = normalize_price_record(row, symbol=params.symbol, source=row.get("price_source") or f"vnstock_history:{params.source.upper()}")
+                row = normalize_price_record(row, symbol=params.symbol, source=row.get("price_source") or f"vnstock5_history:{params.source.upper()}")
                 # Handle different column names from different sources
                 time_value = row.get("time") or row.get("date") or row.get("trading_date")
 

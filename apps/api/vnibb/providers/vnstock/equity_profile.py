@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.market_cap import resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +59,14 @@ class EquityProfileData(BaseModel):
 
     # Key metrics
     outstanding_shares: Optional[float] = Field(None, description="Outstanding shares")
+    shares_outstanding_provenance: Optional[dict[str, Any]] = None
     listed_shares: Optional[float] = Field(None, description="Listed shares")
     market_cap: Optional[float] = Field(None, description="Market capitalization")
+    market_cap_provenance: Optional[dict[str, Any]] = None
+    shares_unit: Optional[str] = None
+    shares_as_of: Optional[datetime | str] = None
+    shares_source: Optional[str] = None
+    share_basis: Optional[str] = None
     no_employees: Optional[int] = Field(None, description="Number of employees")
 
     # Contact
@@ -122,49 +130,32 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
             try:
                 from vnibb.providers.vnstock.runtime import (
                     get_listing_class,
-                    get_vnstock_class,
+                    get_company_class,
                     validate_source,
                 )
 
+                source = validate_source(settings.vnstock_source)
                 Listing = get_listing_class()
-                Vnstock = get_vnstock_class()
+                Company = get_company_class()
 
+                overview = Company(symbol=query["symbol"], source=source).overview()
                 record: dict[str, Any] = {}
-                candidate_sources = [validate_source(settings.vnstock_source)]
-
-                for source in candidate_sources:
-                    try:
-                        stock = Vnstock().stock(symbol=query["symbol"], source=source)
-                        overview = stock.company.overview()
-                    except Exception as source_error:
-                        logger.debug(
-                            "vnstock profile fetch failed for %s source=%s: %s",
-                            query["symbol"],
-                            source,
-                            source_error,
-                        )
-                        continue
-
-                    if overview is None or overview.empty:
-                        continue
-
+                if overview is not None and not overview.empty:
                     source_record = overview.to_dict("records")[0]
-                    for key, value in source_record.items():
-                        if _is_present(value) and not _is_present(record.get(key)):
-                            record[key] = value
+                    record = {key: value for key, value in source_record.items() if _is_present(value)}
 
                 if not record:
                     logger.warning(f"No profile data for {query['symbol']}")
                     return []
 
-                # Get company name from Listing (overview doesn't include it)
+                # Enrich the overview with the listing name when supplied.
                 try:
-                    listing = Listing(source=validate_source(settings.vnstock_source))
+                    listing = Listing(source=source)
                     symbols_df = listing.all_symbols()
                     if symbols_df is not None and not symbols_df.empty:
                         match = symbols_df[symbols_df["symbol"] == query["symbol"]]
-                        if not match.empty:
-                            record["organ_name"] = match.iloc[0].get("organ_name", "")
+                        if not match.empty and _is_present(match.iloc[0].get("organ_name")):
+                            record["organ_name"] = match.iloc[0]["organ_name"]
                 except Exception as e:
                     logger.debug(f"Failed to get company name from listing: {e}")
 
@@ -232,35 +223,24 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 return value
             return None
 
-        def _scale_shares(value: Any) -> Optional[float]:
-            number = _coerce_float(value)
-            if number is None:
-                return None
-            if number < 1_000_000:
-                return number * 1_000_000
-            return number
-
-        def _scale_capital(value: Any) -> Optional[float]:
-            number = _coerce_float(value)
-            if number is None:
-                return None
-            if number < 1_000_000_000:
-                return number * 1_000_000_000
-            return number
 
         for row in data:
             try:
                 outstanding_shares = _pick_first(
+                    _coerce_float(row.get("outstanding_shares")),
+                    _coerce_float(row.get("shares_outstanding")),
+                    _coerce_float(row.get("sharesOutstanding")),
                     _coerce_float(row.get("issue_share")),
                     _coerce_float(row.get("financial_ratio_issue_share")),
-                    _scale_shares(row.get("outstanding_shares")),
-                    _scale_shares(row.get("listed_volume")),
                 )
                 listed_shares = _pick_first(
-                    _coerce_float(row.get("issue_share")),
-                    _scale_shares(row.get("listed_volume")),
-                    outstanding_shares,
+                    _coerce_float(row.get("listed_shares")),
+                    _coerce_float(row.get("listed_volume")),
                 )
+                shares = resolve_screener_shares(row, source="vnstock:profile")
+                if shares["status"] == "conflict":
+                    outstanding_shares = None
+                cap = resolve_market_cap(row, source="vnstock:profile")
                 profile = EquityProfileData(
                     symbol=params.symbol.upper(),
                     # Company name from Listing().all_symbols()
@@ -288,12 +268,14 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     ),
                     # Share data
                     outstanding_shares=outstanding_shares,
+                    shares_outstanding_provenance=shares,
                     listed_shares=listed_shares,
-                    # Charter capital as proxy (actual market cap needs price calculation)
-                    market_cap=_pick_first(
-                        _coerce_float(row.get("market_cap")),
-                        _scale_capital(row.get("charter_capital")),
-                    ),
+                    market_cap=cap["value"],
+                    market_cap_provenance=cap,
+                    shares_unit=row.get("shares_unit") or row.get("outstanding_shares_unit"),
+                    shares_as_of=row.get("shares_as_of") or row.get("outstanding_shares_as_of"),
+                    shares_source=row.get("shares_source") or row.get("outstanding_shares_source"),
+                    share_basis=row.get("share_basis"),
                     no_employees=_pick_first(
                         _coerce_int(row.get("no_employees")),
                         _coerce_int(row.get("employees")),

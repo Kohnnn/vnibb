@@ -4,17 +4,11 @@ VnStock Cash Flow Fetcher
 Fetches cash flow statement data for Vietnam-listed companies.
 """
 
-import asyncio
-import logging
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
 from vnibb.providers.base import BaseFetcher
-from vnibb.core.config import settings
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-
-logger = logging.getLogger(__name__)
 
 
 class CashFlowQueryParams(BaseModel):
@@ -50,6 +44,7 @@ class CashFlowData(BaseModel):
     currency: str | None = None
     flow_basis: str | None = None
     consolidation_basis: str | None = None
+    unavailable_reason: str | None = None
     
     model_config = {
         "json_schema_extra": {
@@ -78,56 +73,29 @@ class VnstockCashFlowFetcher(BaseFetcher[CashFlowQueryParams, CashFlowData]):
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-        loop = asyncio.get_event_loop()
-        
-        def _fetch_sync() -> List[dict]:
-            try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+        from sys import maxsize
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
-                df = stock.finance.cash_flow(period=query.get("period", "year"), lang="en")
-                
-                if df is None or df.empty:
-                    return []
-                
-                return df.to_dict("records")
-            except Exception as e:
-                logger.error(f"vnstock cash flow fetch error: {e}")
-                raise ProviderError(message=str(e), provider="vnstock", details={"symbol": query["symbol"]})
-        
-        try:
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _fetch_sync),
-                timeout=settings.vnstock_timeout,
-            )
-        except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
+        from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
+
+        return await VnstockFinancialsFetcher.extract_data(
+            {**query, "statement_type": "cashflow", "limit": maxsize}, credentials
+        )
     
     @staticmethod
     def transform_data(
         params: CashFlowQueryParams,
         data: List[dict[str, Any]],
     ) -> List[CashFlowData]:
-        results = []
-        for row in data:
-            try:
-                op_cf = row.get("fromOperatingActivities") or row.get("operatingCashFlow")
-                inv_cf = row.get("fromInvestingActivities") or row.get("investingCashFlow")
-                fin_cf = row.get("fromFinancingActivities") or row.get("financingCashFlow")
-                capex = row.get("purchaseOfFixedAssets") or row.get("capex")
-                
-                results.append(CashFlowData(
-                    symbol=params.symbol.upper(),
-                    period=str(row.get("yearReport") or row.get("period") or ""),
-                    operating_cash_flow=op_cf,
-                    investing_cash_flow=inv_cf,
-                    financing_cash_flow=fin_cf,
-                    net_cash_flow=(op_cf or 0) + (inv_cf or 0) + (fin_cf or 0) if op_cf else None,
-                    free_cash_flow=(op_cf or 0) - abs(capex or 0) if op_cf else None,
-                    capital_expenditure=capex,
-                    dividends_paid=row.get("dividendsPaid"),
-                ))
-            except Exception as e:
-                logger.warning(f"Skipping invalid cash flow row: {e}")
-        return results
+        from sys import maxsize
+
+        from vnibb.providers.vnstock.financials import (
+            FinancialsQueryParams,
+            StatementType,
+            VnstockFinancialsFetcher,
+        )
+        from vnibb.services.financial_service import admit_statement_rows
+
+        statements = VnstockFinancialsFetcher.transform_data(
+            FinancialsQueryParams(symbol=params.symbol, period=params.period, statement_type=StatementType.CASHFLOW, limit=maxsize), data
+        )
+        return [CashFlowData.model_validate(row.model_dump()) for row in admit_statement_rows(statements, params.period)]

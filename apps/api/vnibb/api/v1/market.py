@@ -25,10 +25,11 @@ from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, or_, text
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, get_db
+from vnibb.core.market_cap import resolve_market_cap
 from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import VN_SECTORS
@@ -54,7 +55,7 @@ from vnibb.services.data_quality import latest_market_business_day
 from vnibb.services.market_session import expected_market_session
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-from vnibb.providers.vnstock import get_stock
+from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 from vnibb.api.v1.market_heatmap import (
     HeatmapGroupBuilder,
     HeatmapGroupConfig,
@@ -69,12 +70,6 @@ from vnibb.api.v1.market_heatmap import (
     resolve_hnx30_symbols,
 )
 
-try:
-    from vnstock.explorer.misc import vcb_exchange_rate, btmc_goldprice, sjc_gold_price
-except Exception:  # pragma: no cover - defensive import guard
-    vcb_exchange_rate = None
-    btmc_goldprice = None
-    sjc_gold_price = None
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -168,7 +163,9 @@ class HeatmapStock(BaseModel):
     name: str
     sector: str
     industry: Optional[str] = None
-    market_cap: float
+    market_cap: float | None = None
+    market_cap_provenance: dict[str, Any]
+    size_value: float
     price: float
     change: float | None = None  # Absolute price change
     change_pct: float | None = None  # Percentage change
@@ -184,7 +181,9 @@ class SectorGroup(BaseModel):
 
     sector: str
     stocks: List[HeatmapStock]
-    total_market_cap: float
+    total_market_cap: float | None = None
+    total_size_value: float
+    cap_count: int
     avg_change_pct: float | None = None
     stock_count: int
 
@@ -216,6 +215,8 @@ class IndustryBubblePoint(BaseModel):
     price: Optional[float] = None
     change_pct: Optional[float] = None
     color: str
+    market_cap: float | None = None
+    market_cap_provenance: dict[str, Any]
     is_reference: bool = False
 
 
@@ -244,12 +245,13 @@ class SectorBoardStock(BaseModel):
     change_pct: Optional[float] = None
     volume: Optional[float] = None
     market_cap: Optional[float] = None
+    market_cap_provenance: dict[str, Any]
     color: str
 
 
 class SectorBoardSector(BaseModel):
     name: str
-    change_pct: float
+    change_pct: float | None
     constituent_count: int
     displayed_count: int
     stocks: List[SectorBoardStock]
@@ -624,11 +626,13 @@ def _compute_money_flow_metrics(
 
 async def _fetch_benchmark_history_from_provider(start_date: date, end_date: date) -> pd.DataFrame:
     def _load_history() -> pd.DataFrame:
-        stock = get_stock("VNINDEX")
-        history = stock.quote.history(
+        source = validate_source(settings.vnstock_source)
+        Market, _ = import_vnstock_symbol("Market")
+        history = Market().index("VNINDEX").ohlcv(
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            show_log=False,
+            source=source,
+            floating=None,
         )
         if history is None or history.empty:
             return pd.DataFrame(columns=["time", "close_index"])
@@ -1254,17 +1258,18 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
     row = SimpleNamespace(
         symbol=symbol, price=_first_non_none(payload.get("price"), payload.get("close")),
         volume=payload.get("volume"),
-        trade_date=_coerce_to_date(_first_non_none(payload.get("trade_date"), payload.get("tradeDate"))),
+        trade_date=_coerce_to_date(_first_non_none(payload.get("trade_date"), payload.get("tradeDate"), payload.get("constituent_date"))),
         extended_metrics=metrics,
     )
     market_session, returns_withheld = _snapshot_session_projection(row, metrics)
     returns_withheld = returns_withheld or bool(payload.get("_session_returns_withheld"))
+    market_cap = resolve_market_cap(payload, source=str(payload.get("source") or "market:screener"))
 
     return {
         "symbol": symbol,
         "name": _normalize_text(
             _first_non_none(
-                payload.get("organ_name"), payload.get("organName"), payload.get("company_name")
+                payload.get("organ_name"), payload.get("organName"), payload.get("company_name"), payload.get("name")
             )
         )
         or symbol,
@@ -1276,9 +1281,9 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "market_session": market_session,
         "_session_returns_withheld": returns_withheld,
         "volume": _to_float(payload.get("volume")),
-        "market_cap": _to_float(
-            _first_non_none(payload.get("market_cap"), payload.get("marketCap"))
-        ),
+        "market_cap": market_cap["value"],
+        "market_cap_provenance": market_cap,
+        "extended_metrics": payload.get("extended_metrics"),
         "shares_outstanding": _to_float(
             _first_non_none(payload.get("shares_outstanding"), payload.get("sharesOutstanding"))
         ),
@@ -1319,6 +1324,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
                 payload.get("value_traded"),
                 payload.get("valueTraded"),
                 payload.get("trading_value"),
+                _extract_snapshot_value_traded(metrics),
             )
         ),
         "updated_at": _first_non_none(
@@ -1329,6 +1335,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
         "constituent_date": _first_non_none(
             payload.get("trade_date"),
             payload.get("tradeDate"),
+            payload.get("constituent_date"),
         ),
     }
 
@@ -1676,6 +1683,7 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
                 .label("rn"),
             )
             .where(FinancialRatio.symbol.in_(unique_symbols))
+            .where(or_(FinancialRatio.source.is_(None), FinancialRatio.source != "issuer_report"))
             .subquery()
         )
 
@@ -1723,6 +1731,7 @@ async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[
                 .label("rn"),
             )
             .where(IncomeStatement.symbol.in_(unique_symbols))
+            .where(or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
             .subquery()
         )
         rows = (
@@ -1770,11 +1779,10 @@ async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str,
     )
     if not cache_result.hit or not cache_result.data:
         return []
-    rows = sorted(
-        cache_result.data,
-        key=lambda row: (row.market_cap is None, -(row.market_cap or 0)),
-    )[:limit]
-    return [_normalize_screener_row(row) for row in rows]
+    rows = [_normalize_screener_row(row) for row in cache_result.data]
+    rows = [row for row in rows if row.get("symbol")]
+    rows.sort(key=lambda row: (row["market_cap"] is None, -(row["market_cap"] or 0), row["symbol"]))
+    return rows[:limit]
 
 
 async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]:
@@ -2363,7 +2371,7 @@ def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
     summary="Get Market Heatmap Data",
     description="Get aggregated market data for treemap visualization. Supports grouping by sector/industry.",
 )
-@cached(ttl=120, key_prefix="market_heatmap_v2")
+@cached(ttl=120, key_prefix="market_heatmap_v3_cap_lineage")
 @_market_deadline
 async def get_heatmap_data(
     group_by: str = Query(
@@ -2442,7 +2450,7 @@ async def get_heatmap_data(
                         freshness,
                         len(cache_result.data),
                     )
-                    screener_data = [_normalize_screener_row(row) for row in cache_result.data]
+                    screener_data = list(cache_result.data)
                     cached = True
                     partial = not cache_result.hit
             except Exception as e:
@@ -2514,7 +2522,6 @@ async def get_heatmap_data(
             refreshed_rows = normalize_heatmap_rows(
                 screener_data,
                 _normalize_screener_row,
-                normalize_dict_rows=True,
             )
             refreshed_symbols = collect_heatmap_symbols(refreshed_rows)
             refreshed_metadata = await _load_stock_metadata(refreshed_symbols)
@@ -2544,6 +2551,19 @@ async def get_heatmap_data(
             normalized_rows = refreshed_rows
             cached = False
             partial = True
+
+        if group_by == "hnx30":
+            partial = partial or any(
+                (row.get("exchange") or "").upper() == "HNX" and row.get("market_cap") is None
+                for row in normalized_rows
+            )
+        elif size_metric == "market_cap":
+            partial = partial or any(
+                row.get("market_cap") is None
+                and (group_by != "vn30" or row["symbol"] in vn30_symbols)
+                and (_to_float(row.get("price")) or 0) > 0
+                for row in normalized_rows
+            )
 
         # Step 5: Create sector aggregations
         sectors = build_heatmap_sectors(
@@ -2920,6 +2940,7 @@ async def get_earnings_season(
             .label("rn"),
         )
         .where(IncomeStatement.period_type == "quarter")
+        .where(or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
         .subquery()
     )
 
@@ -2963,6 +2984,7 @@ async def get_earnings_season(
             IncomeStatement.eps,
         )
         .where(IncomeStatement.period_type == "quarter")
+        .where(or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"))
         .where(IncomeStatement.symbol.in_(symbols))
         .where(IncomeStatement.fiscal_year.in_(previous_years))
         .where(IncomeStatement.fiscal_quarter.in_(previous_quarters))
@@ -3054,7 +3076,7 @@ async def get_earnings_season(
 
 
 @router.get("/industry-bubble", response_model=IndustryBubbleResponse)
-@cached(ttl=300, key_prefix="industry_bubble_v2_certified")
+@cached(ttl=300, key_prefix="industry_bubble_v3_cap_lineage")
 @_market_deadline
 async def get_industry_bubble(
     symbol: str = Query(..., description="Reference symbol used to determine sector"),
@@ -3238,6 +3260,8 @@ async def get_industry_bubble(
                 size=float(size_value),
                 price=_to_float(row.get("price")),
                 change_pct=_to_float(row.get("change_pct")),
+                market_cap=row.get("market_cap"),
+                market_cap_provenance=row["market_cap_provenance"],
                 color=INDUSTRY_BUBBLE_COLORS[index % len(INDUSTRY_BUBBLE_COLORS)],
                 is_reference=ticker == reference_symbol,
             )
@@ -3248,13 +3272,13 @@ async def get_industry_bubble(
             status_code=404, detail="No comparable sector data available for bubble chart"
         )
 
-    points.sort(key=lambda item: item.size, reverse=True)
+    points.sort(key=lambda item: (-item.size, item.symbol))
     selected = points[:top_n]
     if not any(item.is_reference for item in selected):
         reference_point = next((item for item in points if item.is_reference), None)
         if reference_point is not None:
             selected = selected[:-1] + [reference_point]
-            selected.sort(key=lambda item: item.size, reverse=True)
+            selected.sort(key=lambda item: (-item.size, item.symbol))
 
     x_values = [point.x for point in points]
     y_values = [point.y for point in points]
@@ -3263,7 +3287,10 @@ async def get_industry_bubble(
         y=sum(y_values) / len(y_values) if y_values else None,
     )
 
-    updated_at = _latest_timestamp([row.get("updated_at") for row in sector_rows])
+    point_symbols = {point.symbol for point in points}
+    updated_at = _latest_timestamp(
+        [row.get("updated_at") for row in sector_rows if row.get("symbol") in point_symbols]
+    )
     return IndustryBubbleResponse(
         sector=sector_name,
         reference_symbol=reference_symbol,
@@ -3280,7 +3307,7 @@ async def get_industry_bubble(
 
 
 @router.get("/sector-board", response_model=SectorBoardResponse)
-@cached(ttl=180, key_prefix="sector_board")
+@cached(ttl=180, key_prefix="sector_board_v2_cap_lineage")
 async def get_sector_board(
     limit_per_sector: int = Query(default=15, ge=5, le=30),
     sectors: Optional[str] = Query(default=None),
@@ -3349,7 +3376,7 @@ async def get_sector_board(
         return value if value is not None else float("-inf")
 
     sector_payloads: List[SectorBoardSector] = []
-    sector_market_caps: Dict[str, float] = {}
+    sector_market_caps: Dict[str, float | None] = {}
     for sector_name, rows in grouped.items():
         valid_rows = [row for row in rows if _to_float(row.get("change_pct")) is not None]
         weighted_rows = [
@@ -3366,12 +3393,11 @@ async def get_sector_board(
             change_pct = (
                 sum(_to_float(row.get("change_pct")) or 0.0 for row in valid_rows) / len(valid_rows)
                 if valid_rows
-                else 0.0
+                else None
             )
-        sector_market_caps[sector_name] = sum(
-            _to_float(row.get("market_cap")) or 0.0 for row in rows
-        )
-        rows.sort(key=_sort_metric, reverse=True)
+        caps = [row["market_cap"] for row in rows if row.get("market_cap") is not None]
+        sector_market_caps[sector_name] = sum(caps) if caps else None
+        rows.sort(key=lambda row: (-_sort_metric(row), row["symbol"]))
         selected_rows = rows[:limit_per_sector]
 
         stocks = [
@@ -3381,6 +3407,7 @@ async def get_sector_board(
                 change_pct=_to_float(row.get("change_pct")),
                 volume=_to_float(row.get("volume")),
                 market_cap=_to_float(row.get("market_cap")),
+                market_cap_provenance=row["market_cap_provenance"],
                 color=_resolve_board_color(_to_float(row.get("change_pct"))),
             )
             for row in selected_rows
@@ -3395,7 +3422,11 @@ async def get_sector_board(
             )
         )
 
-    sector_payloads.sort(key=lambda item: sector_market_caps[item.name], reverse=True)
+    sector_payloads.sort(key=lambda item: (
+        sector_market_caps[item.name] is None,
+        -sector_market_caps[item.name] if sector_market_caps[item.name] is not None else 0,
+        item.name,
+    ))
 
     market_summary_rows = await _load_latest_market_indices_from_db(db)
     market_summary = {
@@ -3986,16 +4017,9 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
 
 @router.get("/forex-rates", response_model=ForexRatesResponse)
 async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexRatesResponse:
-    if vcb_exchange_rate is None:
-        return ForexRatesResponse(
-            count=0,
-            data=[],
-            source="vnstock:vcb_exchange_rate",
-            error="vcb_exchange_rate helper unavailable",
-        )
-
     def _sync_fetch() -> list[dict[str, Any]]:
-        frame = vcb_exchange_rate()
+        Retail, _ = import_vnstock_symbol("Retail")
+        frame = Retail().exchange_rate()
         if frame is None or len(frame.index) == 0:
             return []
 
@@ -4006,8 +4030,8 @@ async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexR
                 {
                     "currency_code": row.get("currency_code"),
                     "currency_name": row.get("currency_name"),
-                    "buy_cash": _to_float(row.get("buy _cash")),
-                    "buy_transfer": _to_float(row.get("buy _transfer")),
+                    "buy_cash": _to_float(row.get("buy_cash")),
+                    "buy_transfer": _to_float(row.get("buy_transfer")),
                     "sell": _to_float(row.get("sell")),
                     "date": row.get("date"),
                 }
@@ -4017,53 +4041,16 @@ async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexR
 
     try:
         data = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=15)
-        return ForexRatesResponse(count=len(data), data=data, source="vnstock:vcb_exchange_rate")
+        return ForexRatesResponse(count=len(data), data=data, source="vnstock5:Retail.exchange_rate")
     except Exception as e:
         logger.warning(f"Forex rates fetch failed: {e}")
         return ForexRatesResponse(
-            count=0, data=[], source="vnstock:vcb_exchange_rate", error=str(e)
+            count=0, data=[], source="vnstock5:Retail.exchange_rate", error=str(e)
         )
 
 
 @router.get("/commodities", response_model=CommoditiesResponse)
 async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> CommoditiesResponse:
-    def _sync_fetch() -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-
-        if btmc_goldprice is not None:
-            btmc = btmc_goldprice()
-            if btmc is not None and len(btmc.index) > 0:
-                for item in btmc.to_dict(orient="records"):
-                    rows.append(
-                        {
-                            "source": "BTMC",
-                            "name": item.get("name"),
-                            "symbol": item.get("karat"),
-                            "buy_price": _to_float(item.get("buy_price")),
-                            "sell_price": _to_float(item.get("sell_price")),
-                            "reference_price": _to_float(item.get("world_price")),
-                            "time": item.get("time"),
-                        }
-                    )
-
-        if sjc_gold_price is not None:
-            sjc = sjc_gold_price()
-            if sjc is not None and len(sjc.index) > 0:
-                for item in sjc.to_dict(orient="records"):
-                    rows.append(
-                        {
-                            "source": "SJC",
-                            "name": item.get("gold_type") or item.get("name") or "SJC Gold",
-                            "symbol": item.get("brand") or item.get("type") or "SJC",
-                            "buy_price": _to_float(item.get("buy_price") or item.get("buy")),
-                            "sell_price": _to_float(item.get("sell_price") or item.get("sell")),
-                            "reference_price": None,
-                            "time": item.get("updated_at") or item.get("time"),
-                        }
-                    )
-
-        return rows[:limit]
-
     try:
         yahoo_rows = await _fetch_yahoo_commodities(limit)
         if yahoo_rows:
@@ -4071,16 +4058,12 @@ async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> Commod
                 count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:commodities"
             )
 
-        if btmc_goldprice is None and sjc_gold_price is None:
-            return CommoditiesResponse(
-                count=0,
-                data=[],
-                source="vnstock:gold_price",
-                error="gold price helpers unavailable",
-            )
-
-        data = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=20)
-        return CommoditiesResponse(count=len(data), data=data, source="vnstock:gold_price")
+        return CommoditiesResponse(
+            count=0,
+            data=[],
+            source="vnstock:gold_price",
+            error="gold price helpers unavailable",
+        )
     except Exception as e:
         logger.warning(f"Commodities fetch failed: {e}")
         return CommoditiesResponse(

@@ -85,6 +85,29 @@ def _item(**overrides):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("second,expected", [(5730, "available"), (6000, "conflict")])
+async def test_scheduled_sync_reconciles_same_day_cap(test_db, monkeypatch, second, expected):
+    from vnibb.core.market_cap import resolve_market_cap
+
+    def item(value):
+        cap = resolve_market_cap({"market_cap": value, "market_cap_source": "issuer:cap",
+            "market_cap_unit": "VND", "market_cap_currency": "VND", "market_cap_as_of": TODAY.isoformat(),
+            "outstanding_shares": 100, "shares_unit": "shares", "shares_as_of": TODAY.isoformat(),
+            "shares_source": "issuer:shares", "share_basis": "outstanding"}, source="test")
+        return _item(market_cap=cap["value"], market_cap_provenance=cap, price=None)
+
+    assert await _run_sync(test_db, monkeypatch, [item(5730)]) == 1
+    assert await _run_sync(test_db, monkeypatch, [item(second)]) == 1
+    assert await _run_sync(test_db, monkeypatch, [item(5730)]) == 1
+    test_db.expire_all()
+    row = (await test_db.execute(select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == "VNM"))).scalar_one()
+    cap = row.extended_metrics["market_cap_provenance"]
+    assert cap["status"] == expected
+    assert row.market_cap == (5730 if expected == "available" else None)
+    assert {obs["value"] for obs in cap["observations"]} >= {5730, second}
+
+
+@pytest.mark.asyncio
 async def test_declared_but_unset_price_is_not_written_as_null(test_db: AsyncSession, monkeypatch):
     """A declared-but-unset price must be omitted, not written as NULL."""
     await _run_sync(test_db, monkeypatch, [_item(symbol="VNM", price=None)])
@@ -98,7 +121,8 @@ async def test_declared_but_unset_price_is_not_written_as_null(test_db: AsyncSes
     assert row.price is None
     assert row.trade_date is None
     # The rest of the row still landed, proving the sync ran.
-    assert row.market_cap == 1.26e14
+    assert row.market_cap is None
+    assert row.extended_metrics["market_cap_provenance"]["observations"][0]["value"] == 1.26e14
     assert row.exchange == "HOSE"
 
 
@@ -195,7 +219,8 @@ async def test_screener_sync_persists_nonempty_payload_with_ratio_only_metadata(
     rows = (await test_db.execute(select(ScreenerSnapshot))).scalars().all()
     assert len(rows) == 1
     row = rows[0]
-    assert (row.symbol, row.price, row.pe, row.market_cap, row.roe) == ("FPT", 60300, 14.2, 1.26e14, 0)
+    assert (row.symbol, row.price, row.pe, row.market_cap, row.roe) == ("FPT", 60300, 14.2, None, 0)
+    assert row.extended_metrics["market_cap_provenance"]["observations"][0]["value"] == 1.26e14
     assert row.roa is None
     assert row.net_margin is None
     assert row.revenue_growth is None
@@ -224,15 +249,15 @@ def test_screener_provider_uses_actual_history_contract(unit, source, price, exp
 @pytest.mark.parametrize(
     "provider_module,frame_source,unit,close,expected_price,expected_unit,expected_source",
     [
-        ("vnstock.explorer.kbs.quote", "KBS", None, 60.3, 60300, "VND", "vnstock_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "VCI", None, 60.3, 60300, "VND", "vnstock_history:VCI"),
-        ("vnstock.explorer.kbs.quote", "KBS", None, 0.5, 500, "VND", "vnstock_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "KBS", None, 100000, 100000000, "VND", "vnstock_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "KBS", "VND", 60300, 60300, "VND", "vnstock_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "KBS", "thousand_VND", 60.3, 60300, "VND", "vnstock5_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "VCI", "thousand_VND", 60.3, 60300, "VND", "vnstock5_history:VCI"),
+        ("vnstock.explorer.kbs.quote", "KBS", "thousand_VND", 0.5, 500, "VND", "vnstock5_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "KBS", "thousand_VND", 100000, 100000000, "VND", "vnstock5_history:KBS"),
+        ("vnstock.explorer.kbs.quote", "KBS", "VND", 60300, 60300, "VND", "vnstock5_history:KBS"),
         ("vnstock_data.explorer.kbs.quote", "KBS", "VND", 60300, 60300, "VND", "vnstock_data_history:KBS"),
         ("vnstock_data.explorer.kbs.quote", "KBS", None, 60300, 60300, "unknown", "vnstock_data_history:KBS"),
-        ("vnstock.explorer.kbs.quote", "MSN", None, 60300, 60300, "unknown", "vnstock_history:MSN"),
-        ("vnstock.explorer.kbs.quote", "MSN", None, 0.5, 0.5, "unknown", "vnstock_history:MSN"),
+        ("vnstock.explorer.kbs.quote", "MSN", None, 60300, 60300, "unknown", "vnstock5_history:MSN"),
+        ("vnstock.explorer.kbs.quote", "MSN", None, 0.5, 0.5, "unknown", "vnstock5_history:MSN"),
     ],
     ids=[
         "free-history",
@@ -293,11 +318,13 @@ async def test_pipeline_screener_history_enrichment_retains_actual_price_lineage
         symbols_by_industries = all_symbols
 
     class Finance:
-        def __init__(self, **kwargs):
-            pass
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
         def ratio(self, **kwargs):
-            return pd.DataFrame([{"item_id": "pe", "2025": 12}])
+            assert kwargs == {"source": "VCI", "period": "year", "lang": "en", "format": "long"}
+            return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12}])
 
     class Quote:
         def __init__(self, symbol, source):
@@ -324,7 +351,7 @@ async def test_pipeline_screener_history_enrichment_retains_actual_price_lineage
         cache.append(value)
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", pace)
@@ -378,12 +405,11 @@ async def test_pipeline_screener_history_enrichment_retains_actual_price_lineage
         assert row.pe == 12
         assert row.extended_metrics["price_unit"] == expected_unit
         assert row.extended_metrics["price_source"] == expected_source
+        assert row.market_cap is None
         if expected_unit == "VND":
-            assert row.market_cap == pytest.approx(shares * expected_price)
             expected_yield = dps / expected_price * 100
             assert row.dividend_yield == pytest.approx(expected_yield)
         else:
-            assert row.market_cap is None
             assert row.dividend_yield is None
 
     assert len(cache) == 1
@@ -392,8 +418,8 @@ async def test_pipeline_screener_history_enrichment_retains_actual_price_lineage
     assert cache[0]["price_source"] == expected_source
     assert cache[0]["trade_date"] == expected_trade_date.isoformat()
     assert cache[0]["volume"] == expected_volume
+    assert cache[0]["market_cap"] is None
     if expected_unit == "unknown":
-        assert cache[0]["market_cap"] is None
         assert cache[0]["dividend_yield"] is None
 
 
@@ -409,8 +435,8 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
     monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
     monkeypatch.setattr(data_pipeline_module.settings, "vnstock_source", "VCI")
     evidence = [
-        {"item_id": "roe", "unit": provider_unit, "2025": 0.25},
-        {"item_id": "debt_assets", "unit": provider_unit, "2025": 0.42},
+        {"period": "2025", "id": "roe", "name": "ROE", "unit": provider_unit, "value": 0.25},
+        {"period": "2025", "id": "debt_assets", "name": "Debt/assets", "unit": provider_unit, "value": 0.42},
     ]
 
     class Listing:
@@ -424,8 +450,9 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
         symbols_by_industries = all_symbols
 
     class Finance:
-        def __init__(self, **kwargs):
-            pass
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
 
         def ratio(self, **kwargs):
             return pd.DataFrame(evidence)
@@ -444,7 +471,7 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
         return None
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: Finance)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", pace)
@@ -476,6 +503,85 @@ async def test_pipeline_quote_less_refresh_pairs_stored_ratios_and_evidence(
         assert (row.price, row.volume, row.trade_date) == (60300, 100, TODAY - timedelta(days=1))
         assert row.extended_metrics["price_unit"] == "VND"
         assert row.extended_metrics["price_source"] == "vnstock_history:VCI"
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current,expected", [("certified", 2000), ("agree", 1000), ("unknown", None), ("absent", 1000)])
+@pytest.mark.parametrize("same_day", [False, True])
+async def test_pipeline_previous_cap_is_only_a_fallback(test_engine, monkeypatch, current, expected, same_day):
+    from vnibb.core.market_cap import resolve_market_cap
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr(data_pipeline_module.settings, "vnstock_source", "VCI")
+    old_day = TODAY if same_day else TODAY - timedelta(days=1)
+
+    def certified(value, day):
+        return {"market_cap": value, "market_cap_source": "issuer:cap", "market_cap_unit": "VND",
+                "market_cap_currency": "VND", "market_cap_as_of": day.isoformat(),
+                "outstanding_shares": 100, "shares_unit": "shares", "shares_as_of": day.isoformat(),
+                "shares_source": "issuer:shares", "share_basis": "outstanding"}
+
+    class Listing:
+        def __init__(self, **kwargs):
+            pass
+
+        def all_symbols(self):
+            cap = certified(2000 if current == "certified" else 1000, TODAY) if current in ("certified", "agree") else {"market_cap": 2000} if current == "unknown" else {}
+            return pd.DataFrame([{"symbol": "VNM", **cap}])
+
+        def symbols_by_exchange(self):
+            return pd.DataFrame()
+
+        symbols_by_industries = symbols_by_exchange
+
+    class Finance:
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
+
+        def ratio(self, **kwargs):
+            return pd.DataFrame([{"period": "2025", "id": "pe", "name": "P/E", "unit": "times", "value": 12}])
+
+    class Quote:
+        def __init__(self, **kwargs):
+            pass
+
+        def history(self, **kwargs):
+            return pd.DataFrame()
+
+    async def noop(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", noop)
+    monkeypatch.setattr(pipeline, "_cache_set_json", noop)
+    old_cap = resolve_market_cap(certified(1000, old_day), source="issuer")
+    async with sessions.begin() as session:
+        session.add(ScreenerSnapshot(
+            symbol="VNM", snapshot_date=old_day, trade_date=old_day, price=10, volume=1,
+            market_cap=old_cap["value"], extended_metrics={"market_cap_provenance": old_cap,
+                "price_unit": "VND", "price_source": "vnstock_history:VCI"},
+        ))
+
+    assert await pipeline.sync_screener_data(symbols=["VNM"]) == 1
+    async with sessions() as session:
+        rows = (await session.scalars(select(ScreenerSnapshot).where(ScreenerSnapshot.symbol == "VNM"))).all()
+        by_day = {row.snapshot_date: row for row in rows}
+        if not same_day:
+            assert by_day[old_day].market_cap == 1000
+        result = by_day[TODAY]
+        assert result.market_cap == (None if same_day and current == "certified" else expected)
+        cap = result.extended_metrics["market_cap_provenance"]
+        values = [obs["value"] for obs in cap["observations"]]
+        assert (1000 in values) is (same_day or current in ("absent", "agree"))
+        assert (2000 in values) is (current in ("certified", "unknown"))
+        if same_day and current == "certified":
+            assert cap["status"] == "conflict"
+        if same_day and current == "agree":
+            assert cap["status"] == "available"
 
 
 @pytest.mark.parametrize("provider_payload,expected", [
@@ -599,7 +705,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         def utcnow(cls):
             return observed.replace(tzinfo=None)
 
-    def board(self, symbols):
+    def board(self, symbols, **kwargs):
         calls.append(symbols)
         return [{
             "listingInfo": {
@@ -618,11 +724,24 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
     monkeypatch.setattr(data_pipeline_module, "async_session_maker", sessions)
     monkeypatch.setattr(data_pipeline_module, "datetime", FrozenDateTime)
     monkeypatch.setattr(VietcapClient, "get_price_board", board)
-    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: SimpleNamespace(enabled=False))
+    retained = SimpleNamespace(
+        retain_price_board_envelope=lambda *args: None,
+        retain_market_sessions=lambda records: {record["symbol"]: record for record in records},
+        verified_market_sessions=lambda records, envelopes: set(records),
+    )
+    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: retained)
     pipeline = DataPipeline()
     monkeypatch.setattr(pipeline, "_cache_set_json", cached)
     async with sessions.begin() as session:
-        session.add_all([Stock(symbol="AAA", is_active=1), Stock(symbol="BBB", is_active=1)])
+        stocks = [Stock(symbol="AAA", is_active=1), Stock(symbol="BBB", is_active=1)]
+        session.add_all(stocks)
+        await session.flush()
+        session.add(StockPrice(
+            id=1,
+            stock_id=stocks[1].id, symbol="BBB", time=session_date - timedelta(days=3),
+            open=20000, high=20000, low=20000, close=20000, volume=5,
+            interval="1D", source="vietcap_vnd",
+        ))
         session.add_all([
             ScreenerSnapshot(symbol="AAA", snapshot_date=session_date, trade_date=session_date, price=10000, volume=5, pe=12, extended_metrics={"price_unit": "VND", "price_source": "unverified", "ratio_units": {"roe": "percent"}, "market_session": {"raw": {"obsolete": True}}}),
             ScreenerSnapshot(symbol="BBB", snapshot_date=session_date, trade_date=session_date - timedelta(days=3), price=20000, volume=5, extended_metrics={"price_unit": "VND", "price_source": "vietcap_vnd"}),
@@ -645,7 +764,7 @@ async def test_pipeline_session_acquisition_is_opt_in_and_clears_unqualified_quo
         assert typed[0]["market_session_date"] == session_date.isoformat()
         assert typed[0]["expected_symbols"] == ["AAA", "BBB"]
 
-    def unavailable(self, symbols):
+    def unavailable(self, symbols, **kwargs):
         raise RuntimeError("source unavailable")
 
     monkeypatch.setattr(VietcapClient, "get_price_board", unavailable)

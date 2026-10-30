@@ -136,6 +136,8 @@ function mockHeatmapData(overrides: Partial<HeatmapResponse> = {}): HeatmapQuery
             sector: 'Banking',
             industry: 'Ngân hàng',
             market_cap: 1_000_000,
+            market_cap_provenance: null,
+            size_value: 1_000_000,
             price: 100,
             change: 1.2,
             change_pct: 1.2,
@@ -143,6 +145,8 @@ function mockHeatmapData(overrides: Partial<HeatmapResponse> = {}): HeatmapQuery
           },
         ],
         total_market_cap: 1_000_000,
+        total_size_value: 1_000_000,
+        cap_count: 1,
         avg_change_pct: 1.2,
         stock_count: 1,
       },
@@ -314,6 +318,71 @@ describe('MarketHeatmapWidget', () => {
         }),
       }),
     }));
+  });
+
+  it('uses explicit volume weights while preserving admitted cap coverage and provenance', () => {
+    const source = mockHeatmapData().data!;
+    const sector = source.sectors[0];
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      size_metric: 'volume',
+      sectors: [{ ...sector, total_size_value: 450, total_market_cap: null, cap_count: 0, stocks: [{ ...sector.stocks[0], size_value: 450, market_cap: 999, market_cap_provenance: null }] }],
+    }));
+    const onDataChange = jest.fn();
+    render(<MarketHeatmapWidget id="market-heatmap" onDataChange={onDataChange} />);
+    expect(screen.getByText('Size: Volume')).toBeInTheDocument();
+    expect(screen.getByText(/Admitted market cap: Unavailable/)).toHaveTextContent('Size (Volume): 450');
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ sizeMetric: 'volume', sectors: expect.any(Array) }));
+    fireEvent.click(screen.getByText(/Admitted market cap: Unavailable/).parentElement!);
+    expect(screen.getByText(/Market cap: Unavailable/)).toHaveTextContent('Size (Volume): 450');
+    expect(screen.getByText(/Market cap: Unavailable/)).not.toHaveTextContent('Market cap: 999');
+  });
+
+  it('retains certified market-cap provenance in stock chart details', () => {
+    const source = mockHeatmapData().data!;
+    const sector = source.sectors[0];
+    const provenance = {
+      status: 'available', value: 1_000_000, reason: null, source: 'Certified', unit: 'VND', currency: 'VND',
+      as_of: '2026-10-26', share_basis: 'outstanding', observations: [{ value: 1_000_000, source: 'Certified' }],
+    } as unknown as NonNullable<typeof sector.stocks[0]['market_cap_provenance']>;
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      sectors: [{ ...sector, stocks: [{ ...sector.stocks[0], market_cap_provenance: provenance }] }],
+    }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+    fireEvent.click(screen.getByText(/Admitted market cap:/).parentElement!);
+    expect(screen.getByText(/source Certified/)).toHaveTextContent('Market cap:');
+    expect(screen.getByText(/source Certified/)).toHaveTextContent('share basis outstanding');
+  });
+
+  it('labels traded-value weights without treating them as capitalization', () => {
+    const source = mockHeatmapData().data!;
+    const sector = source.sectors[0];
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      size_metric: 'value_traded', sectors: [{ ...sector, total_size_value: 250, total_market_cap: null, cap_count: 0 }],
+    }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+    expect(screen.getByText('Size: Traded value')).toBeInTheDocument();
+    expect(screen.getByText(/Admitted market cap: Unavailable/)).toHaveTextContent('Size (Traded value):');
+  });
+
+  it('rejects stale payloads without explicit size fields instead of using cap', () => {
+    const source = mockHeatmapData().data!;
+    const sector = source.sectors[0];
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      sectors: [{ ...sector, total_size_value: undefined } as unknown as typeof sector],
+    }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+    expect(screen.getByText('Market data unavailable')).toBeInTheDocument();
+  });
+
+  it('does not drill down using market cap when stock size is absent', () => {
+    const source = mockHeatmapData().data!;
+    const sector = source.sectors[0];
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      sectors: [{ ...sector, stocks: [{ ...sector.stocks[0], size_value: undefined } as unknown as typeof sector.stocks[0]] }],
+    }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+    fireEvent.click(screen.getByText(/Admitted market cap:/).parentElement!);
+    expect(screen.getByText('Market data unavailable')).toBeInTheDocument();
   });
 
   it('reports unavailable coverage instead of a flat zero-stock market', () => {

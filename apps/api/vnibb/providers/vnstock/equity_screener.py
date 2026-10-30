@@ -18,9 +18,11 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
+from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
-from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload, ratio_method_kwargs
-from vnibb.providers.vnstock import get_vnstock
+from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload
+from vnibb.providers.vnstock.financial_ratios import FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher
 from vnibb.providers.vnstock.runtime import validate_source
 from concurrent.futures import ThreadPoolExecutor
 
@@ -177,6 +179,7 @@ class ScreenerData(BaseModel):
     price_unit: PriceUnit = "unknown"
     price_source: Optional[str] = None
     volume: Optional[float] = Field(None, description="Trading volume")
+    value_traded: Optional[float] = Field(None, description="Source-reported traded value; unit is unqualified")
     change_1d: Optional[float] = Field(
         None, alias="change1D", description="Daily price change percentage"
     )
@@ -194,9 +197,11 @@ class ScreenerData(BaseModel):
     market_cap: Optional[float] = Field(
         None, alias="marketCap", description="Market capitalization"
     )
+    market_cap_provenance: Optional[dict[str, Any]] = None
     shares_outstanding: Optional[float] = Field(
-        None, alias="sharesOutstanding", description="Shares outstanding (millions)"
+        None, alias="sharesOutstanding", description="Certified outstanding shares"
     )
+    shares_outstanding_provenance: Optional[dict[str, Any]] = None
 
     # ==========================================================================
     # VALUATION RATIOS
@@ -485,6 +490,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
     provider_name = "vnstock"
     requires_credentials = False
+    propagate_provider_errors = True
 
     @staticmethod
     def transform_query(params: StockScreenerParams) -> dict[str, Any]:
@@ -504,12 +510,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-        """
-        Fetch screener data from vnstock.
-
-        vnstock.stock().company.ratio_summary() returns financial metrics.
-        We also fetch price/volume from quote.history() and company name from Listing.
-        """
+        """Fetch VCI listing, quotes, and optionally the plan-tier ratio table."""
         source = validate_source(query.get("source"))
         include_ratios = query.get("include_ratios", True)
         loop = asyncio.get_running_loop()
@@ -519,94 +520,39 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             try:
                 from datetime import datetime, timedelta
 
-                from vnibb.providers.vnstock.runtime import get_listing_class, get_quote_class
+                from vnibb.providers.vnstock.runtime import (
+                    get_listing_class, get_quote_class, import_vnstock_symbol,
+                )
 
                 Listing = get_listing_class()
-                stock = get_vnstock() if include_ratios else None
-                Quote = get_quote_class() if not include_ratios else None
+                Quote = get_quote_class()
+                Fundamental = import_vnstock_symbol("Fundamental")[0] if include_ratios else None
 
-                def _extract_ratio_snapshot(stock_obj: Any) -> dict[str, Any]:
-                    """Extract latest ratio snapshot from vnstock finance.ratio output."""
-                    finance_obj = getattr(stock_obj, "finance", None)
-                    if finance_obj is None:
-                        logger.debug("Missing finance object for stock screener item")
-                        return {}
-
-                    ratio_method = getattr(finance_obj, "ratio", None)
-                    if not callable(ratio_method):
-                        logger.debug("Missing finance.ratio() for stock screener item")
-                        return {}
-
-                    try:
-                        ratio_df = ratio_method(**ratio_method_kwargs(ratio_method, {"period": "year"}))
-                    except Exception as ratio_err:
-                        logger.debug("finance.ratio() failed: %s", ratio_err)
-                        return {}
-
+                def _extract_ratio_snapshot(symbol: str) -> dict[str, Any]:
+                    ratio_df = Fundamental().equity(symbol).ratio(
+                        source=source, period="year", lang="en", format="long",
+                    )
                     if ratio_df is None or ratio_df.empty:
                         return {}
-
-                    # New vnstock format: row-based (item/item_id + year columns)
-                    if "item_id" in ratio_df.columns:
-                        records = ratio_df.to_dict("records")
-                        year_cols = sorted(
-                            [c for c in ratio_df.columns if str(c).isdigit()],
-                            reverse=True,
+                    ratios = VnstockFinancialRatiosFetcher.transform_data(
+                        FinancialRatiosQueryParams(symbol=symbol, period="year"),
+                        ratio_df.to_dict("records"),
+                    )
+                    ratios = [ratio for ratio in ratios if ratio.period and ratio.period.isdigit()]
+                    if not ratios:
+                        raise ProviderError(
+                            message="Nonempty ratio response contains no admitted fiscal periods",
+                            provider="vnstock", details={"symbol": symbol},
                         )
-                        if not year_cols:
-                            return {}
-                        latest_year = str(year_cols[0])
-
-                        metrics: dict[str, Any] = {
-                            "year_report": int(latest_year),
-                        }
-                        metric_map = {
-                            "p_e": "pe",
-                            "p_b": "pb",
-                            "p_s": "ps",
-                            "roe": "roe",
-                            "roa": "roa",
-                            "trailing_eps": "eps",
-                            "book_value_per_share_bvps": "bvps",
-                            "gross_profit_margin": "gross_margin",
-                            "net_profit_margin": "net_margin",
-                            "short_term_ratio": "current_ratio",
-                            "quick_ratio": "quick_ratio",
-                        }
-
-                        liabilities = None
-                        owners_equity = None
-                        for row in records:
-                            item_id = row.get("item_id")
-                            if not item_id:
-                                continue
-                            value = row.get(latest_year)
-                            if value is None:
-                                continue
-                            if item_id in metric_map:
-                                metrics[metric_map[item_id]] = value
-                            elif item_id == "liabilities":
-                                liabilities = value
-                            elif item_id == "owners_equity":
-                                owners_equity = value
-
-                        if (
-                            metrics.get("de") is None
-                            and liabilities is not None
-                            and owners_equity not in (None, 0)
-                        ):
-                            metrics["de"] = liabilities / owners_equity
-
-                        return normalize_ratio_payload(metrics, records, latest_year)
-
-                    # Legacy format: one row per period with columns already normalized
-                    raw = ratio_df.head(1).to_dict("records")[0]
-                    return normalize_ratio_payload(raw, [raw])
+                    record = ratios[0].model_dump()
+                    record["year_report"] = int(ratios[0].period)
+                    record["de"] = record.get("debt_equity")
+                    return record
 
                 # Get company names mapping from Listing
                 listing = Listing(source=source)
-                symbols_df = listing.all_symbols() if include_ratios else listing.symbols_by_exchange()
-                if not include_ratios and symbols_df is not None and not symbols_df.empty:
+                symbols_df = listing.symbols_by_exchange()
+                if symbols_df is not None and not symbols_df.empty:
                     symbols_df = symbols_df[symbols_df["type"].eq("STOCK")]
 
                 def _to_float(value: Any) -> Optional[float]:
@@ -637,18 +583,14 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                         mapping[symbol_key] = {
                             "organ_name": row.get("organ_name") or row.get("organName"),
-                            "exchange": (row.get("comGroupCode") or row.get("exchange")) if include_ratios else (row.get("exchange") or "").upper() or None,
+                            "exchange": {"HSX": "HOSE"}.get(str(row.get("exchange") or "").upper(), str(row.get("exchange") or "").upper()) or None,
                             "industry_name": row.get("industryName") or row.get("industry_name"),
-                            "market_cap": _to_float(
-                                row.get("market_cap")
-                                or row.get("marketCap")
-                                or row.get("charter_capital")
-                            ) if include_ratios else None,
-                            "shares_outstanding": _to_float(
-                                row.get("shares_outstanding")
-                                or row.get("issue_share")
-                                or row.get("listed_shares")
-                            ) if include_ratios else None,
+                            **({key: row.get(key) for key in (
+                                "market_cap", "marketCap", "market_cap_source", "market_cap_unit",
+                                "market_cap_currency", "market_cap_as_of", "market_cap_provenance",
+                                "shares_outstanding", "outstanding_shares", "shares_unit", "shares_as_of",
+                                "shares_source", "share_basis",
+                            ) if row.get(key) is not None} if include_ratios else {}),
                         }
                     return mapping
 
@@ -660,9 +602,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                 # If single symbol requested, get that specific stock's data
                 if query["symbol"]:
-                    screener = stock.stock(symbol=query["symbol"], source=source) if include_ratios else None
-
-                    record = _extract_ratio_snapshot(screener) if include_ratios else {"ticker": query["symbol"]}
+                    record = _extract_ratio_snapshot(query["symbol"]) if include_ratios else {"ticker": query["symbol"]}
                     if record:
                         symbol_key = str(query["symbol"]).upper()
                         record["ticker"] = symbol_key
@@ -672,11 +612,10 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                         for key in (
                             "exchange",
                             "industry_name",
-                            "market_cap",
-                            "shares_outstanding",
                         ):
                             if record.get(key) is None and metadata.get(key) is not None:
                                 record[key] = metadata.get(key)
+                        record["listing_cap_record"] = metadata
 
                         # Debug: Log key valuation metrics
                         logger.debug(
@@ -687,7 +626,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                         # Get latest price/volume from quote.history()
                         try:
-                            quote = screener.quote if include_ratios else Quote(symbol=query["symbol"], source=source)
+                            quote = Quote(symbol=query["symbol"], source=source)
                             end_date = datetime.now()
                             start_date = end_date - timedelta(days=7)
                             hist = quote.history(
@@ -701,6 +640,9 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                 record["price_source"] = latest.get("price_source")
                                 record["price_unit"] = latest["price_unit"]
                                 record["volume"] = latest.get("volume")
+                                for key in ("value_traded", "valueTraded", "trading_value"):
+                                    if latest.get(key) is not None:
+                                        record[key] = latest[key]
                                 if latest_price is not None:
                                     record["trade_date"] = _coerce_trade_date(
                                         latest.get("time")
@@ -719,11 +661,10 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 exchange = query.get("exchange")
 
                 # Get all symbols for the exchange
-                all_symbols_df = listing.all_symbols(exchange=exchange) if include_ratios else symbols_df
-                if not include_ratios and exchange and all_symbols_df is not None and not all_symbols_df.empty:
-                    all_symbols_df = all_symbols_df[
-                        all_symbols_df["exchange"].str.upper().eq(exchange.upper())
-                    ]
+                all_symbols_df = symbols_df
+                if exchange and all_symbols_df is not None and not all_symbols_df.empty:
+                    exchange_values = all_symbols_df["exchange"].str.upper().replace({"HSX": "HOSE"})
+                    all_symbols_df = all_symbols_df[exchange_values.eq(exchange.upper())]
                 if all_symbols_df is None or all_symbols_df.empty:
                     logger.warning("No symbols found for exchange: %s", exchange)
                     return []
@@ -745,8 +686,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 def _fetch_single_stock(symbol: str) -> Optional[dict[str, Any]]:
                     """Fetch data for a single stock."""
                     try:
-                        stock_obj = stock.stock(symbol=symbol, source=source) if include_ratios else None
-                        record = _extract_ratio_snapshot(stock_obj) if include_ratios else {"ticker": symbol}
+                        record = _extract_ratio_snapshot(symbol) if include_ratios else {"ticker": symbol}
                         if record:
                             record["ticker"] = symbol
                             record["organ_name"] = name_map.get(symbol, "")
@@ -759,15 +699,14 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                             for key in (
                                 "exchange",
                                 "industry_name",
-                                "market_cap",
-                                "shares_outstanding",
                             ):
                                 if record.get(key) is None and metadata.get(key) is not None:
                                     record[key] = metadata.get(key)
+                            record["listing_cap_record"] = metadata
 
                             # Get latest price/volume
                             try:
-                                quote = stock_obj.quote if include_ratios else Quote(symbol=symbol, source=source)
+                                quote = Quote(symbol=symbol, source=source)
                                 # Use a slightly longer window to ensure we get data
                                 end_date = datetime.now()
                                 start_date = end_date - timedelta(days=10)
@@ -782,6 +721,9 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                     record["price_source"] = latest.get("price_source")
                                     record["price_unit"] = latest["price_unit"]
                                     record["volume"] = latest.get("volume")
+                                    for key in ("value_traded", "valueTraded", "trading_value"):
+                                        if latest.get(key) is not None:
+                                            record[key] = latest[key]
                                     if latest_price is not None:
                                         record["trade_date"] = _coerce_trade_date(
                                             latest.get("time")
@@ -795,11 +737,8 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                                 return None
                             return record
                     except Exception as e:
-                        error_msg = str(e)
-                        if "quá nhiều" in error_msg or "rate" in error_msg.lower():
-                            # Raise specific error to stop the whole executor if rate limited
-                            logger.warning(f"Rate limit hit while fetching {symbol}")
-                            raise e
+                        if include_ratios or _is_rate_limit_error(e):
+                            raise
                         logger.debug("Failed to fetch screener data for %s: %s", symbol, e)
                     return None
 
@@ -817,11 +756,8 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                             if res:
                                 results.append(res)
                         except Exception as e:
-                            error_msg = str(e)
-                            if "quá nhiều" in error_msg or "rate" in error_msg.lower():
-                                logger.warning("Rate limit detected in batch")
-                                # We can't easily cancel running futures, but we can stop processing
-                                break
+                            if include_ratios or _is_rate_limit_error(e):
+                                raise
                 except TimeoutError:
                     logger.warning(f"Parallel screener fetch timed out after {batch_timeout}s")
                 finally:
@@ -831,21 +767,22 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 logger.info("Fetched screener data for %d/%d stocks", len(results), len(symbols))
                 return results
 
-            except Exception as e:
+            except (Exception, SystemExit) as e:
                 if _is_rate_limit_error(e):
                     logger.warning(f"VNStock rate limit hit in _fetch_sync: {e}")
-                    raise ProviderRateLimitError(provider="vnstock", retry_after=60)
+                    raise ProviderRateLimitError(provider="vnstock", retry_after_seconds=60)
 
-                if _is_recoverable_screener_error(e):
+                if not include_ratios and _is_recoverable_screener_error(e):
                     logger.debug("Recoverable vnstock screener issue: %s", e)
                     return []
 
                 logger.error(f"vnstock screener fetch error: {e}")
+                code = getattr(e, "code", None)
+                message = f"{code}: {e}" if code else str(e)
                 raise ProviderError(
-                    message=str(e),
-                    provider="vnstock",
-                    details={"query": query},
-                )
+                    message=message, provider="vnstock",
+                    details={"query": query, "provider_code": code},
+                ) from e
 
         key = tuple(sorted(query.items()))
         future = _screener_jobs.get(key)
@@ -896,6 +833,9 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             "price": "price",
             "close": "price",
             "volume": "volume",
+            "value_traded": "value_traded",
+            "valueTraded": "value_traded",
+            "trading_value": "value_traded",
             "trade_date": "trade_date",
             "tradeDate": "trade_date",
             "trading_date": "trade_date",
@@ -916,7 +856,6 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             # Market Cap & Shares
             "marketCap": "market_cap",
             "market_cap": "market_cap",
-            "charter_capital": "market_cap",
             "shares_outstanding": "shares_outstanding",
             "issue_share": "shares_outstanding",  # vnstock 3.x actual column
             # =================================================================
@@ -1084,6 +1023,19 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 mapped["net_profit_growth"] = admitted_ratio_value(
                     mapped.get("earnings_growth"), "earnings_growth", ratio_units=mapped["ratio_units"],
                 )
+                cap = resolve_market_cap(row, source="vnstock:screener")
+                listing = row.get("listing_cap_record")
+                if isinstance(listing, dict) and any(
+                    listing.get(key) is not None for key in ("market_cap", "marketCap", "market_cap_provenance")
+                ):
+                    cap = reconcile_market_caps(cap, resolve_market_cap(listing, source="vnstock:listing"))
+                mapped["market_cap"] = cap["value"]
+                mapped["market_cap_provenance"] = cap
+                shares = resolve_screener_shares(row, source="vnstock:screener")
+                if not shares["observations"] and isinstance(listing, dict):
+                    shares = resolve_screener_shares(listing, source="vnstock:listing")
+                mapped["shares_outstanding"] = shares["value"]
+                mapped["shares_outstanding_provenance"] = shares
 
                 mapped["updated_at"] = datetime.utcnow()
 

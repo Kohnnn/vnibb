@@ -364,6 +364,19 @@ def test_interest_admission_preserves_certified_true_label_including_zero(value)
     assert admit_statement_rows([row], "FY")[0].interest_expense == value
 
 
+@pytest.mark.parametrize("value", [0, -42, 100])
+def test_issuer_statement_is_withheld_even_with_generic_unit_evidence(value):
+    raw = {"issuer_evidence": {"document_hash": "abc", "page": 12, "currency": "VND", "value_unit": "VND"}}
+    row = FinancialStatementData(symbol="FPT", period="2025", fiscal_year=2025,
+        statement_type="income", source="issuer_report", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="annual", revenue=value, raw_data=raw,
+        unit_metadata={"revenue": {"source_unit": "VND", "value_unit": "VND"}})
+    admitted = admit_statement_rows([row], "year")[0]
+    assert admitted.revenue is None
+    assert admitted.unavailable_reason == "issuer_field_evidence_not_admitted"
+    assert admitted.raw_data == raw
+    assert row.revenue == value
+
 def test_statement_rejection_overrides_certified_fields_without_rewriting_evidence():
     raw = {"original_revenue": 100, "source_record": "FPT:2025"}
     row = FinancialStatementData(symbol="FPT", period="2025", fiscal_year=2025,

@@ -474,6 +474,61 @@ async def test_existing_socket_receives_session_transition(monkeypatch):
         with pytest.raises(asyncio.CancelledError):
             await task
 
+@pytest.mark.asyncio
+async def test_broadcaster_propagates_cancellation_when_subscription_wakeup_completes(monkeypatch):
+    manager = ConnectionManager()
+    monkeypatch.setattr(websocket_api, "manager", manager)
+    woke = asyncio.Event()
+    broadcaster = None
+
+    async def wake_and_cancel():
+        if not woke.is_set():
+            woke.set()
+            broadcaster.cancel()
+            return
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(manager.subscriptions_changed, "wait", wake_and_cancel)
+    broadcaster = asyncio.create_task(websocket_api.fetch_and_broadcast_prices())
+    try:
+        await asyncio.wait_for(woke.wait(), 0.5)
+        done, _ = await asyncio.wait({broadcaster}, timeout=0.5)
+        assert broadcaster in done, "Broadcaster swallowed cancellation on subscription wakeup"
+        with pytest.raises(asyncio.CancelledError):
+            await broadcaster
+    finally:
+        if not broadcaster.done():
+            broadcaster.cancel()
+        await asyncio.gather(broadcaster, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_price_cycle_propagates_cancellation_when_cycle_completes(monkeypatch):
+    cycle = None
+
+    async def finish_and_cancel(*_args):
+        cycle.cancel()
+
+    monkeypatch.setattr(websocket_api, "_fetch_and_broadcast_cycle", finish_and_cancel)
+    cycle = asyncio.create_task(websocket_api._run_price_cycle({"FPT"}, False))
+    with pytest.raises(asyncio.CancelledError):
+        await cycle
+
+
+@pytest.mark.asyncio
+async def test_send_propagates_cancellation_when_send_completes():
+    manager = ConnectionManager()
+    websocket = FakeWebSocket()
+    manager.active_connections[websocket] = set()
+    send_task = None
+
+    async def send_and_cancel(_payload):
+        send_task.cancel()
+
+    websocket.send_json = send_and_cancel
+    send_task = asyncio.create_task(manager.send_json(websocket, {"type": "market_status"}, 0.5))
+    with pytest.raises(asyncio.CancelledError):
+        await send_task
 
 @pytest.mark.asyncio
 async def test_blocked_sync_worker_keeps_slot_and_does_not_duplicate(monkeypatch):
@@ -738,6 +793,7 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
         return future
 
     class History:
+        attrs = {"price_unit": "THOUSAND_VND"}
         empty = False
 
         def __init__(self, price):
@@ -747,19 +803,17 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
             return [{"time": datetime.now().isoformat(), "close": self.price, "volume": 123}]
 
     class Provider:
-        def stock(self, **kwargs):
+        def __init__(self, **kwargs):
             calls.append(kwargs)
-            price = 70.1
+            self.price = 70.1
             if kwargs["symbol"] == "FPT":
-                price = 57.4 if sum(call["symbol"] == "FPT" for call in calls) == 1 else 57.6
+                self.price = 57.4 if sum(call["symbol"] == "FPT" for call in calls) == 1 else 57.6
 
-            def history(**_kwargs):
-                loop.call_soon_threadsafe(started.set)
-                if not release.wait(5):
-                    raise TimeoutError("Test did not release quote worker")
-                return History(price)
-
-            return SimpleNamespace(quote=SimpleNamespace(history=history))
+        def history(self, **_kwargs):
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(5):
+                raise TimeoutError("Test did not release quote worker")
+            return History(self.price)
 
     async def no_quote(*_args, **_kwargs):
         return None
@@ -775,7 +829,7 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
         [json.dumps({"action": "subscribe", "symbols": ["VNM"]})], keep_open=True,
     )
     monkeypatch.setattr(loop, "run_in_executor", submit)
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Provider)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Provider)
     monkeypatch.setattr(runtime, "_reference_jobs", {})
     monkeypatch.setattr(QuoteCache, "_cache", {})
     monkeypatch.setattr(QuoteCache, "_ttl_seconds", 0)

@@ -194,7 +194,7 @@ def test_build_dividends_context_keeps_recent_items_and_summary():
 
 def test_price_context_normalizes_full_orm_lineage_before_returns():
     days = []
-    cursor = date(2026, 4, 1)
+    cursor = date(2026, 3, 2)
     while len(days) < 21:
         if cursor.weekday() < 5:
             days.append(cursor)

@@ -62,6 +62,21 @@ test('compact controls retain parameter edits and settings access, returning foc
   expect(screen.queryByRole('button', { name: 'More controls for Long company price history' })).not.toBeInTheDocument();
 });
 
+test('toolbar uses its grid cell width when expanded content overflows the header', () => {
+  jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const isExpandedHeader = this.classList.contains('select-none') && !this.querySelector('[aria-label^="More controls for"]');
+    const measuredWidth = isExpandedHeader && width < 544 ? 600 : width;
+    return { width: measuredWidth, height: 36, top: 0, left: 0, bottom: 36, right: measuredWidth, x: 0, y: 0, toJSON() {} };
+  });
+
+  render(<ToolbarHarness />);
+  expect(screen.getByRole('button', { name: 'More controls for Long company price history' })).toBeInTheDocument();
+
+  act(() => { width = 900; observers.forEach(callback => callback()); });
+  expect(screen.getByRole('combobox', { name: 'Period' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'More controls for Long company price history' })).not.toBeInTheDocument();
+});
+
 test.each(['mouseDown', 'pointerDown', 'touchStart'] as const)('compact parameter %s cannot start its surrounding grid drag', eventName => {
   function GridDragHarness() {
     const [dragging, setDragging] = useState(false);

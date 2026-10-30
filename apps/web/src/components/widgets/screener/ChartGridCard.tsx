@@ -30,7 +30,7 @@ export function ChartGridCard({
   tradeDate,
   onAddToWatchlist,
 }: ChartGridCardProps) {
-  const isPositive = (changePercent ?? 0) >= 0;
+  const isPositive = changePercent !== null && changePercent > 0;
 
   return (
     <div
@@ -61,9 +61,9 @@ export function ChartGridCard({
         </span>
         <span className={cn(
             "text-[10px] font-black px-1.5 py-0.5 rounded",
-            changePercent === null ? 'text-[var(--text-muted)]' : isPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+            changePercent === null || changePercent === 0 ? 'text-[var(--text-muted)]' : isPositive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
         )}>
-          {changePercent === null ? '—' : `${isPositive ? '▲' : '▼'}${Math.abs(changePercent).toFixed(2)}%`}
+          {changePercent === null ? '—' : `${changePercent === 0 ? '' : isPositive ? '▲' : '▼'}${Math.abs(changePercent).toFixed(2)}%`}
         </span>
       </div>
     </div>

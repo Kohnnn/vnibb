@@ -92,6 +92,25 @@ export function resolveMetric(candidates: MetricCandidate[]): MetricResult {
   return { value: null, source: 'Unavailable' };
 }
 
+export function certifiedProfileShares(profile: { outstanding_shares?: number | null; shares_unit?: string | null; shares_source?: string | null; share_basis?: string | null; shares_as_of?: string | null } | null | undefined): number | null {
+  if (profile?.shares_unit !== 'shares' || profile.share_basis !== 'outstanding' || typeof profile.shares_source !== 'string' || !profile.shares_source.trim()) return null;
+  const date = profile.shares_as_of;
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(date)) return null;
+  if (date.length > 10 && (Number(date.slice(11, 13)) > 23 || Number(date.slice(14, 16)) > 59 || Number(date.slice(17, 19)) > 59)) return null;
+  const day = date.slice(0, 10);
+  const calendarDate = new Date(`${day}T00:00:00Z`);
+  if (!Number.isFinite(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== day) return null;
+  const marketDay = (value: Date) => {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(value);
+    return ['year', 'month', 'day'].map((type) => parts.find((part) => part.type === type)?.value).join('-');
+  };
+  const timestamp = date.length === 10 ? null : new Date(/[Zz]|[+-]\d{2}:\d{2}$/.test(date) ? date : `${date}+07:00`);
+  if (timestamp && !Number.isFinite(timestamp.getTime())) return null;
+  if (day > marketDay(new Date())) return null;
+  const value = profile.outstanding_shares;
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /** Bound a percent value to the [0, 100] range, returning 0 for non-finite input. */
 export function clampPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;

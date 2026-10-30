@@ -12,26 +12,28 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Generic, List, Optional, TypeVar
 
-from sqlalchemy import Float, and_, case, func, or_, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import JSON, Date, Float, String, and_, case, cast, func, literal_column, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache_constants import DB_CACHE_TTLS
 from vnibb.core.database import async_session_factory
+from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import normalize_screener_record
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.services.market_session import expected_market_session, session_coverage
-from vnibb.services.screener_metadata import screener_metadata_updates
+from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
 _QUALIFIED_RETAINED_PRICE_SOURCES = frozenset({"vietcap_vnd", "vnstock_vnd"} | {
     f"{prefix}:{provider}"
-    for prefix in ("vnstock_vnd", "vnstock_history", "vnstock_data_history")
+    for prefix in ("vnstock_vnd", "vnstock_history", "vnstock_data_history", "vnstock5_history")
     for provider in ("KBS", "VCI", "TCBS")
 })
 T = TypeVar("T")
@@ -61,20 +63,23 @@ def snapshot_session_coverage(
     coverage = session_coverage(record, row.symbol, expected_session)
     if coverage is None:
         return None
+    trade_date = _coerce_date(row.trade_date)
+    if row.trade_date is not None and trade_date is None:
+        return None
     try:
         observed_at = datetime.fromisoformat(record["observed_at"].replace("Z", "+00:00"))
         current_utc = now.replace(tzinfo=UTC) if now.tzinfo is None else now.astimezone(UTC)
         if observed_at.tzinfo is None or observed_at > current_utc:
             return None
-        if row.trade_date is not None and row.trade_date > expected_session:
+        if trade_date is not None and trade_date > expected_session:
             return None
         if coverage != "traded":
             if row.volume != 0:
                 return None
             if row.price is None:
-                return coverage if row.trade_date is None else None
+                return coverage if trade_date is None else None
             if (
-                row.trade_date is None or row.trade_date >= expected_session
+                trade_date is None or trade_date >= expected_session
                 or not math.isfinite(row.price) or row.price <= 0
                 or metrics.get("price_unit") != "VND"
                 or metrics.get("price_source") not in _QUALIFIED_RETAINED_PRICE_SOURCES
@@ -83,7 +88,7 @@ def snapshot_session_coverage(
             return coverage
         match = record["raw"]["matchPrice"]
         if (
-            row.trade_date != expected_session
+            trade_date != expected_session
             or metrics.get("price_unit") != "VND"
             or metrics.get("price_source") != "vietcap_vnd"
             or row.price is None or not math.isfinite(row.price) or row.price <= 0
@@ -126,7 +131,19 @@ def source_update_condition(model, source: str | None):
         return model.source == source
     if source == "vietcap_vnd":
         return model.source.in_(("vietcap", "vietcap_vnd"))
-    return or_(model.source.is_(None), model.source.not_in(("vietcap", "vietcap_vnd")))
+    excluded = ("vietcap", "vietcap_vnd", "issuer_report") if model.__tablename__ in {
+        "income_statements", "balance_sheets", "cash_flows", "financial_ratios"
+    } else ("vietcap", "vietcap_vnd")
+    return or_(model.source.is_(None), model.source.not_in(excluded))
+
+
+async def lock_ratio_writes(session: AsyncSession, symbol: str, period: str) -> None:
+    if session.get_bind().dialect.name == "postgresql":
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(
+                f"vnibb:financial_ratios:{symbol.upper()}:{period}", 0
+            )))
+        )
 
 
 def _retains_financial_evidence(existing: Any, incoming: Any) -> bool:
@@ -496,6 +513,22 @@ class CacheManager:
                         key in record or key in (record.get("extended_metrics") or {})
                     )):
                         extended_metrics[key] = value
+                share_keys = ("shares_outstanding", "outstanding_shares", "sharesOutstanding", "issue_share")
+                metrics = record.get("extended_metrics") or {}
+                if any(record.get(key) is not None for key in (*share_keys, "shares_outstanding_provenance")):
+                    share_record = record
+                else:
+                    share_record = metrics
+                shares = resolve_screener_shares(share_record, source=f"cache:{source}")
+                if shares["observations"]:
+                    extended_metrics["shares_outstanding_provenance"] = shares
+                cap_fields = ("market_cap", "marketCap", "market_cap_provenance", "shares_outstanding", "outstanding_shares")
+                cap_input = any(record.get(key) is not None for key in cap_fields) or any(
+                    (record.get("extended_metrics") or {}).get(key) is not None for key in cap_fields
+                )
+                cap = resolve_market_cap(record, source=f"cache:{source}") if cap_input else {"value": None, "observations": [], "status": "unavailable"}
+                if cap["observations"] or cap["status"] == "conflict":
+                    extended_metrics["market_cap_provenance"] = cap
                 compact_extended_metrics = {
                     key: value for key, value in extended_metrics.items()
                     if value is not None or key == "market_session"
@@ -521,7 +554,7 @@ class CacheManager:
                     "industry": record.get("industry_name") or record.get("industryName"),
                     "price": price_value,
                     "volume": record.get("volume"),
-                    "market_cap": record.get("market_cap") or record.get("marketCap"),
+                    "market_cap": cap["value"],
                     "pe": record.get("pe"),
                     "pb": record.get("pb"),
                     "ps": record.get("ps"),
@@ -577,26 +610,55 @@ class CacheManager:
             # the retention sweep, not by an incidental request-path write.
             dialect_name = session.get_bind().dialect.name
             dialect_insert = insert if dialect_name == "postgresql" else sqlite_insert
-            stmt = dialect_insert(ScreenerSnapshot).values(prep_data)
-
-            update_cols = {
-                k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
-                for k in prep_data[0].keys()
-                if k not in ["symbol", "snapshot_date", "source"]
-            }
-            quote_missing = stmt.excluded.price.is_(None)
-            for column in ("trade_date", "volume"):
-                update_cols[column] = case(
-                    (quote_missing, ScreenerSnapshot.__table__.c[column]),
-                    else_=update_cols[column],
+            # INSERT has no outer SELECT to auto-correlate; refer to its conflict target directly.
+            stored_symbol = literal_column("screener_snapshots.symbol", String)
+            stored_date = literal_column("screener_snapshots.snapshot_date", Date)
+            stored_metrics = literal_column("screener_snapshots.extended_metrics", JSON)
+            receipt = SyncStatus.additional_data
+            expected = receipt["expected_symbols"]
+            if dialect_name == "postgresql":
+                expected = cast(expected, JSONB)
+                expected = case((func.jsonb_typeof(expected) == "array", expected), else_=cast("[]", JSONB))
+                members = func.jsonb_array_elements_text(expected).table_valued("value")
+                expected_count = func.jsonb_array_length(expected)
+            else:
+                members = func.json_each(expected).table_valued("value")
+                expected_count = func.json_array_length(expected)
+            member_matches = select(members.c.value).where(
+                members.c.value == stored_symbol,
+            ).correlate(SyncStatus).exists()
+            stored_session = stored_metrics["market_session"]
+            admitted_session = select(SyncStatus.id).select_from(SyncStatus).where(
+                SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed",
+                SyncStatus.error_count == 0, SyncStatus.completed_at.is_not(None),
+                receipt["snapshot_date"].as_string() == cast(stored_date, String),
+                receipt["market_session_date"].as_string() == stored_session["session_date"].as_string(),
+                cast(receipt["expected_count"].as_string(), String) == cast(expected_count, String),
+                SyncStatus.success_count == expected_count, expected_count > 0,
+                stored_session["source"].as_string() == "vietcap",
+                stored_session["scope"].as_string() == "vietcap_board",
+                stored_session["symbol"].as_string() == stored_symbol,
+                member_matches,
+            ).exists()
+            for values in prep_data:
+                stmt = dialect_insert(ScreenerSnapshot).values(**values)
+                update_cols = {
+                    k: func.coalesce(stmt.excluded[k], ScreenerSnapshot.__table__.c[k])
+                    for k in values
+                    if k not in ["symbol", "snapshot_date", "source"]
+                }
+                quote_missing = stmt.excluded.price.is_(None)
+                for column in ("price", "trade_date", "volume", "created_at"):
+                    preserve = quote_missing | admitted_session if column in {"trade_date", "volume"} else admitted_session
+                    update_cols[column] = case(
+                        (preserve, ScreenerSnapshot.__table__.c[column]), else_=update_cols[column],
+                    )
+                update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing | admitted_session))
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["symbol", "snapshot_date"], set_=update_cols
                 )
-            update_cols.update(screener_metadata_updates(stmt, dialect_name, quote_missing))
-
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["symbol", "snapshot_date"], set_=update_cols
-            )
-
-            await session.execute(stmt)
+                result = await session.execute(stmt.returning(*ScreenerSnapshot.__table__.c))
+                await reconcile_snapshot_cap(session, dict(result.mappings().one()), values)
             await session.commit()
 
             logger.info(f"Stored {len(prep_data)} screener records (source={source})")
@@ -717,40 +779,37 @@ class CacheManager:
             )
             listing_date = _parse_optional_date(data.get("listing_date") or data.get("listingDate"))
 
-            def _normalize_share_count(value: Any) -> Optional[float]:
-                if value is None:
-                    return None
+            def _share_count(value: Any) -> Optional[float]:
                 try:
                     numeric = float(value)
                 except (TypeError, ValueError):
                     return None
-                if numeric == 0:
-                    return None
-                if abs(numeric) < 1_000_000:
-                    return numeric * 1_000_000.0
-                return numeric
+                return numeric if math.isfinite(numeric) and numeric > 0 else None
 
-            def _resolve_listed_share_count(
-                listed_value: Any,
-                outstanding_value: Any,
-            ) -> Optional[float]:
-                listed_shares = _normalize_share_count(listed_value)
-                outstanding_shares = _normalize_share_count(outstanding_value)
-                if listed_shares is None:
-                    return outstanding_shares
-                if outstanding_shares is None:
-                    return listed_shares
-
-                gap_ratio = abs(outstanding_shares - listed_shares) / max(outstanding_shares, 1.0)
-                if listed_shares < outstanding_shares and gap_ratio <= 0.02:
-                    return outstanding_shares
-                return listed_shares
-
-            outstanding_shares = _normalize_share_count(data.get("outstanding_shares"))
-            listed_shares = _resolve_listed_share_count(
-                data.get("listed_shares"),
-                outstanding_shares,
-            )
+            share_count_keys = ("outstanding_shares", "shares_outstanding", "sharesOutstanding")
+            share_metadata_keys = ("shares_unit", "shares_as_of", "shares_source", "share_basis",
+                                   "outstanding_shares_unit", "outstanding_shares_as_of",
+                                   "outstanding_shares_source")
+            share_keys = (*share_count_keys, *share_metadata_keys, "shares_outstanding_provenance")
+            incoming_shares = next((data[key] for key in share_count_keys if data.get(key) is not None), None)
+            outstanding_shares = _share_count(incoming_shares)
+            listed_shares = _share_count(data.get("listed_shares"))
+            incoming_share_evidence = resolve_screener_shares(data, source="cache:profile")
+            share_conflict = incoming_share_evidence["status"] == "conflict"
+            cap = resolve_market_cap(data, source="cache:profile")
+            raw_data = dict(data)
+            share_update = outstanding_shares is not None or share_conflict
+            for key in share_keys:
+                raw_data.pop(key, None)
+            if share_update and not share_conflict:
+                raw_data["outstanding_shares"] = incoming_shares
+                raw_data.update({key: data[key] for key in share_metadata_keys if data.get(key) is not None})
+                if isinstance(data.get("shares_outstanding_provenance"), dict):
+                    raw_data["shares_outstanding_provenance"] = data["shares_outstanding_provenance"]
+            raw_data.pop("market_cap", None)
+            raw_data.pop("marketCap", None)
+            raw_data.pop("market_cap_provenance", None)
+            # Capitalization is reconciled after the upsert acquires the row lock.
 
             values = {
                 "symbol": symbol,
@@ -764,12 +823,12 @@ class CacheManager:
                 "listing_date": listing_date,
                 "website": data.get("website") or None,
                 "business_description": data.get("description") or None,
-                "outstanding_shares": outstanding_shares,
+                "outstanding_shares": None if share_conflict else outstanding_shares,
                 "listed_shares": listed_shares,
                 "address": data.get("address") or None,
                 "phone": data.get("phone") or None,
                 "email": data.get("email") or None,
-                "raw_data": data or None,
+                "raw_data": {},
                 "created_at": now,
                 "updated_at": now,
             }
@@ -780,9 +839,46 @@ class CacheManager:
                 for key in values
                 if key not in {"symbol", "created_at"}
             }
-            await session.execute(
+            updates["raw_data"] = Company.raw_data
+            result = await session.execute(
                 stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates)
+                .returning(Company.raw_data, Company.outstanding_shares)
             )
+            stored_raw_value, stored_shares = result.one()
+            stored_raw = dict(stored_raw_value or {})
+            old_cap = resolve_market_cap(stored_raw, source="postgres:company_profile")
+            if share_conflict:
+                old_shares = resolve_screener_shares(stored_raw, source="postgres:company_profile")
+                observations = old_shares["observations"] + [
+                    item for item in incoming_share_evidence["observations"]
+                    if item not in old_shares["observations"]
+                ]
+                if stored_shares is not None and not any(item.get("value") == stored_shares for item in observations):
+                    observations.append({"value": stored_shares, "unit": None, "as_of": None,
+                                         "source": None, "share_basis": None,
+                                         "record_source": "postgres:company_profile_column"})
+                raw_data["shares_outstanding_provenance"] = {
+                    **incoming_share_evidence, "status": "conflict", "value": None,
+                    "observations": observations,
+                }
+                raw_data["shares_outstanding_provenance"]["previous_record"] = {
+                    key: stored_raw[key] for key in share_keys if key in stored_raw
+                }
+                raw_data["shares_outstanding_provenance"]["incoming_record"] = {
+                    key: data[key] for key in (*share_count_keys, *share_metadata_keys) if data.get(key) is not None
+                }
+            if share_update:
+                for key in share_keys:
+                    stored_raw.pop(key, None)
+            stored_raw.update({key: value for key, value in raw_data.items() if value is not None})
+            if cap["observations"] or cap["status"] == "conflict":
+                reconciled = reconcile_market_caps(old_cap, cap)
+                stored_raw.pop("marketCap", None)
+                stored_raw.update(market_cap=reconciled["value"], market_cap_provenance=reconciled)
+            updates = {"raw_data": stored_raw}
+            if share_conflict:
+                updates["outstanding_shares"] = None
+            await session.execute(update(Company).where(Company.symbol == symbol).values(**updates))
 
             await session.commit()
             logger.info(f"Stored profile in cache: {symbol}")
@@ -1012,6 +1108,9 @@ class CacheManager:
         session = await self._get_session()
         own_session = self._db is None
         try:
+            if model.__tablename__ == "financial_ratios":
+                for symbol, period in sorted({(row["symbol"].upper(), row["period_type"]) for row in rows}):
+                    await lock_ratio_writes(session, symbol, period)
             dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
             count = 0
             conflicts = []
@@ -1027,7 +1126,7 @@ class CacheManager:
                     source = values.get("source")
                     allowed = (existing.source == "vietcap" if source == "vietcap" else
                                existing.source in {"vietcap", "vietcap_vnd"} if source == "vietcap_vnd" else
-                               existing.source not in {"vietcap", "vietcap_vnd"})
+                               existing.source not in {"vietcap", "vietcap_vnd", "issuer_report"})
                     if not allowed:
                         conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
                         continue
@@ -1083,6 +1182,8 @@ class CacheManager:
         models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow, "ratio": FinancialRatio}
         if statement_type not in models or period not in {"year", "quarter"}:
             raise ValueError("Unsupported financial statement or period")
+        if source == "issuer_report":
+            raise ValueError("issuer_report persistence is not enabled")
         model = models[statement_type]
         aliases = {
             "operating_expense": "operating_expenses", "profit_before_tax": "income_before_tax",
