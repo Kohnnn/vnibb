@@ -1,7 +1,6 @@
 import math
 
 import pytest
-
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
