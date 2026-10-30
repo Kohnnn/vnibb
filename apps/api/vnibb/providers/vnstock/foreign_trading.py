@@ -7,18 +7,18 @@ Fetches foreign investor buying/selling data for Vietnam-listed stocks.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-from vnibb.providers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
 
-def _safe_float(value: Any) -> float | None:
+def _safe_float(value: Any) -> Optional[float]:
     if value is None:
         return None
     try:
@@ -39,7 +39,7 @@ def _row_value(row: dict[str, Any], *keys: Any) -> Any:
     return None
 
 
-def _normalize_trade_date(value: Any) -> str | None:
+def _normalize_trade_date(value: Any) -> Optional[str]:
     if value is None:
         return None
 
@@ -93,13 +93,13 @@ class ForeignTradingData(BaseModel):
     """Standardized foreign trading data."""
 
     symbol: str
-    date: str | None = None
-    buy_volume: float | None = None
-    sell_volume: float | None = None
-    buy_value: float | None = None
-    sell_value: float | None = None
-    net_volume: float | None = None
-    net_value: float | None = None
+    date: Optional[str] = None
+    buy_volume: Optional[float] = None
+    sell_volume: Optional[float] = None
+    buy_value: Optional[float] = None
+    sell_value: Optional[float] = None
+    net_volume: Optional[float] = None
+    net_value: Optional[float] = None
 
     model_config = {
         "json_schema_extra": {
@@ -127,11 +127,11 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: dict[str, str] | None = None,
-    ) -> list[dict[str, Any]]:
+        credentials: Optional[dict[str, str]] = None,
+    ) -> List[dict[str, Any]]:
         loop = asyncio.get_event_loop()
 
-        def _fetch_sync() -> list[dict]:
+        def _fetch_sync() -> List[dict]:
             try:
                 from vnibb.providers.vnstock.runtime import get_trading_class, validate_source
 
@@ -158,14 +158,14 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                 loop.run_in_executor(None, _fetch_sync),
                 timeout=settings.vnstock_timeout,
             )
-        except TimeoutError:
+        except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
         params: ForeignTradingQueryParams,
-        data: list[dict[str, Any]],
-    ) -> list[ForeignTradingData]:
+        data: List[dict[str, Any]],
+    ) -> List[ForeignTradingData]:
         results = []
         for row in data:
             try:

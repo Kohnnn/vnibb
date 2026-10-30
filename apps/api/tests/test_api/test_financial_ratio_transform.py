@@ -1,5 +1,4 @@
 import pytest
-
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
     VnstockFinancialRatiosFetcher,

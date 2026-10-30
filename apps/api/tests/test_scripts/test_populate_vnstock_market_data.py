@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
+
 SCRIPT_PATH = Path(__file__).resolve().parents[4] / "scripts" / "mongodb" / "populate_vnstock_market_data.py"
 SPEC = importlib.util.spec_from_file_location("populate_vnstock_market_data", SCRIPT_PATH)
 assert SPEC and SPEC.loader

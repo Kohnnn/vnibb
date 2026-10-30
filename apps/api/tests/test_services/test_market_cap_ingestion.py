@@ -8,7 +8,6 @@ from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.core.market_cap import resolve_market_cap
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot

@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-
 from vnibb.models.stock import StockPrice
 from vnibb.services import chart_data_service, rs_snapshot_service
 from vnibb.services.rs_rating_service import RSRatingService

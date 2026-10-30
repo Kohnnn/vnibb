@@ -5,37 +5,36 @@ import hashlib
 import json
 import math
 import os
+from pathlib import Path
 import re
 import sqlite3
 from collections import Counter
 from datetime import date, datetime
-from pathlib import Path
-
 
 def check_database():
     """Check database structure and content."""
     print("="*60)
     print("PHASE 31: DATABASE VERIFICATION")
     print("="*60)
-
+    
     # 1. Check file exists
     db_path = "test.db"
     if not os.path.exists(db_path):
         print("❌ Database file not found!")
         return False
-
+    
     file_size = os.path.getsize(db_path)
     print(f"✅ Database file exists: {file_size:,} bytes")
-
+    
     # 2. Connect and check tables
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-
+    
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
     tables = [t[0] for t in cursor.fetchall()]
-
+    
     print(f"\n📊 Found {len(tables)} tables:")
-
+    
     # Get row counts
     table_info = []
     for table in sorted(tables):
@@ -47,18 +46,18 @@ def check_database():
             print(f"  {status} {table}: {count:,} rows")
         except Exception as e:
             print(f"  ❌ {table}: Error - {e}")
-
+    
     # 3. Summary
     total_rows = sum(count for _, count in table_info)
     empty_tables = sum(1 for _, count in table_info if count == 0)
-
+    
     print("\n" + "="*60)
-    print("📈 SUMMARY:")
+    print(f"📈 SUMMARY:")
     print(f"  Total tables: {len(tables)}")
     print(f"  Total rows: {total_rows:,}")
     print(f"  Empty tables: {empty_tables}")
     print("="*60)
-
+    
     conn.close()
     return True
 

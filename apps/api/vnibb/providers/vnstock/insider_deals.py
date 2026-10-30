@@ -22,6 +22,7 @@ import asyncio
 import hashlib
 import logging
 import re
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -37,14 +38,14 @@ INSIDER_EVENT_CODES = ("DDIND", "DDINS", "DDRP")
 _QUANTITY_PATTERN = r"([0-9][0-9.,]*)\s+{symbol}\b"
 
 
-def _truncate(value: object, limit: int) -> str | None:
+def _truncate(value: object, limit: int) -> Optional[str]:
     if value is None:
         return None
     text = str(value)
     return text[:limit] if len(text) > limit else text
 
 
-def _clean_number(value: object) -> object | None:
+def _clean_number(value: object) -> Optional[object]:
     if value is None:
         return None
     try:
@@ -145,13 +146,13 @@ class InsiderDealData(BaseModel):
     """Insider trading transaction data."""
     symbol: str
     # Insider info
-    insider_name: str | None = Field(None, alias="insiderName")
-    insider_position: str | None = Field(None, alias="position")
-    insider_relation: str | None = Field(None, alias="relation")
+    insider_name: Optional[str] = Field(None, alias="insiderName")
+    insider_position: Optional[str] = Field(None, alias="position")
+    insider_relation: Optional[str] = Field(None, alias="relation")
     # Transaction details
-    transaction_type: str | None = Field(None, alias="dealType")
-    transaction_date: str | None = Field(None, alias="dealDate")
-    registration_date: str | None = Field(None, alias="registrationDate")
+    transaction_type: Optional[str] = Field(None, alias="dealType")
+    transaction_date: Optional[str] = Field(None, alias="dealDate")
+    registration_date: Optional[str] = Field(None, alias="registrationDate")
     deal_action: str | None = Field(None, alias="dealAction")
     deal_price: float | None = Field(None, alias="dealPrice")
     deal_value: float | None = Field(None, alias="dealValue")
@@ -162,13 +163,13 @@ class InsiderDealData(BaseModel):
     record_hash: str | None = None
     raw_data: dict | None = None
     # Shares
-    shares_before: int | None = Field(None, alias="sharesBefore")
-    shares_registered: int | None = Field(None, alias="sharesRegistered")
-    shares_executed: int | None = Field(None, alias="sharesExecuted")
-    shares_after: int | None = Field(None, alias="sharesAfter")
+    shares_before: Optional[int] = Field(None, alias="sharesBefore")
+    shares_registered: Optional[int] = Field(None, alias="sharesRegistered")
+    shares_executed: Optional[int] = Field(None, alias="sharesExecuted")
+    shares_after: Optional[int] = Field(None, alias="sharesAfter")
     # Ownership
-    ownership_before: float | None = Field(None, alias="ownershipBefore")
-    ownership_after: float | None = Field(None, alias="ownershipAfter")
+    ownership_before: Optional[float] = Field(None, alias="ownershipBefore")
+    ownership_after: Optional[float] = Field(None, alias="ownershipAfter")
 
     model_config = {"populate_by_name": True}
 

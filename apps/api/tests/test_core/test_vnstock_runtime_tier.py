@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-
 from vnibb.core.config import Settings
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -215,8 +214,9 @@ def test_finance_does_not_supply_missing_community_symbols(monkeypatch):
 def test_direct_vci_backfill_rejects_sponsor_before_provider_import(monkeypatch):
     from datetime import date
 
-    from scripts import backfill_ohlcv_full
     from vnibb.providers.vnstock import runtime
+
+    from scripts import backfill_ohlcv_full
 
     imports = []
 

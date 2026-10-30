@@ -7,20 +7,24 @@ Handles synchronization of screener/financial ratio data from vnstock providers.
 import asyncio
 import logging
 from datetime import date
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import and_, func, select
 
+from vnibb.core.cache import build_cache_key
+from vnibb.core.cache_constants import PIPELINE_TTL_SCREENER
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import normalize_screener_record
-from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock
-from vnibb.services.pipeline.base import BasePipeline
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from vnibb.services.screener_metadata import screener_metadata_updates
+from vnibb.core.vn_sectors import resolve_sector_name
+from vnibb.models.company import Company
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockPrice
+from vnibb.services.pipeline.base import BasePipeline
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +35,7 @@ class ScreenerPipeline(BasePipeline):
     def __init__(self):
         super().__init__()
 
-    def _normalize_text(self, value: Any) -> str | None:
+    def _normalize_text(self, value: Any) -> Optional[str]:
         if value is None:
             return None
         if isinstance(value, float) and pd.isna(value):
@@ -39,7 +43,7 @@ class ScreenerPipeline(BasePipeline):
         raw = str(value).strip()
         return raw or None
 
-    def _parse_float(self, value: Any) -> float | None:
+    def _parse_float(self, value: Any) -> Optional[float]:
         if value is None:
             return None
         if isinstance(value, float) and pd.isna(value):
@@ -52,7 +56,7 @@ class ScreenerPipeline(BasePipeline):
         except (TypeError, ValueError):
             return None
 
-    def _normalize_share_count(self, value: Any) -> float | None:
+    def _normalize_share_count(self, value: Any) -> Optional[float]:
         parsed = self._parse_float(value)
         if parsed in (None, 0):
             return None
@@ -60,14 +64,14 @@ class ScreenerPipeline(BasePipeline):
             return parsed * 1_000_000.0
         return parsed
 
-    def _pick_float(self, *values: Any) -> float | None:
+    def _pick_float(self, *values: Any) -> Optional[float]:
         for value in values:
             parsed = self._parse_float(value)
             if parsed is not None:
                 return parsed
         return None
 
-    def _normalize_dividend_yield(self, value: Any) -> float | None:
+    def _normalize_dividend_yield(self, value: Any) -> Optional[float]:
         parsed = self._parse_float(value)
         if parsed is None:
             return None
@@ -78,16 +82,15 @@ class ScreenerPipeline(BasePipeline):
 
     async def sync_screener_data(
         self,
-        symbols: list[str] | None = None,
-        exchanges: list[str] | None = None,
-        limit: int | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: Optional[List[str]] = None,
+        exchanges: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync admitted VCI financial ratios into screener snapshots."""
         from vnibb.providers.vnstock.financial_ratios import (
-            FinancialRatiosQueryParams,
-            VnstockFinancialRatiosFetcher,
+            FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher,
         )
         from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
@@ -96,7 +99,7 @@ class ScreenerPipeline(BasePipeline):
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
 
-        normalized_exchanges: list[str] = []
+        normalized_exchanges: List[str] = []
         if exchanges:
             normalized_exchanges = [
                 exchange.strip().upper()
@@ -126,7 +129,7 @@ class ScreenerPipeline(BasePipeline):
             logger.warning("No symbols found in database for screener sync.")
             return 0
 
-        stock_metadata: dict[str, dict[str, Any]] = {}
+        stock_metadata: Dict[str, Dict[str, Any]] = {}
         async with self._get_session() as session:
             rows = await session.execute(
                 select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry).where(

@@ -22,12 +22,11 @@ from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.providers.vnstock.foreign_trading import ForeignTradingData
 from vnibb.providers.vnstock.intraday import IntradayTradeData
-from vnibb.providers.vnstock.market_overview import MarketIndexData
 from vnibb.providers.vnstock.price_depth import OrderLevel, PriceDepthData
+from vnibb.providers.vnstock.market_overview import MarketIndexData
 from vnibb.providers.vnstock.stock_quote import StockQuoteData
 from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
-
 
 @pytest.fixture
 def quote_database(test_engine, monkeypatch):

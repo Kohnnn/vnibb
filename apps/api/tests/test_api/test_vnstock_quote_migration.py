@@ -7,10 +7,7 @@ import pytest
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers.vnstock import runtime
 from vnibb.providers.vnstock.derivatives import VnstockDerivativesFetcher
-from vnibb.providers.vnstock.foreign_trading import (
-    ForeignTradingQueryParams,
-    VnstockForeignTradingFetcher,
-)
+from vnibb.providers.vnstock.foreign_trading import ForeignTradingQueryParams, VnstockForeignTradingFetcher
 from vnibb.providers.vnstock.intraday import IntradayQueryParams, VnstockIntradayFetcher
 from vnibb.providers.vnstock.market_overview import VnstockMarketOverviewFetcher
 from vnibb.providers.vnstock.price_board import VnstockPriceBoardFetcher

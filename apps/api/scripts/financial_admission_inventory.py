@@ -69,10 +69,9 @@ if __name__ == "__main__":
         raise SystemExit(1) from None
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+    from scripts.verify_database import FINANCIAL_DATASETS
     from sqlalchemy import create_engine, select, text
     from sqlalchemy.engine import make_url
-
-    from scripts.verify_database import FINANCIAL_DATASETS
 
     try:
         with isolated_import_environment():
@@ -83,10 +82,9 @@ if __name__ == "__main__":
         print(json.dumps({"status": "inventory_failed", "error_type": type(exc).__name__}))
         raise SystemExit(1) from None
 else:
+    from scripts.verify_database import FINANCIAL_DATASETS
     from sqlalchemy import create_engine, select, text
     from sqlalchemy.engine import make_url
-
-    from scripts.verify_database import FINANCIAL_DATASETS
     from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
     from vnibb.mcp.server import _serialize_row, serialize_data_value
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement

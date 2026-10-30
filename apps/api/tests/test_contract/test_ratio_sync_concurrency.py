@@ -8,7 +8,6 @@ import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-
 from vnibb.core.database import Base
 from vnibb.models.financials import IncomeStatement
 from vnibb.models.trading import FinancialRatio

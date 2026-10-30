@@ -1,7 +1,6 @@
 from datetime import date
 
 import pytest
-
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 
 
@@ -317,7 +316,6 @@ async def test_explicit_sparse_profile_refresh_retains_stored_share_lineage(clie
     from zoneinfo import ZoneInfo
 
     from sqlalchemy import select
-
     from vnibb.models.company import Company
     from vnibb.models.stock import Stock, StockPrice
     from vnibb.providers.vnstock.equity_profile import (

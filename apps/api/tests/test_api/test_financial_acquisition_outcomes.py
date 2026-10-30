@@ -2,7 +2,6 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
-
 import vnibb.services.data_pipeline as module
 from vnibb.providers.vnstock.financials import FinancialStatementData, VnstockFinancialsFetcher
 from vnibb.services.data_pipeline import DataPipeline
@@ -263,7 +262,6 @@ async def test_invalid_history_window_rejects_before_provider_calls(acquisition,
 @pytest.mark.asyncio
 async def test_extractor_passes_requested_count_to_supported_provider(monkeypatch):
     import pandas as pd
-
     from vnibb.providers.vnstock import runtime
     from vnibb.providers.vnstock.financials import FinancialsQueryParams
 

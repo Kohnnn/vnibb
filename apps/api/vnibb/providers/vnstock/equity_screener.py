@@ -10,24 +10,21 @@ import asyncio
 import logging
 import math
 import re
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
-from typing import Any
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
-from vnibb.core.exceptions import ProviderError, ProviderRateLimitError, ProviderTimeoutError
+from vnibb.core.exceptions import ProviderError, ProviderTimeoutError, ProviderRateLimitError
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
 from vnibb.core.ratio_units import admitted_ratio_value, normalize_ratio_payload
-from vnibb.core.screener_shares import resolve_screener_shares
-from vnibb.providers.base import BaseFetcher
-from vnibb.providers.vnstock.financial_ratios import (
-    FinancialRatiosQueryParams,
-    VnstockFinancialRatiosFetcher,
-)
+from vnibb.providers.vnstock.financial_ratios import FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher
 from vnibb.providers.vnstock.runtime import validate_source
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +86,7 @@ def _is_equity_symbol(symbol: Any) -> bool:
     return True
 
 
-def _coerce_trade_date(value: Any) -> date | None:
+def _coerce_trade_date(value: Any) -> Optional[date]:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -110,7 +107,7 @@ class StockScreenerParams(BaseModel):
     including valuation ratios, growth metrics, profitability, and more.
     """
 
-    symbol: str | None = Field(
+    symbol: Optional[str] = Field(
         default=None,
         description="Single stock ticker symbol (e.g., VNM). If None, returns all stocks.",
     )
@@ -118,7 +115,7 @@ class StockScreenerParams(BaseModel):
         default="ALL",
         description="Stock exchange filter: HOSE, HNX, UPCOM, or ALL",
     )
-    industry: str | None = Field(
+    industry: Optional[str] = Field(
         default=None,
         description="Industry filter (e.g., 'Thực phẩm & Đồ uống')",
     )
@@ -140,7 +137,7 @@ class StockScreenerParams(BaseModel):
 
     @field_validator("symbol")
     @classmethod
-    def uppercase_symbol(cls, v: str | None) -> str | None:
+    def uppercase_symbol(cls, v: Optional[str]) -> Optional[str]:
         """Ensure symbol is uppercase if provided."""
         return v.upper().strip() if v else None
 
@@ -169,200 +166,200 @@ class ScreenerData(BaseModel):
     # IDENTIFICATION
     # ==========================================================================
     symbol: str = Field(..., description="Stock ticker symbol")
-    organ_name: str | None = Field(None, alias="organName", description="Company name")
-    exchange: str | None = Field(None, description="Stock exchange (HOSE/HNX/UPCOM)")
-    industry_name: str | None = Field(
+    organ_name: Optional[str] = Field(None, alias="organName", description="Company name")
+    exchange: Optional[str] = Field(None, description="Stock exchange (HOSE/HNX/UPCOM)")
+    industry_name: Optional[str] = Field(
         None, alias="industryName", description="Industry classification"
     )
 
     # =======================================================================
     # PRICE & VOLUME
     # =======================================================================
-    price: float | None = Field(None, description="Current price")
+    price: Optional[float] = Field(None, description="Current price")
     price_unit: PriceUnit = "unknown"
-    price_source: str | None = None
-    volume: float | None = Field(None, description="Trading volume")
-    value_traded: float | None = Field(None, description="Source-reported traded value; unit is unqualified")
-    change_1d: float | None = Field(
+    price_source: Optional[str] = None
+    volume: Optional[float] = Field(None, description="Trading volume")
+    value_traded: Optional[float] = Field(None, description="Source-reported traded value; unit is unqualified")
+    change_1d: Optional[float] = Field(
         None, alias="change1D", description="Daily price change percentage"
     )
-    perf_1w: float | None = Field(None, alias="perf1W", description="1-week performance (%)")
-    perf_1m: float | None = Field(None, alias="perf1M", description="1-month performance (%)")
-    perf_ytd: float | None = Field(None, alias="perfYTD", description="YTD performance (%)")
-    trade_date: date | None = Field(
+    perf_1w: Optional[float] = Field(None, alias="perf1W", description="1-week performance (%)")
+    perf_1m: Optional[float] = Field(None, alias="perf1M", description="1-month performance (%)")
+    perf_ytd: Optional[float] = Field(None, alias="perfYTD", description="YTD performance (%)")
+    trade_date: Optional[date] = Field(
         None,
         alias="tradeDate",
         description="Trading date of the price and volume fields",
     )
-    market_session: dict[str, Any] | None = Field(
+    market_session: Optional[dict[str, Any]] = Field(
         None, description="Bounded, validated source-session status and date"
     )
-    market_cap: float | None = Field(
+    market_cap: Optional[float] = Field(
         None, alias="marketCap", description="Market capitalization"
     )
-    market_cap_provenance: dict[str, Any] | None = None
-    shares_outstanding: float | None = Field(
+    market_cap_provenance: Optional[dict[str, Any]] = None
+    shares_outstanding: Optional[float] = Field(
         None, alias="sharesOutstanding", description="Certified outstanding shares"
     )
-    shares_outstanding_provenance: dict[str, Any] | None = None
+    shares_outstanding_provenance: Optional[dict[str, Any]] = None
 
     # ==========================================================================
     # VALUATION RATIOS
     # ==========================================================================
-    pe: float | None = Field(None, alias="priceToEarning", description="Price-to-Earnings ratio")
-    pb: float | None = Field(None, alias="priceToBook", description="Price-to-Book ratio")
-    ps: float | None = Field(None, alias="priceToSales", description="Price-to-Sales ratio")
-    ev_ebitda: float | None = Field(
+    pe: Optional[float] = Field(None, alias="priceToEarning", description="Price-to-Earnings ratio")
+    pb: Optional[float] = Field(None, alias="priceToBook", description="Price-to-Book ratio")
+    ps: Optional[float] = Field(None, alias="priceToSales", description="Price-to-Sales ratio")
+    ev_ebitda: Optional[float] = Field(
         None, alias="valueBeforeEbitda", description="EV/EBITDA ratio"
     )
-    ebitda_on_stock: float | None = Field(
+    ebitda_on_stock: Optional[float] = Field(
         None, alias="ebitdaOnStock", description="EBITDA per share"
     )
 
     # ==========================================================================
     # PROFITABILITY METRICS
     # ==========================================================================
-    roe: float | None = Field(None, description="Return on Equity (%)")
-    roa: float | None = Field(None, description="Return on Assets (%)")
-    roic: float | None = Field(None, description="Return on Invested Capital (%)")
+    roe: Optional[float] = Field(None, description="Return on Equity (%)")
+    roa: Optional[float] = Field(None, description="Return on Assets (%)")
+    roic: Optional[float] = Field(None, description="Return on Invested Capital (%)")
     ratio_units: dict[str, str] = Field(default_factory=dict)
     provider_evidence: list[dict[str, Any]] = Field(default_factory=list)
-    gross_margin: float | None = Field(
+    gross_margin: Optional[float] = Field(
         None, alias="grossProfitMargin", description="Gross Profit Margin (%)"
     )
-    net_margin: float | None = Field(
+    net_margin: Optional[float] = Field(
         None, alias="postTaxMargin", description="Net Profit Margin (%)"
     )
-    operating_margin: float | None = Field(
+    operating_margin: Optional[float] = Field(
         None, alias="operatingProfitMargin", description="Operating Profit Margin (%)"
     )
-    ebit_on_revenue: float | None = Field(
+    ebit_on_revenue: Optional[float] = Field(
         None, alias="ebitOnRevenue", description="EBIT/Revenue (%)"
     )
-    pre_tax_on_ebit: float | None = Field(
+    pre_tax_on_ebit: Optional[float] = Field(
         None, alias="preTaxOnEbit", description="Pre-Tax Profit/EBIT (%)"
     )
-    post_tax_on_pre_tax: float | None = Field(
+    post_tax_on_pre_tax: Optional[float] = Field(
         None, alias="postTaxOnPreTax", description="Post-Tax/Pre-Tax (%)"
     )
 
     # ==========================================================================
     # PER SHARE DATA
     # ==========================================================================
-    eps: float | None = Field(
+    eps: Optional[float] = Field(
         None, alias="earningPerShare", description="Earnings per Share (VND)"
     )
-    bvps: float | None = Field(
+    bvps: Optional[float] = Field(
         None, alias="bookValuePerShare", description="Book Value per Share (VND)"
     )
-    eps_change: float | None = Field(None, alias="epsChange", description="EPS YoY Change (%)")
-    bvps_change: float | None = Field(
+    eps_change: Optional[float] = Field(None, alias="epsChange", description="EPS YoY Change (%)")
+    bvps_change: Optional[float] = Field(
         None, alias="bookValuePerShareChange", description="BVPS YoY Change (%)"
     )
-    ebitda_on_stock_change: float | None = Field(
+    ebitda_on_stock_change: Optional[float] = Field(
         None, alias="ebitdaOnStockChange", description="EBITDA/Share YoY Change (%)"
     )
 
     # ==========================================================================
     # GROWTH METRICS
     # ==========================================================================
-    revenue_growth: float | None = Field(
+    revenue_growth: Optional[float] = Field(
         None, alias="revenueGrowth", description="Revenue Growth YoY (%)"
     )
-    earnings_growth: float | None = Field(
+    earnings_growth: Optional[float] = Field(
         None, alias="earningsGrowth", description="Earnings Growth YoY (%)"
     )
-    net_profit_growth: float | None = Field(
+    net_profit_growth: Optional[float] = Field(
         None, alias="netProfitGrowth", description="Net Profit Growth YoY (%)"
     )
 
     # ==========================================================================
     # DIVIDEND
     # ==========================================================================
-    dividend_yield: float | None = Field(
+    dividend_yield: Optional[float] = Field(
         None, alias="dividendYield", description="Dividend Yield (%)"
     )
 
     # ==========================================================================
     # LIQUIDITY RATIOS
     # ==========================================================================
-    current_ratio: float | None = Field(
+    current_ratio: Optional[float] = Field(
         None, alias="currentPayment", description="Current Ratio"
     )
-    quick_ratio: float | None = Field(None, alias="quickPayment", description="Quick Ratio")
-    days_receivable: float | None = Field(
+    quick_ratio: Optional[float] = Field(None, alias="quickPayment", description="Quick Ratio")
+    days_receivable: Optional[float] = Field(
         None, alias="daysReceivable", description="Days Receivable"
     )
-    days_payable: float | None = Field(None, alias="daysPayable", description="Days Payable")
+    days_payable: Optional[float] = Field(None, alias="daysPayable", description="Days Payable")
 
     # ==========================================================================
     # CAPITAL STRUCTURE & DEBT METRICS
     # ==========================================================================
-    debt_to_equity: float | None = Field(
+    debt_to_equity: Optional[float] = Field(
         None, alias="debtOnEquity", description="Debt-to-Equity ratio"
     )
-    debt_to_asset: float | None = Field(
+    debt_to_asset: Optional[float] = Field(
         None, alias="debtOnAsset", description="Debt-to-Asset ratio"
     )
-    debt_to_ebitda: float | None = Field(
+    debt_to_ebitda: Optional[float] = Field(
         None, alias="debtOnEbitda", description="Debt/EBITDA ratio"
     )
-    equity_on_total_asset: float | None = Field(
+    equity_on_total_asset: Optional[float] = Field(
         None, alias="equityOnTotalAsset", description="Equity/Total Assets (%)"
     )
-    equity_on_liability: float | None = Field(
+    equity_on_liability: Optional[float] = Field(
         None, alias="equityOnLiability", description="Equity/Liability ratio"
     )
-    asset_on_equity: float | None = Field(
+    asset_on_equity: Optional[float] = Field(
         None, alias="assetOnEquity", description="Asset/Equity ratio (leverage)"
     )
-    payable_on_equity: float | None = Field(
+    payable_on_equity: Optional[float] = Field(
         None, alias="payableOnEquity", description="Payable/Equity ratio"
     )
-    capital_balance: float | None = Field(
+    capital_balance: Optional[float] = Field(
         None, alias="capitalBalance", description="Capital balance"
     )
-    short_on_long_debt: float | None = Field(
+    short_on_long_debt: Optional[float] = Field(
         None, alias="shortOnLongDebt", description="Short-term/Long-term Debt"
     )
 
     # ==========================================================================
     # CASH METRICS
     # ==========================================================================
-    cash_on_equity: float | None = Field(
+    cash_on_equity: Optional[float] = Field(
         None, alias="cashOnEquity", description="Cash/Equity ratio"
     )
-    cash_on_capitalize: float | None = Field(
+    cash_on_capitalize: Optional[float] = Field(
         None, alias="cashOnCapitalize", description="Cash/Capitalization ratio"
     )
 
     # ==========================================================================
     # EFFICIENCY METRICS
     # ==========================================================================
-    revenue_on_asset: float | None = Field(
+    revenue_on_asset: Optional[float] = Field(
         None, alias="revenueOnAsset", description="Revenue/Asset ratio (asset turnover)"
     )
-    revenue_on_work_capital: float | None = Field(
+    revenue_on_work_capital: Optional[float] = Field(
         None, alias="revenueOnWorkCapital", description="Revenue/Working Capital"
     )
-    capex_on_fixed_asset: float | None = Field(
+    capex_on_fixed_asset: Optional[float] = Field(
         None, alias="capexOnFixedAsset", description="CapEx/Fixed Asset ratio"
     )
 
     # ==========================================================================
     # OWNERSHIP
     # ==========================================================================
-    foreign_ownership: float | None = Field(
+    foreign_ownership: Optional[float] = Field(
         None, alias="foreignOwnership", description="Foreign Ownership (%)"
     )
-    state_ownership: float | None = Field(
+    state_ownership: Optional[float] = Field(
         None, alias="stateOwnership", description="State Ownership (%)"
     )
 
     # ==========================================================================
     # FUNDAMENTAL SCREENER (computed valuation layer)
     # ==========================================================================
-    intrinsic_value: float | None = Field(
+    intrinsic_value: Optional[float] = Field(
         None,
         alias="intrinsicValue",
         description=(
@@ -370,52 +367,52 @@ class ScreenerData(BaseModel):
             "model-derived reference estimate, not investment advice"
         ),
     )
-    margin_of_safety: float | None = Field(
+    margin_of_safety: Optional[float] = Field(
         None,
         alias="marginOfSafety",
         description="Margin of safety vs intrinsic value (%), clamped to [-100, 100]",
     )
-    moat: str | None = Field(
+    moat: Optional[str] = Field(
         None,
         description=(
             "Moat label (wide/narrow/none/eroding); "
             "model-derived reference estimate, not investment advice"
         ),
     )
-    dividend_years: int | None = Field(
+    dividend_years: Optional[int] = Field(
         None,
         alias="dividendYears",
         description="Consecutive most-recent years with dividends paid",
     )
-    fcf_positive: bool | None = Field(
+    fcf_positive: Optional[bool] = Field(
         None,
         alias="fcfPositive",
         description="Whether latest-year free cash flow is positive",
     )
-    valuation_method: str | None = Field(
+    valuation_method: Optional[str] = Field(
         None,
         alias="valuationMethod",
         description="Valuation model used for intrinsic value (dcf/rim)",
     )
-    fundamental_as_of: str | None = Field(
+    fundamental_as_of: Optional[str] = Field(
         None,
         alias="fundamentalAsOf",
         description="Snapshot date (YYYY-MM-DD) of the fundamental valuation data",
     )
-    listing_date: date | None = Field(None, alias="listingDate")
-    listing_age_days: int | None = Field(None, alias="listingAgeDays")
-    target_price: float | None = Field(None, alias="targetPrice")
-    target_upside_pct: float | None = Field(None, alias="targetUpsidePct")
-    recommendation: str | None = None
-    target_source: str | None = Field(None, alias="targetSource")
-    profile_refreshed_at: datetime | None = Field(None, alias="profileRefreshedAt")
+    listing_date: Optional[date] = Field(None, alias="listingDate")
+    listing_age_days: Optional[int] = Field(None, alias="listingAgeDays")
+    target_price: Optional[float] = Field(None, alias="targetPrice")
+    target_upside_pct: Optional[float] = Field(None, alias="targetUpsidePct")
+    recommendation: Optional[str] = None
+    target_source: Optional[str] = Field(None, alias="targetSource")
+    profile_refreshed_at: Optional[datetime] = Field(None, alias="profileRefreshedAt")
 
     # ==========================================================================
     # TIMESTAMP
     # ==========================================================================
-    year: int | None = Field(None, description="Fiscal year of the data")
-    quarter: int | None = Field(None, description="Fiscal quarter (1-4)")
-    updated_at: datetime | None = Field(None, description="Data update timestamp")
+    year: Optional[int] = Field(None, description="Fiscal year of the data")
+    quarter: Optional[int] = Field(None, description="Fiscal quarter (1-4)")
+    updated_at: Optional[datetime] = Field(None, description="Data update timestamp")
 
     @model_validator(mode="before")
     @classmethod
@@ -480,7 +477,7 @@ class ScreenerData(BaseModel):
         return super().model_dump_json(**kwargs)
 
 
-from vnibb.core.retry import circuit_breaker, vnstock_cb
+from vnibb.core.retry import vnstock_cb, circuit_breaker
 
 
 class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
@@ -511,22 +508,20 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
     @circuit_breaker(vnstock_cb)
     async def extract_data(
         query: dict[str, Any],
-        credentials: dict[str, str] | None = None,
-    ) -> list[dict[str, Any]]:
+        credentials: Optional[dict[str, str]] = None,
+    ) -> List[dict[str, Any]]:
         """Fetch VCI listing, quotes, and optionally the plan-tier ratio table."""
         source = validate_source(query.get("source"))
         include_ratios = query.get("include_ratios", True)
         loop = asyncio.get_running_loop()
 
-        def _fetch_sync() -> list[dict[str, Any]]:
+        def _fetch_sync() -> List[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
             try:
                 from datetime import datetime, timedelta
 
                 from vnibb.providers.vnstock.runtime import (
-                    get_listing_class,
-                    get_quote_class,
-                    import_vnstock_symbol,
+                    get_listing_class, get_quote_class, import_vnstock_symbol,
                 )
 
                 Listing = get_listing_class()
@@ -560,7 +555,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                 if symbols_df is not None and not symbols_df.empty:
                     symbols_df = symbols_df[symbols_df["type"].eq("STOCK")]
 
-                def _to_float(value: Any) -> float | None:
+                def _to_float(value: Any) -> Optional[float]:
                     if value is None:
                         return None
                     if isinstance(value, (int, float)):
@@ -688,7 +683,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
                     source,
                 )
 
-                def _fetch_single_stock(symbol: str) -> dict[str, Any] | None:
+                def _fetch_single_stock(symbol: str) -> Optional[dict[str, Any]]:
                     """Fetch data for a single stock."""
                     try:
                         record = _extract_ratio_snapshot(symbol) if include_ratios else {"ticker": symbol}
@@ -749,7 +744,7 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
 
                 results = []
 
-                from concurrent.futures import TimeoutError, as_completed, wait
+                from concurrent.futures import as_completed, wait, TimeoutError
 
                 future_to_symbol = {_executor.submit(_fetch_single_stock, s): s for s in symbols}
                 try:
@@ -806,20 +801,20 @@ class VnstockScreenerFetcher(BaseFetcher[StockScreenerParams, ScreenerData]):
             future.add_done_callback(finished)
         try:
             return await asyncio.wait_for(asyncio.shield(future), timeout=settings.vnstock_timeout)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
         params: StockScreenerParams,
-        data: list[dict[str, Any]],
-    ) -> list[ScreenerData]:
+        data: List[dict[str, Any]],
+    ) -> List[ScreenerData]:
         """
         Transform raw vnstock screener response to standardized ScreenerData.
 
         Maps vnstock column names to our standardized schema.
         """
-        results: list[ScreenerData] = []
+        results: List[ScreenerData] = []
 
         # Column name mapping from vnstock to our schema
         # VCI ratio_summary uses snake_case format (verified via test_valuation.py)

@@ -11,10 +11,10 @@ environment variables in production will cause the application to fail fast.
 import logging
 import re
 import sys
+from pathlib import Path
 from datetime import date
 from functools import lru_cache
-from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, List, Optional
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -66,22 +66,22 @@ class Settings(BaseSettings):
     websocket_broadcast_concurrency: int = Field(default=20, ge=1, le=100)
     websocket_cycle_timeout_seconds: float = Field(default=4.5, gt=0, le=5)
     websocket_send_timeout_seconds: float = Field(default=2, gt=0, le=5)
-    admin_api_key: str | None = None
+    admin_api_key: Optional[str] = None
     admin_user_ids: str = ""
     admin_revoked_session_ids: str = ""
     # Must be >= the issuer's GOTRUE_JWT_EXP; the issuer lifetime is operator-configurable.
     admin_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     active_session_max_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
-    apps_script_api_key: str | None = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
+    apps_script_api_key: Optional[str] = Field(default=None, validation_alias="VNIBB_APPS_SCRIPT_KEY")
     vnibb_mcp_host: str = "0.0.0.0"
     vnibb_mcp_port: int = 8001
     vnibb_mcp_transport: str = "stdio"
-    vnibb_mcp_url: str | None = None
+    vnibb_mcp_url: Optional[str] = None
     vnibb_mcp_timeout_seconds: int = 20
-    vnibb_mcp_shared_bearer_token: str | None = None
-    vnibb_mcp_allowed_hosts: Annotated[list[str], NoDecode] = []
-    vnibb_mcp_allowed_origins: Annotated[list[str], NoDecode] = []
-    cors_origins: list[str] = [
+    vnibb_mcp_shared_bearer_token: Optional[str] = None
+    vnibb_mcp_allowed_hosts: Annotated[List[str], NoDecode] = []
+    vnibb_mcp_allowed_origins: Annotated[List[str], NoDecode] = []
+    cors_origins: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:3001",
@@ -110,12 +110,12 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Connection string format: postgresql+asyncpg://user:password@host:port/database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/vnibb"
-    database_url_sync: str | None = None  # For Alembic migrations (psycopg2)
+    database_url_sync: Optional[str] = None  # For Alembic migrations (psycopg2)
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_timeout: int = 30  # Seconds to wait for connection
     database_pool_recycle: int = 1800  # Recycle connections after 30 min
-    database_echo: bool | None = None  # Override debug for SQL logging
+    database_echo: Optional[bool] = None  # Override debug for SQL logging
     database_ssl_mode: str = "prefer"  # disable, allow, prefer, require, verify-ca, verify-full
 
     # ==========================================================================
@@ -131,10 +131,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Supabase specific (if using Supabase hosted)
     # ==========================================================================
-    supabase_url: str | None = None
-    supabase_anon_key: str | None = None
-    supabase_service_role_key: str | None = None
-    supabase_jwt_secret: str | None = None  # For JWT validation
+    supabase_url: Optional[str] = None
+    supabase_anon_key: Optional[str] = None
+    supabase_service_role_key: Optional[str] = None
+    supabase_jwt_secret: Optional[str] = None  # For JWT validation
     allow_anonymous_dashboard_writes: bool = True
 
     # ==========================================================================
@@ -146,7 +146,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # MongoDB Analytical Source
     # ==========================================================================
-    mongodb_url: str | None = None
+    mongodb_url: Optional[str] = None
     mongodb_database: str = "vnibb-market"
     mongodb_enabled: bool = True
     mongodb_timeout_ms: int = Field(default=10000, ge=1)
@@ -154,10 +154,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Redis Cache
     # ==========================================================================
-    redis_url: str | None = "redis://localhost:6379/0"
-    redis_host: str | None = "localhost"  # Extracted for rate limiter
+    redis_url: Optional[str] = "redis://localhost:6379/0"
+    redis_host: Optional[str] = "localhost"  # Extracted for rate limiter
     redis_port: int = 6379
-    redis_password: str | None = None
+    redis_password: Optional[str] = None
     redis_cache_ttl: int = 300  # Default TTL in seconds (5 minutes)
     redis_max_connections: int = 10
     redis_ssl: bool = False  # Enable SSL for production Redis
@@ -177,18 +177,18 @@ class Settings(BaseSettings):
     # ==========================================================================
     # VNStock Provider
     # ==========================================================================
-    vnstock_api_key: str | None = Field(default=None, repr=False, exclude=True)
+    vnstock_api_key: Optional[str] = Field(default=None, repr=False, exclude=True)
     vnstock_runtime_tier: str = "free"
     vnstock_source: str = "VCI"
     vnstock_timeout: int = Field(default=25, ge=1)  # Request timeout in seconds
     vnstock_rate_limit_rps: float = 18 / 60  # Guest allowance: 20/min shared with reinforcement
     vnstock_reinforcement_rps: float = 2 / 60
-    vnstock_calls_per_minute: int | None = 20  # Per-operation ceiling; global budgets still apply
+    vnstock_calls_per_minute: Optional[int] = 20  # Per-operation ceiling; global budgets still apply
     big_order_threshold_vnd: float = 10_000_000_000
     intraday_limit: int = 500
     intraday_symbols_per_run: int = 200
-    derivatives_symbols: str | None = None  # Comma-separated override
-    warrant_symbols: list[str] = []
+    derivatives_symbols: Optional[str] = None  # Comma-separated override
+    warrant_symbols: List[str] = []
     intraday_backoff_seconds: int = 10
     intraday_backoff_max_seconds: int = 60
     intraday_require_market_hours: bool = True
@@ -196,8 +196,8 @@ class Settings(BaseSettings):
     intraday_market_tz: str = "Asia/Ho_Chi_Minh"
     intraday_market_open: str = "09:00"
     intraday_market_close: str = "15:00"
-    intraday_break_start: str | None = "11:30"
-    intraday_break_end: str | None = "13:00"
+    intraday_break_start: Optional[str] = "11:30"
+    intraday_break_end: Optional[str] = "13:00"
     orderflow_at_close_only: bool = True
     orderbook_at_close_only: bool = True
     store_intraday_trades: bool = False
@@ -215,7 +215,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Data Retention
     # ==========================================================================
-    price_backfill_start_date: str | None = "2019-01-01"
+    price_backfill_start_date: Optional[str] = "2019-01-01"
     price_history_years: int = 5
     news_retention_days: int = 7
     screener_retention_days: int = 365
@@ -229,7 +229,7 @@ class Settings(BaseSettings):
     # Timezone & Regional Settings
     # ==========================================================================
     vn_timezone: str = "Asia/Ho_Chi_Minh"
-    market_holiday_dates: Annotated[list[str], NoDecode] = []
+    market_holiday_dates: Annotated[List[str], NoDecode] = []
     data_quality_sustained_breach_runs: int = Field(default=2, ge=2, le=30)
 
     # ==========================================================================
@@ -242,12 +242,12 @@ class Settings(BaseSettings):
     # ==========================================================================
     # LLM Configuration (AI Copilot)
     # ==========================================================================
-    openrouter_api_key: str | None = None
+    openrouter_api_key: Optional[str] = None
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_site_url: str | None = None
+    openrouter_site_url: Optional[str] = None
     openrouter_app_name: str = "VNIBB"
-    openai_api_key: str | None = None
-    gemini_api_key: str | None = None
+    openai_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
     llm_provider: str = (
         "openrouter"  # openrouter, openai_compatible (legacy values normalize to openrouter)
     )
@@ -279,10 +279,10 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Monitoring & Observability (Sentry)
     # ==========================================================================
-    sentry_dsn: str | None = None  # Sentry Data Source Name
+    sentry_dsn: Optional[str] = None  # Sentry Data Source Name
     sentry_traces_sample_rate: float = 0.1  # Sample 10% of transactions
     sentry_profiles_sample_rate: float = 0.1  # Profile 10% of requests
-    sentry_environment: str | None = None  # Override environment name for Sentry
+    sentry_environment: Optional[str] = None  # Override environment name for Sentry
 
     # ==========================================================================
     # Validators
@@ -361,7 +361,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: Any) -> list[str]:
+    def parse_cors_origins(cls, v: Any) -> List[str]:
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
             v_clean = v.strip()
@@ -394,7 +394,7 @@ class Settings(BaseSettings):
 
     @field_validator("market_holiday_dates", mode="before")
     @classmethod
-    def parse_market_holiday_dates(cls, v: Any) -> list[str]:
+    def parse_market_holiday_dates(cls, v: Any) -> List[str]:
         if isinstance(v, str):
             value = v.strip()
             if not value:
@@ -411,7 +411,7 @@ class Settings(BaseSettings):
 
     @field_validator("market_holiday_dates")
     @classmethod
-    def validate_market_holiday_dates(cls, v: list[str]) -> list[str]:
+    def validate_market_holiday_dates(cls, v: List[str]) -> List[str]:
         try:
             return sorted({date.fromisoformat(value).isoformat() for value in v})
         except ValueError as exc:
@@ -419,7 +419,7 @@ class Settings(BaseSettings):
 
     @field_validator("vnibb_mcp_allowed_hosts", "vnibb_mcp_allowed_origins", mode="before")
     @classmethod
-    def parse_mcp_allowlists(cls, v: Any) -> list[str]:
+    def parse_mcp_allowlists(cls, v: Any) -> List[str]:
         """Parse MCP host/origin allowlists from a JSON array or comma-separated string."""
         if isinstance(v, str):
             v_clean = v.strip()
@@ -437,7 +437,7 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins")
     @classmethod
-    def validate_cors_origins(cls, v: list[str]) -> list[str]:
+    def validate_cors_origins(cls, v: List[str]) -> List[str]:
         """Validate CORS origin URLs."""
         validated = []
         for origin in v:

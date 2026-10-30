@@ -12,7 +12,7 @@ import logging
 import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, List, Literal, Optional
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query, Request
@@ -24,12 +24,12 @@ from vnibb.core.cache import redis_client
 from vnibb.core.cache_constants import REDIS_TTL_INDEX_CONSTITUENTS
 from vnibb.core.config import settings
 from vnibb.core.database import get_db
-from vnibb.core.exceptions import ProviderError
+from vnibb.core.exceptions import ProviderError, ProviderRateLimitError, ProviderTimeoutError
 from vnibb.core.market_cap import resolve_market_cap
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
 from vnibb.core.retry import vnstock_cb
-from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.models.company import Company
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock, StockPrice
@@ -56,7 +56,7 @@ _REFRESH_LOCK = asyncio.Lock()
 _REFRESH_IN_FLIGHT: set[str] = set()
 
 
-def _coerce_meta_datetime(value: Any) -> datetime | None:
+def _coerce_meta_datetime(value: Any) -> Optional[datetime]:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -74,7 +74,7 @@ def _coerce_meta_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _latest_screener_timestamp(rows: list[ScreenerData]) -> str | None:
+def _latest_screener_timestamp(rows: List[ScreenerData]) -> Optional[str]:
     trade_dates = [row.trade_date for row in rows if row.trade_date is not None]
     if trade_dates:
         return max(trade_dates).isoformat()
@@ -90,15 +90,15 @@ def _latest_screener_timestamp(rows: list[ScreenerData]) -> str | None:
 
 
 def _build_screener_meta(
-    rows: list[ScreenerData],
+    rows: List[ScreenerData],
     *,
     cached: bool = False,
     stale: bool = False,
     fallback: bool = False,
-    cached_at: datetime | None = None,
-    discovery_meta: dict[str, Any] | None = None,
-    candidate_count: int | None = None,
-    matched_count: int | None = None,
+    cached_at: Optional[datetime] = None,
+    discovery_meta: Optional[dict[str, Any]] = None,
+    candidate_count: Optional[int] = None,
+    matched_count: Optional[int] = None,
     page_scoped: bool = False,
     fundamental_enrichment: EnrichmentOutcome = "skipped",
 ) -> MetaData:
@@ -330,7 +330,7 @@ def _to_screener_data_row(row: object) -> ScreenerData:
     )
 
 
-async def _hydrate_screener_rows(rows: list[ScreenerData], db: AsyncSession) -> list[ScreenerData]:
+async def _hydrate_screener_rows(rows: List[ScreenerData], db: AsyncSession) -> List[ScreenerData]:
     def _is_missing(value: object) -> bool:
         if value is None:
             return True
@@ -357,7 +357,7 @@ async def _hydrate_screener_rows(rows: list[ScreenerData], db: AsyncSession) -> 
         )
     ]
     symbols = sorted({symbol for symbol in missing_symbols if symbol})
-    stock_map: dict[str, tuple[str | None, str | None, str | None]] = {}
+    stock_map: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {}
     company_map: dict[str, tuple[Any, Any, Any, Any, Any]] = {}
     if symbols:
         stock_result = await db.execute(
@@ -384,7 +384,7 @@ async def _hydrate_screener_rows(rows: list[ScreenerData], db: AsyncSession) -> 
             for symbol, company_name, exchange, industry, outstanding_shares, raw_data in company_result.fetchall()
         }
 
-    hydrated: list[ScreenerData] = []
+    hydrated: List[ScreenerData] = []
     for row in rows:
         updates: dict[str, Any] = {}
         symbol = row.symbol
@@ -443,7 +443,7 @@ async def _hydrate_screener_rows(rows: list[ScreenerData], db: AsyncSession) -> 
     return hydrated
 
 
-def _coerce_float(value: Any) -> float | None:
+def _coerce_float(value: Any) -> Optional[float]:
     if value is None:
         return None
     try:
@@ -455,7 +455,7 @@ def _coerce_float(value: Any) -> float | None:
     return numeric
 
 
-def _pick_float(*values: Any) -> float | None:
+def _pick_float(*values: Any) -> Optional[float]:
     for value in values:
         numeric = _coerce_float(value)
         if numeric is not None:
@@ -463,7 +463,7 @@ def _pick_float(*values: Any) -> float | None:
     return None
 
 
-def _parse_date(value: Any) -> date | None:
+def _parse_date(value: Any) -> Optional[date]:
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -476,7 +476,7 @@ def _parse_date(value: Any) -> date | None:
     return None
 
 
-def _validated_target_reference(raw: dict[str, Any], price: Any) -> tuple[float | None, float | None, str | None, str | None]:
+def _validated_target_reference(raw: dict[str, Any], price: Any) -> tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
     target_price = _coerce_float(raw.get("target_price") or raw.get("targetPrice"))
     target_unit = str(raw.get("target_price_unit") or raw.get("targetPriceUnit") or "").upper()
     source = raw.get("target_source") or raw.get("targetSource") or raw.get("providerSource")
@@ -498,11 +498,11 @@ def _validated_target_reference(raw: dict[str, Any], price: Any) -> tuple[float 
 
 
 async def _enrich_discovery_fields(
-    rows: list[ScreenerData],
+    rows: List[ScreenerData],
     db: AsyncSession,
     *,
-    as_of_date: date | None,
-) -> list[ScreenerData]:
+    as_of_date: Optional[date],
+) -> List[ScreenerData]:
     symbols = sorted({row.symbol for row in rows if row.symbol})
     if not symbols:
         return rows
@@ -518,7 +518,7 @@ async def _enrich_discovery_fields(
     ).all()
     companies = {symbol: (listing_date, raw_data, updated_at) for symbol, listing_date, raw_data, updated_at in company_rows}
     stock_listing_dates = {symbol: listing_date for symbol, listing_date in stock_rows}
-    enriched: list[ScreenerData] = []
+    enriched: List[ScreenerData] = []
     for row in rows:
         company_listing_date, raw_data, profile_refreshed_at = companies.get(row.symbol, (None, {}, None))
         listing_date = _parse_date(company_listing_date) or _parse_date(stock_listing_dates.get(row.symbol))
@@ -545,11 +545,11 @@ async def _enrich_discovery_fields(
 
 
 def _apply_discovery_filters(
-    rows: list[ScreenerData],
+    rows: List[ScreenerData],
     *,
-    min_listing_age_days: int | None,
-    target_upside_min: float | None,
-) -> list[ScreenerData]:
+    min_listing_age_days: Optional[int],
+    target_upside_min: Optional[float],
+) -> List[ScreenerData]:
     if min_listing_age_days is not None:
         rows = [row for row in rows if row.listing_age_days is not None and row.listing_age_days >= min_listing_age_days]
     if target_upside_min is not None and math.isfinite(target_upside_min):
@@ -557,7 +557,7 @@ def _apply_discovery_filters(
     return rows
 
 
-def _sort_discovery_rows(rows: list[ScreenerData], sort_by: str | None, sort_order: str) -> list[ScreenerData]:
+def _sort_discovery_rows(rows: List[ScreenerData], sort_by: Optional[str], sort_order: str) -> List[ScreenerData]:
     if sort_by not in {"listing_age_days", "target_price", "target_upside_pct"}:
         return rows
     known = [row for row in rows if getattr(row, sort_by) is not None]
@@ -565,7 +565,7 @@ def _sort_discovery_rows(rows: list[ScreenerData], sort_by: str | None, sort_ord
     return sorted(known, key=lambda row: getattr(row, sort_by), reverse=sort_order == "desc") + missing
 
 
-async def _resolve_index_universe(universe: str) -> tuple[set[str] | None, dict[str, Any]]:
+async def _resolve_index_universe(universe: str) -> tuple[Optional[set[str]], dict[str, Any]]:
     normalized = universe.upper()
     meta: dict[str, Any] = {
         "universe": normalized,
@@ -629,13 +629,13 @@ async def _resolve_index_universe(universe: str) -> tuple[set[str] | None, dict[
 
 
 
-def _compute_growth(current: float | None, previous: float | None) -> float | None:
+def _compute_growth(current: Optional[float], previous: Optional[float]) -> Optional[float]:
     if current is None or previous in (None, 0):
         return None
     return ((current - previous) / previous) * 100
 
 
-def _normalize_pct_metric(value: Any) -> float | None:
+def _normalize_pct_metric(value: Any) -> Optional[float]:
     numeric = _coerce_float(value)
     if numeric is None:
         return None
@@ -651,8 +651,8 @@ def _normalize_pct_metric(value: Any) -> float | None:
 
 
 async def _enrich_screener_metrics(
-    rows: list[ScreenerData], db: AsyncSession
-) -> list[ScreenerData]:
+    rows: List[ScreenerData], db: AsyncSession
+) -> List[ScreenerData]:
     if not rows:
         return rows
 
@@ -719,9 +719,9 @@ async def _enrich_screener_metrics(
     )
 
     ratio_by_symbol: dict[str, FinancialRatio] = {}
-    income_by_symbol: dict[str, list[dict[str, float | None]]] = {}
-    balance_by_symbol: dict[str, dict[str, float | None]] = {}
-    dividends_by_symbol: dict[str, float | None] = {}
+    income_by_symbol: dict[str, list[dict[str, Optional[float]]]] = {}
+    balance_by_symbol: dict[str, dict[str, Optional[float]]] = {}
+    dividends_by_symbol: dict[str, Optional[float]] = {}
 
     if fundamental_symbols:
         ratio_rows = (
@@ -885,8 +885,8 @@ async def _enrich_screener_metrics(
     perf_ytd_map = _build_performance_map(252)
 
     def _should_use_computed_pct(
-        existing: float | None,
-        computed: float | None,
+        existing: Optional[float],
+        computed: Optional[float],
         *,
         extreme_threshold: float,
         diff_threshold: float,
@@ -899,7 +899,7 @@ async def _enrich_screener_metrics(
             return True
         return abs(existing - computed) >= diff_threshold
 
-    enriched_rows: list[ScreenerData] = []
+    enriched_rows: List[ScreenerData] = []
     for row in rows:
         updates: dict[str, Any] = {}
         symbol = row.symbol
@@ -908,11 +908,11 @@ async def _enrich_screener_metrics(
 
         def _certified_ratio(
             metric: str,
-            field: str | None = None,
+            field: Optional[str] = None,
             *,
             ratio_raw: dict[str, Any] = ratio_raw,
             ratio_row: Any = ratio_row,
-        ) -> float | None:
+        ) -> Optional[float]:
             units = ratio_raw.get("ratio_units", {})
             if not isinstance(units, dict) or units.get(metric) != "percent":
                 return None
@@ -1109,8 +1109,8 @@ async def _enrich_screener_metrics(
 
 
 def apply_advanced_filters(
-    data: list[ScreenerData], filters: str | None = None, sort: str | None = None, **kwargs
-) -> list[ScreenerData]:
+    data: List[ScreenerData], filters: Optional[str] = None, sort: Optional[str] = None, **kwargs
+) -> List[ScreenerData]:
     """Apply dynamic filters and sorting using ScreenerFilterService."""
     if not data:
         return []
@@ -1172,7 +1172,7 @@ def apply_advanced_filters(
     return [ScreenerData(**record) for record in records]
 
 
-def fill_market_cap(rows: list[ScreenerData]) -> list[ScreenerData]:
+def fill_market_cap(rows: List[ScreenerData]) -> List[ScreenerData]:
     for row in rows:
         provenance = resolve_market_cap(row, source="screener:response")
         row.market_cap = provenance["value"]
@@ -1185,21 +1185,21 @@ def fill_market_cap(rows: list[ScreenerData]) -> list[ScreenerData]:
 
 def _has_advanced_screener_filters(
     *,
-    filters: str | None,
-    sort: str | None,
-    pe_min: float | None,
-    pe_max: float | None,
-    pb_min: float | None,
-    pb_max: float | None,
-    ps_min: float | None,
-    ps_max: float | None,
-    roe_min: float | None,
-    roa_min: float | None,
-    debt_to_equity_max: float | None,
-    market_cap_min: float | None,
-    market_cap_max: float | None,
-    volume_min: int | None,
-    sort_by: str | None,
+    filters: Optional[str],
+    sort: Optional[str],
+    pe_min: Optional[float],
+    pe_max: Optional[float],
+    pb_min: Optional[float],
+    pb_max: Optional[float],
+    ps_min: Optional[float],
+    ps_max: Optional[float],
+    roe_min: Optional[float],
+    roa_min: Optional[float],
+    debt_to_equity_max: Optional[float],
+    market_cap_min: Optional[float],
+    market_cap_max: Optional[float],
+    volume_min: Optional[int],
+    sort_by: Optional[str],
 ) -> bool:
     return any(
         value is not None
@@ -1224,10 +1224,10 @@ def _has_advanced_screener_filters(
 
 
 def _apply_exchange_and_industry_filters(
-    rows: list[ScreenerData],
+    rows: List[ScreenerData],
     exchange: str,
-    industry: str | None,
-) -> list[ScreenerData]:
+    industry: Optional[str],
+) -> List[ScreenerData]:
     filtered = rows
     normalized_exchange = exchange.upper()
     if normalized_exchange != "ALL":
@@ -1263,7 +1263,7 @@ _FUNDAMENTAL_DOC_FIELD_MAP = {
 FUNDAMENTAL_FIELD_NAMES = frozenset(_FUNDAMENTAL_DOC_FIELD_MAP.values())
 
 
-def _blob_names_fundamental_field(filters: str | None) -> bool:
+def _blob_names_fundamental_field(filters: Optional[str]) -> bool:
     """True when a serialized filter blob references any Fundamental Field.
 
     Walks nested groups at arbitrary depth under both AND and OR. An
@@ -1286,7 +1286,7 @@ def _blob_names_fundamental_field(filters: str | None) -> bool:
     return _walk(group)
 
 
-def _sort_names_fundamental_field(sort: str | None, sort_by: str | None) -> bool:
+def _sort_names_fundamental_field(sort: Optional[str], sort_by: Optional[str]) -> bool:
     """True when a sort targets a Fundamental Field.
 
     Sorting an unenriched column silently yields arbitrary order, which is the
@@ -1307,15 +1307,15 @@ def _sort_names_fundamental_field(sort: str | None, sort_by: str | None) -> bool
 def request_needs_fundamental_enrichment(
     *,
     include_fundamental: bool,
-    columns: str | None,
-    moat: str | None,
-    margin_of_safety_min: float | None,
-    margin_of_safety_max: float | None,
-    dividend_years_min: int | None,
-    fcf_positive: bool | None,
-    filters: str | None,
-    sort: str | None,
-    sort_by: str | None,
+    columns: Optional[str],
+    moat: Optional[str],
+    margin_of_safety_min: Optional[float],
+    margin_of_safety_max: Optional[float],
+    dividend_years_min: Optional[int],
+    fcf_positive: Optional[bool],
+    filters: Optional[str],
+    sort: Optional[str],
+    sort_by: Optional[str],
 ) -> bool:
     """Whether a request needs Fundamental Enrichment.
 
@@ -1347,8 +1347,8 @@ def request_needs_fundamental_enrichment(
 
 
 async def _apply_fundamental_enrichment(
-    rows: list[ScreenerData],
-) -> tuple[list[ScreenerData], EnrichmentOutcome]:
+    rows: List[ScreenerData],
+) -> tuple[List[ScreenerData], EnrichmentOutcome]:
     """Join the latest Fundamental Snapshots onto a Candidate Set.
 
     Best-effort by contract: any failure leaves the fields empty rather than
@@ -1393,13 +1393,13 @@ async def _apply_fundamental_enrichment(
 
 
 def _apply_fundamental_filters(
-    rows: list[ScreenerData],
-    moat: str | None,
-    margin_of_safety_min: float | None,
-    margin_of_safety_max: float | None,
-    dividend_years_min: int | None,
-    fcf_positive: bool | None,
-) -> list[ScreenerData]:
+    rows: List[ScreenerData],
+    moat: Optional[str],
+    margin_of_safety_min: Optional[float],
+    margin_of_safety_max: Optional[float],
+    dividend_years_min: Optional[int],
+    fcf_positive: Optional[bool],
+) -> List[ScreenerData]:
     """Filter rows by fundamental-screener fields.
 
     Each set parameter keeps only rows whose corresponding field is non-null
@@ -1438,36 +1438,36 @@ def _apply_fundamental_filters(
 
 
 async def _prepare_cached_screener_rows(
-    snapshots: list[object],
+    snapshots: List[object],
     db: AsyncSession,
     *,
     limit: int,
     universe: str,
     exchange: str,
-    industry: str | None,
-    filters: str | None,
-    sort: str | None,
-    pe_min: float | None,
-    pe_max: float | None,
-    pb_min: float | None,
-    pb_max: float | None,
-    ps_min: float | None,
-    ps_max: float | None,
-    roe_min: float | None,
-    roa_min: float | None,
-    debt_to_equity_max: float | None,
-    market_cap_min: float | None,
-    market_cap_max: float | None,
-    volume_min: int | None,
-    sort_by: str | None,
+    industry: Optional[str],
+    filters: Optional[str],
+    sort: Optional[str],
+    pe_min: Optional[float],
+    pe_max: Optional[float],
+    pb_min: Optional[float],
+    pb_max: Optional[float],
+    ps_min: Optional[float],
+    ps_max: Optional[float],
+    roe_min: Optional[float],
+    roa_min: Optional[float],
+    debt_to_equity_max: Optional[float],
+    market_cap_min: Optional[float],
+    market_cap_max: Optional[float],
+    volume_min: Optional[int],
+    sort_by: Optional[str],
     sort_order: str,
-    as_of_date: date | None,
-    min_listing_age_days: int | None,
-    target_upside_min: float | None,
-    enrich: Callable[[list[ScreenerData]], Awaitable[list[ScreenerData]]],
-    fundamental_filter: Callable[[list[ScreenerData]], list[ScreenerData]],
+    as_of_date: Optional[date],
+    min_listing_age_days: Optional[int],
+    target_upside_min: Optional[float],
+    enrich: Callable[[List[ScreenerData]], Awaitable[List[ScreenerData]]],
+    fundamental_filter: Callable[[List[ScreenerData]], List[ScreenerData]],
     needs_fundamental_enrichment: bool,
-) -> tuple[list[ScreenerData], dict[str, Any], int, int, bool]:
+) -> tuple[List[ScreenerData], dict[str, Any], int, int, bool]:
     data = [_to_screener_data_row(snapshot) for snapshot in snapshots]
     candidate_count = len(data)
 
@@ -1585,60 +1585,60 @@ async def _refresh_screener_cache(params: StockScreenerParams) -> None:
 
 @router.get(
     "",
-    response_model=StandardResponse[list[ScreenerData]],
+    response_model=StandardResponse[List[ScreenerData]],
     response_model_by_alias=False,
     summary="Get Stock Screener Data",
 )
 @router.get(
     "/",
-    response_model=StandardResponse[list[ScreenerData]],
+    response_model=StandardResponse[List[ScreenerData]],
     response_model_by_alias=False,
     summary="Get Stock Screener Data",
 )
 async def get_screener(
     request: Request,
-    symbol: str | None = Query(None),
+    symbol: Optional[str] = Query(None),
     universe: str = Query(default="ALL", pattern=r"^(ALL|VN30|VN100|HNX30)$"),
     exchange: str = Query(default="ALL", pattern=r"^(HOSE|HNX|UPCOM|ALL)$"),
-    industry: str | None = Query(None),
-    as_of_date: date | None = Query(None),
-    min_listing_age_days: int | None = Query(None, ge=0),
-    target_upside_min: float | None = Query(None, allow_inf_nan=False),
+    industry: Optional[str] = Query(None),
+    as_of_date: Optional[date] = Query(None),
+    min_listing_age_days: Optional[int] = Query(None, ge=0),
+    target_upside_min: Optional[float] = Query(None, allow_inf_nan=False),
     limit: int = Query(default=100, ge=1, le=2000),
     source: str = Query(default="VCI", pattern=r"^VCI$", description="Data source: VCI"),
     use_cache: bool = Query(default=True),
     refresh: bool = Query(default=False),
-    filters: str | None = Query(None),
-    sort: str | None = Query(None),
-    pe_min: float | None = Query(None),
-    pe_max: float | None = Query(None),
-    pb_min: float | None = Query(None),
-    pb_max: float | None = Query(None),
-    ps_min: float | None = Query(None),
-    ps_max: float | None = Query(None),
-    roe_min: float | None = Query(None),
-    roa_min: float | None = Query(None),
-    debt_to_equity_max: float | None = Query(None),
-    market_cap_min: float | None = Query(None),
-    market_cap_max: float | None = Query(None),
-    volume_min: int | None = Query(None),
-    moat: str | None = Query(
+    filters: Optional[str] = Query(None),
+    sort: Optional[str] = Query(None),
+    pe_min: Optional[float] = Query(None),
+    pe_max: Optional[float] = Query(None),
+    pb_min: Optional[float] = Query(None),
+    pb_max: Optional[float] = Query(None),
+    ps_min: Optional[float] = Query(None),
+    ps_max: Optional[float] = Query(None),
+    roe_min: Optional[float] = Query(None),
+    roa_min: Optional[float] = Query(None),
+    debt_to_equity_max: Optional[float] = Query(None),
+    market_cap_min: Optional[float] = Query(None),
+    market_cap_max: Optional[float] = Query(None),
+    volume_min: Optional[int] = Query(None),
+    moat: Optional[str] = Query(
         None,
         description=(
             "Comma-separated moat labels (wide,narrow,none,eroding); "
             "model-derived reference estimate, not investment advice"
         ),
     ),
-    margin_of_safety_min: float | None = Query(None),
-    margin_of_safety_max: float | None = Query(None),
-    dividend_years_min: int | None = Query(None),
-    fcf_positive: bool | None = Query(None),
+    margin_of_safety_min: Optional[float] = Query(None),
+    margin_of_safety_max: Optional[float] = Query(None),
+    dividend_years_min: Optional[int] = Query(None),
+    fcf_positive: Optional[bool] = Query(None),
     include_fundamental: bool = Query(False),
-    columns: str | None = Query(None),
-    sort_by: str | None = Query(None),
+    columns: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(None),
     sort_order: str = Query(default="desc", pattern=r"^(asc|desc)$"),
     db: AsyncSession = Depends(get_db),
-) -> StandardResponse[list[ScreenerData]]:
+) -> StandardResponse[List[ScreenerData]]:
     cache_manager = CacheManager(db)
 
     # Decided once, before any path branches, then threaded to the places that
@@ -1661,7 +1661,7 @@ async def get_screener(
     # return value back through four call paths.
     enrichment_outcome: EnrichmentOutcome = "skipped"
 
-    async def _enrich(rows: list[ScreenerData]) -> list[ScreenerData]:
+    async def _enrich(rows: List[ScreenerData]) -> List[ScreenerData]:
         """Fundamental Enrichment, ahead of every truncation to a Page."""
         nonlocal enrichment_outcome
         if not needs_fundamental_enrichment:
@@ -1669,7 +1669,7 @@ async def get_screener(
         rows, enrichment_outcome = await _apply_fundamental_enrichment(rows)
         return rows
 
-    def _fundamental_filter(rows: list[ScreenerData]) -> list[ScreenerData]:
+    def _fundamental_filter(rows: List[ScreenerData]) -> List[ScreenerData]:
         """Typed fundamental filters, applied to the enriched Candidate Set."""
         if not needs_fundamental_enrichment:
             return rows
@@ -1683,17 +1683,17 @@ async def get_screener(
         )
 
     async def _respond(
-        rows: list[ScreenerData],
+        rows: List[ScreenerData],
         *,
         cached: bool = False,
         stale: bool = False,
         fallback: bool = False,
-        cached_at: datetime | None = None,
-        discovery_meta: dict[str, Any] | None = None,
-        candidate_count: int | None = None,
-        matched_count: int | None = None,
+        cached_at: Optional[datetime] = None,
+        discovery_meta: Optional[dict[str, Any]] = None,
+        candidate_count: Optional[int] = None,
+        matched_count: Optional[int] = None,
         page_scoped: bool = False,
-    ) -> StandardResponse[list[ScreenerData]]:
+    ) -> StandardResponse[List[ScreenerData]]:
         """Single funnel for every row-emitting return path.
 
         Enrichment and fundamental filtering both happened upstream, before

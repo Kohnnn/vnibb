@@ -9,17 +9,19 @@ Supports both PostgreSQL and SQLite dialects.
 import asyncio
 import logging
 import math
+import os
 import re
 from collections import Counter
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from sqlalchemy import and_, case, delete, func, or_, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache import build_cache_key, redis_client
@@ -43,28 +45,29 @@ from vnibb.core.cache_constants import (
 )
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, engine
-from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
-from vnibb.core.price_units import (
-    history_price_records,
-    normalize_price_record,
-    persisted_price_record,
-    persisted_price_source,
-    screener_price_record,
-)
-from vnibb.core.ratio_units import admitted_ratio_value
+from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.retry import with_retry
-from vnibb.core.screener_shares import resolve_screener_shares
+from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import resolve_sector_name
+from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
+from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
+from vnibb.core.screener_shares import resolve_screener_shares
+from vnibb.services.cache_manager import StructuredPersistenceConflict, lock_ratio_writes, snapshot_session_coverage, source_update_condition
+from vnibb.services.market_session import expected_market_session, qualify_market_session
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
 from vnibb.models.derivatives import DerivativePrice
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance, Subsidiary
+from vnibb.models.market_news import MarketNews
 from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.sync_status import SyncStatus
+from vnibb.models.technical_indicator import TechnicalIndicator
 from vnibb.models.trading import (
     FinancialRatio,
     ForeignTrading,
@@ -82,20 +85,10 @@ from vnibb.providers.vnstock.financials import (
     VnstockFinancialsFetcher,
     admitted_interest_expense,
 )
-from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
-from vnibb.providers.vnstock.runtime import validate_source
-from vnibb.services.cache_manager import (
-    StructuredPersistenceConflict,
-    lock_ratio_writes,
-    snapshot_session_coverage,
-    source_update_condition,
-)
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows
-from vnibb.services.market_session import expected_market_session, qualify_market_session
 from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
-from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +126,7 @@ DAILY_TRADING_STAGES = [
 RATE_MODE_NORMAL = "normal"
 RATE_MODE_REINFORCEMENT = "reinforcement"
 RATE_MODE_CONTEXT: ContextVar[str] = ContextVar("vnibb_rate_mode", default=RATE_MODE_NORMAL)
-_SYNC_RUN_LOCKS: dict[str, asyncio.Lock] = {}
+_SYNC_RUN_LOCKS: Dict[str, asyncio.Lock] = {}
 MARKET_INDEX_ALIASES = {
     "VNINDEX": "VNINDEX",
     "VN-INDEX": "VNINDEX",
@@ -230,7 +223,7 @@ class DataPipeline:
             "derivatives": 15,
         }
         if settings.vnstock_calls_per_minute:
-            base_limits = dict.fromkeys(base_limits, settings.vnstock_calls_per_minute)
+            base_limits = {k: settings.vnstock_calls_per_minute for k in base_limits}
         self.rate_limiters = {
             key: RateLimiter(calls_per_minute=value) for key, value in base_limits.items()
         }
@@ -273,8 +266,8 @@ class DataPipeline:
 
     @staticmethod
     def _describe_provider_exception(exc: BaseException) -> str:
-        parts: list[str] = []
-        current: BaseException | None = exc
+        parts: List[str] = []
+        current: Optional[BaseException] = exc
         seen: set[int] = set()
 
         while current is not None and id(current) not in seen:
@@ -284,7 +277,7 @@ class DataPipeline:
                 f"{type(current).__name__}: {message}" if message else type(current).__name__
             )
 
-            next_exc: BaseException | None = None
+            next_exc: Optional[BaseException] = None
             last_attempt = getattr(current, "last_attempt", None)
             exception_getter = getattr(last_attempt, "exception", None)
             if callable(exception_getter):
@@ -341,7 +334,7 @@ class DataPipeline:
             raise ValueError("empty data (VCI)")
         return frame
 
-    async def _fetch_trading_listing_rows(self, client) -> list[dict[str, Any]]:
+    async def _fetch_trading_listing_rows(self, client) -> List[Dict[str, Any]]:
         from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
         try:
@@ -377,8 +370,8 @@ class DataPipeline:
             return []
 
     async def _fetch_stock_history_frame(self, client, symbol, start, end, *, instrument_type):
-        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
         from vnibb.services.vietcap_ingestion import ohlc_rows_from_gap_chart
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
         if str(instrument_type or "").upper() != "STOCK":
             raise ValueError(f"Price acquisition requires a confirmed stock listing: {symbol}")
@@ -454,7 +447,7 @@ class DataPipeline:
         except Exception as exc:
             logger.debug(f"Cache set failed for {key}: {exc}")
 
-    async def _load_progress(self, key: str = SYNC_PROGRESS_KEY) -> dict[str, Any] | None:
+    async def _load_progress(self, key: str = SYNC_PROGRESS_KEY) -> Optional[Dict[str, Any]]:
         if not await self._ensure_redis():
             return None
         try:
@@ -470,7 +463,7 @@ class DataPipeline:
 
     async def _save_progress(
         self,
-        data: dict[str, Any],
+        data: Dict[str, Any],
         key: str = SYNC_PROGRESS_KEY,
         ttl: int = SYNC_PROGRESS_TTL,
     ) -> None:
@@ -491,7 +484,7 @@ class DataPipeline:
         self,
         sync_type: str,
         ttl_seconds: int,
-    ) -> tuple[bool, str, str | None]:
+    ) -> tuple[bool, str, Optional[str]]:
         lock_key = build_cache_key("vnibb", "sync", "guard", sync_type)
 
         if await self._ensure_redis():
@@ -514,7 +507,7 @@ class DataPipeline:
         self,
         sync_type: str,
         source: str,
-        token: str | None,
+        token: Optional[str],
     ) -> None:
         if source == "redis":
             if token and await self._ensure_redis():
@@ -580,7 +573,7 @@ class DataPipeline:
         )
         return len(stale_records)
 
-    def _is_progress_stale(self, progress: dict[str, Any], max_age_hours: int) -> bool:
+    def _is_progress_stale(self, progress: Dict[str, Any], max_age_hours: int) -> bool:
         updated_at_raw = progress.get("updated_at")
         if not updated_at_raw:
             return False
@@ -613,11 +606,11 @@ class DataPipeline:
     async def _update_sync_record(
         self,
         sync_id: int,
-        status: str | None = None,
-        success_count: int | None = None,
-        error_count: int | None = None,
-        additional_data: dict[str, Any] | None = None,
-        errors: dict[str, Any] | None = None,
+        status: Optional[str] = None,
+        success_count: Optional[int] = None,
+        error_count: Optional[int] = None,
+        additional_data: Optional[Dict[str, Any]] = None,
+        errors: Optional[Dict[str, Any]] = None,
     ) -> None:
         async with async_session_maker() as session:
             record = await session.get(SyncStatus, sync_id)
@@ -639,7 +632,7 @@ class DataPipeline:
 
     async def _checkpoint(
         self,
-        progress: dict[str, Any],
+        progress: Dict[str, Any],
         sync_id: int,
         key: str = SYNC_PROGRESS_KEY,
         ttl: int = SYNC_PROGRESS_TTL,
@@ -652,7 +645,7 @@ class DataPipeline:
             additional_data=progress,
         )
 
-    def _parse_time_value(self, value: str | None, default_value: str) -> time:
+    def _parse_time_value(self, value: Optional[str], default_value: str) -> time:
         raw = value or default_value
         try:
             hour, minute = raw.split(":")
@@ -660,10 +653,10 @@ class DataPipeline:
         except Exception:
             return time(hour=9, minute=0)
 
-    def _is_market_hours(self, check_time: datetime | None = None) -> bool:
+    def _is_market_hours(self, check_time: Optional[datetime] = None) -> bool:
         return is_vietnam_market_open(check_time)
 
-    def _is_after_market_close(self, check_time: datetime | None = None) -> bool:
+    def _is_after_market_close(self, check_time: Optional[datetime] = None) -> bool:
         try:
             tz = ZoneInfo(settings.intraday_market_tz)
         except Exception:
@@ -673,7 +666,7 @@ class DataPipeline:
         market_close = self._parse_time_value(settings.intraday_market_close, "15:00")
         return now.time() >= market_close
 
-    def _get_market_date(self, check_time: datetime | None = None) -> date:
+    def _get_market_date(self, check_time: Optional[datetime] = None) -> date:
         try:
             tz = ZoneInfo(settings.intraday_market_tz)
         except Exception:
@@ -682,7 +675,7 @@ class DataPipeline:
         now = check_time.astimezone(tz) if check_time else datetime.now(tz)
         return now.date()
 
-    def _parse_date_value(self, value: Any) -> date | None:
+    def _parse_date_value(self, value: Any) -> Optional[date]:
         if value is None:
             return None
         if isinstance(value, datetime):
@@ -705,7 +698,7 @@ class DataPipeline:
                 continue
         return None
 
-    def _parse_datetime_value(self, value: Any) -> datetime | None:
+    def _parse_datetime_value(self, value: Any) -> Optional[datetime]:
         return parse_datetime(value)
 
     @staticmethod
@@ -729,7 +722,7 @@ class DataPipeline:
         start_date: date,
         end_date: date,
         max_range_days: int = 30,
-    ) -> list[tuple[date, date]]:
+    ) -> List[Tuple[date, date]]:
         if start_date > end_date:
             return []
 
@@ -740,7 +733,7 @@ class DataPipeline:
         if not missing_dates:
             return []
 
-        ranges: list[tuple[date, date]] = []
+        ranges: List[Tuple[date, date]] = []
         range_start = missing_dates[0]
         range_end = missing_dates[0]
 
@@ -762,7 +755,7 @@ class DataPipeline:
         ranges.append((range_start, range_end))
         return ranges
 
-    async def _get_or_create_company_id(self, session: AsyncSession, symbol: str) -> int | None:
+    async def _get_or_create_company_id(self, session: AsyncSession, symbol: str) -> Optional[int]:
         result = await session.execute(select(Company.id).where(Company.symbol == symbol))
         company_id = result.scalar_one_or_none()
         if company_id:
@@ -783,7 +776,7 @@ class DataPipeline:
         every = max(1, settings.progress_checkpoint_every)
         return (index + 1) % every == 0 or index == total - 1
 
-    def _normalize_exchange(self, exchange: str | None) -> str:
+    def _normalize_exchange(self, exchange: Optional[str]) -> str:
         if not exchange:
             return "UNKNOWN"
         normalized = str(exchange).strip().upper()
@@ -791,9 +784,9 @@ class DataPipeline:
 
     async def _get_exchange_and_chunk_index(
         self,
-        symbols: list[str],
+        symbols: List[str],
         chunk_size: int,
-    ) -> tuple[dict[str, str], dict[str, int]]:
+    ) -> Tuple[Dict[str, str], Dict[str, int]]:
         if not symbols:
             return {}, {}
 
@@ -809,12 +802,12 @@ class DataPipeline:
                 symbol: self._normalize_exchange(exchange) for symbol, exchange in result.fetchall()
             }
 
-        exchange_groups: dict[str, list[str]] = {}
+        exchange_groups: Dict[str, List[str]] = {}
         for symbol in normalized_symbols:
             exchange = exchange_map.get(symbol) or "UNKNOWN"
             exchange_groups.setdefault(exchange, []).append(symbol)
 
-        chunk_index_map: dict[str, int] = {}
+        chunk_index_map: Dict[str, int] = {}
         safe_chunk_size = max(1, chunk_size)
         for exchange, exchange_symbols in exchange_groups.items():
             for idx, symbol in enumerate(sorted(set(exchange_symbols))):
@@ -824,17 +817,17 @@ class DataPipeline:
 
     async def _cache_chunked_records(
         self,
-        key_prefix_parts: list[str | int],
+        key_prefix_parts: List[Union[str, int]],
         trade_date: date,
-        records: list[dict[str, Any]],
-        symbol_exchange: dict[str, str],
-        symbol_chunk_index: dict[str, int],
+        records: List[Dict[str, Any]],
+        symbol_exchange: Dict[str, str],
+        symbol_chunk_index: Dict[str, int],
         ttl: int,
     ) -> None:
         if not records:
             return
 
-        chunked: dict[str, list[dict[str, Any]]] = {}
+        chunked: Dict[str, List[Dict[str, Any]]] = {}
         for record in records:
             symbol = record.get("symbol")
             if not symbol:
@@ -855,9 +848,9 @@ class DataPipeline:
 
     async def _upsert_chunked_record(
         self,
-        key_prefix_parts: list[str | int],
+        key_prefix_parts: List[Union[str, int]],
         trade_date: date,
-        record: dict[str, Any],
+        record: Dict[str, Any],
         exchange: str,
         chunk_index: int,
         ttl: int,
@@ -878,7 +871,7 @@ class DataPipeline:
         except Exception as exc:
             logger.debug(f"Chunked cache read failed for {cache_key}: {exc}")
 
-        payload: list[dict[str, Any]] = []
+        payload: List[Dict[str, Any]] = []
         if isinstance(existing, list):
             payload = existing
             updated = False
@@ -898,8 +891,8 @@ class DataPipeline:
     @with_retry(max_retries=3)
     async def sync_stock_list(
         self,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Refresh source-backed IQ stock listings; free VCI supplements outages."""
         from vnibb.providers.vnstock.runtime import get_listing_class
@@ -964,7 +957,7 @@ class DataPipeline:
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
 
-        def normalize_text(value: Any) -> str | None:
+        def normalize_text(value: Any) -> Optional[str]:
             if value is None:
                 return None
             if isinstance(value, float) and pd.isna(value):
@@ -974,7 +967,7 @@ class DataPipeline:
                 return cleaned or None
             return str(value)
 
-        exchange_map: dict[str, str] = {}
+        exchange_map: Dict[str, str] = {}
         if exchange_df is not None and not exchange_df.empty:
             for _, row in exchange_df.iterrows():
                 symbol_value = normalize_text(row.get("symbol") or row.get("ticker"))
@@ -982,7 +975,7 @@ class DataPipeline:
                 if symbol_value and exchange_value:
                     exchange_map[symbol_value.upper()] = exchange_value
 
-        industry_map: dict[str, str] = {}
+        industry_map: Dict[str, str] = {}
         if industry_df is not None and not industry_df.empty:
             for _, row in industry_df.iterrows():
                 symbol_value = normalize_text(row.get("symbol") or row.get("ticker"))
@@ -1006,7 +999,7 @@ class DataPipeline:
                 start_index = symbols.index(last_symbol) + 1
 
         batch_size = 200
-        cache_batch: list[dict[str, Any]] = []
+        cache_batch: List[Dict[str, Any]] = []
 
         if progress is not None:
             progress.setdefault("stage_stats", {})
@@ -1116,18 +1109,18 @@ class DataPipeline:
     @with_retry(max_retries=3)
     async def sync_screener_data(
         self,
-        symbols: list[str] | None = None,
-        exchanges: list[str] | None = None,
-        limit: int | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: Optional[List[str]] = None,
+        exchanges: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
         enrich_ratios: bool = True,
         acquire_sessions: bool = False,
     ) -> int:
         """Materialize retained quotes; acquire provider-board sessions only when requested."""
         from vnibb.providers.vnstock.runtime import (
-            get_listing_class,
             import_vnstock_symbol,
+            get_listing_class,
             run_financial_provider,
         )
 
@@ -1136,7 +1129,7 @@ class DataPipeline:
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
 
-        def _normalize_text(value: Any) -> str | None:
+        def _normalize_text(value: Any) -> Optional[str]:
             if value is None:
                 return None
             if isinstance(value, float) and pd.isna(value):
@@ -1144,7 +1137,7 @@ class DataPipeline:
             raw = str(value).strip()
             return raw or None
 
-        def _parse_float(value: Any) -> float | None:
+        def _parse_float(value: Any) -> Optional[float]:
             if value is None:
                 return None
             if isinstance(value, float) and pd.isna(value):
@@ -1157,7 +1150,7 @@ class DataPipeline:
             except (TypeError, ValueError):
                 return None
 
-        def _normalize_share_count(value: Any) -> float | None:
+        def _normalize_share_count(value: Any) -> Optional[float]:
             parsed = _parse_float(value)
             if parsed in (None, 0):
                 return None
@@ -1165,14 +1158,14 @@ class DataPipeline:
                 return parsed * 1_000_000.0
             return parsed
 
-        def _pick_float(*values: Any) -> float | None:
+        def _pick_float(*values: Any) -> Optional[float]:
             for value in values:
                 parsed = _parse_float(value)
                 if parsed is not None:
                     return parsed
             return None
 
-        def _valid_base_quote(quote: dict[str, Any], trade_date: date | None) -> bool:
+        def _valid_base_quote(quote: Dict[str, Any], trade_date: Optional[date]) -> bool:
             price = _parse_float(quote.get("price"))
             return bool(
                 price is not None and math.isfinite(price) and price > 0
@@ -1180,7 +1173,7 @@ class DataPipeline:
                 and quote["price_unit"] == "VND" and quote.get("price_source")
             )
 
-        def _normalize_dividend_yield(value: Any) -> float | None:
+        def _normalize_dividend_yield(value: Any) -> Optional[float]:
             parsed = _parse_float(value)
             if parsed is None:
                 return None
@@ -1191,8 +1184,8 @@ class DataPipeline:
 
             return normalized
 
-        def _extract_listing_metadata(src: str) -> dict[str, dict[str, Any]]:
-            metadata: dict[str, dict[str, Any]] = {}
+        def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
+            metadata: Dict[str, Dict[str, Any]] = {}
             try:
                 listing = Listing(source=validate_source(src))
                 df = listing.all_symbols()
@@ -1205,7 +1198,7 @@ class DataPipeline:
             if df is None or df.empty:
                 return metadata
 
-            exchange_map: dict[str, str] = {}
+            exchange_map: Dict[str, str] = {}
             if exchange_df is not None and not exchange_df.empty:
                 for _, row in exchange_df.iterrows():
                     symbol_value = _normalize_text(row.get("symbol") or row.get("ticker"))
@@ -1213,7 +1206,7 @@ class DataPipeline:
                     if symbol_value and exchange_value:
                         exchange_map[symbol_value.upper()] = exchange_value
 
-            industry_map: dict[str, str] = {}
+            industry_map: Dict[str, str] = {}
             if industry_df is not None and not industry_df.empty:
                 for _, row in industry_df.iterrows():
                     symbol_value = _normalize_text(row.get("symbol") or row.get("ticker"))
@@ -1282,7 +1275,7 @@ class DataPipeline:
 
             return metadata
 
-        normalized_exchanges: list[str] = []
+        normalized_exchanges: List[str] = []
         if exchanges:
             normalized_exchanges = [
                 exchange.strip().upper()
@@ -1312,8 +1305,8 @@ class DataPipeline:
             logger.warning("No symbols found in database for screener sync.")
             return 0
 
-        stock_metadata: dict[str, dict[str, Any]] = {}
-        company_metadata: dict[str, dict[str, Any]] = {}
+        stock_metadata: Dict[str, Dict[str, Any]] = {}
+        company_metadata: Dict[str, Dict[str, Any]] = {}
         async with async_session_maker() as session:
             rows = await session.execute(
                 select(Stock.symbol, Stock.company_name, Stock.exchange, Stock.industry, Stock.id).where(
@@ -1389,8 +1382,8 @@ class DataPipeline:
         session_input_complete = True
         today = datetime.utcnow().date()
 
-        previous_snapshot_fallback: dict[str, dict[str, Any]] = {}
-        latest_price_fallback: dict[str, dict[str, Any]] = {}
+        previous_snapshot_fallback: Dict[str, Dict[str, Any]] = {}
+        latest_price_fallback: Dict[str, Dict[str, Any]] = {}
         async with async_session_maker() as session:
             latest_snapshot = (
                 select(
@@ -1721,7 +1714,7 @@ class DataPipeline:
                             )
                             if ratio_df:
                                 break
-                        except TimeoutError:
+                        except asyncio.TimeoutError:
                             logger.warning(f"Ratio summary timed out for {symbol} ({ratio_source})")
                         except SystemExit as exc:
                             logger.warning(
@@ -2241,7 +2234,7 @@ class DataPipeline:
                         changed = True
 
 
-                def _set_extended_metric(key: str, value: float | None) -> None:
+                def _set_extended_metric(key: str, value: Optional[float]) -> None:
                     nonlocal changed
                     if value is None:
                         return
@@ -2513,13 +2506,13 @@ class DataPipeline:
 
     async def sync_daily_prices(
         self,
-        symbols: list[str] = None,
+        symbols: List[str] = None,
         days: int = 30,
-        start_date: date | None = None,
-        end_date: date | None = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
         fill_missing_gaps: bool = False,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
         cache_recent: bool = True,
     ) -> int:
         """Sync historical prices for specified symbols."""
@@ -2566,9 +2559,9 @@ class DataPipeline:
         total_synced = 0
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
-            active_range: tuple[str, str] | None = None
+            active_range: Optional[Tuple[str, str]] = None
             try:
-                fetch_ranges: list[tuple[date, date]] = [(resolved_start, resolved_end)]
+                fetch_ranges: List[Tuple[date, date]] = [(resolved_start, resolved_end)]
                 existing_dates: set[date] = set()
 
                 async with async_session_maker() as session:
@@ -2600,7 +2593,7 @@ class DataPipeline:
                             max_range_days=30,
                         )
 
-                latest_row: dict[str, Any] | None = None
+                latest_row: Optional[Dict[str, Any]] = None
                 symbol_synced = 0
                 async with async_session_maker() as session:
                     stock_id_result = await session.execute(
@@ -2824,7 +2817,7 @@ class DataPipeline:
 
         return total_synced
 
-    async def cleanup_price_history(self, retain_years: int | None = None) -> int:
+    async def cleanup_price_history(self, retain_years: Optional[int] = None) -> int:
         retain_years = retain_years or settings.price_history_years
         cutoff = date.today() - timedelta(days=retain_years * 365)
         async with async_session_maker() as session:
@@ -2835,7 +2828,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_screener_snapshots(self, retain_days: int | None = None) -> int:
+    async def cleanup_screener_snapshots(self, retain_days: Optional[int] = None) -> int:
         retain_days = retain_days if retain_days is not None else settings.screener_retention_days
         if retain_days <= 0:
             return 0
@@ -2847,7 +2840,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_company_news(self, retain_days: int | None = None) -> int:
+    async def cleanup_company_news(self, retain_days: Optional[int] = None) -> int:
         retain_days = retain_days if retain_days is not None else settings.news_retention_days
         if retain_days <= 0:
             return 0
@@ -2862,7 +2855,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_intraday_trades(self, retain_days: int | None = None) -> int:
+    async def cleanup_intraday_trades(self, retain_days: Optional[int] = None) -> int:
         retain_days = retain_days if retain_days is not None else settings.intraday_retention_days
         if retain_days <= 0:
             return 0
@@ -2875,7 +2868,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_orderbook_snapshots(self, retain_days: int | None = None) -> int:
+    async def cleanup_orderbook_snapshots(self, retain_days: Optional[int] = None) -> int:
         retain_days = retain_days if retain_days is not None else settings.orderbook_retention_days
         if retain_days <= 0:
             return 0
@@ -2888,7 +2881,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_block_trades(self, retain_days: int | None = None) -> int:
+    async def cleanup_block_trades(self, retain_days: Optional[int] = None) -> int:
         retain_days = (
             retain_days if retain_days is not None else settings.block_trades_retention_days
         )
@@ -2903,7 +2896,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_foreign_trading(self, retain_years: int | None = None) -> int:
+    async def cleanup_foreign_trading(self, retain_years: Optional[int] = None) -> int:
         retain_years = retain_years or settings.foreign_trading_retention_years
         if retain_years <= 0:
             return 0
@@ -2915,7 +2908,7 @@ class DataPipeline:
             await session.commit()
             return result.rowcount or 0
 
-    async def cleanup_order_flow_daily(self, retain_years: int | None = None) -> int:
+    async def cleanup_order_flow_daily(self, retain_years: Optional[int] = None) -> int:
         retain_years = retain_years or settings.order_flow_retention_years
         if retain_years <= 0:
             return 0
@@ -2928,10 +2921,10 @@ class DataPipeline:
             return result.rowcount or 0
 
     async def run_retention_cleanup(self, include_price_history: bool = False) -> dict[str, int]:
-        results: dict[str, int] = {}
+        results: Dict[str, int] = {}
         failed_labels: list[str] = []
 
-        cleanup_actions: list[tuple[str, Any]] = [
+        cleanup_actions: List[Tuple[str, Any]] = [
             ("screener_snapshots", self.cleanup_screener_snapshots),
             ("company_news", self.cleanup_company_news),
             ("intraday_trades", self.cleanup_intraday_trades),
@@ -2966,9 +2959,9 @@ class DataPipeline:
 
     async def sync_company_profiles(
         self,
-        symbols: list[str] = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: List[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync company basic info for specified symbols."""
         if not symbols:
@@ -2992,7 +2985,7 @@ class DataPipeline:
                 {"success": 0, "errors": 0, "total": len(symbols)},
             )
 
-        def _normalize_text(value: Any) -> str | None:
+        def _normalize_text(value: Any) -> Optional[str]:
             if value is None:
                 return None
             if isinstance(value, float) and pd.isna(value):
@@ -3000,7 +2993,7 @@ class DataPipeline:
             raw = str(value).strip()
             return raw or None
 
-        def _parse_float(value: Any) -> float | None:
+        def _parse_float(value: Any) -> Optional[float]:
             if value is None:
                 return None
             if isinstance(value, float) and pd.isna(value):
@@ -3013,13 +3006,13 @@ class DataPipeline:
             except (TypeError, ValueError):
                 return None
 
-        def _normalize_share_count(value: Any) -> float | None:
+        def _normalize_share_count(value: Any) -> Optional[float]:
             parsed = _parse_float(value)
             if parsed in (None, 0):
                 return None
             return parsed * 1_000_000.0 if abs(parsed) < 1_000_000 else parsed
 
-        def _parse_date(value: Any) -> date | None:
+        def _parse_date(value: Any) -> Optional[date]:
             if value is None:
                 return None
             if isinstance(value, date) and not isinstance(value, datetime):
@@ -3052,10 +3045,10 @@ class DataPipeline:
                     run_financial_provider,
                 )
 
-                def acquire_profile(symbol=symbol) -> dict[str, Any]:
+                def acquire_profile(symbol=symbol) -> Dict[str, Any]:
                     company = get_company_class()(symbol=symbol, source=validate_source(settings.vnstock_source))
-                    overview_row: dict[str, Any] = {}
-                    profile_row: dict[str, Any] = {}
+                    overview_row: Dict[str, Any] = {}
+                    profile_row: Dict[str, Any] = {}
                     errors: list[Exception] = []
                     for method_name, target in (("overview", overview_row), ("profile", profile_row)):
                         try:
@@ -3256,13 +3249,13 @@ class DataPipeline:
 
     async def sync_financials(
         self,
-        symbols: list[str] = None,
+        symbols: List[str] = None,
         period: str = "year",
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
-        statement_types: list[StatementType | str] | None = None,
-        start_year: int | None = None,
-        count: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
+        statement_types: Optional[List[StatementType | str]] = None,
+        start_year: Optional[int] = None,
+        count: Optional[int] = None,
     ) -> int:
         """Acquire independent statements; return symbols with a complete requested window."""
         if not symbols:
@@ -3342,7 +3335,7 @@ class DataPipeline:
                 progress["stage_stats"]["financials"].setdefault(key, 0)
 
         cycle.update(status="running", complete=False, persisted_rows=0)
-        async def _persist_receipt(outcome: dict[str, Any], *, cycle_receipt: bool = False):
+        async def _persist_receipt(outcome: Dict[str, Any], *, cycle_receipt: bool = False):
             async with async_session_maker() as session:
                 await session.execute(SyncStatus.__table__.insert().values(
                     sync_type="financial_cycle" if cycle_receipt else "financial_acquisition",
@@ -3359,11 +3352,11 @@ class DataPipeline:
 
         def _parse_period_fields(
             raw_period: Any,
-            raw_payload: dict[str, Any] | None = None,
-        ) -> tuple[str, int, int | None]:
+            raw_payload: Optional[Dict[str, Any]] = None,
+        ) -> Tuple[str, int, Optional[int]]:
             payload = raw_payload if isinstance(raw_payload, dict) else {}
 
-            year_hint: int | None = None
+            year_hint: Optional[int] = None
             for key in ("yearReport", "fiscalYear", "year_report", "year"):
                 value = payload.get(key)
                 if value is None:
@@ -3402,7 +3395,7 @@ class DataPipeline:
 
             return str(fiscal_year), fiscal_year, None
 
-        def _coerce_float(value: Any) -> float | None:
+        def _coerce_float(value: Any) -> Optional[float]:
             if value is None:
                 return None
             try:
@@ -3413,7 +3406,7 @@ class DataPipeline:
                 return None
             return parsed
 
-        def _pick_float(*values: Any) -> float | None:
+        def _pick_float(*values: Any) -> Optional[float]:
             for value in values:
                 parsed = _coerce_float(value)
                 if parsed is not None:
@@ -3452,7 +3445,7 @@ class DataPipeline:
                 symbol_synced = True
                 symbol_persisted_rows = 0
                 cycle["outcomes"][symbol] = {}
-                income_depreciation_lookup: dict[tuple[Any, ...], dict[str, Any]] = {}
+                income_depreciation_lookup: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
                 async def _acquire_statement(
                     statement_type, model, cache_slug, outcome,
                     *, income_depreciation_lookup=income_depreciation_lookup,
@@ -3478,9 +3471,9 @@ class DataPipeline:
                     if not items:
                         raise RuntimeError(f"Empty {statement_type.value} acquisition for {symbol}")
 
-                    latest_cache_payload: list[dict[str, Any]] = []
-                    rejected_updates: list[str] = []
-                    withheld_periods: dict[str, dict[str, Any]] = {}
+                    latest_cache_payload: List[Dict[str, Any]] = []
+                    rejected_updates: List[str] = []
+                    withheld_periods: Dict[str, Dict[str, Any]] = {}
                     committed_periods = {}
                     admitted_items = admit_statement_rows(items, normalized_period)
                     period_counts = Counter(
@@ -3520,7 +3513,7 @@ class DataPipeline:
                                 "aggregation_basis", "source_periods", "unavailable_reason",
                                 "consolidation_basis", "flow_basis",
                             )
-                            derived: dict[str, Any] = {}
+                            derived: Dict[str, Any] = {}
                             lineage = {key: canonical.get(key) for key in lineage_fields}
                             lineage["canonical_data"] = canonical
                             lineage["derived_data"] = derived
@@ -3854,10 +3847,10 @@ class DataPipeline:
 
     async def sync_financial_ratios(
         self,
-        symbols: list[str] = None,
+        symbols: List[str] = None,
         period: str = "quarter",
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync financial ratios for specified symbols."""
         if not symbols:
@@ -3887,7 +3880,7 @@ class DataPipeline:
         total = 0
         normalized_period = "year" if period in {"year", "FY"} else "quarter"
 
-        def _coerce_float(value: Any) -> float | None:
+        def _coerce_float(value: Any) -> Optional[float]:
             if value is None:
                 return None
             try:
@@ -3898,14 +3891,14 @@ class DataPipeline:
                 return None
             return parsed
 
-        def _pick_float(*values: Any) -> float | None:
+        def _pick_float(*values: Any) -> Optional[float]:
             for value in values:
                 parsed = _coerce_float(value)
                 if parsed is not None:
                     return parsed
             return None
 
-        def _normalize_dividend_yield(value: Any) -> float | None:
+        def _normalize_dividend_yield(value: Any) -> Optional[float]:
             parsed = _coerce_float(value)
             if parsed is None:
                 return None
@@ -3914,11 +3907,11 @@ class DataPipeline:
             return parsed
 
         def _resolve_lookup(
-            keyed: dict[tuple[int, int], dict[str, float | None]],
-            annual: dict[int, dict[str, float | None]],
+            keyed: Dict[Tuple[int, int], Dict[str, Optional[float]]],
+            annual: Dict[int, Dict[str, Optional[float]]],
             year: int,
-            quarter: int | None,
-        ) -> dict[str, float | None] | None:
+            quarter: Optional[int],
+        ) -> Dict[str, Optional[float]] | None:
             key = (year, quarter or 0)
             row = keyed.get(key)
             if row is None and quarter not in (None, 0):
@@ -4120,8 +4113,8 @@ class DataPipeline:
                 )
             ).all()
 
-            income_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-            income_annual: dict[int, dict[str, float | None]] = {}
+            income_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
+            income_annual: Dict[int, Dict[str, Optional[float]]] = {}
             for (
                 year,
                 quarter,
@@ -4145,8 +4138,8 @@ class DataPipeline:
                 income_lookup[period_key] = row_value
                 income_annual.setdefault(int(year), row_value)
 
-            balance_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-            balance_annual: dict[int, dict[str, float | None]] = {}
+            balance_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
+            balance_annual: Dict[int, Dict[str, Optional[float]]] = {}
             for (
                 year,
                 quarter,
@@ -4175,8 +4168,8 @@ class DataPipeline:
                 balance_lookup[period_key] = row_value
                 balance_annual.setdefault(int(year), row_value)
 
-            cashflow_lookup: dict[tuple[int, int], dict[str, float | None]] = {}
-            cashflow_annual: dict[int, dict[str, float | None]] = {}
+            cashflow_lookup: Dict[Tuple[int, int], Dict[str, Optional[float]]] = {}
+            cashflow_annual: Dict[int, Dict[str, Optional[float]]] = {}
             for (
                 year,
                 quarter,
@@ -4699,15 +4692,15 @@ class DataPipeline:
 
     async def sync_company_news(
         self,
-        symbols: list[str] = None,
+        symbols: List[str] = None,
         limit: int = 20,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync company news for specified symbols."""
         from vnibb.providers.vnstock.company_news import (
-            CompanyNewsQueryParams,
             VnstockCompanyNewsFetcher,
+            CompanyNewsQueryParams,
         )
 
         if not symbols:
@@ -4810,19 +4803,19 @@ class DataPipeline:
 
     async def sync_company_events(
         self,
-        symbols: list[str] = None,
+        symbols: List[str] = None,
         limit: int = 30,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync company events for specified symbols."""
         from vnibb.providers.vnstock.company_events import (
-            CompanyEventsQueryParams,
             VnstockCompanyEventsFetcher,
+            CompanyEventsQueryParams,
         )
         from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 
-        def _parse_float(value: Any) -> float | None:
+        def _parse_float(value: Any) -> Optional[float]:
             if value is None:
                 return None
             if isinstance(value, (int, float)):
@@ -4858,7 +4851,7 @@ class DataPipeline:
                     VnstockCompanyEventsFetcher.transform_query(params)
                 )
                 items = VnstockCompanyEventsFetcher.transform_data(params, raw_items)
-                payloads: list[dict[str, Any]] = []
+                payloads: List[Dict[str, Any]] = []
 
                 if items:
                     payloads = [item.model_dump() for item in items]
@@ -4948,14 +4941,14 @@ class DataPipeline:
 
     async def sync_dividends(
         self,
-        symbols: list[str] = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: List[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync dividend history for specified symbols."""
         from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 
-        def _parse_ratio(value: Any) -> float | None:
+        def _parse_ratio(value: Any) -> Optional[float]:
             if value is None:
                 return None
             if isinstance(value, (int, float)):
@@ -5047,10 +5040,10 @@ class DataPipeline:
 
     async def sync_insider_deals(
         self,
-        symbols: list[str] = None,
+        symbols: List[str] = None,
         limit: int = 20,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync insider deals for specified symbols."""
         from vnibb.providers.vnstock.insider_deals import VnstockInsiderDealsFetcher
@@ -5210,14 +5203,14 @@ class DataPipeline:
 
     async def sync_shareholders(
         self,
-        symbols: list[str] = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: List[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync major shareholders for specified symbols."""
         from vnibb.providers.vnstock.shareholders import (
-            ShareholdersQueryParams,
             VnstockShareholdersFetcher,
+            ShareholdersQueryParams,
         )
 
         if not symbols:
@@ -5300,14 +5293,14 @@ class DataPipeline:
 
     async def sync_officers(
         self,
-        symbols: list[str] = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: List[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync company officers for specified symbols."""
         from vnibb.providers.vnstock.officers import (
-            OfficersQueryParams,
             VnstockOfficersFetcher,
+            OfficersQueryParams,
         )
 
         if not symbols:
@@ -5392,14 +5385,14 @@ class DataPipeline:
 
     async def sync_subsidiaries(
         self,
-        symbols: list[str] = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: List[str] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync subsidiaries for specified symbols."""
         from vnibb.providers.vnstock.subsidiaries import (
-            SubsidiariesQueryParams,
             VnstockSubsidiariesFetcher,
+            SubsidiariesQueryParams,
         )
 
         if not symbols:
@@ -5518,7 +5511,7 @@ class DataPipeline:
         )
         from vnibb.services.sector_service import SectorService
 
-        def metric(row: dict, *keys: str) -> float | None:
+        def metric(row: dict, *keys: str) -> Optional[float]:
             extended = row.get("extended_metrics")
             extended = extended if isinstance(extended, dict) else {}
             for payload in (row, extended):
@@ -5561,7 +5554,7 @@ class DataPipeline:
         if not dated_rows:
             raise ValueError("Sector performance unavailable: no dated screener observations")
 
-        rows_by_date: dict[date, list[dict]] = {}
+        rows_by_date: Dict[date, List[dict]] = {}
         for row in dated_rows:
             row["price_change_1d_pct"] = metric(
                 row, "price_change_1d_pct", "change_pct", "change_1d", "changePct", "price_change_pct"
@@ -5608,8 +5601,8 @@ class DataPipeline:
 
     async def sync_market_indices(
         self,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync the latest market index snapshots into stock_indices."""
         from vnibb.providers.vnstock.market_overview import (
@@ -5617,7 +5610,7 @@ class DataPipeline:
             VnstockMarketOverviewFetcher,
         )
 
-        def _parse_float(value: Any) -> float | None:
+        def _parse_float(value: Any) -> Optional[float]:
             if value is None:
                 return None
             try:
@@ -5726,10 +5719,10 @@ class DataPipeline:
 
     async def sync_foreign_trading(
         self,
-        trade_date: date | None = None,
-        symbols: list[str] | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        trade_date: Optional[date] = None,
+        symbols: Optional[List[str]] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync foreign trading data using price board batches."""
         from vnibb.providers.vnstock.price_board import VnstockPriceBoardFetcher
@@ -5757,15 +5750,15 @@ class DataPipeline:
         if not symbols:
             return 0
 
-        symbol_exchange: dict[str, str] = {}
-        symbol_chunk_index: dict[str, int] = {}
+        symbol_exchange: Dict[str, str] = {}
+        symbol_chunk_index: Dict[str, int] = {}
         if settings.cache_foreign_trading_chunked:
             symbol_exchange, symbol_chunk_index = await self._get_exchange_and_chunk_index(
                 symbols,
                 settings.cache_chunk_size,
             )
 
-        chunked_cache_records: list[dict[str, Any]] = []
+        chunked_cache_records: List[Dict[str, Any]] = []
 
         start_index = 0
         if progress and progress.get("stage") == "foreign_trading":
@@ -5896,13 +5889,13 @@ class DataPipeline:
 
     async def sync_intraday_trades(
         self,
-        trade_date: date | None = None,
-        symbols: list[str] | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
-        limit: int | None = None,
+        trade_date: Optional[date] = None,
+        symbols: Optional[List[str]] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
+        limit: Optional[int] = None,
         live_session: bool = False,
-        retain_ticks: bool | None = None,
+        retain_ticks: Optional[bool] = None,
     ) -> int:
         """Sync intraday trades and compute daily order flow."""
         trade_date = trade_date or self._get_market_date()
@@ -6002,17 +5995,17 @@ class DataPipeline:
         if not symbols:
             return 0
 
-        symbol_exchange: dict[str, str] = {}
-        symbol_chunk_index: dict[str, int] = {}
+        symbol_exchange: Dict[str, str] = {}
+        symbol_chunk_index: Dict[str, int] = {}
         if settings.cache_order_flow_chunked:
             symbol_exchange, symbol_chunk_index = await self._get_exchange_and_chunk_index(
                 symbols,
                 settings.cache_chunk_size,
             )
 
-        order_flow_cache_records: list[dict[str, Any]] = []
+        order_flow_cache_records: List[Dict[str, Any]] = []
 
-        foreign_lookup: dict[str, dict[str, Any]] = {}
+        foreign_lookup: Dict[str, Dict[str, Any]] = {}
         async with async_session_maker() as session:
             result = await session.execute(
                 select(ForeignTrading).where(ForeignTrading.trade_date == trade_date)
@@ -6042,20 +6035,15 @@ class DataPipeline:
         total = 0
         consecutive_429 = 0
         store_intraday = settings.store_intraday_trades if retain_ticks is None else retain_ticks
-        error_counts: dict[str, int] = {}
-        error_samples: list[str] = []
+        error_counts: Dict[str, int] = {}
+        error_samples: List[str] = []
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             await self._wait_for_rate_limit("intraday")
             try:
                 source = settings.vnstock_source or "VCI"
 
-                from vnibb.services.trading_acquisition import (
-                    acquire_session_trades,
-                    fetch_primary_trades,
-                    persist_mongo_trades,
-                    persist_trade_stores,
-                )
+                from vnibb.services.trading_acquisition import acquire_session_trades, persist_trade_stores, persist_mongo_trades, fetch_primary_trades
 
                 def _sync_fetch(symbol=symbol, source=source):
                     from vnibb.services.vietcap_client import VietcapClient
@@ -6080,7 +6068,7 @@ class DataPipeline:
                 raw_rows, coverage = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=settings.vnstock_timeout)
                 coverage.update(raw_dataset="equity.intraday", price_unit="VND", volume_unit="shares", current_depth={"status": "unknown"})
 
-                rows: list[dict[str, Any]] = []
+                rows: List[Dict[str, Any]] = []
                 buy_volume = 0
                 sell_volume = 0
                 buy_value = 0.0
@@ -6354,16 +6342,16 @@ class DataPipeline:
 
     async def sync_orderbook_snapshots(
         self,
-        symbols: list[str] | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        symbols: Optional[List[str]] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
         *,
         live_session: bool = False,
     ) -> int:
         """Persist each symbol's current provider batch; never promise historical replay."""
         from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
-        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
         from vnibb.services.trading_acquisition import persist_trade_stores
+        from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
         if not live_session and settings.orderbook_at_close_only and not self._is_after_market_close():
             logger.info("Orderbook snapshot skipped before market close")
@@ -6649,10 +6637,10 @@ class DataPipeline:
 
     async def sync_block_trades(
         self,
-        trade_date: date | None = None,
-        symbols: list[str] | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        trade_date: Optional[date] = None,
+        symbols: Optional[List[str]] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Detect block trades from intraday data."""
         from vnibb.services.insider_tracking import InsiderTrackingService
@@ -6734,8 +6722,8 @@ class DataPipeline:
         if not symbols:
             return 0
 
-        symbol_exchange: dict[str, str] = {}
-        symbol_chunk_index: dict[str, int] = {}
+        symbol_exchange: Dict[str, str] = {}
+        symbol_chunk_index: Dict[str, int] = {}
         if settings.cache_order_flow_chunked:
             symbol_exchange, symbol_chunk_index = await self._get_exchange_and_chunk_index(
                 symbols,
@@ -6879,9 +6867,9 @@ class DataPipeline:
 
     async def sync_derivatives_prices(
         self,
-        trade_date: date | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        trade_date: Optional[date] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync derivatives/futures price data."""
         from vnibb.providers.vnstock.derivatives import VnstockDerivativesFetcher
@@ -7003,9 +6991,9 @@ class DataPipeline:
 
     async def sync_warrant_prices(
         self,
-        trade_date: date | None = None,
-        progress: dict[str, Any] | None = None,
-        sync_id: int | None = None,
+        trade_date: Optional[date] = None,
+        progress: Optional[Dict[str, Any]] = None,
+        sync_id: Optional[int] = None,
     ) -> int:
         """Sync warrant prices for configured symbols."""
         trade_date = trade_date or self._get_market_date()
@@ -7057,9 +7045,9 @@ class DataPipeline:
 
     async def run_daily_trading_updates(
         self,
-        trade_date: date | None = None,
+        trade_date: Optional[date] = None,
         resume: bool = True,
-        job_id: str | None = None,
+        job_id: Optional[str] = None,
     ) -> None:
         """Run daily updater for trading flow and derivatives."""
         trade_date = trade_date or self._get_market_date()
@@ -7182,7 +7170,7 @@ class DataPipeline:
                             sync_id=sync_id,
                         )
 
-                cleanup_results: dict[str, int] = {}
+                cleanup_results: Dict[str, int] = {}
                 for label, action in (
                     ("intraday_trades", self.cleanup_intraday_trades),
                     ("orderbook_snapshots", self.cleanup_orderbook_snapshots),
@@ -7219,9 +7207,9 @@ class DataPipeline:
 
     async def run_reinforcement(
         self,
-        symbols: list[str],
-        domains: list[str] | None = None,
-    ) -> dict[str, Any]:
+        symbols: List[str],
+        domains: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Run targeted symbol reinforcement using reserved low-throughput budget."""
         normalized_symbols = sorted(
             {
@@ -7248,7 +7236,7 @@ class DataPipeline:
 
         token = RATE_MODE_CONTEXT.set(RATE_MODE_REINFORCEMENT)
         started_at = datetime.utcnow()
-        domain_results: list[dict[str, Any]] = []
+        domain_results: List[Dict[str, Any]] = []
         try:
             for domain in requested_domains:
                 domain_started = datetime.utcnow()
@@ -7314,8 +7302,8 @@ class DataPipeline:
         days: int = settings.price_history_years * 365,
         include_prices: bool = True,
         resume: bool = True,
-        job_id: str | None = None,
-        stages: list[str] | None = None,
+        job_id: Optional[str] = None,
+        stages: Optional[List[str]] = None,
         cache_writes: bool = False,
     ):
         """Run complete data seeding pipeline with resume support."""

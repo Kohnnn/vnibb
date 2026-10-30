@@ -10,8 +10,8 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import and_, or_, select
-
 from vnibb.core.price_units import persisted_price_record
+
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio

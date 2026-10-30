@@ -3,14 +3,11 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
+from vnibb.core.config import settings
 from vnibb.providers.vnstock import runtime
 from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
-from vnibb.providers.vnstock.financial_ratios import (
-    FinancialRatiosQueryParams,
-    VnstockFinancialRatiosFetcher,
-)
+from vnibb.providers.vnstock.financial_ratios import FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher
 
 
 class EntitlementError(Exception):

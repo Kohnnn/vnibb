@@ -7,6 +7,7 @@ Uses vnstock Market.equity().order_book() method.
 
 import asyncio
 import logging
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +26,7 @@ class OrderLevel(BaseModel):
 
     price: float | None = None
     volume: int
-    order_count: int | None = Field(None, alias="orderCount")
+    order_count: Optional[int] = Field(None, alias="orderCount")
 
     model_config = {"populate_by_name": True}
 
@@ -35,19 +36,19 @@ class PriceDepthData(BaseModel):
 
     symbol: str
     # Bid levels (buyers)
-    bid_1: OrderLevel | None = None
-    bid_2: OrderLevel | None = None
-    bid_3: OrderLevel | None = None
+    bid_1: Optional[OrderLevel] = None
+    bid_2: Optional[OrderLevel] = None
+    bid_3: Optional[OrderLevel] = None
     # Ask levels (sellers)
-    ask_1: OrderLevel | None = None
-    ask_2: OrderLevel | None = None
-    ask_3: OrderLevel | None = None
+    ask_1: Optional[OrderLevel] = None
+    ask_2: Optional[OrderLevel] = None
+    ask_3: Optional[OrderLevel] = None
     # Summary
-    total_bid_volume: int | None = Field(None, alias="totalBidVolume")
-    total_ask_volume: int | None = Field(None, alias="totalAskVolume")
-    last_price: float | None = Field(None, alias="lastPrice")
-    last_volume: int | None = Field(None, alias="lastVolume")
-    raw_levels: list[dict] | None = None
+    total_bid_volume: Optional[int] = Field(None, alias="totalBidVolume")
+    total_ask_volume: Optional[int] = Field(None, alias="totalAskVolume")
+    last_price: Optional[float] = Field(None, alias="lastPrice")
+    last_volume: Optional[int] = Field(None, alias="lastVolume")
+    raw_levels: Optional[list[dict]] = None
     provider_source: str = "VCI"
     observed_at: str | None = None
     timestamp_meaning: str = "unknown"

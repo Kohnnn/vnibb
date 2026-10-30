@@ -29,9 +29,9 @@ elif hasattr(sys.stdout, "detach"):
     except Exception:
         pass
 
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -208,7 +208,7 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
 
         try:
             return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning(
                 "Request timed out after %ss: %s %s",
                 timeout_seconds,
@@ -393,7 +393,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             check_database_connection(),
             timeout=db_timeout_seconds,
         )
-    except TimeoutError:
+    except asyncio.TimeoutError:
         db_ok = False
         logger.warning("Database connection check timed out after %ss", db_timeout_seconds)
     except Exception as exc:
@@ -483,7 +483,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             websocket_timeout = _env_int("STARTUP_WS_TIMEOUT_SECONDS", 5)
             await asyncio.wait_for(start_background_fetcher(), timeout=websocket_timeout)
             logger.info("WebSocket price broadcaster started")
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.warning("WebSocket broadcaster startup timed out (non-fatal)")
         except Exception as e:
             logger.warning(f"WebSocket broadcaster start failed (non-fatal): {e}")
@@ -505,7 +505,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     "screener fundamental enrichment will fall back to a collection scan. "
                     "Run scripts/build_fundamental_screener.py to create it."
                 )
-    except TimeoutError:
+    except asyncio.TimeoutError:
         logger.warning("Fundamental snapshot index probe timed out (non-fatal)")
     except Exception as e:
         logger.warning(f"Fundamental snapshot index probe failed (non-fatal): {e}")
@@ -806,7 +806,7 @@ def create_app() -> FastAPI:
 
         try:
             db_ok = await asyncio.wait_for(check_database_connection(max_retries=1), timeout=5.0)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             return JSONResponse(
                 status_code=503,
                 content={"ready": False, "reason": "Database readiness check timed out"},

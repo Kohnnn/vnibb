@@ -2,7 +2,6 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from vnibb.api.main import app
 from vnibb.api.v1 import equity, health, screener
 from vnibb.core.database import get_db

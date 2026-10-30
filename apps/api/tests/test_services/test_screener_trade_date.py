@@ -8,7 +8,6 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from vnibb.api.v1.screener import _build_screener_meta
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock

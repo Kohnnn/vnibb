@@ -8,7 +8,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
 
@@ -45,7 +45,7 @@ router = APIRouter(tags=["Admin"])
 logger = logging.getLogger(__name__)
 
 
-def _package_status(package_name: str) -> dict[str, Any]:
+def _package_status(package_name: str) -> Dict[str, Any]:
     try:
         module = import_module(package_name)
         return {
@@ -64,7 +64,7 @@ def _package_status(package_name: str) -> dict[str, Any]:
         }
 
 
-def _vnstock_runtime_status() -> dict[str, Any]:
+def _vnstock_runtime_status() -> Dict[str, Any]:
     packages = {
         name: _package_status(name)
         for name in [
@@ -141,8 +141,8 @@ def _validate_admin_query(query: str) -> str:
 
 
 def require_admin_automation_access(
-    x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),
-    origin: str | None = Header(default=None),
+    x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key"),
+    origin: Optional[str] = Header(default=None),
 ) -> None:
     """Protect server-only automation with its independently rotated API key."""
     if origin is not None:
@@ -159,7 +159,7 @@ def require_admin_automation_access(
 
 
 @router.get("/session")
-async def get_admin_session(user: User = Depends(require_admin_access)) -> dict[str, str]:
+async def get_admin_session(user: User = Depends(require_admin_access)) -> Dict[str, str]:
     return {"id": user.id, "role": "admin"}
 
 
@@ -172,7 +172,7 @@ async def get_ai_telemetry(
     vote: str | None = Query(default=None),
     surface: str | None = Query(default=None),
     search: str | None = Query(default=None),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     return await ai_telemetry_service.get_review_payload(
         limit=limit,
         provider=provider,
@@ -185,17 +185,17 @@ async def get_ai_telemetry(
 
 
 @router.get("/ai-runtime", dependencies=[Depends(require_admin_access)])
-async def get_ai_runtime_config() -> dict[str, Any]:
+async def get_ai_runtime_config() -> Dict[str, Any]:
     return await ai_runtime_config_service.get_runtime_config()
 
 
 @router.get("/ai-runtime/public")
-async def get_public_ai_runtime_config() -> dict[str, Any]:
+async def get_public_ai_runtime_config() -> Dict[str, Any]:
     return await ai_runtime_config_service.get_runtime_config()
 
 
 @router.put("/ai-runtime", dependencies=[Depends(require_admin_access)])
-async def save_ai_runtime_config(data: Any = Body(...)) -> dict[str, Any]:
+async def save_ai_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
     if isinstance(data, dict):
         model = data.get("model")
     else:
@@ -207,17 +207,17 @@ async def save_ai_runtime_config(data: Any = Body(...)) -> dict[str, Any]:
 
 
 @router.get("/unit-runtime/public")
-async def get_public_unit_runtime_config() -> dict[str, Any]:
+async def get_public_unit_runtime_config() -> Dict[str, Any]:
     return await unit_runtime_config_service.get_runtime_config()
 
 
 @router.get("/unit-runtime", dependencies=[Depends(require_admin_access)])
-async def get_unit_runtime_config() -> dict[str, Any]:
+async def get_unit_runtime_config() -> Dict[str, Any]:
     return await unit_runtime_config_service.get_runtime_config()
 
 
 @router.put("/unit-runtime", dependencies=[Depends(require_admin_access)])
-async def save_unit_runtime_config(data: Any = Body(...)) -> dict[str, Any]:
+async def save_unit_runtime_config(data: Any = Body(...)) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail="Request body must be a JSON object")
 
@@ -241,7 +241,7 @@ async def save_unit_runtime_config(data: Any = Body(...)) -> dict[str, Any]:
     if not isinstance(yearly_rates_raw, dict):
         raise HTTPException(status_code=400, detail="usd_vnd_rates_by_year must be an object")
 
-    yearly_rates: dict[str, float] = {}
+    yearly_rates: Dict[str, float] = {}
     for raw_year, raw_value in yearly_rates_raw.items():
         year = str(raw_year).strip()
         if not YEAR_KEY_RE.fullmatch(year):
@@ -270,7 +270,7 @@ async def save_unit_runtime_config(data: Any = Body(...)) -> dict[str, Any]:
 
 
 @router.get("/ai-prompts", dependencies=[Depends(require_admin_access)])
-async def get_ai_prompt_library() -> dict[str, Any]:
+async def get_ai_prompt_library() -> Dict[str, Any]:
     state = await ai_prompt_library_service.get_library_state()
     prompts = state.get("prompts") or []
     return {
@@ -283,7 +283,7 @@ async def get_ai_prompt_library() -> dict[str, Any]:
 
 
 @router.put("/ai-prompts", dependencies=[Depends(require_admin_access)])
-async def save_ai_prompt_library(data: Any = Body(...)) -> dict[str, Any]:
+async def save_ai_prompt_library(data: Any = Body(...)) -> Dict[str, Any]:
     prompts = data.get("prompts") if isinstance(data, dict) else None
     if not isinstance(prompts, list):
         raise HTTPException(status_code=400, detail="prompts array is required")
@@ -299,7 +299,7 @@ async def save_ai_prompt_library(data: Any = Body(...)) -> dict[str, Any]:
 
 
 @router.get("/providers/status", dependencies=[Depends(require_admin_access)])
-async def get_provider_status() -> dict[str, Any]:
+async def get_provider_status() -> Dict[str, Any]:
     """Return runtime provider configuration and connectivity status."""
     ai_runtime = await ai_runtime_config_service.get_runtime_config()
     openrouter_status = await ai_model_catalog_service.get_openrouter_status()
@@ -326,9 +326,9 @@ async def get_provider_status() -> dict[str, Any]:
 
 @router.get("/mongo/collections", dependencies=[Depends(require_admin_access)])
 async def inspect_mongo_collections(
-    name_filter: str | None = Query(default=None, description="Optional case-insensitive collection-name filter"),
+    name_filter: Optional[str] = Query(default=None, description="Optional case-insensitive collection-name filter"),
     sample_limit: int = Query(default=5, ge=1, le=20),
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """Inspect configured Mongo analytical collections without exposing raw documents."""
 
     service = get_mongo_market_data_service()
@@ -377,7 +377,7 @@ async def get_admin_system_layout_bundle(dashboard_key: str) -> SystemLayoutTemp
     return await system_layout_template_service.get_template_bundle(dashboard_key)
 
 
-def _coerce_admin_system_layout_body(payload: Any) -> dict[str, Any]:
+def _coerce_admin_system_layout_body(payload: Any) -> Dict[str, Any]:
     if isinstance(payload, dict):
         return payload
 
@@ -562,7 +562,7 @@ async def _table_exists(db: AsyncSession, table_name: str) -> bool:
     return result.first() is not None
 
 
-async def _discover_timestamp_column(db: AsyncSession, table_name: str) -> str | None:
+async def _discover_timestamp_column(db: AsyncSession, table_name: str) -> Optional[str]:
     if engine.dialect.name == "postgresql":
         result = await db.execute(
             text(
@@ -587,7 +587,7 @@ async def _discover_timestamp_column(db: AsyncSession, table_name: str) -> str |
     return None
 
 
-def _normalize_datetime(value: Any) -> datetime | None:
+def _normalize_datetime(value: Any) -> Optional[datetime]:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -600,7 +600,7 @@ def _normalize_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _classify_freshness(latest: datetime | None) -> tuple[str, int | None]:
+def _classify_freshness(latest: Optional[datetime]) -> tuple[str, Optional[int]]:
     if not latest:
         return "unknown", None
 
@@ -856,12 +856,12 @@ async def list_all_tables(db: AsyncSession = Depends(get_db)):
 @router.get("/errors/recent")
 async def get_recent_errors(
     limit: int = Query(default=50, ge=1, le=200),
-    since: str | None = Query(default=None),
+    since: Optional[str] = Query(default=None),
     _auth: None = Depends(require_admin_access),
 ):
     """Return recent server-side request errors captured by middleware."""
     errors = get_recent_error_events(limit=limit)
-    since_dt: datetime | None = None
+    since_dt: Optional[datetime] = None
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00")).replace(tzinfo=None)
@@ -1073,7 +1073,7 @@ async def trigger_data_health_auto_backfill(
         key: str,
         reason: str,
         fn,
-        kwargs: dict[str, Any] | None = None,
+        kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         nonlocal scheduled_count
         payload = {
@@ -1183,12 +1183,12 @@ async def trigger_data_health_auto_backfill(
 async def _schedule_data_reinforcement(
     background_tasks: BackgroundTasks,
     db: AsyncSession,
-    symbols: list[str] | None,
-    domains: list[str] | None,
+    symbols: Optional[List[str]],
+    domains: Optional[List[str]],
     dry_run: bool,
     max_symbols: int,
-    mode: str | None = None,
-) -> dict[str, Any]:
+    mode: Optional[str] = None,
+) -> Dict[str, Any]:
     """Schedule targeted symbol reinforcement jobs with stale/explicit selection modes."""
     from vnibb.services.data_pipeline import data_pipeline
 
@@ -1309,7 +1309,7 @@ async def trigger_data_reinforcement_get(
         pattern=r"^(STALE|SYMBOLS)$",
         description="Selection mode: STALE (auto-select) or SYMBOLS",
     ),
-    symbols: str | None = Query(
+    symbols: Optional[str] = Query(
         default=None,
         description="Comma-separated symbols when mode=SYMBOLS",
     ),
@@ -1343,10 +1343,10 @@ async def trigger_data_reinforcement_get(
 @router.post("/data-health/reinforce", dependencies=[Depends(require_admin_access)])
 async def trigger_data_reinforcement(
     background_tasks: BackgroundTasks,
-    mode: str | None = Body(default=None, embed=True),
-    symbols: list[str] | None = Body(default=None, embed=True),
-    domains: list[str] | None = Body(default=None, embed=True),
-    targets: list[str] | None = Body(default=None, embed=True),
+    mode: Optional[str] = Body(default=None, embed=True),
+    symbols: Optional[List[str]] = Body(default=None, embed=True),
+    domains: Optional[List[str]] = Body(default=None, embed=True),
+    targets: Optional[List[str]] = Body(default=None, embed=True),
     dry_run: bool = Body(default=True, embed=True),
     max_symbols: int = Body(default=50, embed=True),
     db: AsyncSession = Depends(get_db),
@@ -1453,7 +1453,7 @@ async def get_table_sample(
     table_name: str,
     limit: int = Query(default=10, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    search: str | None = Query(default=None),
+    search: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Get sample rows from a table with pagination and optional search."""

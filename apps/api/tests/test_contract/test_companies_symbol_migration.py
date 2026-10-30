@@ -9,7 +9,6 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-
 from vnibb.services.cache_manager import CacheManager
 
 pytestmark = [

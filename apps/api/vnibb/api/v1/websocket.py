@@ -23,11 +23,11 @@ from vnibb.api.v1.market import (
 )
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory
+from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 from vnibb.providers.vnstock.market_overview import (
     MarketOverviewQueryParams,
     VnstockMarketOverviewFetcher,
 )
-from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 from vnibb.services.websocket_service import VN_TZ, PriceUpdate, manager
 
 logger = logging.getLogger(__name__)

@@ -13,8 +13,7 @@ import logging
 import re
 import unicodedata
 from datetime import datetime
-from typing import Any
-
+from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select
 
@@ -23,16 +22,13 @@ from vnibb.core.database import async_session_maker
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import (
-    FRACTION_RATIO_FIELDS,
-    PERCENT_RATIO_FIELDS,
-    admitted_ratio_value,
-    declared_ratio_value,
+    FRACTION_RATIO_FIELDS, PERCENT_RATIO_FIELDS, admitted_ratio_value, declared_ratio_value,
 )
 from vnibb.core.vn_sectors import VN_SECTORS
-from vnibb.models.company import Company
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.company import Company
 from vnibb.models.trading import FinancialRatio
 from vnibb.providers.vnstock.financials import admitted_interest_expense
 from vnibb.services.cache_manager import CacheManager
@@ -51,7 +47,7 @@ def _record_value(record: Any, *keys: str) -> Any:
     return None
 
 
-def _coerce_number(value: Any) -> float | None:
+def _coerce_number(value: Any) -> Optional[float]:
     if value is None:
         return None
     try:
@@ -94,7 +90,7 @@ PERCENT_METRIC_LIMITS = {
 _DECLARED_UNIT_METRICS = FRACTION_RATIO_FIELDS
 
 
-def _normalize_comparison_metric(metric_key: str, value: Any) -> float | None:
+def _normalize_comparison_metric(metric_key: str, value: Any) -> Optional[float]:
     """Coerce a stored comparison value without inferring a magnitude.
 
     Stored percent values are canonical; provider transforms normalize only
@@ -115,7 +111,7 @@ def _normalize_comparison_metric(metric_key: str, value: Any) -> float | None:
     return numeric
 
 
-def _first_metric_value(metric_key: str, *values: Any) -> float | None:
+def _first_metric_value(metric_key: str, *values: Any) -> Optional[float]:
     for value in values:
         normalized = _normalize_comparison_metric(metric_key, value)
         if normalized is not None:
@@ -135,7 +131,7 @@ def _first_metric_value(metric_key: str, *values: Any) -> float | None:
 # `declared_ratio_value` unchanged; only percent-format metrics are admitted.
 
 
-def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> float | None:
+def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> Optional[float]:
     """Read a metric that is carried only in `FinancialRatio.raw_data`."""
     if not isinstance(raw_data, dict):
         return None
@@ -148,7 +144,7 @@ def _ratio_json_metric(metric_key: str, raw_data: Any, *aliases: str) -> float |
     ))
 
 
-def _normalize_ratio_period(period: str) -> tuple[str, int | None, bool]:
+def _normalize_ratio_period(period: str) -> tuple[str, Optional[int], bool]:
     normalized = str(period or "FY").strip().upper()
     if normalized in {"FY", "YEAR"}:
         return "year", None, False
@@ -160,14 +156,14 @@ def _normalize_ratio_period(period: str) -> tuple[str, int | None, bool]:
 
 
 def _matches_requested_quarter(
-    period_value: str, fiscal_quarter: int | None, requested_quarter: int
+    period_value: str, fiscal_quarter: Optional[int], requested_quarter: int
 ) -> bool:
     if fiscal_quarter == requested_quarter:
         return True
     return f"Q{requested_quarter}" in str(period_value or "").upper()
 
 
-def _metric_from_ratio_row(row: Any, metric_key: str) -> float | None:
+def _metric_from_ratio_row(row: Any, metric_key: str) -> Optional[float]:
     attribute_map = {
         "pe": "pe_ratio",
         "pb": "pb_ratio",
@@ -186,8 +182,8 @@ def _metric_from_ratio_row(row: Any, metric_key: str) -> float | None:
 
 
 def _build_statement_snapshot(
-    rows: list[Any], statement_type: str, *, ttm: bool
-) -> dict[str, float | None] | None:
+    rows: List[Any], statement_type: str, *, ttm: bool
+) -> Optional[dict[str, Optional[float]]]:
     if not rows:
         return None
 
@@ -239,7 +235,7 @@ def _build_statement_snapshot(
         if lineage.get("value_unit") != "VND" or lineage.get("flow_basis") != "single_quarter":
             return None
 
-    snapshot: dict[str, float | None] = {}
+    snapshot: dict[str, Optional[float]] = {}
     for metric_key in metric_keys:
         values = [
             admitted_interest_expense(row) if metric_key == "interest_expense"
@@ -260,7 +256,7 @@ def _statement_row_lineage(row: Any) -> dict[str, Any]:
     return lineage if isinstance(lineage, dict) else {}
 
 
-def _consecutive_quarter_rows(rows: list[Any]) -> bool:
+def _consecutive_quarter_rows(rows: List[Any]) -> bool:
     ordinals = []
     for row in rows:
         year, quarter = getattr(row, "fiscal_year", None), getattr(row, "fiscal_quarter", None)
@@ -270,7 +266,7 @@ def _consecutive_quarter_rows(rows: list[Any]) -> bool:
     return all(left == right + 1 for left, right in zip(ordinals, ordinals[1:], strict=False))
 
 def _statement_periods_match(
-    left: list[Any], right: list[Any], period_type: str, *, ttm: bool = False
+    left: List[Any], right: List[Any], period_type: str, *, ttm: bool = False
 ) -> bool:
     count = 4 if ttm else 1
     if len(left) < count or len(right) < count:
@@ -290,10 +286,10 @@ async def _load_statement_rows(
     symbol: str,
     model: Any,
     period_type: str,
-    requested_quarter: int | None,
+    requested_quarter: Optional[int],
     *,
     limit: int,
-) -> list[Any]:
+) -> List[Any]:
     async with async_session_maker() as session:
         stmt = select(model).where(
             model.symbol == symbol, model.period_type == period_type,
@@ -310,8 +306,8 @@ async def _load_statement_rows(
 async def _build_comparison_backfill(
     symbol: str,
     period: str,
-    market_cap: float | None,
-) -> dict[str, float | None]:
+    market_cap: Optional[float],
+) -> Dict[str, Optional[float]]:
     period_type, requested_quarter, use_ttm = _normalize_ratio_period(period)
     row_limit = 8 if use_ttm else 2
 
@@ -424,12 +420,12 @@ class StockMetrics(BaseModel):
     """Metrics for a single stock."""
 
     symbol: str
-    name: str | None = None
-    industry: str | None = None
-    exchange: str | None = None
+    name: Optional[str] = None
+    industry: Optional[str] = None
+    exchange: Optional[str] = None
     # Flexible metrics dictionary to hold all 84+ fields
-    metrics: dict[str, Any] = Field(default_factory=dict)
-    market_cap_provenance: dict[str, Any] = Field(
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    market_cap_provenance: Dict[str, Any] = Field(
         default_factory=lambda: resolve_market_cap({}, source="comparison")
     )
 
@@ -440,17 +436,17 @@ class PricePerformancePoint(BaseModel):
     """Normalized price performance point."""
 
     date: str
-    values: dict[str, float]  # symbol -> normalized_value
+    values: Dict[str, float]  # symbol -> normalized_value
 
 
 class ComparisonResponse(BaseModel):
     """Response for stock comparison."""
 
-    symbols: list[str]
-    metrics: list[MetricDefinition]
-    data: dict[str, StockMetrics]
-    price_history: list[PricePerformancePoint] = Field(default_factory=list, alias="priceHistory")
-    sector_averages: dict[str, float] = Field(default_factory=dict, alias="sectorAverages")
+    symbols: List[str]
+    metrics: List[MetricDefinition]
+    data: Dict[str, StockMetrics]
+    price_history: List[PricePerformancePoint] = Field(default_factory=list, alias="priceHistory")
+    sector_averages: Dict[str, float] = Field(default_factory=dict, alias="sectorAverages")
     generated_at: datetime = Field(default_factory=datetime.utcnow)
 
     model_config = {"populate_by_name": True}
@@ -460,22 +456,22 @@ class PeerCompany(BaseModel):
     """Peer company data."""
 
     symbol: str
-    name: str | None = None
-    market_cap: float | None = None
-    pe_ratio: float | None = None
-    roe: float | None = None
-    price: float | None = None
-    change_pct: float | None = None
-    industry: str | None = None
+    name: Optional[str] = None
+    market_cap: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    roe: Optional[float] = None
+    price: Optional[float] = None
+    change_pct: Optional[float] = None
+    industry: Optional[str] = None
 
 
 class PeersResponse(BaseModel):
     """Response for peer companies lookup."""
 
     symbol: str
-    industry: str | None = None
+    industry: Optional[str] = None
     count: int = 0
-    peers: list[PeerCompany] = Field(default_factory=list)
+    peers: List[PeerCompany] = Field(default_factory=list)
 
 
 # Standard metrics for comparison (Expanded to common categories)
@@ -522,7 +518,7 @@ class ComparisonService:
     def __init__(self):
         self.cache_manager = CacheManager()
 
-    async def _get_all_screener_data(self, source: str = settings.vnstock_source) -> list[Any]:
+    async def _get_all_screener_data(self, source: str = settings.vnstock_source) -> List[Any]:
         """
         Get all screener data from cache or API.
         """
@@ -546,8 +542,8 @@ class ComparisonService:
                     return fallback_cache.data
 
                 from vnibb.providers.vnstock.equity_screener import (
-                    StockScreenerParams,
                     VnstockScreenerFetcher,
+                    StockScreenerParams,
                 )
 
             params = StockScreenerParams(limit=2000, source=source)
@@ -591,8 +587,8 @@ class ComparisonService:
                     data = fallback_cache.data[0]
                 else:
                     from vnibb.providers.vnstock.equity_screener import (
-                        StockScreenerParams,
                         VnstockScreenerFetcher,
+                        StockScreenerParams,
                     )
 
                     params = StockScreenerParams(symbol=symbol, limit=1, source=source)
@@ -603,8 +599,8 @@ class ComparisonService:
             if not data:
                 try:
                     from vnibb.providers.vnstock.financial_ratios import (
-                        FinancialRatiosQueryParams,
                         VnstockFinancialRatiosFetcher,
+                        FinancialRatiosQueryParams,
                     )
 
                     ratios = await VnstockFinancialRatiosFetcher.fetch(
@@ -746,7 +742,7 @@ class ComparisonService:
                         metrics_dict[key] = value
 
 
-            normalized_metrics: dict[str, float] = {}
+            normalized_metrics: Dict[str, float] = {}
             for key, value in metrics_dict.items():
                 normalized = _normalize_comparison_metric(key, value)
                 if normalized is not None:
@@ -775,17 +771,16 @@ class ComparisonService:
             return StockMetrics(symbol=symbol)
 
     async def compare_price_performance(
-        self, symbols: list[str], period: str = "1Y", source: str = settings.vnstock_source
-    ) -> list[PricePerformancePoint]:
+        self, symbols: List[str], period: str = "1Y", source: str = settings.vnstock_source
+    ) -> List[PricePerformancePoint]:
         """
         Compare historical price performance normalized to 100 at the start.
         """
-        from datetime import date, timedelta
-
         from vnibb.providers.vnstock.equity_historical import (
-            EquityHistoricalQueryParams,
             VnstockEquityHistoricalFetcher,
+            EquityHistoricalQueryParams,
         )
+        from datetime import date, timedelta
 
         end_date = date.today()
         if period == "1M":
@@ -941,7 +936,7 @@ class ComparisonService:
                         payload[key] = getattr(stock, key)
                 return payload
 
-            def _to_float(value: Any) -> float | None:
+            def _to_float(value: Any) -> Optional[float]:
                 if value is None:
                     return None
                 try:
@@ -955,22 +950,22 @@ class ComparisonService:
                     return None
                 return parsed
 
-            def _text(stock: Any, *keys: str) -> str | None:
+            def _text(stock: Any, *keys: str) -> Optional[str]:
                 value = _value(stock, *keys)
                 if value is None:
                     return None
                 cleaned = str(value).strip()
                 return cleaned or None
 
-            def _market_cap(stock: Any) -> float | None:
+            def _market_cap(stock: Any) -> Optional[float]:
                 result = resolve_market_cap(stock, source=source)
                 return result["value"] if result["status"] == "available" else None
 
-            def _price(stock: Any) -> float | None:
+            def _price(stock: Any) -> Optional[float]:
                 price = screener_price_record({**_as_payload(stock), "price": _value(stock, "price", "close")})
                 return _to_float(price.get("price")) if price["price_unit"] != "unknown" else None
 
-            def _change_pct(stock: Any) -> float | None:
+            def _change_pct(stock: Any) -> Optional[float]:
                 return _to_float(
                     _value(
                         stock,
@@ -982,22 +977,22 @@ class ComparisonService:
                     )
                 )
 
-            def _symbol(stock: Any) -> str | None:
+            def _symbol(stock: Any) -> Optional[str]:
                 value = _text(stock, "symbol", "ticker")
                 return value.upper() if value else None
 
-            def _industry(stock: Any) -> str | None:
+            def _industry(stock: Any) -> Optional[str]:
                 return _text(stock, "industry", "industry_name", "industryName")
 
-            def _exchange(stock: Any) -> str | None:
+            def _exchange(stock: Any) -> Optional[str]:
                 return _text(stock, "exchange")
 
-            def _sector(stock: Any) -> str | None:
+            def _sector(stock: Any) -> Optional[str]:
                 return _text(stock, "sector", "sector_name", "sectorName")
 
             def _resolve_sector_id(
-                industry: str | None, sector_hint: str | None
-            ) -> str | None:
+                industry: Optional[str], sector_hint: Optional[str]
+            ) -> Optional[str]:
                 combined = " ".join(
                     part
                     for part in [_normalize_text(industry), _normalize_text(sector_hint)]
@@ -1032,7 +1027,7 @@ class ComparisonService:
                     industry=_industry(stock),
                 )
 
-            universe: dict[str, Any] = {}
+            universe: Dict[str, Any] = {}
             for stock in all_stocks:
                 stock_symbol = _symbol(stock)
                 if not stock_symbol:
@@ -1074,7 +1069,7 @@ class ComparisonService:
                         )
                     ).all()
 
-                    stock_lookup: dict[str, tuple[str | None, str | None, str | None]] = {
+                    stock_lookup: dict[str, tuple[Optional[str], Optional[str], Optional[str]]] = {
                         str(symbol).upper(): (sector, industry, exchange)
                         for symbol, sector, industry, exchange in stock_rows
                         if symbol
@@ -1237,7 +1232,7 @@ class ComparisonService:
                     return False
                 return _resolve_sector_id(_industry(stock), _sector(stock)) == target_sector_id
 
-            peers_list: list[Any] = [stock for stock in candidate_pool if _is_same_industry(stock)]
+            peers_list: List[Any] = [stock for stock in candidate_pool if _is_same_industry(stock)]
 
             if len(peers_list) < min(3, limit):
                 existing_symbols = {_symbol(stock) for stock in peers_list if _symbol(stock)}
@@ -1294,7 +1289,7 @@ class ComparisonService:
 
             peers_list.sort(key=_rank)
 
-            unique_ranked: list[Any] = []
+            unique_ranked: List[Any] = []
             seen_symbols: set[str] = set()
             for stock in peers_list:
                 stock_symbol = _symbol(stock)
@@ -1396,7 +1391,7 @@ class ComparisonService:
 
     async def get_sector_averages(
         self, industry: str, source: str = settings.vnstock_source
-    ) -> dict[str, float]:
+    ) -> Dict[str, float]:
         """
         Calculate sector averages for key metrics.
         """
@@ -1423,7 +1418,7 @@ class ComparisonService:
                 return {}
 
             # Calculate averages for key metrics
-            averages: dict[str, float] = {}
+            averages: Dict[str, float] = {}
             metric_keys = [m.key for m in COMPARISON_METRICS]
             sector_symbols = sorted(
                 {
@@ -1476,7 +1471,7 @@ class ComparisonService:
                         .all()
                     )
 
-                latest_ratios: dict[str, FinancialRatio] = {}
+                latest_ratios: Dict[str, FinancialRatio] = {}
                 for row in ratio_rows:
                     latest_ratios.setdefault(row.symbol.upper(), row)
 
@@ -1518,7 +1513,7 @@ class ComparisonService:
             return {}
 
     async def compare(
-        self, symbols: list[str], source: str = settings.vnstock_source, period: str = "1Y"
+        self, symbols: List[str], source: str = settings.vnstock_source, period: str = "1Y"
     ) -> ComparisonResponse:
         """
         Compare multiple stocks side by side.
@@ -1536,7 +1531,7 @@ class ComparisonService:
         data = {m.symbol: m for m in metrics_results}
 
         # Get sector averages from the first stock's industry
-        sector_averages: dict[str, float] = {}
+        sector_averages: Dict[str, float] = {}
         if metrics_results:
             first_group = metrics_results[0].industry
             if first_group:
@@ -1557,9 +1552,9 @@ comparison_service = ComparisonService()
 
 
 async def get_multi_performance_data(
-    symbols: list[str],
+    symbols: List[str],
     days: int = 30,
-    period: str | None = None,
+    period: Optional[str] = None,
 ):
     """
     Get normalized price performance (%) for multiple symbols.
@@ -1589,7 +1584,7 @@ async def get_multi_performance_data(
     return formatted
 
 
-async def get_comparison_data(symbols: list[str], period: str = "FY"):
+async def get_comparison_data(symbols: List[str], period: str = "FY"):
     """
     Get comparison data for a list of symbols and period.
     Returns data compatible with vnibb.models.comparison.StockComparison.

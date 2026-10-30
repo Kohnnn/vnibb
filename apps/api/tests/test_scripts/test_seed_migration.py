@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pandas as pd
 import pytest
 
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
 
@@ -55,10 +56,9 @@ async def test_batch_seeder_preserves_limit_and_rejects_batch_size(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_full_seed_uses_vci_index_ohlcv(monkeypatch):
-    import sys
-
     from vnibb.providers.vnstock import runtime
     from vnibb.services.data_pipeline import data_pipeline as shared_pipeline
+    import sys
 
     pipeline_module = sys.modules[shared_pipeline.__class__.__module__]
 

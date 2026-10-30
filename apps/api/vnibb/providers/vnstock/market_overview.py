@@ -7,13 +7,14 @@ Fetches market indices and overview data for Vietnam stock market.
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-from vnibb.providers.base import BaseFetcher
+
 from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def _first_non_none(*values: Any) -> Any:
     return None
 
 
-def _coerce_float(value: Any) -> float | None:
+def _coerce_float(value: Any) -> Optional[float]:
     if value is None:
         return None
     try:
@@ -59,13 +60,13 @@ class MarketIndexData(BaseModel):
     """Standardized market index data."""
 
     index_name: str
-    current_value: float | None = None
-    change: float | None = None
-    change_pct: float | None = None
-    volume: float | None = None
-    high: float | None = None
-    low: float | None = None
-    time: Any | None = None  # Could be datetime or string
+    current_value: Optional[float] = None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
+    volume: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    time: Optional[Any] = None  # Could be datetime or string
 
     model_config = {
         "json_schema_extra": {
@@ -92,8 +93,8 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: dict[str, str] | None = None,
-    ) -> list[dict[str, Any]]:
+        credentials: Optional[dict[str, str]] = None,
+    ) -> List[dict[str, Any]]:
         index_candidates: dict[str, list[str]] = {
             "VNINDEX": ["VNINDEX", "VN-INDEX"],
             "VN30": ["VN30"],
@@ -103,7 +104,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
         source_candidates = [validate_source(settings.vnstock_source)]
 
-        def _fetch_single_index(index_name: str, symbols: list[str]) -> dict[str, Any] | None:
+        def _fetch_single_index(index_name: str, symbols: list[str]) -> Optional[dict[str, Any]]:
             """Fetch a single market index with timeout handling."""
             market = import_vnstock_symbol("Market")[0]()
 
@@ -196,7 +197,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
         async def _fetch_index_async(
             index_name: str, symbols: list[str], timeout: int = 12
-        ) -> dict[str, Any] | None:
+        ) -> Optional[dict[str, Any]]:
             """Fetch a single index with timeout."""
             key = (source_candidates[0], index_name)
             future = _index_jobs.get(key)
@@ -215,7 +216,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                 future.add_done_callback(finished)
             try:
                 return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 logger.warning("Timeout fetching %s after %ss", index_name, timeout)
                 return None
             except Exception as e:
@@ -242,7 +243,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
 
 
             return indices
-        except TimeoutError:
+        except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=30)
         except Exception as e:
             logger.error(f"vnstock market overview fetch error: {e}")
@@ -251,8 +252,8 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
     @staticmethod
     def transform_data(
         params: MarketOverviewQueryParams,
-        data: list[dict[str, Any]],
-    ) -> list[MarketIndexData]:
+        data: List[dict[str, Any]],
+    ) -> List[MarketIndexData]:
         results = []
         for row in data:
             try:

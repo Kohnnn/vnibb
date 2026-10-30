@@ -10,7 +10,6 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.market_cap import resolve_market_cap

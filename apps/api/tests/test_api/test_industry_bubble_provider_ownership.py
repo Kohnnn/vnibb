@@ -3,7 +3,6 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
-
 from vnibb.api.v1 import market
 
 

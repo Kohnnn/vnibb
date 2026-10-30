@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.api.v1 import equity, market, sectors
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock

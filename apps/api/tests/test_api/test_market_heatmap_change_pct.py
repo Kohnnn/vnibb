@@ -13,7 +13,6 @@ market.py is fixed.
 from datetime import date, datetime
 
 import pytest
-
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock.equity_screener import ScreenerData
 from vnibb.services.cache_manager import CacheResult
@@ -231,7 +230,6 @@ def test_money_flow_frame_preserves_index_points():
 @pytest.mark.asyncio
 async def test_daily_change_normalizes_each_persisted_source(test_engine, test_db, monkeypatch):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1.market import _load_change_pct_map
     from vnibb.models.stock import Stock, StockPrice
 
@@ -256,7 +254,6 @@ async def test_breadth_range_and_sma_use_only_canonical_history(test_engine, tes
     from datetime import timedelta
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1.market import _load_52_week_range_map, _load_latest_technical_indicator_map
     from vnibb.models.stock import Stock, StockPrice
 
@@ -289,7 +286,6 @@ def test_screener_prices_preserve_declared_units(unit, expected_price):
 @pytest.mark.asyncio
 async def test_daily_change_snapshot_fallback_retains_unit_metadata(test_engine, test_db, monkeypatch):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1.market import _load_change_pct_map
 
     test_db.add_all([
@@ -320,7 +316,6 @@ def test_snapshot_mover_price_replacement_does_not_reuse_other_unit_change():
 @pytest.mark.asyncio
 async def test_last_session_movers_normalize_sources_and_exclude_unknown(test_engine, test_db, monkeypatch):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1.market import _build_last_session_top_movers
     from vnibb.models.stock import Stock, StockPrice
 
@@ -351,7 +346,6 @@ async def test_market_movers_serve_retained_without_starting_provider(
     import asyncio
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.models.stock import Stock, StockPrice
 
@@ -423,7 +417,6 @@ async def test_market_movers_keep_provider_error_when_retained_prices_are_unavai
     client, test_engine, monkeypatch
 ):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
 
     calls = []
@@ -455,7 +448,6 @@ async def test_market_retained_vn30_movers_exclude_higher_ranked_nonmembers(
     client, test_engine, test_db, monkeypatch, mover_type, membership_available
 ):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.models.stock import Stock, StockPrice
 
@@ -522,7 +514,6 @@ async def test_market_retained_movers_do_not_relabel_older_ranked_observations(
     client, test_engine, test_db, monkeypatch, mover_type, selected_session_available
 ):
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.models.stock import Stock, StockPrice
 
@@ -706,7 +697,6 @@ async def test_market_retained_inputs_share_sql_across_types_limits_and_aliases(
 
     from sqlalchemy import event
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.core import cache
     from vnibb.models.stock import Stock, StockPrice
@@ -777,7 +767,6 @@ async def test_market_movers_share_occupied_raw_provider_after_cancellation_and_
     import threading
 
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.api.v1 import market
     from vnibb.core import cache
     from vnibb.providers.vnstock import runtime as provider_runtime

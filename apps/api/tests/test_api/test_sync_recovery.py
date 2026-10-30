@@ -9,7 +9,6 @@ import pandas as pd
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.core import scheduler
 from vnibb.models.scheduler_state import SchedulerJobState
 from vnibb.models.sync_status import SyncStatus
@@ -740,7 +739,6 @@ async def test_screener_resumed_base_and_marker_commit_atomically(screener_base_
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncSession
-
     from vnibb.models.screener import ScreenerSnapshot
     from vnibb.models.stock import Stock, StockPrice
 
@@ -833,7 +831,6 @@ async def test_file_sqlite_screener_checkpoint_preserves_publication_and_resume(
 
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import create_async_engine
-
     from vnibb.core.database import Base
     from vnibb.models.stock import Stock, StockPrice
     from vnibb.services import data_pipeline as pipeline_module
@@ -903,7 +900,6 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
 
     from sqlalchemy import BigInteger, Integer
     from sqlalchemy.ext.asyncio import create_async_engine
-
     from vnibb.core.database import Base
     from vnibb.models.stock import Stock, StockPrice
     from vnibb.services import cache_manager as cache_module
@@ -1006,7 +1002,6 @@ async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(sc
 
     from sqlalchemy import update
     from sqlalchemy.ext.asyncio import AsyncSession
-
     from vnibb.models.stock import Stock, StockPrice
     from vnibb.services.cache_manager import CacheManager
 

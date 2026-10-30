@@ -9,9 +9,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -34,7 +35,7 @@ _local_registered: set[str] = set()
 class RegistrationResult:
     registered: bool
     reason: str
-    source: str | None = None
+    source: Optional[str] = None
     retryable: bool = False
 
 
@@ -110,7 +111,7 @@ def _vnstock_auth_surface() -> tuple[Any, Any, Any]:
     return persist, read, clear
 
 
-def _normalized_status(status: Any) -> dict | None:
+def _normalized_status(status: Any) -> Optional[dict]:
     if not isinstance(status, dict):
         return None
     if "authenticated" in status or "tier" in status:
@@ -165,8 +166,8 @@ def _register_api_key(api_key: str) -> bool:
 @dataclass
 class _LockState:
     acquired: bool
-    source: str | None
-    token: str | None = None
+    source: Optional[str]
+    token: Optional[str] = None
 
 
 async def _acquire_lock(lock_key: str) -> _LockState:
@@ -195,7 +196,7 @@ async def _release_lock(lock_key: str, lock: _LockState) -> None:
         await _release_db_lock(lock_key)
 
 
-async def _release_redis_lock(lock_key: str, token: str | None) -> None:
+async def _release_redis_lock(lock_key: str, token: Optional[str]) -> None:
     redis = await _get_redis_client()
     if not redis or not token:
         return
@@ -253,7 +254,7 @@ async def _release_db_lock(lock_key: str) -> None:
         return
 
 
-def _lock_active(payload: dict[str, Any] | None) -> bool:
+def _lock_active(payload: Optional[dict[str, Any]]) -> bool:
     if not payload:
         return False
     locked_at = payload.get("locked_at")

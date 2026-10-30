@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-
 from vnibb.api.v1.screener import (
     _hydrate_screener_rows,
     _to_screener_data_row,

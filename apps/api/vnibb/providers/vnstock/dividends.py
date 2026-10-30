@@ -7,6 +7,7 @@ Uses vnstock company.dividends() method.
 
 import logging
 import math
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,19 +28,19 @@ class DividendData(BaseModel):
 
     symbol: str
     # Dates
-    ex_date: str | None = Field(None, alias="exDate")
-    record_date: str | None = Field(None, alias="recordDate")
-    payment_date: str | None = Field(None, alias="paymentDate")
+    ex_date: Optional[str] = Field(None, alias="exDate")
+    record_date: Optional[str] = Field(None, alias="recordDate")
+    payment_date: Optional[str] = Field(None, alias="paymentDate")
     # Dividend info
-    dividend_type: str | None = Field(None, alias="type")
-    cash_dividend: float | None = Field(None, alias="cashDividend")
-    stock_dividend: float | None = Field(None, alias="stockDividend")
-    dividend_ratio: float | str | None = Field(None, alias="ratio")
+    dividend_type: Optional[str] = Field(None, alias="type")
+    cash_dividend: Optional[float] = Field(None, alias="cashDividend")
+    stock_dividend: Optional[float] = Field(None, alias="stockDividend")
+    dividend_ratio: Optional[float | str] = Field(None, alias="ratio")
     # Year
-    fiscal_year: int | None = Field(None, alias="year")
-    issue_year: int | None = Field(None, alias="issueYear")
+    fiscal_year: Optional[int] = Field(None, alias="year")
+    issue_year: Optional[int] = Field(None, alias="issueYear")
     # Description
-    description: str | None = None
+    description: Optional[str] = None
 
     model_config = {"populate_by_name": True}
 
@@ -65,7 +66,7 @@ class VnstockDividendsFetcher:
     @staticmethod
     async def fetch(
         symbol: str,
-    ) -> list[DividendData]:
+    ) -> List[DividendData]:
         """
         Fetch dividend history for a company.
 

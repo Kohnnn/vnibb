@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from vnibb.core.market_cap import resolve_market_cap
-from vnibb.models.company import Company
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio

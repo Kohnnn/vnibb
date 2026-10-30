@@ -4,8 +4,9 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
 from fastapi import BackgroundTasks
+
+import pytest
 
 from vnibb.api.v1 import news
 from vnibb.core.market_cap import resolve_market_cap

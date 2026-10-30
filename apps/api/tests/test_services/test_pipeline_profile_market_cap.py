@@ -4,7 +4,6 @@ import pandas as pd
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.core.market_cap import resolve_market_cap
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
