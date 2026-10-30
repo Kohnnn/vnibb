@@ -13,6 +13,8 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Financial statement sync withholds unverifiable or ambiguous rows and reports their periods without replacing existing metrics, metadata, lineage or cache; independently verified periods still persist. This safeguard does not authorize acquisition or certify provider coverage (#190).
+
 - Support 4.x and 5.x registration without trusting shared legacy authentication state; retain the startup deadline during cancellation. The 5.x financial-statement path requests VCI long-format rows through the existing guarded reader. Offline synthetic SDK and disposable database checks do not authorize acquisition or change the pinned runtime (#185, #186, #168).
 - Document the generation-5 Agent Skills Hub loader and the 30 October local read-only financial inventory. Golden skills load on demand; the isolated SDK and inventory do not authorize production acquisition or establish data coverage (#168, #183).
 - VCI VAS long-format financial rows are grouped by explicit period through the existing reader, with documented income/balance/cash-flow IDs and original rows, units and taxonomy retained. Unknown IDs, ambiguous duplicates, off-balance metrics and unproven source/unit/reporting basis remain unserved. Isolated `vnstock` 5.2.1/Golden verification does not change the pinned app runtime or authorize acquisition, publication or production recovery (#183, #168).
