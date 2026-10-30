@@ -11,6 +11,7 @@ import logging
 import math
 import os
 import re
+from collections import Counter
 from contextvars import ContextVar
 from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
@@ -3463,21 +3464,40 @@ class DataPipeline:
 
                     latest_cache_payload: List[Dict[str, Any]] = []
                     rejected_updates: List[str] = []
+                    withheld_periods: Dict[str, Dict[str, Any]] = {}
                     committed_periods = {}
+                    admitted_items = admit_statement_rows(items, normalized_period)
+                    period_counts = Counter(
+                        _parse_period_fields(entry.period, entry.raw_data)[0] for entry in admitted_items
+                    )
                     async with async_session_maker() as session:
-                        for entry in admit_statement_rows(items, normalized_period):
+                        for entry in admitted_items:
                             payload = entry.model_dump(mode="json")
                             raw_payload = dict(entry.raw_data or {})
                             canonical = {
                                 key: value for key, value in payload.items() if key != "raw_data"
                             }
-                            if entry.unavailable_reason or entry.value_unit != "VND":
-                                canonical["unavailable_reason"] = (
-                                    entry.unavailable_reason or "unknown_source_unit"
-                                )
-                                for key, value in canonical.items():
-                                    if isinstance(value, (int, float)) and not isinstance(value, bool):
-                                        canonical[key] = None
+                            rejected_fields = {
+                                key: metadata["unavailable_reason"]
+                                for key, metadata in (canonical.get("unit_metadata") or {}).items()
+                                if isinstance(metadata, dict) and metadata.get("unavailable_reason")
+                            }
+                            period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
+                                entry.period, raw_payload
+                            )
+                            reason = entry.unavailable_reason or (
+                                "duplicate_statement_period" if period_counts[period_value] > 1 else None
+                            ) or (
+                                "unverified_statement_currency_or_unit"
+                                if entry.value_unit != "VND" or entry.currency != "VND" else None
+                            )
+                            if reason or rejected_fields:
+                                withheld_periods[period_value] = {
+                                    "status": "withheld",
+                                    "unavailable_reason": reason or "unverified_statement_metrics",
+                                    "rejected_metrics": rejected_fields,
+                                }
+                                continue
 
                             lineage_fields = (
                                 "source", "currency", "value_unit", "unit_metadata",
@@ -3490,9 +3510,6 @@ class DataPipeline:
                             lineage["derived_data"] = derived
                             raw_payload["_financial_lineage"] = lineage
 
-                            period_value, fiscal_year, fiscal_quarter = _parse_period_fields(
-                                entry.period, raw_payload
-                            )
                             common = {
                                 "symbol": symbol,
                                 "period": period_value,
@@ -3655,17 +3672,19 @@ class DataPipeline:
                                     "raw_data": raw_payload,
                                 }
 
-                            # A provider-rejected metric is unavailable, not absent: deriving
-                            # it from other fields would persist a number the lineage refused.
-                            rejected_fields = {
-                                key
-                                for key, metadata in (canonical.get("unit_metadata") or {}).items()
-                                if isinstance(metadata, dict) and metadata.get("unavailable_reason")
-                            }
-                            for key in rejected_fields:
-                                derived.pop(key, None)
-                                if key in values:
-                                    values[key] = None
+                            if not any(
+                                isinstance(value, (int, float)) and not isinstance(value, bool)
+                                for key, value in canonical.items()
+                                if key not in {"fiscal_year", "fiscal_quarter"}
+                            ) and not any(
+                                value is not None for key, value in values.items()
+                                if key not in common and key != "raw_data"
+                            ):
+                                withheld_periods[period_value] = {
+                                    "status": "withheld", "unavailable_reason": "no_admitted_metrics",
+                                    "rejected_metrics": {},
+                                }
+                                continue
 
                             for key, supplement in derived.items():
                                 canonical[key] = supplement["value"]
@@ -3688,7 +3707,7 @@ class DataPipeline:
                                 committed_periods[period_value] = {
                                     "status": "stored", "source": entry.source,
                                     "unavailable_reason": canonical.get("unavailable_reason"),
-                                    "rejected_metrics": sorted(rejected_fields),
+                                    "rejected_metrics": [],
                                 }
 
                             latest_cache_payload.append(payload)
@@ -3698,7 +3717,7 @@ class DataPipeline:
                             "persisted_rows": len(committed_periods),
                             "period_outcomes": {**outcome["period_outcomes"], **committed_periods,
                                 **{value: {"status": "retained_source_conflict"}
-                                   for value in rejected_updates}},
+                                   for value in rejected_updates}, **withheld_periods},
                         }
                         await session.execute(SyncStatus.__table__.insert().values(
                             sync_type="financial_acquisition", started_at=now, status="running",
@@ -3712,6 +3731,7 @@ class DataPipeline:
                         outcome["period_outcomes"][rejected_period] = {
                             "status": "retained_source_conflict",
                         }
+                    outcome["period_outcomes"].update(withheld_periods)
 
                     if rejected_updates:
                         raise StructuredPersistenceConflict(
@@ -3719,12 +3739,13 @@ class DataPipeline:
                             [{"table": model.__tablename__, "symbol": symbol, "period": entry_period} for entry_period in rejected_updates],
                         )
 
-                    cache_key = build_cache_key(
-                        "vnibb", "financials", cache_slug, symbol, normalized_period
-                    )
-                    await self._cache_set_json(
-                        cache_key, latest_cache_payload, CACHE_TTL_FINANCIALS
-                    )
+                    if latest_cache_payload and not withheld_periods:
+                        cache_key = build_cache_key(
+                            "vnibb", "financials", cache_slug, symbol, normalized_period
+                        )
+                        await self._cache_set_json(
+                            cache_key, latest_cache_payload, CACHE_TTL_FINANCIALS
+                        )
 
                 for statement_type, model, cache_slug in statement_specs:
                     outcome = {
@@ -3741,7 +3762,8 @@ class DataPipeline:
                         await _acquire_statement(statement_type, model, cache_slug, outcome)
                         outcome["complete"] = all(outcome["period_outcomes"][value]["status"] == "stored"
                                                   for value in expected_periods)
-                        outcome["status"] = "completed" if outcome["complete"] else "partial"
+                        outcome["status"] = ("completed" if outcome["complete"] else
+                                             "partial" if outcome["persisted_rows"] else "failed")
                     except (Exception, SystemExit) as exc:
                         outcome["error"] = str(exc)
                         outcome["status"] = "partial" if outcome["persisted_rows"] else "failed"
