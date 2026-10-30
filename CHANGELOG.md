@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- VCI VAS long-format financial rows are grouped by explicit period through the existing reader, with documented income/balance/cash-flow IDs and original rows, units and taxonomy retained. Unknown IDs, ambiguous duplicates, off-balance metrics and unproven source/unit/reporting basis remain unserved. Isolated `vnstock` 5.2.1/Golden verification does not change the pinned app runtime or authorize acquisition, publication or production recovery (#183, #168).
 - Retained-data screener syncs cannot certify prices inserted by an uncompleted board acquisition: each new price and its provenance fence commit together under the publication lock. A completed acquired cohort certifies only the fence members it actually verified, atomically with publication; an older same-session receipt cannot certify a later price. Pre-existing independently valid legacy prices are not fenced.
 - Promoting a retained `vietcap` price to `vietcap_vnd` now names the symbol in its acquisition fence, in the same transaction as the promotion. A rejected or interrupted board can no longer be promoted into a publishable cohort by a later legacy sync; pre-existing independently valid `vietcap_vnd` rows remain unfenced.
 - `ocf_sales` and `fcf_yield` convert from a fraction only when the writer recorded `ratio_units[...] = "fraction"`. A declared percent passes through unchanged, and an undeclared, unknown or conflicting unit is withheld instead of being assumed to be a percentage.
