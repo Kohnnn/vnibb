@@ -4,6 +4,7 @@ from types import ModuleType, SimpleNamespace
 
 import pandas as pd
 import pytest
+
 from vnibb.core.config import settings
 from vnibb.providers.vnstock import runtime
 from vnibb.services import technical_analysis

@@ -8,7 +8,7 @@ Uses vnstock to fetch historical price data with in-memory LRU cache.
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import select
 
@@ -24,7 +24,7 @@ from vnibb.models.stock import StockPrice
 logger = logging.getLogger(__name__)
 
 # Period to start-date mapping
-PERIOD_MAP: Dict[str, int] = {
+PERIOD_MAP: dict[str, int] = {
     "1M": 30,
     "3M": 90,
     "6M": 180,
@@ -43,7 +43,7 @@ def _compute_start_date(period: str) -> date:
 
 
 # Simple in-memory cache keyed by (symbol, period, source)
-_cache: Dict[str, Any] = {}
+_cache: dict[str, Any] = {}
 _CACHE_MAX_SIZE = 50
 
 
@@ -58,7 +58,7 @@ def _evict_oldest():
         del _cache[oldest_key]
 
 
-async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[str, Any]]:
+async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> list[dict[str, Any]]:
     async with async_session_maker() as session:
         rows = (
             await session.execute(
@@ -72,7 +72,7 @@ async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[
             )
         ).scalars().all()
 
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for row in rows:
         normalized = persisted_price_record(row)
         if normalized["price_unit"] == "unknown":
@@ -97,8 +97,8 @@ async def _fetch_chart_data_from_db(symbol: str, start_date: date) -> List[Dict[
 async def fetch_chart_data(
     symbol: str,
     period: str = "5Y",
-    source: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    source: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Fetch OHLCV data for a symbol.
 
@@ -127,7 +127,7 @@ async def fetch_chart_data(
 
     loop = asyncio.get_event_loop()
 
-    def _fetch_sync() -> List[Dict[str, Any]]:
+    def _fetch_sync() -> list[dict[str, Any]]:
         try:
             from vnibb.providers.vnstock.runtime import get_quote_class
 
@@ -200,7 +200,7 @@ async def fetch_chart_data(
 
         return data
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(f"Chart data timeout for {symbol}")
         raise
     except Exception:

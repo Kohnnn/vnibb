@@ -10,10 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-import vnibb.services.data_pipeline as pipeline_module
-import vnibb.services.sync_all_data as sync_all_data_module
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+import vnibb.services.data_pipeline as pipeline_module
+import vnibb.services.sync_all_data as sync_all_data_module
 from vnibb.core.exceptions import ProviderError
 from vnibb.core.insider_units import admitted_deal_value, normalize_deal_action
 from vnibb.models.news import InsiderDeal
@@ -123,6 +124,7 @@ async def test_reference_fetcher_constructs_only_company(monkeypatch, dataset, f
     from importlib import import_module
 
     import pandas as pd
+
     from vnibb.providers.vnstock import runtime
 
     calls = []

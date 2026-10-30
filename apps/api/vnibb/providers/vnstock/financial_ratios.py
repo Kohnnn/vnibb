@@ -6,21 +6,21 @@ Fetches historical financial ratios for Vietnam-listed companies.
 
 import logging
 import re
-from typing import Any, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.ratio_units import normalize_ratio_payload
+from vnibb.providers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
 VALID_PERIOD_RE = re.compile(r"^\d{4}(?:-Q[1-4])?$")
 
 
-def _as_float(value: Any) -> Optional[float]:
+def _as_float(value: Any) -> float | None:
     try:
         if value is None:
             return None
@@ -44,7 +44,7 @@ def _normalize_period_value(
     fiscal_year: Any = None,
     fiscal_quarter: Any = None,
     default_period: str = "year",
-) -> Optional[str]:
+) -> str | None:
     text = str(period_value or "").strip().upper()
     year_hint = _as_float(fiscal_year)
     quarter_hint = _as_float(fiscal_quarter)
@@ -93,49 +93,49 @@ class FinancialRatioData(BaseModel):
     """Standardized financial ratio data."""
 
     symbol: str
-    period: Optional[str] = None  # 2024, Q3/2024
-    pe: Optional[float] = None
-    pb: Optional[float] = None
-    ps: Optional[float] = None
-    ev_ebitda: Optional[float] = None
-    ev_sales: Optional[float] = None
-    ebitda: Optional[float] = None
-    roe: Optional[float] = None
-    roa: Optional[float] = None
-    roic: Optional[float] = None
-    eps: Optional[float] = None
-    bvps: Optional[float] = None
-    debt_equity: Optional[float] = None
-    debt_assets: Optional[float] = None
-    equity_multiplier: Optional[float] = None
-    current_ratio: Optional[float] = None
-    quick_ratio: Optional[float] = None
-    cash_ratio: Optional[float] = None
-    asset_turnover: Optional[float] = None
-    inventory_turnover: Optional[float] = None
-    receivables_turnover: Optional[float] = None
-    loan_to_deposit: Optional[float] = None
-    casa_ratio: Optional[float] = None
-    deposit_growth: Optional[float] = None
-    nim: Optional[float] = None
-    equity_to_assets: Optional[float] = None
-    asset_yield: Optional[float] = None
-    credit_cost: Optional[float] = None
-    provision_coverage: Optional[float] = None
-    gross_margin: Optional[float] = None
-    net_margin: Optional[float] = None
-    operating_margin: Optional[float] = None
-    interest_coverage: Optional[float] = None
-    debt_service_coverage: Optional[float] = None
-    ocf_debt: Optional[float] = None
-    fcf_yield: Optional[float] = None
-    ocf_sales: Optional[float] = None
-    revenue_growth: Optional[float] = None
-    earnings_growth: Optional[float] = None
-    dps: Optional[float] = None
-    dividend_yield: Optional[float] = None
-    payout_ratio: Optional[float] = None
-    peg_ratio: Optional[float] = None
+    period: str | None = None  # 2024, Q3/2024
+    pe: float | None = None
+    pb: float | None = None
+    ps: float | None = None
+    ev_ebitda: float | None = None
+    ev_sales: float | None = None
+    ebitda: float | None = None
+    roe: float | None = None
+    roa: float | None = None
+    roic: float | None = None
+    eps: float | None = None
+    bvps: float | None = None
+    debt_equity: float | None = None
+    debt_assets: float | None = None
+    equity_multiplier: float | None = None
+    current_ratio: float | None = None
+    quick_ratio: float | None = None
+    cash_ratio: float | None = None
+    asset_turnover: float | None = None
+    inventory_turnover: float | None = None
+    receivables_turnover: float | None = None
+    loan_to_deposit: float | None = None
+    casa_ratio: float | None = None
+    deposit_growth: float | None = None
+    nim: float | None = None
+    equity_to_assets: float | None = None
+    asset_yield: float | None = None
+    credit_cost: float | None = None
+    provision_coverage: float | None = None
+    gross_margin: float | None = None
+    net_margin: float | None = None
+    operating_margin: float | None = None
+    interest_coverage: float | None = None
+    debt_service_coverage: float | None = None
+    ocf_debt: float | None = None
+    fcf_yield: float | None = None
+    ocf_sales: float | None = None
+    revenue_growth: float | None = None
+    earnings_growth: float | None = None
+    dps: float | None = None
+    dividend_yield: float | None = None
+    payout_ratio: float | None = None
+    peg_ratio: float | None = None
     ratio_units: dict[str, str] = Field(default_factory=dict)
     provider_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -189,17 +189,17 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
-    ) -> List[dict[str, Any]]:
+        credentials: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
         from vnibb.providers.vnstock.runtime import run_financial_provider
 
-        def _fetch_sync() -> List[dict[str, Any]]:
+        def _fetch_sync() -> list[dict[str, Any]]:
             try:
                 from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
                 candidate_sources = [validate_source(settings.vnstock_source)]
 
-                def _fetch_rows_for_source(source: str) -> List[dict[str, Any]]:
+                def _fetch_rows_for_source(source: str) -> list[dict[str, Any]]:
                     fundamental = import_vnstock_symbol("Fundamental")[0]()
                     df = fundamental.equity(query["symbol"]).ratio(
                         source=source, period=query.get("period", "year"),
@@ -224,7 +224,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                             row["_source"] = source
                     return rows
 
-                def _score_ratio_payload(rows: List[dict[str, Any]]) -> int:
+                def _score_ratio_payload(rows: list[dict[str, Any]]) -> int:
                     if not rows:
                         return 0
                     numeric_cells = 0
@@ -238,7 +238,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                                 numeric_cells += 1
                     return len(rows) * 100 + numeric_cells
 
-                best_rows: List[dict[str, Any]] = []
+                best_rows: list[dict[str, Any]] = []
                 best_score = -1
                 last_error: Exception | None = None
 
@@ -292,8 +292,8 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
     @staticmethod
     def transform_data(
         params: FinancialRatiosQueryParams,
-        data: List[dict[str, Any]],
-    ) -> List[FinancialRatioData]:
+        data: list[dict[str, Any]],
+    ) -> list[FinancialRatioData]:
         if not data:
             return []
 
@@ -324,7 +324,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 payload, evidence, payload.get("period"), period_keys, field_ids=field_ids,
             ))
 
-        def _to_float(value: Any) -> Optional[float]:
+        def _to_float(value: Any) -> float | None:
             if value is None:
                 return None
             try:
@@ -332,7 +332,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             except (TypeError, ValueError):
                 return None
 
-        def _pick_float(*values: Any) -> Optional[float]:
+        def _pick_float(*values: Any) -> float | None:
             for value in values:
                 numeric = _to_float(value)
                 if numeric is not None:

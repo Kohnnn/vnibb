@@ -3,6 +3,7 @@ import json
 
 import pytest
 from fastapi import WebSocketDisconnect
+
 from vnibb.api.v1 import websocket as websocket_api
 from vnibb.services.websocket_service import ConnectionManager, PriceUpdate
 

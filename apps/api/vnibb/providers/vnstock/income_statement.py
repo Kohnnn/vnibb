@@ -4,12 +4,11 @@ VnStock Income Statement Fetcher
 Fetches income statement data for Vietnam-listed companies.
 """
 
-from typing import Any, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from vnibb.providers.base import BaseFetcher
-
 
 
 class IncomeStatementQueryParams(BaseModel):
@@ -28,18 +27,18 @@ class IncomeStatementData(BaseModel):
     """Standardized income statement data."""
 
     symbol: str
-    period: Optional[str] = None
-    revenue: Optional[float] = None
-    cost_of_revenue: Optional[float] = None
-    gross_profit: Optional[float] = None
-    operating_expense: Optional[float] = None
-    operating_income: Optional[float] = None
-    interest_expense: Optional[float] = None
-    profit_before_tax: Optional[float] = None
-    tax_expense: Optional[float] = None
-    net_income: Optional[float] = None
-    eps: Optional[float] = None
-    eps_diluted: Optional[float] = None
+    period: str | None = None
+    revenue: float | None = None
+    cost_of_revenue: float | None = None
+    gross_profit: float | None = None
+    operating_expense: float | None = None
+    operating_income: float | None = None
+    interest_expense: float | None = None
+    profit_before_tax: float | None = None
+    tax_expense: float | None = None
+    net_income: float | None = None
+    eps: float | None = None
+    eps_diluted: float | None = None
     source: str | None = None
     raw_data: dict[str, Any] | None = None
     fiscal_year: int | None = None
@@ -77,8 +76,9 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
     async def extract_data(
         query: dict[str, Any],
         credentials: dict[str, str] | None = None,
-    ) -> List[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         from sys import maxsize
+
         from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
 
         return await VnstockFinancialsFetcher.extract_data(
@@ -88,10 +88,15 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
     @staticmethod
     def transform_data(
         params: IncomeStatementQueryParams,
-        data: List[dict[str, Any]],
-    ) -> List[IncomeStatementData]:
+        data: list[dict[str, Any]],
+    ) -> list[IncomeStatementData]:
         from sys import maxsize
-        from vnibb.providers.vnstock.financials import FinancialsQueryParams, StatementType, VnstockFinancialsFetcher
+
+        from vnibb.providers.vnstock.financials import (
+            FinancialsQueryParams,
+            StatementType,
+            VnstockFinancialsFetcher,
+        )
         from vnibb.services.financial_service import admit_statement_rows
 
         statements = VnstockFinancialsFetcher.transform_data(

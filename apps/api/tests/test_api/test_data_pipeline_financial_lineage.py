@@ -2,6 +2,7 @@ from copy import deepcopy
 from datetime import datetime
 
 import pytest
+
 import vnibb.services.data_pipeline as pipeline_module
 from vnibb.providers.vnstock.financials import (
     FinancialStatementData,

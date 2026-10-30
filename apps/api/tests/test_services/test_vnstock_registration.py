@@ -5,6 +5,7 @@ import sys
 import types
 
 import pytest
+
 from vnibb.services import vnstock_registration as registration
 
 

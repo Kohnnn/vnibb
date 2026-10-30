@@ -7,13 +7,11 @@ Uses vnstock Listing class.
 
 import asyncio
 import logging
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers.vnstock.runtime import get_listing_class, validate_source
-
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +25,9 @@ class SymbolData(BaseModel):
     """Basic stock symbol data."""
 
     symbol: str
-    organ_name: Optional[str] = Field(None, alias="organName")
-    exchange: Optional[str] = None
-    industry: Optional[str] = None
+    organ_name: str | None = Field(None, alias="organName")
+    exchange: str | None = None
+    industry: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -38,13 +36,13 @@ class ExchangeSymbolData(BaseModel):
     """Symbol data with exchange details."""
 
     symbol: str
-    organ_name: Optional[str] = Field(None, alias="organName")
-    en_organ_name: Optional[str] = Field(None, alias="enOrganName")
-    short_name: Optional[str] = Field(None, alias="organShortName")
-    exchange: Optional[str] = None
-    status: Optional[str] = None
-    listing_date: Optional[str] = Field(None, alias="listingDate")
-    delisting_date: Optional[str] = Field(None, alias="delistingDate")
+    organ_name: str | None = Field(None, alias="organName")
+    en_organ_name: str | None = Field(None, alias="enOrganName")
+    short_name: str | None = Field(None, alias="organShortName")
+    exchange: str | None = None
+    status: str | None = None
+    listing_date: str | None = Field(None, alias="listingDate")
+    delisting_date: str | None = Field(None, alias="delistingDate")
 
     model_config = {"populate_by_name": True}
 
@@ -53,7 +51,7 @@ class IndexGroupSymbolData(BaseModel):
     """Symbol data for index group membership."""
 
     symbol: str
-    organ_name: Optional[str] = Field(None, alias="organName")
+    organ_name: str | None = Field(None, alias="organName")
     group: str
 
     model_config = {"populate_by_name": True}
@@ -63,9 +61,9 @@ class IndustryData(BaseModel):
     """ICB Industry classification."""
 
     icb_code: str = Field(alias="icbCode")
-    icb_name: Optional[str] = Field(None, alias="icbName")
-    en_icb_name: Optional[str] = Field(None, alias="enIcbName")
-    level: Optional[int] = None
+    icb_name: str | None = Field(None, alias="icbName")
+    en_icb_name: str | None = Field(None, alias="enIcbName")
+    level: int | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -114,7 +112,7 @@ class VnstockListingFetcher:
     @staticmethod
     async def fetch_all_symbols(
         source: str = "VCI",
-    ) -> List[SymbolData]:
+    ) -> list[SymbolData]:
         """
         Fetch all stock symbols.
 
@@ -146,7 +144,7 @@ class VnstockListingFetcher:
     async def fetch_symbols_by_exchange(
         source: str = "VCI",
         lang: str = "en",
-    ) -> List[ExchangeSymbolData]:
+    ) -> list[ExchangeSymbolData]:
         """
         Fetch symbols categorized by exchange.
 
@@ -181,7 +179,7 @@ class VnstockListingFetcher:
     async def fetch_symbols_by_group(
         group: str = "VN30",
         source: str = "VCI",
-    ) -> List[IndexGroupSymbolData]:
+    ) -> list[IndexGroupSymbolData]:
         """
         Fetch symbols in a specific index group.
 
@@ -224,7 +222,7 @@ class VnstockListingFetcher:
     @staticmethod
     async def fetch_industries_icb(
         source: str = "VCI",
-    ) -> List[IndustryData]:
+    ) -> list[IndustryData]:
         """
         Fetch ICB industry classification.
 

@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 
 import pytest
-from scripts.financial_admission_inventory import MODELS, inventory, parse_scope
 from sqlalchemy import create_engine, insert
+
+from scripts.financial_admission_inventory import MODELS, inventory, parse_scope
 
 
 def lineage(field="revenue", source="vietcap"):

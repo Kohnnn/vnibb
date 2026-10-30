@@ -284,6 +284,7 @@ def _postgres(settings, now):
 async def _admitted(settings):
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
     from vnibb.services.cache_manager import CacheManager
 
     engine = create_async_engine(settings.database_url, connect_args={"timeout": 3})

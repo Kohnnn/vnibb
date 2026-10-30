@@ -2,6 +2,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
+
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
 

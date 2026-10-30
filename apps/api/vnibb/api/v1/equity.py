@@ -10,7 +10,7 @@ import re
 import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -27,7 +27,12 @@ from vnibb.core.database import async_session_factory, get_db
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
-from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
+from vnibb.core.price_units import (
+    is_index_symbol,
+    normalize_price_record,
+    persisted_price_record,
+    screener_price_record,
+)
 from vnibb.core.ratio_units import ADMITTED_RATIO_FIELDS, admit_ratio_units, admitted_ratio_value
 from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.vn_sectors import VN_SECTORS
@@ -58,7 +63,6 @@ from vnibb.providers.vnstock.equity_profile import (
     EquityProfileQueryParams,
     VnstockEquityProfileFetcher,
 )
-from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatioData,
     FinancialRatiosQueryParams,
@@ -93,7 +97,12 @@ from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
 from vnibb.services.data_quality import is_market_business_day
-from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
+from vnibb.services.financial_service import (
+    admit_statement_rows,
+    build_ttm_statement_rows,
+    get_financials_with_ttm,
+    normalize_statement_period,
+)
 from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
@@ -117,60 +126,60 @@ VN30_PRIORITY_SYMBOLS = {
 
 class TransactionFlowPoint(BaseModel):
     date: str
-    price: Optional[float] = None
+    price: float | None = None
     flow_scope: str = "unknown"
-    coverage: Optional[Dict[str, Any]] = None
-    observed_buy_value: Optional[float] = None
-    observed_sell_value: Optional[float] = None
-    observed_gross_value: Optional[float] = None
-    observed_net_value: Optional[float] = None
-    observed_buy_volume: Optional[int] = None
-    observed_sell_volume: Optional[int] = None
-    observed_volume: Optional[int] = None
-    observed_net_volume: Optional[int] = None
-    total_buy_value: Optional[float] = None
-    total_sell_value: Optional[float] = None
-    total_gross_value: Optional[float] = None
-    total_net_value: Optional[float] = None
-    total_buy_volume: Optional[int] = None
-    total_sell_volume: Optional[int] = None
-    total_volume: Optional[int] = None
-    total_net_volume: Optional[int] = None
-    foreign_net_value: Optional[float] = None
-    foreign_net_volume: Optional[int] = None
-    proprietary_net_value: Optional[float] = None
-    proprietary_net_volume: Optional[int] = None
-    domestic_net_value: Optional[float] = None
-    domestic_net_volume: Optional[int] = None
-    big_order_count: Optional[int] = None
-    block_trade_count: Optional[int] = None
+    coverage: dict[str, Any] | None = None
+    observed_buy_value: float | None = None
+    observed_sell_value: float | None = None
+    observed_gross_value: float | None = None
+    observed_net_value: float | None = None
+    observed_buy_volume: int | None = None
+    observed_sell_volume: int | None = None
+    observed_volume: int | None = None
+    observed_net_volume: int | None = None
+    total_buy_value: float | None = None
+    total_sell_value: float | None = None
+    total_gross_value: float | None = None
+    total_net_value: float | None = None
+    total_buy_volume: int | None = None
+    total_sell_volume: int | None = None
+    total_volume: int | None = None
+    total_net_volume: int | None = None
+    foreign_net_value: float | None = None
+    foreign_net_volume: int | None = None
+    proprietary_net_value: float | None = None
+    proprietary_net_volume: int | None = None
+    domestic_net_value: float | None = None
+    domestic_net_volume: int | None = None
+    big_order_count: int | None = None
+    block_trade_count: int | None = None
 
 
 class TransactionFlowPayload(BaseModel):
     symbol: str
     days: int
-    scopes: List[str]
-    modes: List[str]
-    note: Optional[str] = None
-    data: List[TransactionFlowPoint]
+    scopes: list[str]
+    modes: list[str]
+    note: str | None = None
+    data: list[TransactionFlowPoint]
 
 
 class CorrelationMatrixCell(BaseModel):
     x: str
     y: str
-    value: Optional[float] = None
+    value: float | None = None
 
 
 class CorrelationMatrixPayload(BaseModel):
     symbol: str
-    sector: Optional[str] = None
+    sector: str | None = None
     days: int
-    symbols: List[str]
-    matrix: List[CorrelationMatrixCell]
+    symbols: list[str]
+    matrix: list[CorrelationMatrixCell]
     returns_count: int
-    as_of_date: Optional[date] = None
-    symbol_last_data_dates: Dict[str, date] = Field(default_factory=dict)
-    overlap_counts: Dict[str, int] = Field(default_factory=dict)
+    as_of_date: date | None = None
+    symbol_last_data_dates: dict[str, date] = Field(default_factory=dict)
+    overlap_counts: dict[str, int] = Field(default_factory=dict)
 
 
 async def _schedule_refresh(key: str, refresh_fn: Callable[[], Awaitable[None]]) -> None:
@@ -196,7 +205,7 @@ def _is_priority_symbol(symbol: str) -> bool:
 async def _schedule_critical_reinforcement(
     symbol: str,
     endpoint: str,
-    domains: List[str],
+    domains: list[str],
 ) -> None:
     symbol_upper = str(symbol or "").upper()
     if not symbol_upper or not _is_priority_symbol(symbol_upper):
@@ -244,11 +253,11 @@ def _is_control_flow_exception(exc: BaseException) -> bool:
 
 class MetricsHistoryResponse(BaseModel):
     symbol: str
-    periods: List[str] = []
-    roe: List[Optional[float]] = []
-    roa: List[Optional[float]] = []
-    pe_ratio: List[Optional[float]] = []
-    pb_ratio: List[Optional[float]] = []
+    periods: list[str] = []
+    roe: list[float | None] = []
+    roa: list[float | None] = []
+    pe_ratio: list[float | None] = []
+    pb_ratio: list[float | None] = []
 
 
 async def _refresh_profile_cache(symbol: str) -> None:
@@ -303,7 +312,7 @@ async def _load_financial_statement_fallback(
     if period_upper in {"QUARTER", "Q", "Q1", "Q2", "Q3", "Q4", "TTM"}:
         normalized_period = "quarter"
 
-    quarter_filter: Optional[int] = None
+    quarter_filter: int | None = None
     if period_upper in {"Q1", "Q2", "Q3", "Q4"}:
         quarter_filter = int(period_upper[1])
 
@@ -806,7 +815,7 @@ def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
     return lookup
 
 
-def _lookup_financial_metric(raw_payload: Any, *aliases: str) -> Optional[float]:
+def _lookup_financial_metric(raw_payload: Any, *aliases: str) -> float | None:
     lookup = _build_financial_metric_lookup(raw_payload)
     for alias in aliases:
         normalized = _normalize_financial_metric_key(alias)
@@ -817,7 +826,7 @@ def _lookup_financial_metric(raw_payload: Any, *aliases: str) -> Optional[float]
     return None
 
 
-def _sum_financial_metrics(raw_payload: Any, *aliases: str) -> Optional[float]:
+def _sum_financial_metrics(raw_payload: Any, *aliases: str) -> float | None:
     lookup = _build_financial_metric_lookup(raw_payload)
     values: list[float] = []
     for alias in aliases:
@@ -1194,7 +1203,7 @@ async def _cross_fill_income_statement_rows(
     return _sort_financial_statement_rows(rows)
 
 
-def _coerce_iso_timestamp(value: Any) -> Optional[str]:
+def _coerce_iso_timestamp(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -1212,7 +1221,7 @@ def _coerce_iso_timestamp(value: Any) -> Optional[str]:
         return _coerce_iso_date(raw)
 
 
-def _pick_latest_iso_date_from_rows(rows: list[dict[str, Any]], *keys: str) -> Optional[str]:
+def _pick_latest_iso_date_from_rows(rows: list[dict[str, Any]], *keys: str) -> str | None:
     latest_value: date | None = None
     for row in rows:
         for key in keys:
@@ -1232,14 +1241,14 @@ async def _get_model_last_updated(
     db: AsyncSession,
     model: Any,
     symbol: str,
-) -> Optional[str]:
+) -> str | None:
     result = await db.execute(
         select(func.max(model.updated_at)).where(model.symbol == symbol.upper())
     )
     return _coerce_iso_timestamp(result.scalar())
 
 
-async def _get_profile_last_data_date(db: AsyncSession, symbol: str) -> Optional[str]:
+async def _get_profile_last_data_date(db: AsyncSession, symbol: str) -> str | None:
     symbol_upper = symbol.upper()
     company_result = await db.execute(
         select(func.max(Company.updated_at)).where(Company.symbol == symbol_upper)
@@ -1263,7 +1272,7 @@ def _apply_adjustment_mode_to_ohlc(
     close_value: float,
     adjusted_close: Any,
     adjustment_mode: str,
-) -> tuple[float, float, float, float, Optional[float], bool]:
+) -> tuple[float, float, float, float, float | None, bool]:
     normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
     raw_close = _coerce_optional_float(close_value)
     adjusted_close_value = _coerce_optional_float(adjusted_close)
@@ -1327,13 +1336,13 @@ def _apply_adjustment_mode_to_historical_row(
     )
 
 
-def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> Optional[EquityHistoricalData]:
+def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> EquityHistoricalData | None:
     return _to_historical_data_from_payload(persisted_price_record(row), adjustment_mode=adjustment_mode)
 
 
 def _to_historical_data_from_mongo(
     row: dict[str, Any], *, adjustment_mode: str = "raw"
-) -> Optional[EquityHistoricalData]:
+) -> EquityHistoricalData | None:
     return _to_historical_data_from_payload(
         {**row, "time": row.get("tradeDate") or row.get("time") or row.get("date"),
          "price_source": row.get("price_source") or row.get("providerSource") or row.get("source")},
@@ -1348,7 +1357,7 @@ async def _load_historical_from_db(
     end_date: date,
     interval: str,
     adjustment_mode: str = "raw",
-) -> List[EquityHistoricalData]:
+) -> list[EquityHistoricalData]:
     interval_value = interval or "1D"
     stmt = (
         select(StockPrice)
@@ -1395,7 +1404,7 @@ async def _load_historical_from_mongo(
     return (rows, docs) if include_provenance else rows
 
 
-def _time_to_date(value: Any) -> Optional[date]:
+def _time_to_date(value: Any) -> date | None:
     iso_value = _coerce_iso_date(value)
     if not iso_value:
         return None
@@ -1407,7 +1416,7 @@ def _time_to_date(value: Any) -> Optional[date]:
 
 def _to_historical_data_from_payload(
     doc: dict[str, Any], *, adjustment_mode: str = "raw"
-) -> Optional[EquityHistoricalData]:
+) -> EquityHistoricalData | None:
     try:
         doc = normalize_price_record(doc)
     except (TypeError, ValueError):
@@ -1476,7 +1485,7 @@ def _ratio_factor_for_action(
     action_subtype: str | None,
     share_ratio: str | None,
     percent_ratio: float | None = None,
-) -> Optional[float]:
+) -> float | None:
     category = str(action_category or "").strip().lower()
     subtype = str(action_subtype or "").strip().lower()
     ratio_parts = _parse_share_ratio_parts(share_ratio)
@@ -1503,7 +1512,7 @@ def _ratio_factor_for_action(
 
 def _cash_dividend_factor(
     cash_amount_per_share: float | None, reference_close: float | None
-) -> Optional[float]:
+) -> float | None:
     if cash_amount_per_share in (None, 0) or reference_close in (None, 0):
         return None
 
@@ -1644,10 +1653,10 @@ async def _load_corporate_actions_for_adjustment(
 
 
 def _apply_corporate_action_adjustments(
-    rows: List[EquityHistoricalData],
+    rows: list[EquityHistoricalData],
     actions: list[dict[str, Any]],
     adjustment_mode: str,
-) -> List[EquityHistoricalData]:
+) -> list[EquityHistoricalData]:
     normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
     if normalized_mode != "adjusted" or not rows:
         return [
@@ -1673,7 +1682,7 @@ def _apply_corporate_action_adjustments(
 
         while action_index >= 0 and actions_sorted[action_index]["effective_date"] > row_date:
             action = actions_sorted[action_index]
-            factor: Optional[float] = None
+            factor: float | None = None
 
             if action.get("action_subtype") == "cash_dividend":
                 reference_close = None
@@ -1882,7 +1891,7 @@ async def _load_rolling_price_window(
     symbol: str,
     *,
     trading_days: int = 252,
-) -> List[EquityHistoricalData]:
+) -> list[EquityHistoricalData]:
     end_date = date.today()
     start_date = end_date - timedelta(days=max(380, trading_days + 30))
 
@@ -1900,7 +1909,7 @@ async def _compute_rolling_high_low(
     symbol: str,
     *,
     trading_days: int = 252,
-) -> tuple[Optional[float], Optional[float]]:
+) -> tuple[float | None, float | None]:
     mongo_service = get_mongo_market_data_service()
     mongo_rows = await mongo_service.get_eod_prices(
         symbol,
@@ -1929,7 +1938,7 @@ async def _load_historical_from_recent_cache(
     end_date: date,
     interval: str,
     adjustment_mode: str = "raw",
-) -> List[EquityHistoricalData]:
+) -> list[EquityHistoricalData]:
     if (interval or "1D").upper() != "1D":
         return []
     if (end_date - start_date).days > 90:
@@ -1944,7 +1953,7 @@ async def _load_historical_from_recent_cache(
     if not isinstance(cached_rows, list) or not cached_rows:
         return []
 
-    rows: List[EquityHistoricalData] = []
+    rows: list[EquityHistoricalData] = []
     for row in cached_rows:
         if not isinstance(row, dict):
             continue
@@ -1965,7 +1974,7 @@ async def _load_historical_from_recent_cache(
     return rows
 
 
-async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
+async def _load_quote_from_price_cache(symbol: str) -> StockQuoteData | None:
     latest_key = build_cache_key("vnibb", "price", "latest", symbol.upper())
     recent_key = build_cache_key("vnibb", "price", "recent", symbol.upper())
 
@@ -1992,7 +2001,7 @@ async def _load_quote_from_price_cache(symbol: str) -> Optional[StockQuoteData]:
     )
     normalized_recent.sort(key=lambda row: str(row.get("time") or ""))
 
-    prev_close: Optional[float] = None
+    prev_close: float | None = None
     latest_date = _time_to_date(latest_payload.get("time"))
     for row in reversed(normalized_recent):
         row_date = _time_to_date(row.get("time"))
@@ -2161,7 +2170,7 @@ def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dic
     }
 
 
-def _coerce_optional_float(value: Any) -> Optional[float]:
+def _coerce_optional_float(value: Any) -> float | None:
     if value is None:
         return None
     try:
@@ -2170,7 +2179,7 @@ def _coerce_optional_float(value: Any) -> Optional[float]:
         return None
 
 
-def _coerce_optional_int(value: Any) -> Optional[int]:
+def _coerce_optional_int(value: Any) -> int | None:
     if value is None:
         return None
     try:
@@ -2179,7 +2188,7 @@ def _coerce_optional_int(value: Any) -> Optional[int]:
         return None
 
 
-def _pick_optional_int(*values: Any) -> Optional[int]:
+def _pick_optional_int(*values: Any) -> int | None:
     for value in values:
         parsed = _coerce_optional_int(value)
         if parsed is not None and parsed >= 0:
@@ -2187,7 +2196,7 @@ def _pick_optional_int(*values: Any) -> Optional[int]:
     return None
 
 
-def _pick_optional_float(*values: Any) -> Optional[float]:
+def _pick_optional_float(*values: Any) -> float | None:
     for value in values:
         parsed = _coerce_optional_float(value)
         if parsed is not None:
@@ -2195,7 +2204,7 @@ def _pick_optional_float(*values: Any) -> Optional[float]:
     return None
 
 
-def _pick_optional_text(*values: Any) -> Optional[str]:
+def _pick_optional_text(*values: Any) -> str | None:
     for value in values:
         if value is None:
             continue
@@ -2205,12 +2214,12 @@ def _pick_optional_text(*values: Any) -> Optional[str]:
     return None
 
 
-def _normalize_share_count(value: Any) -> Optional[float]:
+def _normalize_share_count(value: Any) -> float | None:
     numeric = _coerce_optional_float(value)
     return numeric if numeric is not None and math.isfinite(numeric) and numeric > 0 else None
 
 
-def _pick_optional_share_count(*values: Any) -> Optional[float]:
+def _pick_optional_share_count(*values: Any) -> float | None:
     for value in values:
         normalized = _normalize_share_count(value)
         if normalized is not None:
@@ -2222,7 +2231,7 @@ def _pick_optional_share_count(*values: Any) -> Optional[float]:
 
 
 
-def _serialize_meta_datetime(value: Any) -> Optional[str]:
+def _serialize_meta_datetime(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -2249,7 +2258,7 @@ def _serialize_meta_datetime(value: Any) -> Optional[str]:
     return None
 
 
-def _coerce_meta_datetime(value: Any) -> Optional[datetime]:
+def _coerce_meta_datetime(value: Any) -> datetime | None:
     serialized = _serialize_meta_datetime(value)
     if not serialized:
         return None
@@ -2276,10 +2285,10 @@ def _snapshot_observation_date(snapshot_row: ScreenerSnapshot) -> date:
 
 def _build_quote_from_screener_snapshot(
     snapshot_row: ScreenerSnapshot,
-    latest_row: Optional[StockPrice] = None,
-    previous_row: Optional[StockPrice] = None,
+    latest_row: StockPrice | None = None,
+    previous_row: StockPrice | None = None,
     *, observation_clock: bool = False,
-) -> Optional[StockQuoteData]:
+) -> StockQuoteData | None:
     if snapshot_row.price is None:
         return None
     snapshot = screener_price_record(snapshot_row)
@@ -2370,7 +2379,7 @@ def _build_quote_from_screener_snapshot(
 async def _load_latest_screener_snapshot_quote(
     db: AsyncSession,
     symbol: str,
-) -> Optional[StockQuoteData]:
+) -> StockQuoteData | None:
     snapshot_stmt = (
         select(ScreenerSnapshot)
         .where(ScreenerSnapshot.symbol == symbol)
@@ -2403,15 +2412,15 @@ async def _load_latest_screener_snapshot_quote(
     return _build_quote_from_screener_snapshot(snapshot_row, latest_row, previous_row)
 
 
-def _quote_effective_timestamp(quote: Optional[StockQuoteData]) -> Optional[datetime]:
+def _quote_effective_timestamp(quote: StockQuoteData | None) -> datetime | None:
     if quote is None:
         return None
     return _coerce_meta_datetime(getattr(quote, "updated_at", None))
 
 
 def _should_prefer_screener_quote(
-    primary_quote: Optional[StockQuoteData],
-    screener_quote: Optional[StockQuoteData],
+    primary_quote: StockQuoteData | None,
+    screener_quote: StockQuoteData | None,
 ) -> bool:
     if screener_quote is None:
         return False
@@ -2447,7 +2456,7 @@ async def _load_shareholders_fallback(
     db: AsyncSession,
     symbol: str,
     limit: int = 20,
-) -> List[ShareholderData]:
+) -> list[ShareholderData]:
     rows = (
         (
             await db.execute(
@@ -2489,7 +2498,7 @@ def _normalize_ratio_period(
     fiscal_year: Any = None,
     fiscal_quarter: Any = None,
     period_type: Any = None,
-) -> Optional[str]:
+) -> str | None:
     text = str(period_value or "").strip().upper()
     year = _coerce_optional_float(fiscal_year)
     quarter = _coerce_optional_float(fiscal_quarter)
@@ -2552,7 +2561,7 @@ def _ratio_period_sort_key(period_value: Any) -> int:
     return year * 10 + quarter
 
 
-def _dedupe_ratio_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioData]:
+def _dedupe_ratio_rows(rows: list[FinancialRatioData]) -> list[FinancialRatioData]:
     seen: dict[str, FinancialRatioData] = {}
     for row in rows:
         period_text = str(row.period or "").strip()
@@ -2567,9 +2576,9 @@ def _dedupe_ratio_rows(rows: List[FinancialRatioData]) -> List[FinancialRatioDat
 
 
 def _filter_ratio_rows_for_period(
-    rows: List[FinancialRatioData],
+    rows: list[FinancialRatioData],
     requested_period: str,
-) -> List[FinancialRatioData]:
+) -> list[FinancialRatioData]:
     period_upper = str(requested_period or "year").strip().upper()
     if period_upper in {"YEAR", "FY"}:
         return [row for row in rows if "Q" not in str(row.period or "").upper()]
@@ -2620,9 +2629,9 @@ def _merge_ratio_rows(
 
 
 def _merge_ratio_row_collections(
-    preferred_rows: List[FinancialRatioData],
-    fallback_rows: List[FinancialRatioData],
-) -> List[FinancialRatioData]:
+    preferred_rows: list[FinancialRatioData],
+    fallback_rows: list[FinancialRatioData],
+) -> list[FinancialRatioData]:
     merged: dict[str, FinancialRatioData] = {}
 
     for row in fallback_rows:
@@ -2660,7 +2669,7 @@ def _merge_ratio_row_collections(
     return sorted(merged.values(), key=lambda item: _ratio_period_sort_key(item.period))
 
 
-def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
+def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> float | None:
     dps_value = _coerce_optional_float(dps)
     price_vnd = _coerce_optional_float(latest_price)
     if dps_value is None or price_vnd in (None, 0):
@@ -2672,14 +2681,14 @@ def _resolve_dividend_yield_percent(
     raw_yield: Any,
     dps: Any,
     latest_price: Any,
-) -> Optional[float]:
+) -> float | None:
     normalized_raw = _coerce_optional_float(raw_yield)
     if normalized_raw is not None:
         return normalized_raw
     return _derive_dividend_yield_from_dps(dps=dps, latest_price=latest_price)
 
 
-def _coerce_iso_date(value: Any) -> Optional[str]:
+def _coerce_iso_date(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -2703,7 +2712,7 @@ def _coerce_iso_date(value: Any) -> Optional[str]:
         return None
 
 
-def _extract_calendar_year(*values: Any) -> Optional[int]:
+def _extract_calendar_year(*values: Any) -> int | None:
     for value in values:
         numeric = _coerce_optional_float(value)
         if numeric is not None:
@@ -2725,8 +2734,8 @@ def _extract_calendar_year(*values: Any) -> Optional[int]:
 
 def _classify_dividend_type(
     raw_type: Any,
-    cash_dividend: Optional[float],
-    stock_dividend: Optional[float],
+    cash_dividend: float | None,
+    stock_dividend: float | None,
     dividend_ratio: Any,
     description: Any,
 ) -> str:
@@ -2767,7 +2776,7 @@ def _classify_dividend_type(
 
 def _build_dividend_row_from_payload(
     symbol: str, payload: dict[str, Any]
-) -> Optional[dict[str, Any]]:
+) -> dict[str, Any] | None:
     cash_dividend = _coerce_optional_float(
         payload.get("cash_dividend") or payload.get("cashDividend") or payload.get("value")
     )
@@ -2833,9 +2842,9 @@ def _build_dividend_row_from_payload(
 async def _resolve_profile_market_cap(
     db: AsyncSession,
     symbol: str,
-    profile_record: Optional[dict[str, Any]] = None,
+    profile_record: dict[str, Any] | None = None,
     profile_source: str = "postgres:company_profile",
-    incoming_record: Optional[dict[str, Any]] = None,
+    incoming_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     profile_record = profile_record or {}
     share_evidence = resolve_screener_shares(profile_record, source=profile_source)
@@ -2884,7 +2893,7 @@ async def _resolve_profile_market_cap(
     )
 
 
-async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[float]:
+async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> float | None:
     company_row = (
         await db.execute(
             select(Company.outstanding_shares, Company.listed_shares, Company.raw_data).where(
@@ -2904,7 +2913,7 @@ async def _get_outstanding_shares(db: AsyncSession, symbol: str) -> Optional[flo
     )
 
 
-async def _get_latest_price(db: AsyncSession, symbol: str) -> Optional[float]:
+async def _get_latest_price(db: AsyncSession, symbol: str) -> float | None:
     latest_row = (
         await db.execute(
             select(StockPrice)
@@ -3119,7 +3128,7 @@ def _ratio_has_metric_value(item: FinancialRatioData) -> bool:
     return any(value is not None for value in metric_values)
 
 
-def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[int]]:
+def _extract_year_quarter(period_value: str) -> tuple[int | None, int | None]:
     period_text = (
         str(normalize_statement_period(period_value) or period_value or "").strip().upper()
     )
@@ -3146,9 +3155,9 @@ def _extract_year_quarter(period_value: str) -> tuple[Optional[int], Optional[in
 async def _enrich_income_eps_from_ratios(
     symbol: str,
     period: str,
-    rows: List[FinancialStatementData],
+    rows: list[FinancialStatementData],
     db: AsyncSession,
-) -> List[FinancialStatementData]:
+) -> list[FinancialStatementData]:
     if not rows:
         return rows
 
@@ -3216,8 +3225,8 @@ async def _enrich_income_eps_from_ratios(
 
 def _build_placeholder_ratio_rows_from_support(
     symbol: str,
-    *support_groups: List[FinancialStatementData],
-) -> List[FinancialRatioData]:
+    *support_groups: list[FinancialStatementData],
+) -> list[FinancialRatioData]:
     periods = {
         _normalize_ratio_period(statement_row.period)
         for support_group in support_groups
@@ -3235,8 +3244,8 @@ async def _load_ratio_statement_support(
     symbol: str,
     period: str,
     limit: int,
-) -> dict[str, List[FinancialStatementData]]:
-    support: dict[str, List[FinancialStatementData]] = {
+) -> dict[str, list[FinancialStatementData]]:
+    support: dict[str, list[FinancialStatementData]] = {
         StatementType.INCOME.value: [],
         StatementType.BALANCE.value: [],
         StatementType.CASHFLOW.value: [],
@@ -3247,7 +3256,7 @@ async def _load_ratio_statement_support(
         StatementType.BALANCE.value,
         StatementType.CASHFLOW.value,
     ):
-        provider_rows: List[FinancialStatementData] = []
+        provider_rows: list[FinancialStatementData] = []
         try:
             provider_rows = await get_financials_with_ttm(
                 symbol=symbol,
@@ -3293,12 +3302,12 @@ async def _load_ratio_statement_support(
 async def _enrich_missing_ratio_metrics(
     symbol: str,
     period: str,
-    rows: List[FinancialRatioData],
+    rows: list[FinancialRatioData],
     db: AsyncSession,
-    income_support_rows: List[FinancialStatementData] | None = None,
-    balance_support_rows: List[FinancialStatementData] | None = None,
-    cashflow_support_rows: List[FinancialStatementData] | None = None,
-) -> List[FinancialRatioData]:
+    income_support_rows: list[FinancialStatementData] | None = None,
+    balance_support_rows: list[FinancialStatementData] | None = None,
+    cashflow_support_rows: list[FinancialStatementData] | None = None,
+) -> list[FinancialRatioData]:
     if not rows:
         return rows
 
@@ -4228,9 +4237,9 @@ async def _load_quote_response(symbol_upper: str, source: str, refresh: bool):
             logger.warning("Quote DB fallback failed for %s: %s", symbol_upper, error)
             return None
 
-    screener_snapshot_quote: Optional[StockQuoteData] = None
+    screener_snapshot_quote: StockQuoteData | None = None
 
-    async def _get_screener_snapshot_quote() -> Optional[StockQuoteData]:
+    async def _get_screener_snapshot_quote() -> StockQuoteData | None:
         nonlocal screener_snapshot_quote
         if screener_snapshot_quote is None:
             async with async_session_factory() as db:
@@ -4431,7 +4440,7 @@ async def get_profile(
                     ),
                 )
 
-        fallback_profile: Optional[EquityProfileData] = None
+        fallback_profile: EquityProfileData | None = None
         if not refresh:
             stock_result = await db.execute(select(Stock).where(Stock.symbol == symbol_upper))
             stock = stock_result.scalar_one_or_none()
@@ -4729,7 +4738,7 @@ async def get_fundamental_analysis(
     )
 
 
-@router.get("/{symbol}/financials", response_model=StandardResponse[List[FinancialStatementData]])
+@router.get("/{symbol}/financials", response_model=StandardResponse[list[FinancialStatementData]])
 @cached(ttl=86400, key_prefix="financials_v5_monetary_admitted", exclude_args=[4])
 async def get_financials(
     symbol: str,
@@ -4971,8 +4980,8 @@ async def get_correlation_matrix(
             meta=MetaData(count=0, symbol=symbol_upper),
         )
 
-    return_series: Dict[str, pd.Series] = {}
-    symbol_last_data_dates: Dict[str, date] = {}
+    return_series: dict[str, pd.Series] = {}
+    symbol_last_data_dates: dict[str, date] = {}
     for ticker, prices in frame.groupby("symbol"):
         observed_prices = prices.groupby("time")["close"].last().sort_index().tail(days + 1)
         if observed_prices.empty:
@@ -5014,8 +5023,8 @@ async def get_correlation_matrix(
             meta=MetaData(count=0, symbol=symbol_upper),
         )
 
-    overlap_counts: Dict[str, int] = {}
-    matrix: List[CorrelationMatrixCell] = []
+    overlap_counts: dict[str, int] = {}
+    matrix: list[CorrelationMatrixCell] = []
     for row_symbol in valid_symbols:
         for col_symbol in valid_symbols:
             overlapping_returns = pd.concat(
@@ -5094,14 +5103,14 @@ async def get_ttm_snapshot(
     return StandardResponse(data=payload, meta=MetaData(count=1))
 
 
-def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+def _growth_rate(current: float | None, previous: float | None) -> float | None:
     if current is None or previous in (None, 0):
         return None
     if not math.isfinite(current) or not math.isfinite(previous):
         return None
     return ((current - previous) / abs(previous)) * 100
 
-def _growth_detail(current: Optional[float], previous: Optional[float]) -> dict[str, Any]:
+def _growth_detail(current: float | None, previous: float | None) -> dict[str, Any]:
     value = _growth_rate(current, previous)
     transition = None
     if current is not None and previous is not None:
@@ -5150,14 +5159,14 @@ async def get_growth_rates(
     annual_balance = (await db.execute(annual_balance_stmt)).scalars().all()
     quarterly_income = (await db.execute(quarterly_income_stmt)).scalars().all()
 
-    yoy: dict[str, Optional[float]] = {
+    yoy: dict[str, float | None] = {
         "revenue_growth": None,
         "earnings_growth": None,
         "eps_growth": None,
         "ebitda_growth": None,
         "asset_growth": None,
     }
-    qoq: dict[str, Optional[float]] = {
+    qoq: dict[str, float | None] = {
         "revenue_growth": None,
         "earnings_growth": None,
         "eps_growth": None,
@@ -5245,7 +5254,7 @@ async def get_growth_rates(
 
 
 # Re-adding missing endpoints for completeness
-@router.get("/{symbol}/news", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/news", response_model=StandardResponse[list[Any]])
 @cached(ttl=1800, key_prefix="company_news_v27")
 async def get_company_news(symbol: str, limit: int = Query(20)):
     try:
@@ -5294,9 +5303,9 @@ def _build_event_row_from_db(item: CompanyEvent) -> dict[str, Any]:
 
 async def _load_company_events_fallback(
     db: AsyncSession, symbol: str, limit: int
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Read persisted events, using dividends when no event rows exist."""
-    rows: List[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     events = (
         (
             await db.execute(
@@ -5353,7 +5362,7 @@ async def _load_company_events_fallback(
     return rows
 
 
-@router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/events", response_model=StandardResponse[list[Any]])
 @cached(ttl=3600, key_prefix="company_events_v29_stored_first")
 async def get_company_events(
     symbol: str,
@@ -5431,7 +5440,7 @@ async def get_analyst_estimates(symbol: str):
     return StandardResponse(data=payload, meta=MetaData(count=0))
 
 
-@router.get("/{symbol}/shareholders", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/shareholders", response_model=StandardResponse[list[Any]])
 async def get_shareholders(symbol: str, db: AsyncSession = Depends(get_db)):
     symbol_upper = symbol.upper()
     try:
@@ -5471,7 +5480,7 @@ async def get_shareholders(symbol: str, db: AsyncSession = Depends(get_db)):
         return StandardResponse(data=[], error=str(e))
 
 
-@router.get("/{symbol}/officers", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/officers", response_model=StandardResponse[list[Any]])
 async def get_officers(symbol: str):
     try:
         data = await VnstockOfficersFetcher.fetch(OfficersQueryParams(symbol=symbol))
@@ -5489,8 +5498,8 @@ def _depth_value(depth_data: Any, key: str) -> Any:
     return getattr(depth_data, key, None)
 
 
-def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
-    entries: List[dict[str, Any]] = []
+def _normalize_orderbook_entries(depth_data: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
 
     def _meaningful_price(value: Any) -> bool:
         # Treat 0 (or None) as "no price". Provider feeds sometimes emit 0
@@ -5610,7 +5619,7 @@ def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
 
     factor = 0.001
-    new_entries: List[dict[str, Any]] = []
+    new_entries: list[dict[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, dict):
             new_entries.append(entry)
@@ -5766,7 +5775,7 @@ def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[
     if payload.get("entries") or _is_explicit_empty_depth_batch(payload):
         return payload
 
-    entries: List[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     for level in range(1, 4):
         bid_price = getattr(snapshot, f"bid{level}_price")
         ask_price = getattr(snapshot, f"ask{level}_price")
@@ -5925,7 +5934,7 @@ async def get_price_depth(symbol: str, db: AsyncSession = Depends(get_db)):
                 last_data_date=_pick_optional_text(payload.get("snapshot_time")),
             ),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return StandardResponse(
             data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
         )
@@ -5944,7 +5953,7 @@ async def get_orderbook(symbol: str, db: AsyncSession = Depends(get_db)):
                 last_data_date=_pick_optional_text(payload.get("snapshot_time")),
             ),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return StandardResponse(
             data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
         )
@@ -5952,7 +5961,7 @@ async def get_orderbook(symbol: str, db: AsyncSession = Depends(get_db)):
         return StandardResponse(data={"symbol": symbol.upper(), "entries": []}, error=str(e))
 
 
-@router.get("/{symbol}/intraday", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/intraday", response_model=StandardResponse[list[Any]])
 async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
     try:
         data = await asyncio.wait_for(
@@ -5960,7 +5969,7 @@ async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
             timeout=30,
         )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except (asyncio.TimeoutError, ProviderTimeoutError):
+    except (TimeoutError, ProviderTimeoutError):
         return StandardResponse(data=[], error="Request timed out")
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
@@ -6018,22 +6027,22 @@ async def get_transaction_flow(
     )
     price_map = {row.time: row for row in price_result.scalars().all()}
 
-    def _finite_float(value: Any) -> Optional[float]:
+    def _finite_float(value: Any) -> float | None:
         parsed = _coerce_optional_float(value)
         return parsed if parsed is not None and math.isfinite(parsed) else None
 
-    def _finite_int(value: Any) -> Optional[int]:
+    def _finite_int(value: Any) -> int | None:
         parsed = _finite_float(value)
         return int(parsed) if parsed is not None else None
 
-    def _first_finite(*values: Any) -> Optional[float]:
+    def _first_finite(*values: Any) -> float | None:
         for value in values:
             parsed = _finite_float(value)
             if parsed is not None:
                 return parsed
         return None
 
-    points: List[TransactionFlowPoint] = []
+    points: list[TransactionFlowPoint] = []
     for row in flow_rows:
         price_row = price_map.get(row.trade_date)
         foreign_row = foreign_map.get(row.trade_date)
@@ -6200,7 +6209,7 @@ def _latest_foreign_trading_date(data: list[Any]) -> str | None:
     return None
 
 
-@router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/foreign-trading", response_model=StandardResponse[list[Any]])
 async def get_foreign_trading(
     symbol: str,
     limit: int = Query(60, ge=1, le=365),
@@ -6236,7 +6245,7 @@ async def get_foreign_trading(
             ),
             error="Live foreign trading feed returned no rows; using cached database fallback." if fallback else None,
         )
-    except (asyncio.TimeoutError, ProviderTimeoutError):
+    except (TimeoutError, ProviderTimeoutError):
         fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
         return StandardResponse(
             data=fallback,
@@ -6260,7 +6269,7 @@ async def get_foreign_trading(
         )
 
 
-@router.get("/{symbol}/subsidiaries", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/subsidiaries", response_model=StandardResponse[list[Any]])
 async def get_subsidiaries(symbol: str):
     try:
         data = await asyncio.wait_for(
@@ -6268,7 +6277,7 @@ async def get_subsidiaries(symbol: str):
             timeout=30,
         )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except (asyncio.TimeoutError, ProviderTimeoutError):
+    except (TimeoutError, ProviderTimeoutError):
         return StandardResponse(data=[], error="Request timed out")
     except Exception as e:
         return StandardResponse(data=[], error=str(e))
@@ -6278,7 +6287,7 @@ async def get_subsidiaries(symbol: str):
 async def get_trading_stats(symbol: str, db: AsyncSession = Depends(get_db)):
     symbol_upper = symbol.upper()
 
-    async def _hydrate_range(data: Optional[TradingStatsData]) -> Optional[TradingStatsData]:
+    async def _hydrate_range(data: TradingStatsData | None) -> TradingStatsData | None:
         computed_high, computed_low = await _compute_rolling_high_low(
             db, symbol_upper, trading_days=252
         )
@@ -6304,7 +6313,7 @@ async def get_trading_stats(symbol: str, db: AsyncSession = Depends(get_db)):
         )
         data = await _hydrate_range(data)
         return StandardResponse(data=data, meta=MetaData(count=1 if data else 0))
-    except (asyncio.TimeoutError, ProviderTimeoutError):
+    except (TimeoutError, ProviderTimeoutError):
         fallback = await _hydrate_range(None)
         return StandardResponse(
             data=fallback,
@@ -6328,14 +6337,14 @@ async def get_rating(symbol: str):
             timeout=30,
         )
         return StandardResponse(data=data, meta=MetaData(count=1 if data else 0))
-    except (asyncio.TimeoutError, ProviderTimeoutError):
+    except (TimeoutError, ProviderTimeoutError):
         return StandardResponse(data=None, error="Request timed out")
     except Exception as e:
         return StandardResponse(data=None, error=str(e))
 
 
-@router.get("/{symbol}/financial-ratios", response_model=StandardResponse[List[FinancialRatioData]])
-@router.get("/{symbol}/ratios", response_model=StandardResponse[List[FinancialRatioData]])
+@router.get("/{symbol}/financial-ratios", response_model=StandardResponse[list[FinancialRatioData]])
+@router.get("/{symbol}/ratios", response_model=StandardResponse[list[FinancialRatioData]])
 # Keep prior scale-guessed responses out of the certified-unit serving path.
 @cached(ttl=86400, key_prefix="ratios_v12_provider_deadline")
 async def get_financial_ratios(
@@ -6369,7 +6378,7 @@ async def get_financial_ratios(
             error="TTM ratios are not supported: no source supplies a certified four-quarter ratio basis.",
         )
     primary_error: Exception | None = None
-    mongo_ratio_rows: List[FinancialRatioData] = []
+    mongo_ratio_rows: list[FinancialRatioData] = []
     try:
         mongo_ratio_rows = await _load_mongo_financial_ratio_rows(symbol_upper, period, limit=80)
         # Percent-only here, before merging: `_merge_ratio_rows` reads a present
@@ -6395,8 +6404,8 @@ async def get_financial_ratios(
     except Exception as exc:
         primary_error = exc
         logger.warning("IQ ratio read failed for %s: %s", symbol_upper, exc)
-    db_ratio_rows: List[FinancialRatioData] = []
-    provider_ratio_rows: List[FinancialRatioData] = []
+    db_ratio_rows: list[FinancialRatioData] = []
+    provider_ratio_rows: list[FinancialRatioData] = []
     provider_error: Exception | None = None
     can_enrich = True
     support_rows = {
@@ -6516,7 +6525,7 @@ async def get_financial_ratios(
             # rows usually only have valuation ratios (pe/pb/ps/ev_*),
             # so we tell the UI when "full" ratios actually start.
             # (QA-v2 F1 — surface coverage instead of misleading nulls.)
-            full_coverage_periods: List[str] = []
+            full_coverage_periods: list[str] = []
             for item in payload:
                 if (
                     item.roe is not None
@@ -6551,7 +6560,7 @@ async def get_financial_ratios(
     return StandardResponse(data=[], error=acquisition_error)
 
 
-@router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
+@router.get("/{symbol}/ratios/history", response_model=StandardResponse[list[dict[str, Any]]])
 @cached(ttl=86400, key_prefix="ratios_history_v7_provider_deadline")
 async def get_ratio_history(
     symbol: str,
@@ -6611,7 +6620,7 @@ async def get_ratio_history(
                 error=("Financial ratio history stored source unavailable: " + "; ".join(stored_errors))
                 if stored_errors else None,
             )
-        rows: List[dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for item in data:
             # Admit through the shared site so `fcf_yield`/`ocf_sales` cannot
             # publish an undeclared magnitude here either; idempotent for rows
@@ -6649,7 +6658,7 @@ async def get_metrics_history(
     symbol_upper = symbol.upper()
     start_date = date.today() - timedelta(days=days)
 
-    def build_series_from_rows(rows: List[Any], metric_key: str, attr: str) -> List[Optional[float]]:
+    def build_series_from_rows(rows: list[Any], metric_key: str, attr: str) -> list[float | None]:
         if not (include_all or metric_key in metrics_list):
             return []
         return [
@@ -6718,7 +6727,7 @@ async def get_metrics_history(
     ordered = list(reversed(data))
     periods = [r.period or "" for r in ordered]
 
-    def build_series(metric_key: str, attr: str) -> List[Optional[float]]:
+    def build_series(metric_key: str, attr: str) -> list[float | None]:
         if not (include_all or metric_key in metrics_list):
             return []
         return [
@@ -6739,7 +6748,7 @@ async def get_metrics_history(
 
 
 @router.get(
-    "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
+    "/{symbol}/income-statement", response_model=StandardResponse[list[FinancialStatementData]]
 )
 @cached(ttl=86400, key_prefix="income_statement_v5_eps_admitted")
 async def get_income_statement(
@@ -6840,7 +6849,7 @@ async def get_income_statement(
 
 
 @router.get(
-    "/{symbol}/balance-sheet", response_model=StandardResponse[List[FinancialStatementData]]
+    "/{symbol}/balance-sheet", response_model=StandardResponse[list[FinancialStatementData]]
 )
 @cached(ttl=86400, key_prefix="balance_sheet_v4")
 async def get_balance_sheet(
@@ -6897,7 +6906,7 @@ async def get_balance_sheet(
         return StandardResponse(data=[], error=str(e))
 
 
-@router.get("/{symbol}/cash-flow", response_model=StandardResponse[List[FinancialStatementData]])
+@router.get("/{symbol}/cash-flow", response_model=StandardResponse[list[FinancialStatementData]])
 @cached(ttl=86400, key_prefix="cash_flow_v4")
 async def get_cash_flow(
     symbol: str,
@@ -6953,7 +6962,7 @@ async def get_cash_flow(
         return StandardResponse(data=[], error=str(e))
 
 
-@router.get("/{symbol}/dividends", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/dividends", response_model=StandardResponse[list[Any]])
 @cached(ttl=86400, key_prefix="dividends_v2_stored_first")
 async def get_dividends(
     symbol: str,
@@ -7106,7 +7115,7 @@ async def get_dividends(
         return StandardResponse(data=[], error=str(e))
 
 
-@router.get("/{symbol}/ownership", response_model=StandardResponse[List[Any]])
+@router.get("/{symbol}/ownership", response_model=StandardResponse[list[Any]])
 async def get_ownership(symbol: str):
     try:
         data = await VnstockOwnershipFetcher.fetch(symbol=symbol.upper())

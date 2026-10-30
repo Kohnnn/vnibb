@@ -7,7 +7,6 @@ Uses vnstock company.ownership() method.
 
 import asyncio
 import logging
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +16,7 @@ from vnibb.core.exceptions import ProviderError
 logger = logging.getLogger(__name__)
 
 
-def _parse_number(value) -> Optional[float]:
+def _parse_number(value) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -35,14 +34,14 @@ def _parse_number(value) -> Optional[float]:
     return None
 
 
-def _to_int(value) -> Optional[int]:
+def _to_int(value) -> int | None:
     parsed = _parse_number(value)
     if parsed is None:
         return None
     return int(parsed)
 
 
-def _normalize_pct(value) -> Optional[float]:
+def _normalize_pct(value) -> float | None:
     parsed = _parse_number(value)
     if parsed is None:
         return None
@@ -60,13 +59,13 @@ class OwnershipData(BaseModel):
     """Company ownership structure data."""
 
     symbol: str
-    owner_name: Optional[str] = Field(None, alias="ownerName")
-    owner_type: Optional[str] = Field(None, alias="ownerType")  # Individual, Institution, State
-    shares: Optional[int] = None
-    ownership_pct: Optional[float] = Field(None, alias="ownershipPct")
-    change_shares: Optional[int] = Field(None, alias="changeShares")
-    change_pct: Optional[float] = Field(None, alias="changePct")
-    report_date: Optional[str] = Field(None, alias="reportDate")
+    owner_name: str | None = Field(None, alias="ownerName")
+    owner_type: str | None = Field(None, alias="ownerType")  # Individual, Institution, State
+    shares: int | None = None
+    ownership_pct: float | None = Field(None, alias="ownershipPct")
+    change_shares: int | None = Field(None, alias="changeShares")
+    change_pct: float | None = Field(None, alias="changePct")
+    report_date: str | None = Field(None, alias="reportDate")
 
     model_config = {"populate_by_name": True}
 
@@ -90,7 +89,7 @@ class VnstockOwnershipFetcher:
     """
 
     @staticmethod
-    async def fetch(symbol: str) -> List[OwnershipData]:
+    async def fetch(symbol: str) -> list[OwnershipData]:
         """
         Fetch ownership data for a company.
 

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
@@ -121,9 +122,10 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
 
     from sqlalchemy import BigInteger, Integer, select
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import vnibb.services.data_pipeline as pipeline_module
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
     from vnibb.models.sync_status import SyncStatus
-    import vnibb.services.data_pipeline as pipeline_module
     from vnibb.services.data_pipeline import DataPipeline
 
     models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}
@@ -307,9 +309,15 @@ async def test_generation_four_missing_sdk_version_stays_on_legacy_route(monkeyp
 @pytest.mark.parametrize("statement", STATEMENTS)
 @pytest.mark.parametrize("basis", [False, True])
 async def test_dedicated_fetchers_use_vci_and_shared_admission(sdk, statement, basis):
-    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.balance_sheet import (
+        BalanceSheetQueryParams,
+        VnstockBalanceSheetFetcher,
+    )
     from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
-    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+    from vnibb.providers.vnstock.income_statement import (
+        IncomeStatementQueryParams,
+        VnstockIncomeStatementFetcher,
+    )
 
     fetchers = {
         "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
@@ -332,9 +340,15 @@ async def test_dedicated_fetchers_use_vci_and_shared_admission(sdk, statement, b
 
 @pytest.mark.parametrize("statement", STATEMENTS)
 async def test_dedicated_fetchers_do_not_truncate_available_periods(sdk, statement):
-    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.balance_sheet import (
+        BalanceSheetQueryParams,
+        VnstockBalanceSheetFetcher,
+    )
     from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
-    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+    from vnibb.providers.vnstock.income_statement import (
+        IncomeStatementQueryParams,
+        VnstockIncomeStatementFetcher,
+    )
 
     fetchers = {
         "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
@@ -383,9 +397,15 @@ async def test_dedicated_extractors_preserve_provider_errors(monkeypatch, statem
 @pytest.mark.parametrize("statement", STATEMENTS)
 @pytest.mark.parametrize("invalid", ["source", "unit", "basis"])
 async def test_dedicated_fetchers_withhold_unverified_zero(sdk, statement, invalid):
-    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.balance_sheet import (
+        BalanceSheetQueryParams,
+        VnstockBalanceSheetFetcher,
+    )
     from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
-    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+    from vnibb.providers.vnstock.income_statement import (
+        IncomeStatementQueryParams,
+        VnstockIncomeStatementFetcher,
+    )
 
     fetcher, params = {
         "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
@@ -412,9 +432,15 @@ async def test_dedicated_fetchers_withhold_unverified_zero(sdk, statement, inval
 
 @pytest.mark.parametrize("statement", STATEMENTS)
 async def test_dedicated_fetchers_admit_evidenced_zero(sdk, statement):
-    from vnibb.providers.vnstock.balance_sheet import BalanceSheetQueryParams, VnstockBalanceSheetFetcher
+    from vnibb.providers.vnstock.balance_sheet import (
+        BalanceSheetQueryParams,
+        VnstockBalanceSheetFetcher,
+    )
     from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
-    from vnibb.providers.vnstock.income_statement import IncomeStatementQueryParams, VnstockIncomeStatementFetcher
+    from vnibb.providers.vnstock.income_statement import (
+        IncomeStatementQueryParams,
+        VnstockIncomeStatementFetcher,
+    )
 
     fetcher, params = {
         "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),

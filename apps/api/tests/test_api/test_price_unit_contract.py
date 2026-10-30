@@ -3,8 +3,14 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from vnibb.api.v1 import equity
-from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source
+from vnibb.core.price_units import (
+    history_price_records,
+    normalize_price_record,
+    persisted_price_record,
+    persisted_price_source,
+)
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
@@ -337,6 +343,7 @@ def test_registered_indices_and_derivatives_are_not_equity_currency(symbol):
 
 def test_frame_actual_source_overrides_requested_provider():
     import pandas as pd
+
     from vnibb.core.price_units import history_price_records
 
     frame = pd.DataFrame([bar()])
@@ -425,6 +432,7 @@ async def test_quote_provider_withholds_unmarked_sdk5_history(monkeypatch):
 
 def test_sponsor_frame_requires_explicit_unit_contract():
     import pandas as pd
+
     from vnibb.core.price_units import history_price_records
 
     frame = pd.DataFrame([bar()])
@@ -600,6 +608,7 @@ def test_historical_meta_index_basis_is_not_applicable():
 def test_quant_failed_frame_discloses_unresolved_sessions():
     """The quant diagnostics meta survives on an empty unresolved frame."""
     import pandas as pd
+
     from vnibb.api.v1 import quant
 
     frame = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])

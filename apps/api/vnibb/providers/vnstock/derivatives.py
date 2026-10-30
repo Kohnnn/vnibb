@@ -7,8 +7,7 @@ Uses vnstock quote.history() for derivatives symbols like VN30F1M.
 
 import asyncio
 import logging
-from datetime import date, timedelta
-from typing import List, Optional
+from datetime import date
 
 from pydantic import BaseModel, Field
 
@@ -26,13 +25,13 @@ class DerivativePriceData(BaseModel):
     """Derivatives/futures price data."""
     symbol: str
     time: str
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
-    volume: Optional[int] = None
-    open_interest: Optional[int] = Field(None, alias="openInterest")
-    
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    volume: int | None = None
+    open_interest: int | None = Field(None, alias="openInterest")
+
     model_config = {"populate_by_name": True}
 
 
@@ -41,8 +40,8 @@ class DerivativeContractInfo(BaseModel):
     symbol: str
     underlying: str = "VN30"
     contract_type: str = Field(alias="contractType")
-    expiry_date: Optional[str] = Field(None, alias="expiryDate")
-    
+    expiry_date: str | None = Field(None, alias="expiryDate")
+
     model_config = {"populate_by_name": True}
 
 
@@ -74,26 +73,26 @@ DERIVATIVES_SYMBOLS = [
 class VnstockDerivativesFetcher:
     """
     Fetcher for derivatives/futures price data.
-    
+
     Wraps vnstock quote.history() for derivatives symbols.
     """
-    
+
     @staticmethod
     async def fetch(
         symbol: str,
         start_date: date,
         end_date: date,
         interval: str = "1D",
-    ) -> List[DerivativePriceData]:
+    ) -> list[DerivativePriceData]:
         """
         Fetch historical price data for a derivatives contract.
-        
+
         Args:
             symbol: Derivatives symbol (e.g., VN30F1M, VN30F2411)
             start_date: Start date
             end_date: End date
             interval: Data interval (1D, 1H, etc.)
-        
+
         Returns:
             List of DerivativePriceData records
         """
@@ -110,10 +109,10 @@ class VnstockDerivativesFetcher:
                     source=source,
                 )
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
-            
+
             loop = asyncio.get_event_loop()
             records = await loop.run_in_executor(None, _fetch)
-            
+
             result = []
             for r in records:
                 result.append(DerivativePriceData(
@@ -126,18 +125,18 @@ class VnstockDerivativesFetcher:
                     volume=r.get("volume"),
                     open_interest=r.get("openInterest") or r.get("oi"),
                 ))
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Derivatives fetch failed for {symbol}: {e}")
             raise ProviderError(f"Failed to fetch derivatives data for {symbol}: {e}", "vnstock") from e
-    
+
     @staticmethod
-    async def list_contracts() -> List[str]:
+    async def list_contracts() -> list[str]:
         """
         List available derivatives contract symbols.
-        
+
         Returns:
             List of common derivatives symbols
         """

@@ -5,17 +5,16 @@ Fetches corporate events (dividends, stock splits, AGMs, etc.)
 for Vietnam-listed companies via vnstock library.
 """
 
-import asyncio
 import logging
-from datetime import datetime
 import re
-from typing import Any, List, Optional
+from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.providers.base import BaseFetcher
 from vnibb.providers.vnstock.reference_fields import identity, supplied
 from vnibb.providers.vnstock.runtime import run_reference_provider
 
@@ -25,10 +24,10 @@ NUMBER_PATTERN = re.compile(r"(\d+(?:[\.,]\d+)*)")
 
 
 def _normalize_company_action_category(
-    event_type: Optional[str],
-    event_name: Optional[str],
-    description: Optional[str],
-) -> tuple[str, Optional[str]]:
+    event_type: str | None,
+    event_name: str | None,
+    description: str | None,
+) -> tuple[str, str | None]:
     haystack = " ".join(filter(None, [event_type, event_name, description])).upper()
 
     if any(token in haystack for token in ["SPLIT", "TÁCH", "GỘP", "CHIA TÁCH"]):
@@ -49,8 +48,8 @@ def _normalize_company_action_category(
 
 
 def _parse_company_action_value(
-    value: Optional[str], description: Optional[str]
-) -> tuple[Optional[float], Optional[str]]:
+    value: str | None, description: str | None
+) -> tuple[float | None, str | None]:
     primary = value or description or ""
     ratio_match = RATIO_PATTERN.search(primary)
     if ratio_match:
@@ -133,24 +132,24 @@ class CompanyEventData(BaseModel):
     """
 
     symbol: str = Field(..., description="Stock ticker symbol")
-    event_type: Optional[str] = Field(None, description="Type of event")
-    event_name: Optional[str] = Field(None, description="Event name/title")
-    event_date: Optional[str] = Field(None, description="Event date")
-    ex_date: Optional[str] = Field(None, description="Ex-dividend/Ex-rights date")
-    record_date: Optional[str] = Field(None, description="Record date")
-    payment_date: Optional[str] = Field(None, description="Payment date")
-    description: Optional[str] = Field(None, description="Event description")
-    value: Optional[str] = Field(None, description="Event value (dividend amount, ratio, etc.)")
-    action_category: Optional[str] = Field(None, description="Normalized corporate action bucket")
-    action_subtype: Optional[str] = Field(None, description="Refined corporate action subtype")
-    effective_date: Optional[str] = Field(
+    event_type: str | None = Field(None, description="Type of event")
+    event_name: str | None = Field(None, description="Event name/title")
+    event_date: str | None = Field(None, description="Event date")
+    ex_date: str | None = Field(None, description="Ex-dividend/Ex-rights date")
+    record_date: str | None = Field(None, description="Record date")
+    payment_date: str | None = Field(None, description="Payment date")
+    description: str | None = Field(None, description="Event description")
+    value: str | None = Field(None, description="Event value (dividend amount, ratio, etc.)")
+    action_category: str | None = Field(None, description="Normalized corporate action bucket")
+    action_subtype: str | None = Field(None, description="Refined corporate action subtype")
+    effective_date: str | None = Field(
         None, description="Best actionable date for chart markers and adjustments"
     )
-    cash_amount_per_share: Optional[float] = Field(
+    cash_amount_per_share: float | None = Field(
         None, description="Parsed cash amount per share when available"
     )
-    share_ratio: Optional[str] = Field(None, description="Parsed ratio text such as 2:1 or 10:3")
-    raw_data: Optional[dict[str, Any]] = None
+    share_ratio: str | None = Field(None, description="Parsed ratio text such as 2:1 or 10:3")
+    raw_data: dict[str, Any] | None = None
 
     model_config = {
         "json_schema_extra": {
@@ -187,11 +186,11 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
     @staticmethod
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
-    ) -> List[dict[str, Any]]:
+        credentials: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch company events from vnstock."""
 
-        def _fetch_sync() -> List[dict]:
+        def _fetch_sync() -> list[dict]:
             try:
                 from vnibb.providers.vnstock.runtime import create_reference_company
 
@@ -216,16 +215,16 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                 _fetch_sync, settings.vnstock_timeout,
                 key=("company_events", settings.vnstock_source, tuple(sorted(query.items()))),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
         params: CompanyEventsQueryParams,
-        data: List[dict[str, Any]],
-    ) -> List[CompanyEventData]:
+        data: list[dict[str, Any]],
+    ) -> list[CompanyEventData]:
         """Transform raw events data to standardized format."""
-        results: List[CompanyEventData] = []
+        results: list[CompanyEventData] = []
 
         for row in data:
             try:

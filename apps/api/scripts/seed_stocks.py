@@ -1,16 +1,17 @@
 import asyncio
 import logging
-import sys
 import os
+import sys
 from datetime import datetime
 
 # Add parent directory to sys.path to allow importing vnibb
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vnibb.providers.vnstock.runtime import get_listing_class
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from vnibb.core.database import async_session_maker
 from vnibb.models import Stock
+from vnibb.providers.vnstock.runtime import get_listing_class
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,19 +22,19 @@ logger = logging.getLogger(__name__)
 async def seed_all_stocks():
     """Fetch and seed all stock tickers into the database."""
     logger.info("Fetching stock list from VNStock (VCI source)...")
-    
+
     try:
         # Use VCI as source
         listing = get_listing_class()(source='VCI')
         df = listing.symbols_by_exchange()
-        
+
         if df is None or df.empty:
             logger.error("No stock data returned from VNStock")
             return
-            
+
         total_stocks = len(df)
         logger.info(f"Found {total_stocks} stocks. Starting database seeding...")
-        
+
         async with async_session_maker() as session:
             count = 0
             for _, row in df.iterrows():
@@ -48,12 +49,12 @@ async def seed_all_stocks():
 
                 company_name = row.get('organ_name')
                 short_name = row.get('organ_short_name')
-                
+
                 # Truncate to fit DB constraints
                 if company_name: company_name = str(company_name)[:255]
                 if short_name: short_name = str(short_name)[:100]
                 if exchange: exchange = str(exchange)[:10]
-                
+
                 stmt = pg_insert(Stock).values(
                     symbol=symbol,
                     company_name=company_name,
@@ -74,17 +75,17 @@ async def seed_all_stocks():
                 )
                 await session.execute(stmt)
                 count += 1
-                
+
                 if count % 10 == 0:
                     logger.info(f"Processed {count}/{total_stocks}: {symbol}")
-                
+
                 if count % 100 == 0:
                     await session.commit()
                     logger.info(f"--- Committed {count} stocks ---")
-            
+
             await session.commit()
             logger.info(f"Successfully finished seeding {count} stocks into database!")
-            
+
     except Exception as e:
         logger.error(f"Stock seeding failed: {e}")
         import traceback

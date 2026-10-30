@@ -2,6 +2,7 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
+
 from vnibb.api.v1 import market
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.models.screener import ScreenerSnapshot

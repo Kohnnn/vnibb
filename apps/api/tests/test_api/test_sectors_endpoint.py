@@ -1,10 +1,11 @@
-import pytest
 from datetime import date
 
-from vnibb.models.stock import Stock
-from vnibb.models.screener import ScreenerSnapshot
-from vnibb.providers.vnstock.top_movers import SectorStockData, SectorTopMoversData
+import pytest
+
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock
+from vnibb.providers.vnstock.top_movers import SectorStockData, SectorTopMoversData
 
 
 @pytest.mark.asyncio

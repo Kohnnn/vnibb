@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
+
 from vnibb.models.company import Company
 from vnibb.models.stock import Stock
 from vnibb.services.cache_manager import CacheManager

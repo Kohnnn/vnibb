@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import MetaData, null
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from vnibb.api.main import app
 from vnibb.api.v1 import screener
 from vnibb.core.database import get_db

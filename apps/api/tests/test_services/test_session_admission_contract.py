@@ -11,10 +11,11 @@ from uuid import uuid4
 import pytest
 import sqlalchemy.ext.asyncio as sqlalchemy_async
 from pymongo import MongoClient
-from scripts.readiness_census import _admitted, _retained, reconcile_census
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+
+from scripts.readiness_census import _admitted, _retained, reconcile_census
 from vnibb.core.database import Base
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice

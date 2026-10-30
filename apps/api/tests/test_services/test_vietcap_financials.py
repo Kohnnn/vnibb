@@ -5,6 +5,7 @@ from datetime import date
 from unittest.mock import AsyncMock
 
 import pytest
+
 from vnibb.services.vietcap_financials import (
     decode_vietcap_financial_record,
     financial_fiscal_basis,
@@ -463,6 +464,7 @@ async def test_structured_writer_rejects_issuer_before_database_access(monkeypat
 @pytest.mark.parametrize("source", ["vietcap", "vietcap_vnd", "VCI", "vnstock"])
 async def test_structured_refresh_does_not_overwrite_retained_issuer_row(test_db, source):
     from sqlalchemy import select
+
     from vnibb.models import IncomeStatement
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
 
@@ -483,6 +485,7 @@ async def test_structured_refresh_does_not_overwrite_retained_issuer_row(test_db
 @pytest.mark.parametrize("source", ["VCI", "vnstock", "derived", None])
 async def test_pipeline_source_guard_preserves_retained_issuer_atomically(test_db, source):
     from sqlalchemy import select, update
+
     from vnibb.models import IncomeStatement
     from vnibb.services.cache_manager import source_update_condition
 
@@ -505,6 +508,7 @@ async def test_readthrough_retains_existing_admitted_evidence(test_db, envelope,
     from datetime import datetime
 
     from sqlalchemy import select
+
     from vnibb.models import IncomeStatement
     from vnibb.services.cache_manager import CacheManager
 
@@ -549,6 +553,7 @@ async def test_readthrough_retains_existing_admitted_evidence(test_db, envelope,
 @pytest.mark.asyncio
 async def test_readthrough_allows_additive_decoder_enrichment(test_db, envelope):
     from sqlalchemy import select
+
     from vnibb.models import IncomeStatement
     from vnibb.services.cache_manager import CacheManager
 
@@ -607,6 +612,7 @@ async def test_sql_upsert_preserves_non_iq_source_and_reports_conflicting_keys(m
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
+
     from vnibb.models import IncomeStatement
     from vnibb.models.stock import StockPrice
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
@@ -641,6 +647,7 @@ async def test_fresh_certified_price_replaces_owned_generic_iq_not_other_sources
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
+
     from vnibb.models.stock import StockPrice
     from vnibb.services.cache_manager import CacheManager
 
@@ -664,6 +671,7 @@ async def test_secondary_sql_writer_retains_primary_owner_and_conflict_evidence(
     from unittest.mock import Mock
 
     from sqlalchemy.dialects.postgresql import dialect
+
     from vnibb.models.trading import FinancialRatio
     from vnibb.services.cache_manager import CacheManager, StructuredPersistenceConflict
 

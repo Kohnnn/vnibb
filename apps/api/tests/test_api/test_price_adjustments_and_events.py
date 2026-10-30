@@ -424,9 +424,10 @@ async def test_ratio_history_http_store_failure_with_empty_provider_is_unavailab
 async def test_ratio_http_provider_failure_preserves_stored_evidence(
     client, test_db, monkeypatch, endpoint, retained, outcome,
 ):
+    from types import SimpleNamespace
+
     from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
     from vnibb.providers.vnstock import runtime
-    from types import SimpleNamespace
 
     class QuotaFinance:
         def ratio(self, **kwargs):
@@ -550,6 +551,7 @@ async def test_ratio_http_cancelled_support_sql_retains_rows_without_losing_call
     client, test_db, monkeypatch, borrowed, bank, endpoint,
 ):
     from sqlalchemy.exc import PendingRollbackError
+
     from vnibb.models.financials import IncomeStatement
 
     symbol = "TCB" if bank else "VNM"

@@ -8,15 +8,15 @@ for Vietnam-listed companies via vnstock library.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.market_cap import resolve_market_cap
 from vnibb.core.screener_shares import resolve_screener_shares
+from vnibb.providers.base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -45,36 +45,36 @@ class EquityProfileData(BaseModel):
     """
 
     symbol: str = Field(..., description="Stock ticker symbol")
-    company_name: Optional[str] = Field(None, description="Full company name")
-    short_name: Optional[str] = Field(None, description="Short company name")
-    exchange: Optional[str] = Field(None, description="Listed exchange")
-    industry: Optional[str] = Field(None, description="Industry classification")
-    sector: Optional[str] = Field(None, description="Sector classification")
+    company_name: str | None = Field(None, description="Full company name")
+    short_name: str | None = Field(None, description="Short company name")
+    exchange: str | None = Field(None, description="Listed exchange")
+    industry: str | None = Field(None, description="Industry classification")
+    sector: str | None = Field(None, description="Sector classification")
 
     # Company details
-    established_date: Optional[str] = Field(None, description="Date of establishment")
-    listing_date: Optional[str] = Field(None, description="IPO/Listing date")
-    website: Optional[str] = Field(None, description="Company website")
-    description: Optional[str] = Field(None, description="Business description")
+    established_date: str | None = Field(None, description="Date of establishment")
+    listing_date: str | None = Field(None, description="IPO/Listing date")
+    website: str | None = Field(None, description="Company website")
+    description: str | None = Field(None, description="Business description")
 
     # Key metrics
-    outstanding_shares: Optional[float] = Field(None, description="Outstanding shares")
-    shares_outstanding_provenance: Optional[dict[str, Any]] = None
-    listed_shares: Optional[float] = Field(None, description="Listed shares")
-    market_cap: Optional[float] = Field(None, description="Market capitalization")
-    market_cap_provenance: Optional[dict[str, Any]] = None
-    shares_unit: Optional[str] = None
-    shares_as_of: Optional[datetime | str] = None
-    shares_source: Optional[str] = None
-    share_basis: Optional[str] = None
-    no_employees: Optional[int] = Field(None, description="Number of employees")
+    outstanding_shares: float | None = Field(None, description="Outstanding shares")
+    shares_outstanding_provenance: dict[str, Any] | None = None
+    listed_shares: float | None = Field(None, description="Listed shares")
+    market_cap: float | None = Field(None, description="Market capitalization")
+    market_cap_provenance: dict[str, Any] | None = None
+    shares_unit: str | None = None
+    shares_as_of: datetime | str | None = None
+    shares_source: str | None = None
+    share_basis: str | None = None
+    no_employees: int | None = Field(None, description="Number of employees")
 
     # Contact
-    address: Optional[str] = Field(None, description="Head office address")
-    phone: Optional[str] = Field(None, description="Phone number")
-    email: Optional[str] = Field(None, description="Email address")
+    address: str | None = Field(None, description="Head office address")
+    phone: str | None = Field(None, description="Phone number")
+    email: str | None = Field(None, description="Email address")
 
-    updated_at: Optional[datetime] = Field(None, description="Data timestamp")
+    updated_at: datetime | None = Field(None, description="Data timestamp")
 
     model_config = {
         "json_schema_extra": {
@@ -89,7 +89,7 @@ class EquityProfileData(BaseModel):
     }
 
 
-from vnibb.core.retry import vnstock_cb, circuit_breaker
+from vnibb.core.retry import circuit_breaker, vnstock_cb
 
 
 class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityProfileData]):
@@ -112,12 +112,12 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
     @circuit_breaker(vnstock_cb)
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
-    ) -> List[dict[str, Any]]:
+        credentials: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch company profile from vnstock."""
         loop = asyncio.get_event_loop()
 
-        def _fetch_sync() -> List[dict[str, Any]]:
+        def _fetch_sync() -> list[dict[str, Any]]:
             def _is_present(value: Any) -> bool:
                 if value is None:
                     return False
@@ -129,8 +129,8 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
 
             try:
                 from vnibb.providers.vnstock.runtime import (
-                    get_listing_class,
                     get_company_class,
+                    get_listing_class,
                     validate_source,
                 )
 
@@ -174,14 +174,14 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 loop.run_in_executor(None, _fetch_sync),
                 timeout=settings.vnstock_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
         params: EquityProfileQueryParams,
-        data: List[dict[str, Any]],
-    ) -> List[EquityProfileData]:
+        data: list[dict[str, Any]],
+    ) -> list[EquityProfileData]:
         """
         Transform raw profile data to standardized format.
 
@@ -195,9 +195,9 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
         - issue_share: outstanding shares
         - charter_capital: charter capital (VND)
         """
-        results: List[EquityProfileData] = []
+        results: list[EquityProfileData] = []
 
-        def _coerce_float(value: Any) -> Optional[float]:
+        def _coerce_float(value: Any) -> float | None:
             if value is None:
                 return None
             try:
@@ -208,13 +208,13 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                 return None
             return number
 
-        def _coerce_int(value: Any) -> Optional[int]:
+        def _coerce_int(value: Any) -> int | None:
             number = _coerce_float(value)
             if number is None or number < 0:
                 return None
             return int(number)
 
-        def _pick_first(*values: Any) -> Optional[Any]:
+        def _pick_first(*values: Any) -> Any | None:
             for value in values:
                 if value is None:
                     continue

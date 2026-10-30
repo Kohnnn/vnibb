@@ -3,13 +3,12 @@
 import logging
 from contextvars import ContextVar
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
@@ -87,7 +86,7 @@ class TechnicalAnalysisService:
         symbol: str,
         start_date: date,
         end_date: date,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate all technical indicators for a symbol.
 
@@ -107,7 +106,7 @@ class TechnicalAnalysisService:
         symbol: str,
         start_date: date,
         end_date: date,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate indicators using free vnstock history and pandas."""
         import asyncio
 
@@ -191,7 +190,6 @@ class TechnicalAnalysisService:
             return indicators
 
         # Run in thread pool
-        import asyncio
 
         return await asyncio.to_thread(_sync_calculate)
 
@@ -199,7 +197,7 @@ class TechnicalAnalysisService:
         self,
         symbol: str,
         calc_date: date,
-        indicators: Dict[str, Any],
+        indicators: dict[str, Any],
     ):
         """Store calculated indicators in database."""
         if not indicators:
@@ -233,9 +231,9 @@ class TechnicalAnalysisService:
     async def get_indicators(
         self,
         symbol: str,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-    ) -> List[Dict[str, Any]]:
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> list[dict[str, Any]]:
         """Get stored indicators from database."""
         async with async_session_maker() as session:
             query = select(TechnicalIndicator).where(TechnicalIndicator.symbol == symbol.upper())
@@ -258,7 +256,7 @@ class TechnicalAnalysisService:
 
     async def _load_retained_ohlcv_frame(
         self, symbol: str, start_date: date, end_date: date,
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         from vnibb.api.v1.equity import (
             _historical_resolution_meta,
             _load_historical_from_db,
@@ -307,7 +305,7 @@ class TechnicalAnalysisService:
         start_date: date,
         end_date: date,
         interval: str = "1D",
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """Load cleaned OHLCV without the latest-quote merge.
 
         Returns ``None`` when no usable rows exist. When every row was dropped
@@ -458,7 +456,7 @@ class TechnicalAnalysisService:
         start_date: date,
         end_date: date,
         interval: str = "1D",
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """Fetch OHLCV data for a symbol. Returns None if no data."""
         frame = await self._load_ohlcv_frame(
             symbol, start_date, end_date, interval=interval
@@ -490,7 +488,7 @@ class TechnicalAnalysisService:
         self,
         symbol: str,
         lookback_days: int = 260,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
         raw = await self.get_ohlcv_data(symbol, start_date, end_date)
@@ -513,7 +511,7 @@ class TechnicalAnalysisService:
             else "mixed" if len(units) > 1
             else "unconfirmed"
         )
-        issues: List[str] = []
+        issues: list[str] = []
         if len(frame) < 60:
             issues.append(f"Only {len(frame)} clean bars available; most indicators need at least 60.")
         if len(frame) < 220:
@@ -541,9 +539,9 @@ class TechnicalAnalysisService:
     async def get_moving_averages(
         self,
         symbol: str,
-        periods: List[int] = [10, 20, 50, 200],
+        periods: list[int] = [10, 20, 50, 200],
         lookback_days: int = 250,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate SMA and EMA for multiple periods."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -580,7 +578,7 @@ class TechnicalAnalysisService:
         symbol: str,
         period: int = 14,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate RSI with overbought/oversold zones."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -632,7 +630,7 @@ class TechnicalAnalysisService:
         slow: int = 26,
         signal_period: int = 9,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate MACD with histogram."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -686,7 +684,7 @@ class TechnicalAnalysisService:
         period: int = 20,
         std_dev: int = 2,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate Bollinger Bands."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -741,7 +739,7 @@ class TechnicalAnalysisService:
         k_period: int = 14,
         d_period: int = 3,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate Stochastic Oscillator (%K and %D)."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -796,7 +794,7 @@ class TechnicalAnalysisService:
         symbol: str,
         lookback_days: int = 100,
         num_levels: int = 3,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Auto-detect support and resistance levels using pivot points."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -824,7 +822,7 @@ class TechnicalAnalysisService:
                 resistances.append(float(high.iloc[i]))
 
         # Cluster nearby levels and take the most significant ones
-        def cluster_levels(levels: List[float], threshold: float = 0.02) -> List[float]:
+        def cluster_levels(levels: list[float], threshold: float = 0.02) -> list[float]:
             if not levels:
                 return []
             levels = sorted(set(levels))
@@ -879,7 +877,7 @@ class TechnicalAnalysisService:
         self,
         symbol: str,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate Fibonacci retracement levels."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -929,7 +927,7 @@ class TechnicalAnalysisService:
         symbol: str,
         period: int = 14,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate ADX (Average Directional Index) for trend strength."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -1006,7 +1004,7 @@ class TechnicalAnalysisService:
         symbol: str,
         period: int = 20,
         lookback_days: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Analyze volume patterns and moving averages."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days)
@@ -1058,7 +1056,7 @@ class TechnicalAnalysisService:
         senkou_b_period: int = 52,
         displacement: int = 26,
         lookback_days: int = 200,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate Ichimoku Cloud levels."""
         end_date = date.today()
         start_date = end_date - timedelta(days=lookback_days + displacement)
@@ -1127,7 +1125,7 @@ class TechnicalAnalysisService:
         self,
         symbol: str,
         lookback_days: int = 200,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Aggregate all indicators into a buy/sell signal summary."""
         import asyncio
         from datetime import timedelta
@@ -1135,7 +1133,7 @@ class TechnicalAnalysisService:
         # Resolve the frame once so the unit-exclusion reason is captured
         # locally (ContextVar writes do not propagate back across asyncio
         # tasks). When already inside a shared analysis frame, reuse it.
-        exclusion: Optional[Dict[str, Any]] = None
+        exclusion: dict[str, Any] | None = None
         frame_token = None
         cached_frame = _full_analysis_frame.get(_missing_full_analysis_frame)
         if cached_frame is _missing_full_analysis_frame:
@@ -1166,8 +1164,8 @@ class TechnicalAnalysisService:
             if frame_token is not None:
                 _full_analysis_frame.reset(frame_token)
 
-        indicator_signals: List[str] = []
-        category_weighted_signals: Dict[str, List[tuple[str, float]]] = {
+        indicator_signals: list[str] = []
+        category_weighted_signals: dict[str, list[tuple[str, float]]] = {
             "trend": [],
             "oscillator": [],
             "volume": [],
@@ -1361,7 +1359,7 @@ class TechnicalAnalysisService:
             }
 
         category_weights = {"trend": 1.0, "oscillator": 1.0, "volume": 0.6}
-        weighted_categories: List[tuple[float, float]] = []
+        weighted_categories: list[tuple[float, float]] = []
         for category, signals in category_weighted_signals.items():
             if not signals:
                 continue
@@ -1422,7 +1420,7 @@ class TechnicalAnalysisService:
         symbol: str,
         timeframe: Timeframe = "D",
         lookback_days: int = 200,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get comprehensive technical analysis for a symbol."""
         import asyncio
 
@@ -1505,7 +1503,7 @@ class TechnicalAnalysisService:
 
 
 # Global instance placeholder
-_ta_service: Optional[TechnicalAnalysisService] = None
+_ta_service: TechnicalAnalysisService | None = None
 
 
 def get_ta_service() -> TechnicalAnalysisService:

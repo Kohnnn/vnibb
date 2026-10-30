@@ -7,6 +7,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import Integer, MetaData, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from scripts import repair_financial_periods as repair
 from vnibb.api.v1 import admin
 from vnibb.core.database import Base
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
@@ -19,8 +21,6 @@ from vnibb.providers.vnstock.financial_ratios import (
 )
 from vnibb.services import data_pipeline as pipeline_module
 from vnibb.services.data_pipeline import DataPipeline
-
-from scripts import repair_financial_periods as repair
 
 
 @pytest_asyncio.fixture

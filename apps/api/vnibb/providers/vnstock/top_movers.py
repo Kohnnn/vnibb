@@ -10,7 +10,8 @@ price change from match_price and ref_price.
 
 import asyncio
 import logging
-from typing import List, Optional, Literal, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +19,6 @@ from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 from vnibb.core.price_units import normalize_price_record
 from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +39,13 @@ class TopMoverData(BaseModel):
 
     symbol: str
     index: str
-    last_price: Optional[float] = Field(None, alias="lastPrice")
-    price_change: Optional[float] = Field(None, alias="priceChange")
-    price_change_pct: Optional[float] = Field(None, alias="priceChangePct")
-    volume: Optional[int] = None
-    value: Optional[float] = None
-    avg_volume_20d: Optional[float] = Field(None, alias="avgVolume20d")
-    volume_spike_pct: Optional[float] = Field(None, alias="volumeSpikePct")
+    last_price: float | None = Field(None, alias="lastPrice")
+    price_change: float | None = Field(None, alias="priceChange")
+    price_change_pct: float | None = Field(None, alias="priceChangePct")
+    volume: int | None = None
+    value: float | None = None
+    avg_volume_20d: float | None = Field(None, alias="avgVolume20d")
+    volume_spike_pct: float | None = Field(None, alias="volumeSpikePct")
 
     model_config = {"populate_by_name": True}
 
@@ -54,10 +54,10 @@ class SectorStockData(BaseModel):
     """Individual stock data for sector top movers."""
 
     symbol: str
-    price: Optional[float] = None
-    change: Optional[float] = None
-    change_pct: Optional[float] = None
-    volume: Optional[int] = None
+    price: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    volume: int | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -66,8 +66,8 @@ class SectorTopMoversData(BaseModel):
     """Sector with its top movers list."""
 
     sector: str
-    sector_vi: Optional[str] = None
-    stocks: List["SectorStockData"] = []
+    sector_vi: str | None = None
+    stocks: list["SectorStockData"] = []
 
     model_config = {"populate_by_name": True}
 
@@ -128,7 +128,7 @@ def _flatten_multiindex_df(df):
     return df
 
 
-def _extract_from_flattened(row: dict, keys: List[str], default=None):
+def _extract_from_flattened(row: dict, keys: list[str], default=None):
     """Extract value from flattened row trying multiple key patterns."""
     for key in keys:
         if key in row and row[key] is not None:
@@ -138,8 +138,8 @@ def _extract_from_flattened(row: dict, keys: List[str], default=None):
 
 def _extract_by_key_fragments(
     row: dict,
-    required_fragments: List[str],
-    forbidden_fragments: Optional[List[str]] = None,
+    required_fragments: list[str],
+    forbidden_fragments: list[str] | None = None,
 ):
     forbidden_fragments = forbidden_fragments or []
     for key, value in row.items():
@@ -154,7 +154,7 @@ def _extract_by_key_fragments(
     return None
 
 
-def _parse_price_board_record(row: dict) -> Optional[dict]:
+def _parse_price_board_record(row: dict) -> dict | None:
     """
     Parse a flattened price_board record into normalized format.
 
@@ -291,7 +291,7 @@ class VnstockTopMoversFetcher:
         type: Literal["gainer", "loser", "volume", "value"] = "gainer",
         index: Literal["VNINDEX", "HNX", "VN30"] = "VNINDEX",
         limit: int = 10,
-    ) -> List[TopMoverData]:
+    ) -> list[TopMoverData]:
         """
         Fetch top movers by type.
 
@@ -306,7 +306,7 @@ class VnstockTopMoversFetcher:
         try:
             source_name = validate_source(settings.vnstock_source)
 
-            def _fetch() -> List[dict]:
+            def _fetch() -> list[dict]:
                 from vnibb.providers.vnstock.runtime import get_listing_class, get_trading_class
 
                 Listing = get_listing_class()
@@ -476,14 +476,14 @@ class VnstockTopMoversFetcher:
         type: Literal["gainers", "losers"] = "gainers",
         limit_per_sector: int = 5,
         source: str = "VCI",
-    ) -> List[SectorTopMoversData]:
+    ) -> list[SectorTopMoversData]:
         """
         Fetch top movers grouped by sector/industry.
         """
         source = validate_source(source)
         try:
 
-            def _fetch() -> Tuple[List[dict], dict]:
+            def _fetch() -> tuple[list[dict], dict]:
                 from vnibb.providers.vnstock.runtime import get_listing_class, get_trading_class
 
                 Listing = get_listing_class()
@@ -617,7 +617,7 @@ class VnstockTopMoversFetcher:
                     continue
 
             # Group by sector
-            sectors: dict[str, List[dict]] = {}
+            sectors: dict[str, list[dict]] = {}
             for record in parsed_data:
                 sector = record.get("industry", "Unknown")
                 if sector not in sectors:

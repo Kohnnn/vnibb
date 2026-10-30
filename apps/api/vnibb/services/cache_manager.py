@@ -10,9 +10,22 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Generic, List, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
-from sqlalchemy import JSON, Date, Float, String, and_, case, cast, func, literal_column, or_, select, update
+from sqlalchemy import (
+    JSON,
+    Date,
+    Float,
+    String,
+    and_,
+    case,
+    cast,
+    func,
+    literal_column,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,8 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.cache_constants import DB_CACHE_TTLS
 from vnibb.core.database import async_session_factory
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
-from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.core.price_units import normalize_screener_record
+from vnibb.core.screener_shares import resolve_screener_shares
 from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
@@ -38,7 +51,7 @@ _QUALIFIED_RETAINED_PRICE_SOURCES = frozenset({"vietcap_vnd", "vnstock_vnd"} | {
 })
 T = TypeVar("T")
 
-def _coerce_date(value: Any) -> Optional[date]:
+def _coerce_date(value: Any) -> date | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -106,9 +119,9 @@ def snapshot_session_coverage(
 class CacheResult(Generic[T]):
     """Result wrapper containing cached data and metadata."""
 
-    data: Optional[T]
+    data: T | None
     is_stale: bool
-    cached_at: Optional[datetime]
+    cached_at: datetime | None
     hit: bool
     freshness_basis: str | None = None
     market_session_counts: dict[str, int] | None = None
@@ -120,7 +133,7 @@ class CacheResult(Generic[T]):
 
 
 class StructuredPersistenceConflict(ValueError):
-    def __init__(self, persisted_rows: int, conflicting_keys: List[dict[str, Any]]):
+    def __init__(self, persisted_rows: int, conflicting_keys: list[dict[str, Any]]):
         self.persisted_rows = persisted_rows
         self.conflicting_keys = conflicting_keys
         super().__init__(f"IQ PostgreSQL source conflict: persisted {persisted_rows} rows; conflicting keys {conflicting_keys}")
@@ -204,7 +217,7 @@ class CacheManager:
     # would trade a labelled stale answer for a blank universe.
     MAX_STALE_DAYS = 7
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         """
         Initialize cache manager.
 
@@ -226,10 +239,10 @@ class CacheManager:
 
     async def get_screener_data(
         self,
-        symbol: Optional[str] = None,
-        source: Optional[str] = "VCI",
+        symbol: str | None = None,
+        source: str | None = "VCI",
         allow_stale: bool = True,
-    ) -> CacheResult[List[ScreenerSnapshot]]:
+    ) -> CacheResult[list[ScreenerSnapshot]]:
         """
         Get cached screener data from database.
 
@@ -417,7 +430,7 @@ class CacheManager:
 
     async def store_screener_data(
         self,
-        data: List[dict[str, Any]],
+        data: list[dict[str, Any]],
         source: str = "VCI",
     ) -> int:
         """
@@ -751,7 +764,7 @@ class CacheManager:
             now = datetime.utcnow()
             symbol = symbol.upper()
 
-            def _parse_optional_date(value: Any) -> Optional[date]:
+            def _parse_optional_date(value: Any) -> date | None:
                 if value is None:
                     return None
                 if isinstance(value, date) and not isinstance(value, datetime):
@@ -779,7 +792,7 @@ class CacheManager:
             )
             listing_date = _parse_optional_date(data.get("listing_date") or data.get("listingDate"))
 
-            def _share_count(value: Any) -> Optional[float]:
+            def _share_count(value: Any) -> float | None:
                 try:
                     numeric = float(value)
                 except (TypeError, ValueError):
@@ -900,7 +913,7 @@ class CacheManager:
         self,
         source: str = "VCI",
         allow_stale: bool = True,
-    ) -> CacheResult[List[Stock]]:
+    ) -> CacheResult[list[Stock]]:
         """
         Get cached listing data from database.
 
@@ -955,7 +968,7 @@ class CacheManager:
 
     async def store_listing_data(
         self,
-        data: List[dict[str, Any]],
+        data: list[dict[str, Any]],
         source: str = "VCI",
     ) -> int:
         """
@@ -1031,7 +1044,7 @@ class CacheManager:
         self,
         source: str = "VCI",
         allow_stale: bool = True,
-    ) -> CacheResult[List[Stock]]:
+    ) -> CacheResult[list[Stock]]:
         """
         Get cached industry classifications from database.
 
@@ -1053,8 +1066,8 @@ class CacheManager:
 
     async def invalidate_screener_cache(
         self,
-        symbol: Optional[str] = None,
-        source: Optional[str] = None,
+        symbol: str | None = None,
+        source: str | None = None,
     ) -> int:
         """
         Invalidate screener cache for cleanup or forced refresh.
@@ -1102,7 +1115,7 @@ class CacheManager:
     # FINANCIAL DATA CACHING
     # ========================================================================
 
-    async def _store_rows(self, model, rows: List[dict[str, Any]], keys: List[str]) -> int:
+    async def _store_rows(self, model, rows: list[dict[str, Any]], keys: list[str]) -> int:
         if not rows:
             return 0
         session = await self._get_session()
@@ -1173,11 +1186,12 @@ class CacheManager:
 
     async def store_financial_data(
         self, symbol: str, statement_type: str, period: str,
-        data: List[dict[str, Any]], source: str = "vietcap",
+        data: list[dict[str, Any]], source: str = "vietcap",
     ) -> int:
-        from vnibb.models import IncomeStatement, BalanceSheet, CashFlow
-        from vnibb.models.trading import FinancialRatio
         import json
+
+        from vnibb.models import BalanceSheet, CashFlow, IncomeStatement
+        from vnibb.models.trading import FinancialRatio
 
         models = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow, "ratio": FinancialRatio}
         if statement_type not in models or period not in {"year", "quarter"}:
@@ -1215,12 +1229,12 @@ class CacheManager:
         return await self._store_rows(model, rows, ["symbol", "period", "period_type"])
 
     async def store_financial_ratios(
-        self, symbol: str, period: str, data: List[dict[str, Any]], source: str = "vietcap",
+        self, symbol: str, period: str, data: list[dict[str, Any]], source: str = "vietcap",
     ) -> int:
         return await self.store_financial_data(symbol, "ratio", period, data, source=source)
 
     async def store_historical_prices(
-        self, symbol: str, data: List[dict[str, Any]], source: str = "vietcap",
+        self, symbol: str, data: list[dict[str, Any]], source: str = "vietcap",
     ) -> int:
         from vnibb.models.stock import StockPrice
 
@@ -1245,7 +1259,7 @@ class CacheManager:
         statement_type: str,  # 'income', 'balance', 'cashflow'
         period: str = "year",
         allow_stale: bool = True,
-    ) -> CacheResult[List[Any]]:
+    ) -> CacheResult[list[Any]]:
         """
         Get cached financial statement data from database.
 
@@ -1258,7 +1272,7 @@ class CacheManager:
         Returns:
             CacheResult containing list of financial records.
         """
-        from vnibb.models import IncomeStatement, BalanceSheet, CashFlow
+        from vnibb.models import BalanceSheet, CashFlow, IncomeStatement
 
         model_map = {
             "income": IncomeStatement,
@@ -1323,7 +1337,7 @@ class CacheManager:
         end_date: date,
         interval: str = "1D",
         allow_stale: bool = True,
-    ) -> CacheResult[List[Any]]:
+    ) -> CacheResult[list[Any]]:
         """
         Get cached historical price data from database.
 
@@ -1402,7 +1416,7 @@ class CacheManager:
 
     def is_data_fresh(
         self,
-        updated_at: Optional[datetime],
+        updated_at: datetime | None,
         data_type: str,
     ) -> bool:
         """

@@ -9,22 +9,23 @@ Handles:
 """
 
 import logging
-from datetime import datetime, timedelta, date
-from typing import List, Optional, Dict, Any
-from sqlalchemy import select, and_, desc, func
+from datetime import datetime, timedelta
+from typing import Any
+
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
-from vnibb.core.config import settings
-from vnibb.models.news import InsiderDeal
-
-from vnibb.models.trading import IntradayTrade
-from vnibb.models.alerts import (
-    BlockTrade, InsiderAlert, AlertSettings,
-    AlertType, AlertSeverity, TradeSide
-)
-from vnibb.core.database import get_db
 from vnibb.core.insider_units import admitted_deal_value, normalize_deal_action
+from vnibb.models.alerts import (
+    AlertSettings,
+    AlertSeverity,
+    AlertType,
+    BlockTrade,
+    InsiderAlert,
+    TradeSide,
+)
+from vnibb.models.news import InsiderDeal
+from vnibb.models.trading import IntradayTrade
 from vnibb.services.websocket_service import manager
 
 logger = logging.getLogger(__name__)
@@ -57,11 +58,11 @@ async def _rollback_after_query_error(db: AsyncSession, context: str) -> None:
 
 class InsiderTrackingService:
     """Service for tracking insider trading and block trades"""
-    
+
     def __init__(self, db: AsyncSession):
         self.db = db
-    
-    async def sync_insider_deals(self, symbols: List[str]) -> Dict[str, int]:
+
+    async def sync_insider_deals(self, symbols: list[str]) -> dict[str, int]:
         """
         Sync insider deals for given symbols from vnstock.
 
@@ -155,25 +156,25 @@ class InsiderTrackingService:
                 await self.db.rollback()
 
         return stats
-    
+
     async def detect_block_trades(
-        self, 
-        symbol: str, 
-        threshold: Optional[float] = None
-    ) -> List[BlockTrade]:
+        self,
+        symbol: str,
+        threshold: float | None = None
+    ) -> list[BlockTrade]:
         """
         Detect block trades exceeding threshold.
-        
+
         Args:
             symbol: Stock symbol to analyze
             threshold: Value threshold in VND (default: 10 billion)
-            
+
         Returns:
             List of detected block trades
         """
         if threshold is None:
             threshold = 10_000_000_000  # VND 10 billion
-        
+
         # Get recent intraday trades
         today = datetime.now().date()
         result = await self.db.execute(
@@ -186,16 +187,16 @@ class InsiderTrackingService:
             )
             .order_by(desc(IntradayTrade.trade_time))
         )
-        
+
         trades = result.scalars().all()
         block_trades = []
-        
+
         # Calculate average volume for comparison
         avg_volume = await self._get_average_volume(symbol, days=20)
-        
+
         for trade in trades:
             trade_value = trade.price * trade.volume
-            
+
             if trade_value >= threshold:
                 # Check if already recorded
                 existing = await self.db.execute(
@@ -207,13 +208,13 @@ class InsiderTrackingService:
                         )
                     )
                 )
-                
+
                 if existing.scalar_one_or_none():
                     continue
-                
+
                 # Determine trade side (simplified - could be enhanced)
                 side = TradeSide.BUY if trade.match_type == "BUY" else TradeSide.SELL
-                
+
                 # Create block trade record
                 block_trade = BlockTrade(
                     symbol=symbol,
@@ -225,20 +226,20 @@ class InsiderTrackingService:
                     avg_volume_20d=avg_volume,
                     volume_ratio=trade.volume / avg_volume if avg_volume > 0 else None
                 )
-                
+
                 self.db.add(block_trade)
                 block_trades.append(block_trade)
-                
+
                 # Generate alert
                 await self._generate_block_trade_alert(block_trade)
-        
+
         if block_trades:
             await self.db.commit()
             logger.info(f"Detected {len(block_trades)} block trades for {symbol}")
-        
+
         return block_trades
-    
-    async def _generate_insider_alert(self, deal: InsiderDeal) -> Optional[InsiderAlert]:
+
+    async def _generate_insider_alert(self, deal: InsiderDeal) -> InsiderAlert | None:
         """Generate a directional alert; None when the source states no direction."""
 
         action_token = normalize_deal_action(deal.deal_action)
@@ -273,7 +274,7 @@ class InsiderTrackingService:
             f"{deal.insider_position or 'Insider'} {deal.insider_name} "
             f"{action} {quantity_str} of {deal.symbol}{price_str} (Total: {value_str})"
         )
-        
+
         # Create alert
         alert = InsiderAlert(
             alert_type=alert_type,
@@ -284,10 +285,10 @@ class InsiderTrackingService:
             insider_deal_id=deal.id,
             timestamp=datetime.utcnow()
         )
-        
+
         self.db.add(alert)
         logger.info(f"Generated insider alert: {title}")
-        
+
         # Broadcast via WebSocket
         await manager.broadcast_alert(alert.to_dict() if hasattr(alert, 'to_dict') else {
             "id": alert.id,
@@ -299,32 +300,32 @@ class InsiderTrackingService:
             "description": alert.description,
             "timestamp": alert.timestamp.isoformat()
         })
-        
+
         return alert
-    
+
     async def _generate_block_trade_alert(self, trade: BlockTrade) -> InsiderAlert:
         """Generate alert for block trade"""
-        
+
         # Determine severity based on value
         severity = AlertSeverity.MEDIUM
         if trade.value >= 50_000_000_000:  # VND 50bn
             severity = AlertSeverity.HIGH
         elif trade.value >= 20_000_000_000:  # VND 20bn
             severity = AlertSeverity.MEDIUM
-        
+
         # Format title and description
         side_str = "Buy" if trade.side == TradeSide.BUY else "Sell"
         title = f"Large {side_str} Block: {trade.symbol}"
-        
+
         value_bn = trade.value / 1_000_000_000
         description = (
             f"Block {side_str.lower()} of {trade.quantity:,} shares at "
             f"{trade.price:,.0f} VND/share (Total: VND {value_bn:.2f}bn)"
         )
-        
+
         if trade.volume_ratio:
             description += f" - {trade.volume_ratio:.1f}x average volume"
-        
+
         # Create alert
         alert = InsiderAlert(
             alert_type=AlertType.BLOCK_TRADE,
@@ -335,10 +336,10 @@ class InsiderTrackingService:
             block_trade_id=trade.id,
             timestamp=datetime.utcnow()
         )
-        
+
         self.db.add(alert)
         logger.info(f"Generated block trade alert: {title}")
-        
+
         # Broadcast via WebSocket
         await manager.broadcast_alert(alert.to_dict() if hasattr(alert, 'to_dict') else {
             "id": alert.id,
@@ -350,14 +351,14 @@ class InsiderTrackingService:
             "description": alert.description,
             "timestamp": alert.timestamp.isoformat()
         })
-        
+
         return alert
-    
+
     async def _get_average_volume(self, symbol: str, days: int = 20) -> int:
         """Calculate average daily volume for a symbol"""
-        
+
         cutoff_date = datetime.now() - timedelta(days=days)
-        
+
         result = await self.db.execute(
             select(func.avg(IntradayTrade.volume))
             .where(
@@ -367,30 +368,30 @@ class InsiderTrackingService:
                 )
             )
         )
-        
+
         avg = result.scalar()
         return int(avg) if avg else 0
-    
+
     async def get_recent_insider_deals(
-        self, 
-        symbol: Optional[str] = None,
+        self,
+        symbol: str | None = None,
         limit: int = 50
-    ) -> List[InsiderDeal]:
+    ) -> list[InsiderDeal]:
         """Get recent insider deals, optionally filtered by symbol"""
-        
+
         query = select(InsiderDeal).order_by(desc(InsiderDeal.announce_date))
-        
+
         if symbol:
             query = query.where(InsiderDeal.symbol == symbol)
-        
+
         query = query.limit(limit)
-        
+
         result = await self.db.execute(query)
         return list(result.scalars().all())
-    
+
     async def get_recent_block_trades(
         self,
-        symbol: Optional[str] = None,
+        symbol: str | None = None,
         limit: int = 50
     ) -> list[dict[str, Any]]:
         """Get recent block trades, optionally filtered by symbol"""
@@ -458,88 +459,88 @@ class InsiderTrackingService:
             await _rollback_after_query_error(self.db, "Legacy block trades fallback")
             logger.warning("Legacy block trades fallback failed: %s", exc)
             raise
-    
+
     async def get_user_alerts(
         self,
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         unread_only: bool = False,
         limit: int = 100
-    ) -> List[InsiderAlert]:
+    ) -> list[InsiderAlert]:
         """Get alerts for a user"""
-        
+
         query = select(InsiderAlert).order_by(desc(InsiderAlert.timestamp))
-        
+
         if user_id:
             query = query.where(InsiderAlert.user_id == user_id)
-        
+
         if unread_only:
             query = query.where(InsiderAlert.read == False)
-        
+
         query = query.limit(limit)
-        
+
         result = await self.db.execute(query)
         return list(result.scalars().all())
-    
-    async def mark_alert_read(self, alert_id: int) -> Optional[InsiderAlert]:
+
+    async def mark_alert_read(self, alert_id: int) -> InsiderAlert | None:
         """Mark an alert as read"""
-        
+
         result = await self.db.execute(
             select(InsiderAlert).where(InsiderAlert.id == alert_id)
         )
-        
+
         alert = result.scalar_one_or_none()
-        
+
         if alert:
             alert.read = True
             alert.read_at = datetime.utcnow()
             await self.db.commit()
             logger.info(f"Marked alert {alert_id} as read")
-        
+
         return alert
-    
+
     async def get_or_create_alert_settings(
-        self, 
+        self,
         user_id: int
     ) -> AlertSettings:
         """Get or create alert settings for a user"""
-        
+
         result = await self.db.execute(
             select(AlertSettings).where(AlertSettings.user_id == user_id)
         )
-        
+
         settings = result.scalar_one_or_none()
-        
+
         if not settings:
             settings = AlertSettings(user_id=user_id)
             self.db.add(settings)
             await self.db.commit()
             logger.info(f"Created default alert settings for user {user_id}")
-        
+
         return settings
-    
+
     async def update_alert_settings(
         self,
         user_id: int,
         **kwargs
     ) -> AlertSettings:
         """Update alert settings for a user"""
-        
+
         settings = await self.get_or_create_alert_settings(user_id)
-        
+
         for key, value in kwargs.items():
             if hasattr(settings, key):
                 setattr(settings, key, value)
-        
+
         await self.db.commit()
         logger.info(f"Updated alert settings for user {user_id}")
-        
+
         return settings
-    
+
     async def calculate_insider_sentiment(
         self,
         symbol: str,
         days: int = 90
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Aggregate insider sentiment over a window.
 
         Direction counts cover every stored row and UNKNOWN direction stays
@@ -588,12 +589,12 @@ class InsiderTrackingService:
                 sell_value += value
 
         if classified_have_units:
-            net_value: Optional[float] = buy_value - sell_value
+            net_value: float | None = buy_value - sell_value
             total_value = buy_value + sell_value
-            sentiment_score: Optional[float] = (
+            sentiment_score: float | None = (
                 (net_value / total_value) * 100 if total_value > 0 else 0.0
             )
-            value_unit: Optional[str] = "VND"
+            value_unit: str | None = "VND"
         else:
             net_value = sentiment_score = None
             value_unit = None

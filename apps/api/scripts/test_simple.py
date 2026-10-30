@@ -3,7 +3,9 @@ Simple connectivity test for VNIBB - Windows compatible
 """
 import asyncio
 import os
+
 from dotenv import load_dotenv
+
 
 async def test_db():
     """Test PostgreSQL"""
@@ -43,7 +45,7 @@ async def main():
     print("\n" + "="*50)
     print("VNIBB CONNECTIVITY TEST")
     print("="*50)
-    
+
     # Test PostgreSQL
     print("\n[1/3] Testing Supabase PostgreSQL...")
     try:
@@ -52,7 +54,7 @@ async def main():
     except Exception as e:
         print(f"  FAILED: {e}")
         return
-    
+
     # Test Redis
     print("\n[2/3] Testing Upstash Redis...")
     try:
@@ -64,7 +66,7 @@ async def main():
     except Exception as e:
         print(f"  FAILED: {e}")
         return
-    
+
     # Test VNStock
     print("\n[3/3] Testing VNStock API...")
     try:
@@ -72,7 +74,7 @@ async def main():
         print(f"  SUCCESS - Source: {result['source']}, Stocks: {result['count']}")
     except Exception as e:
         print(f"  WARNING: {e}")
-    
+
     print("\n" + "="*50)
     print("ALL TESTS PASSED!")
     print("\nNext: uvicorn vnibb.main:app --reload")

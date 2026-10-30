@@ -11,21 +11,19 @@ Calculation weights: 40% (3mo) + 25% (6mo) + 20% (9mo) + 15% (12mo)
 """
 
 import logging
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-import asyncio
+from datetime import date, timedelta
+from typing import Any
 
-import pandas as pd
 import numpy as np
-from sqlalchemy import select, func, and_, desc
+import pandas as pd
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from vnibb.core.config import settings
 from vnibb.core.database import get_db_context
-from vnibb.models.stock import Stock, StockIndex
-from vnibb.models.stock import StockPrice
 from vnibb.core.price_units import is_index_symbol, persisted_price_record, screener_price_record
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.core.config import settings
+from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,
@@ -59,12 +57,12 @@ class RSRatingService:
     }
     LOOKBACK_CALENDAR_DAYS = 540
 
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         self.db = db
 
     async def calculate_all_rs_ratings(
-        self, calculation_date: Optional[date] = None
-    ) -> Dict[str, any]:
+        self, calculation_date: date | None = None
+    ) -> dict[str, any]:
         """
         Calculate RS ratings for all active stocks.
 
@@ -128,14 +126,14 @@ class RSRatingService:
             logger.error(f"RS rating calculation failed: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
-    async def _get_active_stocks(self, db: AsyncSession) -> List[Stock]:
+    async def _get_active_stocks(self, db: AsyncSession) -> list[Stock]:
         """Get all active stocks from database."""
         result = await db.execute(select(Stock).where(Stock.is_active == 1))
         return result.scalars().all()
 
     async def _get_market_returns(
         self, db: AsyncSession, end_date: date
-    ) -> Optional[Dict[str, float]]:
+    ) -> dict[str, float] | None:
         """
         Calculate market (VN-INDEX) returns for all periods.
 
@@ -143,7 +141,7 @@ class RSRatingService:
             Dictionary with period returns or None if insufficient data
         """
 
-        def _calculate_returns(price_rows: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
+        def _calculate_returns(price_rows: list[dict[str, Any]]) -> dict[str, float] | None:
             if len(price_rows) < max(self.PERIODS["3mo"], 20):
                 logger.warning(f"Insufficient market data: {len(price_rows)} days")
                 return None
@@ -229,10 +227,10 @@ class RSRatingService:
     async def _calculate_all_weighted_returns(
         self,
         db: AsyncSession,
-        stocks: List[Stock],
-        market_returns: Dict[str, float],
+        stocks: list[Stock],
+        market_returns: dict[str, float],
         end_date: date,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """Calculate weighted relative returns for all stocks in batch."""
         symbols = [s.symbol for s in stocks]
         start_date = end_date - timedelta(days=self.LOOKBACK_CALENDAR_DAYS)
@@ -304,7 +302,7 @@ class RSRatingService:
         return stock_ratings
 
     def _calculate_weighted_return(
-        self, stock_returns: Dict[str, float], market_returns: Dict[str, float]
+        self, stock_returns: dict[str, float], market_returns: dict[str, float]
     ) -> float:
         """
         Calculate weighted relative return using IBD methodology.
@@ -327,7 +325,7 @@ class RSRatingService:
 
         return weighted_sum
 
-    def _percentile_rank_all(self, stock_ratings: List[Dict]) -> List[Dict]:
+    def _percentile_rank_all(self, stock_ratings: list[dict]) -> list[dict]:
         """
         Convert weighted returns to percentile rankings (1-99).
 
@@ -357,7 +355,7 @@ class RSRatingService:
 
         return sorted_stocks
 
-    def _calculate_sector_rankings(self, ranked_stocks: List[Dict]) -> List[Dict]:
+    def _calculate_sector_rankings(self, ranked_stocks: list[dict]) -> list[dict]:
         """
         Calculate rank within each sector.
 
@@ -384,8 +382,8 @@ class RSRatingService:
         return ranked_stocks
 
     async def _detect_rs_new_highs_batch(
-        self, db: AsyncSession, ranked_stocks: List[Dict], current_date: date
-    ) -> List[Dict]:
+        self, db: AsyncSession, ranked_stocks: list[dict], current_date: date
+    ) -> list[dict]:
         """Detect if current RS rating is a new 52-week high using batch query."""
         lookback_date = current_date - timedelta(days=365)
         symbols = [s["symbol"] for s in ranked_stocks]
@@ -416,7 +414,7 @@ class RSRatingService:
         return ranked_stocks
 
     async def _update_screener_snapshots(
-        self, db: AsyncSession, ranked_stocks: List[Dict], snapshot_date: date
+        self, db: AsyncSession, ranked_stocks: list[dict], snapshot_date: date
     ) -> None:
         """
         Update screener snapshots with RS rating data.
@@ -431,7 +429,7 @@ class RSRatingService:
 
         # Most recent prior snapshot per symbol (carry-forward seed). Only used
         # when no same-day row exists yet.
-        carry_forward: Dict[str, ScreenerSnapshot] = {}
+        carry_forward: dict[str, ScreenerSnapshot] = {}
         if symbols:
             prior_rows = await db.execute(
                 select(ScreenerSnapshot)
@@ -531,7 +529,7 @@ class RSRatingService:
         await db.commit()
         logger.info(f"Updated {len(ranked_stocks)} screener snapshots")
 
-    def _calculate_statistics(self, ranked_stocks: List[Dict]) -> Dict:
+    def _calculate_statistics(self, ranked_stocks: list[dict]) -> dict:
         """Calculate summary statistics for the RS rating run."""
         if not ranked_stocks:
             return {}
@@ -552,7 +550,7 @@ class RSRatingService:
             ],
         }
 
-    async def _get_latest_price_map(self, db: AsyncSession, symbols: List[str]) -> Dict[str, float]:
+    async def _get_latest_price_map(self, db: AsyncSession, symbols: list[str]) -> dict[str, float]:
         if not symbols:
             return {}
 
@@ -589,13 +587,13 @@ class RSRatingService:
         return prices
 
     def _filter_ranked_stocks(
-        self, ranked_stocks: List[Dict[str, Any]], sector: Optional[str]
-    ) -> List[Dict[str, Any]]:
+        self, ranked_stocks: list[dict[str, Any]], sector: str | None
+    ) -> list[dict[str, Any]]:
         if not sector:
             return ranked_stocks
 
         sector_key = sector.strip().casefold()
-        filtered: List[Dict[str, Any]] = []
+        filtered: list[dict[str, Any]] = []
         for stock in ranked_stocks:
             haystacks = [
                 str(stock.get("sector") or "").strip().casefold(),
@@ -610,11 +608,11 @@ class RSRatingService:
 
     def _serialize_ranked_stocks(
         self,
-        ranked_stocks: List[Dict[str, Any]],
+        ranked_stocks: list[dict[str, Any]],
         *,
         limit: int,
         reverse: bool,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         ordered = sorted(
             ranked_stocks,
             key=lambda item: (item.get("rs_rating") is not None, item.get("rs_rating", 0)),
@@ -637,8 +635,8 @@ class RSRatingService:
     async def _build_live_rankings(
         self,
         db: AsyncSession,
-        calculation_date: Optional[date] = None,
-    ) -> List[Dict[str, Any]]:
+        calculation_date: date | None = None,
+    ) -> list[dict[str, Any]]:
         effective_date = calculation_date or date.today()
         stocks = await self._get_active_stocks(db)
         if not stocks:
@@ -670,7 +668,7 @@ class RSRatingService:
 
         return ranked_stocks
 
-    async def get_rs_rating(self, symbol: str) -> Optional[Dict]:
+    async def get_rs_rating(self, symbol: str) -> dict | None:
         """
         Get current RS rating for a single stock.
 
@@ -708,7 +706,7 @@ class RSRatingService:
                 "snapshot_date": snapshot.snapshot_date.isoformat(),
             }
 
-    async def get_rs_leaders(self, limit: int = 50, sector: Optional[str] = None) -> List[Dict]:
+    async def get_rs_leaders(self, limit: int = 50, sector: str | None = None) -> list[dict]:
         """
         Get top RS rated stocks (leaders).
 
@@ -775,7 +773,7 @@ class RSRatingService:
                 for s in snapshots
             ]
 
-    async def get_rs_laggards(self, limit: int = 50, sector: Optional[str] = None) -> List[Dict]:
+    async def get_rs_laggards(self, limit: int = 50, sector: str | None = None) -> list[dict]:
         """
         Get bottom RS rated stocks (laggards).
 
@@ -839,7 +837,7 @@ class RSRatingService:
                 for s in snapshots
             ]
 
-    async def get_rs_gainers(self, limit: int = 50, lookback_days: int = 7) -> List[Dict]:
+    async def get_rs_gainers(self, limit: int = 50, lookback_days: int = 7) -> list[dict]:
         """
         Get stocks with biggest RS rating improvement.
 
@@ -916,7 +914,7 @@ class RSRatingService:
             gainers.sort(key=lambda x: x["rs_rating_change"], reverse=True)
             return gainers[:limit]
 
-    async def get_rs_rating_history(self, symbol: str, limit: int = 100) -> List[Dict]:
+    async def get_rs_rating_history(self, symbol: str, limit: int = 100) -> list[dict]:
         """
         Get historical RS ratings for a stock.
         Used for RS line chart overlay.

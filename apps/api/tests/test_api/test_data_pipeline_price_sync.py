@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
+
 import vnibb.services.data_pipeline as data_pipeline_module
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.price_board import PriceBoardData
@@ -495,6 +496,7 @@ def _create_stock_price_tables_for_sqlite(conn):
     from sqlalchemy import BigInteger, Integer
     from sqlalchemy.dialects import sqlite as sqlite_dialect
     from sqlalchemy.schema import CreateIndex, CreateTable
+
     from vnibb.models.stock import Stock, StockPrice
 
     dialect = sqlite_dialect.dialect()
@@ -519,6 +521,7 @@ async def test_daily_writer_persists_sparse_value_and_clears_absent_adj_close(
     # sparse-value preservation and absent-adj_close clearing end to end.
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
     from vnibb.models.stock import Stock, StockPrice
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'prices.db'}")
@@ -666,6 +669,7 @@ async def test_modular_screener_uses_explicit_community_vci_finance(monkeypatch)
 @pytest.fixture
 async def scheduled_price_database(monkeypatch, tmp_path):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from vnibb.models.stock import Stock
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'scheduled.db'}")
@@ -690,6 +694,7 @@ async def test_automatic_maintenance_preserves_history_until_explicit_price_clea
 
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from sqlalchemy import select
+
     from vnibb.core import scheduler
     from vnibb.models.stock import StockPrice
 
@@ -790,6 +795,7 @@ async def test_scheduled_price_acquisition_ingests_real_sql_source_rows(monkeypa
     from datetime import UTC, datetime
 
     from sqlalchemy import select
+
     from vnibb.models.stock import StockPrice
     from vnibb.services.vietcap_client import VietcapClient
 
@@ -845,6 +851,7 @@ async def test_scheduled_price_acquisition_ingests_real_sql_source_rows(monkeypa
 @pytest.mark.asyncio
 async def test_scheduled_secondary_preserves_iq_owner_and_reports_accepted_partial_rows(monkeypatch, scheduled_price_database):
     from sqlalchemy import select
+
     from vnibb.models.stock import StockPrice
 
     async with scheduled_price_database() as session:
@@ -956,6 +963,7 @@ async def test_scheduled_unconfirmed_instruments_never_acquire_free_vci(monkeypa
 @pytest.mark.asyncio
 async def test_scheduled_listing_persists_trading_stocks_when_iq_descriptions_fail(monkeypatch, scheduled_price_database):
     from sqlalchemy import select
+
     from vnibb.models.stock import Stock
     from vnibb.services.cache_manager import CacheManager
     from vnibb.services.vietcap_client import VietcapClient
@@ -991,6 +999,7 @@ async def test_scheduled_price_partial_failure_keeps_committed_symbol_rows(monke
     from datetime import UTC, datetime
 
     from sqlalchemy import select
+
     from vnibb.models.stock import StockPrice
     from vnibb.services.vietcap_client import VietcapClient
 

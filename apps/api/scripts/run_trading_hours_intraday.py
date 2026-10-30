@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
-from vnibb.core.database import async_session_maker
 from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.services.data_pipeline import data_pipeline

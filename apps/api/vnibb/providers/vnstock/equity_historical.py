@@ -5,17 +5,16 @@ Fetches historical OHLCV (Open, High, Low, Close, Volume) price data
 for Vietnam-listed stocks using the vnstock library.
 """
 
-import asyncio
 import logging
 from datetime import date, timedelta
-from typing import Any, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
+from vnibb.providers.base import BaseFetcher
 from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
@@ -96,18 +95,18 @@ class EquityHistoricalData(BaseModel):
     close: float = Field(..., description="Closing price")
     volume: int = Field(..., description="Trading volume")
     price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit, independent of adjustment mode")
-    price_source: Optional[str] = Field(
+    price_source: str | None = Field(
         None,
         description="Per-row source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
     )
 
     # Optional extended fields from vnstock
-    value: Optional[float] = Field(None, description="Trading value in VND")
-    raw_close: Optional[float] = Field(None, description="Raw unadjusted closing price")
-    adjusted_close: Optional[float] = Field(
+    value: float | None = Field(None, description="Trading value in VND")
+    raw_close: float | None = Field(None, description="Raw unadjusted closing price")
+    adjusted_close: float | None = Field(
         None, description="Adjusted closing price when available"
     )
-    adjustment_factor: Optional[float] = Field(
+    adjustment_factor: float | None = Field(
         None, description="Adjustment factor applied to OHLC values"
     )
     adjustment_mode: str = Field(default="raw", description="Requested adjustment mode")
@@ -136,7 +135,7 @@ class EquityHistoricalData(BaseModel):
     }
 
 
-from vnibb.core.retry import vnstock_cb, circuit_breaker
+from vnibb.core.retry import circuit_breaker, vnstock_cb
 
 
 class VnstockEquityHistoricalFetcher(
@@ -174,8 +173,8 @@ class VnstockEquityHistoricalFetcher(
     @circuit_breaker(vnstock_cb)
     async def extract_data(
         query: dict[str, Any],
-        credentials: Optional[dict[str, str]] = None,
-    ) -> List[dict[str, Any]]:
+        credentials: dict[str, str] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Fetch historical data from vnstock.
 
@@ -184,7 +183,7 @@ class VnstockEquityHistoricalFetcher(
         """
         source = validate_source(query.get("source"))
 
-        def _fetch_sync() -> List[dict[str, Any]]:
+        def _fetch_sync() -> list[dict[str, Any]]:
             """Synchronous fetch wrapped for executor."""
             try:
                 from vnibb.providers.vnstock.runtime import get_quote_class
@@ -215,21 +214,21 @@ class VnstockEquityHistoricalFetcher(
                 _fetch_sync, settings.vnstock_timeout,
                 key=("historical", source, tuple(sorted(query.items()))),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 
     @staticmethod
     def transform_data(
         params: EquityHistoricalQueryParams,
-        data: List[dict[str, Any]],
-    ) -> List[EquityHistoricalData]:
+        data: list[dict[str, Any]],
+    ) -> list[EquityHistoricalData]:
         """
         Transform raw vnstock response to standardized EquityHistoricalData.
 
         vnstock returns columns: time, open, high, low, close, volume
         Some sources may also include: value, ticker
         """
-        results: List[EquityHistoricalData] = []
+        results: list[EquityHistoricalData] = []
 
         for row in data:
             try:

@@ -5,9 +5,9 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Query, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.core.cache import cached

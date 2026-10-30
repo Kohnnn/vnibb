@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from typing import Any, Callable, Dict, List, Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -25,7 +26,6 @@ from vnibb.api.v1.equity import (
     _load_historical_from_mongo,
     _load_historical_from_recent_cache,
 )
-
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import cached
 from vnibb.core.config import settings
@@ -135,7 +135,7 @@ class QuantResponseData(BaseModel):
     adjustment_mode: str = "raw"
     computed_at: datetime
     last_data_date: datetime | None = None
-    metrics: Dict[str, Any]
+    metrics: dict[str, Any]
     warning: str | None = None
 
 
@@ -147,13 +147,13 @@ class SeasonalityMatrixResponseData(BaseModel):
     computed_at: datetime
     last_data_date: datetime | None = None
     source: str
-    columns: List[str]
-    rows: List[Dict[str, Any]]
-    averages: Dict[str, float | None]
+    columns: list[str]
+    rows: list[dict[str, Any]]
+    averages: dict[str, float | None]
     best_period: str | None = None
     worst_period: str | None = None
     hit_rate_pct: float | None = None
-    current_period: Dict[str, Any] | None = None
+    current_period: dict[str, Any] | None = None
     warning: str | None = None
 
 
@@ -179,8 +179,8 @@ class QuantSweepRequest(BaseModel):
     fee_bps: float = Field(default=15.0, ge=0, le=100)
     source: str = Field(default="VCI", pattern=r"^VCI$", description="Data source: VCI")
     adjustment_mode: Literal["raw", "adjusted"] = "adjusted"
-    fast_windows: List[int] = Field(default_factory=lambda: [10, 20, 50], min_length=1, max_length=8)
-    slow_windows: List[int] = Field(default_factory=lambda: [50, 100, 200], min_length=1, max_length=8)
+    fast_windows: list[int] = Field(default_factory=lambda: [10, 20, 50], min_length=1, max_length=8)
+    slow_windows: list[int] = Field(default_factory=lambda: [50, 100, 200], min_length=1, max_length=8)
     objective: Literal[
         "total_return_pct",
         "sharpe_daily_rf0",
@@ -191,17 +191,17 @@ class QuantSweepRequest(BaseModel):
 
 class QuantBacktestResponseData(BaseModel):
     symbol: str
-    strategy: Dict[str, Any]
+    strategy: dict[str, Any]
     period: str
     as_of_date: date
     adjustment_mode: str
     computed_at: datetime
     last_data_date: datetime | None = None
-    metrics: Dict[str, Any]
-    equity_curve_summary: Dict[str, Any]
-    trades: List[Dict[str, Any]]
-    warnings: List[str] = []
-    basis: Dict[str, Any] = {}
+    metrics: dict[str, Any]
+    equity_curve_summary: dict[str, Any]
+    trades: list[dict[str, Any]]
+    warnings: list[str] = []
+    basis: dict[str, Any] = {}
 
 
 class QuantSweepResponseData(BaseModel):
@@ -211,10 +211,10 @@ class QuantSweepResponseData(BaseModel):
     objective: str
     computed_at: datetime
     last_data_date: datetime | None = None
-    best: Dict[str, Any] | None = None
-    cells: List[Dict[str, Any]]
-    warnings: List[str] = []
-    basis: Dict[str, Any] = {}
+    best: dict[str, Any] | None = None
+    cells: list[dict[str, Any]]
+    warnings: list[str] = []
+    basis: dict[str, Any] = {}
 
 
 def _safe_float(value: Any, decimals: int = 4) -> float | None:
@@ -297,7 +297,7 @@ def _normalize_seasonality_granularity(value: str | None) -> str:
     )
 
 
-def _get_quant_calculators() -> Dict[str, Callable[[pd.DataFrame], Dict[str, Any]]]:
+def _get_quant_calculators() -> dict[str, Callable[[pd.DataFrame], dict[str, Any]]]:
     return {
         "seasonality": _compute_seasonality,
         "volume_delta": _compute_volume_delta,
@@ -422,12 +422,12 @@ def _normalize_provider_history_rows(
         normalized_rows.append(
             EquityHistoricalData(
                 symbol=str(getattr(row, "symbol", "") or "").upper(),
-                time=getattr(row, "time"),
-                open=float(getattr(row, "open")),
-                high=float(getattr(row, "high")),
-                low=float(getattr(row, "low")),
+                time=row.time,
+                open=float(row.open),
+                high=float(row.high),
+                low=float(row.low),
                 close=float(close),
-                volume=int(getattr(row, "volume") or 0),
+                volume=int(row.volume or 0),
                 value=getattr(row, "value", None),
                 raw_close=float(raw_close) if raw_close is not None else float(close),
                 adjusted_close=float(adjusted_close) if adjusted_close is not None else None,
@@ -765,7 +765,7 @@ async def _load_benchmark_frame(
     return frame.reset_index(drop=True)
 
 
-def _compute_benchmark_risk(frame: pd.DataFrame, benchmark_frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_benchmark_risk(frame: pd.DataFrame, benchmark_frame: pd.DataFrame) -> dict[str, Any]:
     merged = (
         frame[["time", "close"]]
         .rename(columns={"close": "stock_close"})
@@ -879,12 +879,12 @@ def _compute_benchmark_risk(frame: pd.DataFrame, benchmark_frame: pd.DataFrame) 
     }
 
 
-def _compute_seasonality(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_seasonality(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
     enriched = enriched.dropna(subset=["time", "close"]).sort_values("time")
 
-    monthly_returns: List[Dict[str, Any]] = []
+    monthly_returns: list[dict[str, Any]] = []
     for period_key, period_frame in enriched.groupby(enriched["time"].dt.to_period("M")):
         closes = period_frame["close"].astype(float)
         if closes.empty:
@@ -938,7 +938,7 @@ def _build_moving_average_backtest(
     strategy: MovingAverageCrossoverStrategy,
     initial_capital: float,
     fee_bps: float,
-) -> tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[str]]:
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], list[str]]:
     data = frame[["time", "open", "close"]].copy()
     data["time"] = pd.to_datetime(data["time"], errors="coerce")
     data["open"] = pd.to_numeric(data["open"], errors="coerce")
@@ -1169,7 +1169,7 @@ def _build_seasonality_matrix_from_period_returns(
         return {
             "columns": columns,
             "rows": [],
-            "averages": {column: None for column in columns},
+            "averages": dict.fromkeys(columns),
             "best_period": None,
             "worst_period": None,
             "hit_rate_pct": None,
@@ -1326,7 +1326,7 @@ async def _get_quant_metric_alias_response(
     source: str,
     adjustment_mode: str,
     db: AsyncSession,
-) -> StandardResponse[Dict[str, Any]]:
+) -> StandardResponse[dict[str, Any]]:
     symbol_upper = symbol.upper().strip()
     if not symbol_upper:
         raise HTTPException(status_code=400, detail="Symbol is required")
@@ -1426,7 +1426,7 @@ async def _get_quant_metric_alias_response(
             error=str(exc),
         )
 
-    response_payload: Dict[str, Any] = {
+    response_payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "period": period_upper,
         "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
@@ -1449,8 +1449,8 @@ async def _get_quant_metric_alias_response(
     )
 
 
-def _build_month_map(series: pd.Series, decimals: int = 2) -> Dict[str, float | None]:
-    payload: Dict[str, float | None] = {}
+def _build_month_map(series: pd.Series, decimals: int = 2) -> dict[str, float | None]:
+    payload: dict[str, float | None] = {}
     for month, label in MONTH_LABELS.items():
         payload[label] = _safe_float(series.get(month), decimals=decimals)
     return payload
@@ -1771,7 +1771,7 @@ async def _load_price_frame(
     return frame
 
 
-def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_volume_delta(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     price_range = (enriched["high"] - enriched["low"]).replace(0, np.nan)
     close_pos = ((enriched["close"] - enriched["low"]) / price_range).clip(0, 1).fillna(0.5)
@@ -1816,7 +1816,7 @@ def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_rsi_seasonal(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_rsi_seasonal(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     delta = enriched["close"].diff()
     gain = delta.clip(lower=0)
@@ -1842,7 +1842,7 @@ def _compute_rsi_seasonal(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_gap_stats(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_gap_stats(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     enriched["prev_close"] = enriched["close"].shift(1)
     enriched["gap_pct"] = (
@@ -1900,7 +1900,7 @@ def _compute_gap_stats(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_bollinger(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_bollinger(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     middle = enriched["close"].rolling(20).mean()
     std = enriched["close"].rolling(20).std(ddof=0)
@@ -1937,7 +1937,7 @@ def _compute_bollinger(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_atr(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_atr(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     prev_close = enriched["close"].shift(1)
     true_range = pd.concat(
@@ -1969,7 +1969,7 @@ def _compute_atr(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_sortino(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_sortino(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
     enriched = enriched.dropna(subset=["time", "close"]).sort_values("time")
@@ -1985,8 +1985,8 @@ def _compute_sortino(frame: pd.DataFrame) -> Dict[str, Any]:
     enriched["returns"] = enriched["close"].pct_change()
     enriched["month"] = enriched["time"].dt.month
 
-    sortino_map: Dict[str, float | None] = {}
-    sharpe_map: Dict[str, float | None] = {}
+    sortino_map: dict[str, float | None] = {}
+    sharpe_map: dict[str, float | None] = {}
 
     for month, label in MONTH_LABELS.items():
         monthly_returns = enriched.loc[enriched["month"] == month, "returns"].dropna()
@@ -2035,7 +2035,7 @@ def _compute_sortino(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_calmar(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_calmar(frame: pd.DataFrame) -> dict[str, Any]:
     if len(frame) < 2:
         return {
             "annualized_return_pct": None,
@@ -2072,7 +2072,7 @@ def _compute_calmar(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_macd_crossovers(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_macd_crossovers(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     ema_fast = enriched["close"].ewm(span=12, adjust=False).mean()
     ema_slow = enriched["close"].ewm(span=26, adjust=False).mean()
@@ -2086,7 +2086,7 @@ def _compute_macd_crossovers(frame: pd.DataFrame) -> Dict[str, Any]:
     forward_1m = (enriched["close"].shift(-21) / enriched["close"] - 1) * 100
     forward_3m = (enriched["close"].shift(-63) / enriched["close"] - 1) * 100
 
-    crossover_rows: List[Dict[str, Any]] = []
+    crossover_rows: list[dict[str, Any]] = []
     for idx in np.where((bullish | bearish).to_numpy())[0].tolist():
         crossover_type = "bullish" if bool(bullish.iloc[idx]) else "bearish"
         crossover_rows.append(
@@ -2158,7 +2158,7 @@ def _classify_volatility_regime(z_score: float | None) -> str:
     return "extreme"
 
 
-def _compute_parkinson_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_parkinson_volatility(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     valid_hl = (
         (enriched["high"] > 0) & (enriched["low"] > 0) & (enriched["high"] >= enriched["low"])
@@ -2224,7 +2224,7 @@ def _compute_parkinson_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _empty_garch_payload() -> Dict[str, Any]:
+def _empty_garch_payload() -> dict[str, Any]:
     return {
         "omega": None,
         "alpha": None,
@@ -2331,7 +2331,7 @@ def _fit_garch_params(eps: np.ndarray) -> tuple[float, float, float, np.ndarray]
     return omega, alpha, beta, h
 
 
-def _compute_garch_volatility(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_garch_volatility(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame[["time", "close"]].copy()
     enriched["time"] = pd.to_datetime(enriched["time"], errors="coerce")
     enriched["close"] = pd.to_numeric(enriched["close"], errors="coerce")
@@ -2487,8 +2487,8 @@ def _hurst_rs(series: np.ndarray) -> float | None:
     return _safe_float(slope, 4)
 
 
-def _compute_market_structure_tests(frame: pd.DataFrame) -> Dict[str, Any]:
-    base_payload: Dict[str, Any] = {
+def _compute_market_structure_tests(frame: pd.DataFrame) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
         "variance_ratio": [
             {"q": q, "vr": None, "z": None, "p_value": None} for q in (2, 5, 10)
         ],
@@ -2582,8 +2582,8 @@ def _adf_tstat_fixed_lag(residuals: np.ndarray, lag: int = 1) -> float | None:
     return _safe_float(float(beta[0]) / se_gamma, 4)
 
 
-def _compute_pair_diagnostics(frame_a: pd.DataFrame, frame_b: pd.DataFrame) -> Dict[str, Any]:
-    base_payload: Dict[str, Any] = {
+def _compute_pair_diagnostics(frame_a: pd.DataFrame, frame_b: pd.DataFrame) -> dict[str, Any]:
+    base_payload: dict[str, Any] = {
         "aligned_days": 0,
         "hedge_ratio_ols": None,
         "hedge_intercept": None,
@@ -2695,13 +2695,13 @@ def _support_strength_label(rate: float | None) -> str:
     return "fragile"
 
 
-def _compute_ema_respect(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_ema_respect(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     ema_periods = (20, 50, 200)
     interaction_tolerance_pct = 1.0
     lookahead_sessions = 5
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     best_support: tuple[int, float] | None = None
 
     for period in ema_periods:
@@ -2718,7 +2718,7 @@ def _compute_ema_respect(frame: pd.DataFrame) -> Dict[str, Any]:
 
         support_tests = 0
         support_successes = 0
-        support_returns: List[float] = []
+        support_returns: list[float] = []
         resistance_tests = 0
         resistance_successes = 0
 
@@ -2788,7 +2788,7 @@ def _compute_ema_respect(frame: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
-def _compute_drawdown_recovery(frame: pd.DataFrame) -> Dict[str, Any]:
+def _compute_drawdown_recovery(frame: pd.DataFrame) -> dict[str, Any]:
     enriched = frame.copy()
     close = enriched["close"].astype(float)
     running_peak = close.cummax()
@@ -2797,7 +2797,7 @@ def _compute_drawdown_recovery(frame: pd.DataFrame) -> Dict[str, Any]:
     rolling_52w_high = close.rolling(252, min_periods=20).max()
     drawdown_52w = ((close / rolling_52w_high.replace(0, np.nan)) - 1) * 100
 
-    episodes: List[Dict[str, Any]] = []
+    episodes: list[dict[str, Any]] = []
     start_index: int | None = None
     trough_index: int | None = None
 
@@ -2881,7 +2881,7 @@ def _grade_from_quality_score(score: float | None) -> str:
     return "D"
 
 
-@router.get("/{symbol}/gamma-exposure", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/gamma-exposure", response_model=StandardResponse[dict[str, Any]])
 async def get_gamma_exposure_proxy(
     symbol: str,
     period: str = Query(default="3Y"),
@@ -2930,7 +2930,7 @@ async def get_gamma_exposure_proxy(
     regime = _classify_gamma_regime(net_gamma_proxy)
     regime_label = _label_gamma_regime(regime)
 
-    band_rows: List[Dict[str, Any]] = []
+    band_rows: list[dict[str, Any]] = []
     if current_close is not None:
         for offset in (-0.15, -0.1, -0.05, 0, 0.05, 0.1, 0.15):
             strike = current_close * (1 + offset)
@@ -2947,7 +2947,7 @@ async def get_gamma_exposure_proxy(
                 }
             )
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "period": period_upper,
         "adjustment_mode": _normalize_adjustment_mode(adjustment_mode),
@@ -2970,7 +2970,7 @@ async def get_gamma_exposure_proxy(
     )
 
 
-@router.get("/{symbol}/momentum", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/momentum", response_model=StandardResponse[dict[str, Any]])
 async def get_momentum_profile(
     symbol: str,
     period: str = Query(default="3Y"),
@@ -3055,7 +3055,7 @@ async def get_momentum_profile(
     )
     sector = sector_result.scalar_one_or_none()
 
-    peer_distribution: List[Dict[str, Any]] = []
+    peer_distribution: list[dict[str, Any]] = []
     sector_rank: int | None = None
     sector_total: int | None = None
     sector_percentile: float | None = None
@@ -3089,7 +3089,7 @@ async def get_momentum_profile(
             if not peer_frame.empty:
                 peer_frame["close"] = pd.to_numeric(peer_frame["close"], errors="coerce")
 
-                momentum_map: Dict[str, float] = {}
+                momentum_map: dict[str, float] = {}
                 for peer_symbol, group in peer_frame.groupby("symbol"):
                     peer_closes = group.sort_values("time")["close"].tail(253)
                     if len(peer_closes) <= 252 or peer_closes.isna().any():
@@ -3130,7 +3130,7 @@ async def get_momentum_profile(
                         for peer_symbol, value in ranked[:15]
                     ]
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "period": period_upper,
         "computed_at": datetime.utcnow(),
@@ -3158,7 +3158,7 @@ async def get_momentum_profile(
     )
 
 
-@router.get("/{symbol}/earnings-quality", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/earnings-quality", response_model=StandardResponse[dict[str, Any]])
 async def get_earnings_quality(
     symbol: str,
     db: AsyncSession = Depends(get_db),
@@ -3225,7 +3225,7 @@ async def get_earnings_quality(
         if row[0] is not None and row[1] is not None
     }
 
-    period_rows: List[Dict[str, Any]] = []
+    period_rows: list[dict[str, Any]] = []
     for fiscal_year, fiscal_quarter, revenue, net_income, eps in income_rows:
         if fiscal_year is None or fiscal_quarter is None:
             continue
@@ -3311,8 +3311,8 @@ async def get_earnings_quality(
     quality_score = _safe_float(float(np.mean(component_scores)), 2) if component_scores else None
     grade = _grade_from_quality_score(quality_score)
 
-    def _blend_score(row: Dict[str, Any]) -> float | None:
-        parts: List[float] = []
+    def _blend_score(row: dict[str, Any]) -> float | None:
+        parts: list[float] = []
         accrual_value = row.get("accruals_ratio_pct")
         revenue_value = row.get("revenue_quality_pct")
         if accrual_value is not None:
@@ -3331,7 +3331,7 @@ async def get_earnings_quality(
         elif delta <= -5:
             trend = "Declining"
 
-    checks: List[str] = []
+    checks: list[str] = []
     if latest.get("accruals_ratio_pct") is not None and abs(latest["accruals_ratio_pct"]) <= 5:
         checks.append("Accruals ratio within ±5%")
     if latest.get("revenue_quality_pct") is not None and latest["revenue_quality_pct"] >= 80:
@@ -3339,7 +3339,7 @@ async def get_earnings_quality(
     if earnings_persistence is not None and earnings_persistence >= 0.5:
         checks.append("EPS persistence correlation >= 0.5")
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "computed_at": datetime.utcnow(),
         "grade": grade,
@@ -3359,7 +3359,7 @@ async def get_earnings_quality(
     return StandardResponse(data=payload, meta=MetaData(count=len(period_rows[:8])))
 
 
-@router.get("/{symbol}/smart-money", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/smart-money", response_model=StandardResponse[dict[str, Any]])
 async def get_smart_money_flow(
     symbol: str,
     db: AsyncSession = Depends(get_db),
@@ -3404,7 +3404,7 @@ async def get_smart_money_flow(
         logger.warning("Smart money price frame load failed for %s: %s", symbol_upper, exc)
         price_frame = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
 
-    synthetic_events: List[Dict[str, Any]] = []
+    synthetic_events: list[dict[str, Any]] = []
     if not price_frame.empty and len(price_frame) > 40:
         enriched = price_frame.copy()
         enriched["avg_vol_20"] = enriched["volume"].rolling(20).mean()
@@ -3426,7 +3426,7 @@ async def get_smart_money_flow(
                 }
             )
 
-    block_events: List[Dict[str, Any]] = []
+    block_events: list[dict[str, Any]] = []
     for row in block_rows[:25]:
         block_date = _format_date_value(row[0])
         if block_date is None:
@@ -3492,7 +3492,7 @@ async def get_smart_money_flow(
     else:
         net_institutional = "neutral"
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "computed_at": datetime.utcnow(),
         "net_institutional": net_institutional,
@@ -3513,7 +3513,7 @@ async def get_smart_money_flow(
     )
 
 
-@router.get("/{symbol}/relative-rotation", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/relative-rotation", response_model=StandardResponse[dict[str, Any]])
 async def get_relative_rotation(
     symbol: str,
     lookback_days: int = Query(default=260, ge=120, le=520),
@@ -3580,8 +3580,8 @@ async def get_relative_rotation(
     index_frame["close_index"] = pd.to_numeric(index_frame["close_index"], errors="coerce")
     index_frame = index_frame.dropna(subset=["close_index"])
 
-    universe_points: List[Dict[str, Any]] = []
-    skipped_symbols: List[Dict[str, Any]] = []
+    universe_points: list[dict[str, Any]] = []
+    skipped_symbols: list[dict[str, Any]] = []
     for stock_symbol, group in price_frame.groupby("symbol"):
         if group["close"].isna().any():
             skipped_symbols.append(
@@ -3620,7 +3620,7 @@ async def get_relative_rotation(
         # meaningful rotation path instead of a near-stationary cluster.
         trail_steps = 12
         step_distance = 5
-        trail: List[Dict[str, float | None]] = []
+        trail: list[dict[str, float | None]] = []
         for step in range(trail_steps, -1, -1):
             idx = len(rs_series) - 1 - step * step_distance
             if idx < 30:
@@ -3650,7 +3650,7 @@ async def get_relative_rotation(
     )
     selected = next((item for item in universe_points if item["symbol"] == symbol_upper), None)
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "benchmark": "VNINDEX",
         "computed_at": datetime.utcnow(),
@@ -3668,7 +3668,7 @@ async def get_relative_rotation(
     return StandardResponse(data=payload, meta=MetaData(count=len(universe_points)))
 
 
-@router.get("/{symbol}/volume-flow", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/volume-flow", response_model=StandardResponse[dict[str, Any]])
 async def get_volume_flow_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3686,7 +3686,7 @@ async def get_volume_flow_metric(
     )
 
 
-@router.get("/{symbol}/seasonality", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/seasonality", response_model=StandardResponse[dict[str, Any]])
 async def get_seasonality_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3704,7 +3704,7 @@ async def get_seasonality_metric(
     )
 
 
-@router.get("/{symbol}/rsi-seasonal", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/rsi-seasonal", response_model=StandardResponse[dict[str, Any]])
 async def get_rsi_seasonal_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3722,7 +3722,7 @@ async def get_rsi_seasonal_metric(
     )
 
 
-@router.get("/{symbol}/bollinger-squeeze", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/bollinger-squeeze", response_model=StandardResponse[dict[str, Any]])
 async def get_bollinger_squeeze_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3740,7 +3740,7 @@ async def get_bollinger_squeeze_metric(
     )
 
 
-@router.get("/{symbol}/atr-regime", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/atr-regime", response_model=StandardResponse[dict[str, Any]])
 async def get_atr_regime_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3758,7 +3758,7 @@ async def get_atr_regime_metric(
     )
 
 
-@router.get("/{symbol}/sortino-monthly", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/sortino-monthly", response_model=StandardResponse[dict[str, Any]])
 async def get_sortino_monthly_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3776,7 +3776,7 @@ async def get_sortino_monthly_metric(
     )
 
 
-@router.get("/{symbol}/macd-crossover", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/macd-crossover", response_model=StandardResponse[dict[str, Any]])
 async def get_macd_crossover_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3794,7 +3794,7 @@ async def get_macd_crossover_metric(
     )
 
 
-@router.get("/{symbol}/parkinson-volatility", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/parkinson-volatility", response_model=StandardResponse[dict[str, Any]])
 async def get_parkinson_volatility_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3812,7 +3812,7 @@ async def get_parkinson_volatility_metric(
     )
 
 
-@router.get("/{symbol}/garch-volatility", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/garch-volatility", response_model=StandardResponse[dict[str, Any]])
 async def get_garch_volatility_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3830,7 +3830,7 @@ async def get_garch_volatility_metric(
     )
 
 
-@router.get("/{symbol}/ema-respect", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/ema-respect", response_model=StandardResponse[dict[str, Any]])
 async def get_ema_respect_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3848,7 +3848,7 @@ async def get_ema_respect_metric(
     )
 
 
-@router.get("/{symbol}/drawdown-recovery", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/drawdown-recovery", response_model=StandardResponse[dict[str, Any]])
 async def get_drawdown_recovery_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3866,7 +3866,7 @@ async def get_drawdown_recovery_metric(
     )
 
 
-@router.get("/{symbol}/benchmark-risk", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/benchmark-risk", response_model=StandardResponse[dict[str, Any]])
 async def get_benchmark_risk_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3884,7 +3884,7 @@ async def get_benchmark_risk_metric(
     )
 
 
-@router.get("/{symbol}/gap-analysis", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/gap-analysis", response_model=StandardResponse[dict[str, Any]])
 async def get_gap_analysis_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3902,7 +3902,7 @@ async def get_gap_analysis_metric(
     )
 
 
-@router.get("/{symbol}/market-structure-tests", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/market-structure-tests", response_model=StandardResponse[dict[str, Any]])
 async def get_market_structure_tests_metric(
     symbol: str,
     period: str = Query(default="5Y"),
@@ -3920,7 +3920,7 @@ async def get_market_structure_tests_metric(
     )
 
 
-@router.get("/{symbol}/pair/{other}", response_model=StandardResponse[Dict[str, Any]])
+@router.get("/{symbol}/pair/{other}", response_model=StandardResponse[dict[str, Any]])
 async def get_pair_diagnostics(
     symbol: str,
     other: str,
@@ -3966,7 +3966,7 @@ async def get_pair_diagnostics(
     payload = _compute_pair_diagnostics(frame_a, frame_b)
     aligned = int(payload.get("aligned_days") or 0)
 
-    response_payload: Dict[str, Any] = {
+    response_payload: dict[str, Any] = {
         "symbol": symbol_upper,
         "pair_symbol": other_upper,
         "period": period_upper,
@@ -4280,7 +4280,7 @@ async def get_quant_metrics(
     calculators = _get_quant_calculators()
     benchmark_frame: pd.DataFrame | None = None
 
-    computed_metrics: Dict[str, Any] = {}
+    computed_metrics: dict[str, Any] = {}
     for metric_name in unique_metrics:
         calculator = calculators.get(metric_name)
         if calculator is None and metric_name != "benchmark_risk":

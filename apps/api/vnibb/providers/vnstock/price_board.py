@@ -9,7 +9,6 @@ import asyncio
 import logging
 import math
 from datetime import UTC, datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,33 +26,33 @@ class PriceBoardData(BaseModel):
     """Real-time price board data for a single stock."""
     symbol: str
     # Price info
-    price: Optional[float] = None
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    close: Optional[float] = None
-    prev_close: Optional[float] = Field(None, alias="prevClose")
+    price: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    prev_close: float | None = Field(None, alias="prevClose")
     # Change
-    change: Optional[float] = None
-    percent_change: Optional[float] = Field(None, alias="percentChange")
+    change: float | None = None
+    percent_change: float | None = Field(None, alias="percentChange")
     # Volume
-    volume: Optional[int] = None
-    value: Optional[float] = None
+    volume: int | None = None
+    value: float | None = None
     # Bid/Ask
-    best_bid: Optional[float] = Field(None, alias="bestBid")
-    best_ask: Optional[float] = Field(None, alias="bestAsk")
-    best_bid_vol: Optional[int] = Field(None, alias="bestBidVol")
-    best_ask_vol: Optional[int] = Field(None, alias="bestAskVol")
+    best_bid: float | None = Field(None, alias="bestBid")
+    best_ask: float | None = Field(None, alias="bestAsk")
+    best_bid_vol: int | None = Field(None, alias="bestBidVol")
+    best_ask_vol: int | None = Field(None, alias="bestAskVol")
     # Foreign trading
-    foreign_buy_vol: Optional[int] = Field(None, alias="foreignBuyVol")
-    foreign_sell_vol: Optional[int] = Field(None, alias="foreignSellVol")
-    foreign_buy_value: Optional[float] = Field(None, alias="foreignBuyValue")
-    foreign_sell_value: Optional[float] = Field(None, alias="foreignSellValue")
+    foreign_buy_vol: int | None = Field(None, alias="foreignBuyVol")
+    foreign_sell_vol: int | None = Field(None, alias="foreignSellVol")
+    foreign_buy_value: float | None = Field(None, alias="foreignBuyValue")
+    foreign_sell_value: float | None = Field(None, alias="foreignSellValue")
     # Reference prices
-    ceiling: Optional[float] = None
-    floor: Optional[float] = None
-    reference: Optional[float] = None
-    source: Optional[str] = None
+    ceiling: float | None = None
+    floor: float | None = None
+    reference: float | None = None
+    source: str | None = None
     refreshed_at: datetime = Field(default_factory=lambda: datetime.now(UTC), alias="refreshedAt")
 
     model_config = {"populate_by_name": True}
@@ -61,7 +60,7 @@ class PriceBoardData(BaseModel):
 
 class PriceBoardQueryParams(BaseModel):
     """Query parameters for price board."""
-    symbols: List[str]
+    symbols: list[str]
     source: str = Field(default="VCI", pattern=r"^VCI$")
 
 
@@ -73,16 +72,16 @@ class PriceBoardQueryParams(BaseModel):
 class VnstockPriceBoardFetcher:
     """
     Fetcher for real-time price board data.
-    
+
     Wraps vnstock Trading.price_board() for monitoring
     multiple stocks simultaneously.
     """
-    
+
     @staticmethod
     async def fetch(
-        symbols: List[str],
+        symbols: list[str],
         source: str = "VCI",
-    ) -> List[PriceBoardData]:
+    ) -> list[PriceBoardData]:
 
         """
         Fetch real-time price board for multiple symbols.
@@ -169,7 +168,7 @@ class VnstockPriceBoardFetcher:
                 ))
 
             return result
-            
+
         except Exception as e:
             logger.error(f"Price board fetch failed: {e}")
             raise ProviderError(f"Failed to fetch price board: {e}", "vnstock")

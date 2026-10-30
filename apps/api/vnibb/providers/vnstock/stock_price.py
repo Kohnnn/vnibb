@@ -8,7 +8,6 @@ Optimized wrapper around Trading.price_board() for single-stock use case.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -31,42 +30,42 @@ class StockQuoteQueryParams(BaseModel):
 
 class StockQuoteData(BaseModel):
     """Real-time quote data for a single stock."""
-    
+
     symbol: str = Field(..., description="Stock ticker symbol")
-    
+
     # Price info
-    price: Optional[float] = Field(None, description="Current/last price")
-    open: Optional[float] = Field(None, description="Opening price")
-    high: Optional[float] = Field(None, description="Day high")
-    low: Optional[float] = Field(None, description="Day low")
-    prev_close: Optional[float] = Field(None, alias="prevClose", description="Previous close")
-    
+    price: float | None = Field(None, description="Current/last price")
+    open: float | None = Field(None, description="Opening price")
+    high: float | None = Field(None, description="Day high")
+    low: float | None = Field(None, description="Day low")
+    prev_close: float | None = Field(None, alias="prevClose", description="Previous close")
+
     # Change
-    change: Optional[float] = Field(None, description="Price change")
-    percent_change: Optional[float] = Field(None, alias="percentChange", description="Percent change")
-    
+    change: float | None = Field(None, description="Price change")
+    percent_change: float | None = Field(None, alias="percentChange", description="Percent change")
+
     # Volume & Value
-    volume: Optional[int] = Field(None, description="Trading volume")
-    value: Optional[float] = Field(None, description="Trading value")
-    
+    volume: int | None = Field(None, description="Trading volume")
+    value: float | None = Field(None, description="Trading value")
+
     # Bid/Ask
-    best_bid: Optional[float] = Field(None, alias="bestBid", description="Best bid price")
-    best_ask: Optional[float] = Field(None, alias="bestAsk", description="Best ask price")
-    best_bid_vol: Optional[int] = Field(None, alias="bestBidVol", description="Best bid volume")
-    best_ask_vol: Optional[int] = Field(None, alias="bestAskVol", description="Best ask volume")
-    
+    best_bid: float | None = Field(None, alias="bestBid", description="Best bid price")
+    best_ask: float | None = Field(None, alias="bestAsk", description="Best ask price")
+    best_bid_vol: int | None = Field(None, alias="bestBidVol", description="Best bid volume")
+    best_ask_vol: int | None = Field(None, alias="bestAskVol", description="Best ask volume")
+
     # Foreign trading
-    foreign_buy_vol: Optional[int] = Field(None, alias="foreignBuyVol", description="Foreign buy volume")
-    foreign_sell_vol: Optional[int] = Field(None, alias="foreignSellVol", description="Foreign sell volume")
-    
+    foreign_buy_vol: int | None = Field(None, alias="foreignBuyVol", description="Foreign buy volume")
+    foreign_sell_vol: int | None = Field(None, alias="foreignSellVol", description="Foreign sell volume")
+
     # Reference prices
-    ceiling: Optional[float] = Field(None, description="Ceiling price")
-    floor: Optional[float] = Field(None, description="Floor price")
-    reference: Optional[float] = Field(None, description="Reference price")
-    
+    ceiling: float | None = Field(None, description="Ceiling price")
+    floor: float | None = Field(None, description="Floor price")
+    reference: float | None = Field(None, description="Reference price")
+
     # Metadata
-    updated_at: Optional[datetime] = Field(None, description="Quote timestamp")
-    
+    updated_at: datetime | None = Field(None, description="Quote timestamp")
+
     model_config = {"populate_by_name": True}
 
 
@@ -77,11 +76,11 @@ class StockQuoteData(BaseModel):
 class VnstockStockPriceFetcher:
     """
     Fetcher for real-time stock price quotes.
-    
+
     Wraps vnstock Trading.price_board() for single-stock queries.
     Returns comprehensive quote data including bid/ask spreads.
     """
-    
+
     @staticmethod
     async def fetch(
         symbol: str,
@@ -90,17 +89,17 @@ class VnstockStockPriceFetcher:
 
         """
         Fetch real-time quote for a single stock.
-        
+
         Args:
             symbol: Stock ticker symbol (e.g., 'VNM', 'FPT')
             source: Data source (VCI recommended)
-        
+
         Returns:
             StockQuoteData with current price and market data
         """
         source = validate_source(source)
         symbol = symbol.upper().strip()
-        
+
         try:
             def _fetch():
                 from vnibb.providers.vnstock.runtime import get_trading_class
@@ -119,17 +118,17 @@ class VnstockStockPriceFetcher:
                 if str(df.attrs.get("value_unit", "")).upper() != "VND":
                     df = df.drop(columns=[name for name in ("value", "total_value", "nmTotalTradedValue") if name in df.columns])
                 return df.to_dict(orient="records")[0]
-            
+
             loop = asyncio.get_event_loop()
             record = await loop.run_in_executor(None, _fetch)
-            
+
             if not record:
                 # Return empty quote if no data
                 return StockQuoteData(
                     symbol=symbol,
                     updated_at=datetime.utcnow(),
                 )
-            
+
             # Map vnstock column names to our schema
             # VCI uses snake_case, handle multiple possible column names
             return StockQuoteData(
@@ -154,7 +153,7 @@ class VnstockStockPriceFetcher:
                 reference=record.get("reference") or record.get("ref_price") or record.get("refPrice"),
                 updated_at=datetime.utcnow(),
             )
-            
+
         except Exception as e:
             logger.error(f"Stock price fetch failed for {symbol}: {e}")
             raise ProviderError(f"Failed to fetch quote for {symbol}: {e}", "vnstock") from e

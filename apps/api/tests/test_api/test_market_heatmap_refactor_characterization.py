@@ -9,6 +9,7 @@ import asyncio
 from datetime import date, datetime, timedelta
 
 import pytest
+
 from vnibb.api.v1.market import _normalize_screener_row
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.providers.vnstock.equity_screener import ScreenerData
@@ -612,9 +613,9 @@ async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monk
 @pytest.mark.asyncio
 async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(client, monkeypatch):
     from concurrent.futures import Future, ThreadPoolExecutor
-    from types import SimpleNamespace
 
     import pandas as pd
+
     from vnibb.api.v1 import market
     from vnibb.providers.vnstock import equity_screener, runtime
 
@@ -692,9 +693,9 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
 async def test_heatmap_distinct_batches_progress_at_child_worker_capacity(client, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier, Event, Lock
-    from types import SimpleNamespace
 
     import pandas as pd
+
     from vnibb.api.v1 import market
     from vnibb.providers.vnstock import equity_screener, runtime
 
@@ -787,6 +788,7 @@ async def test_screener_single_and_batch_share_quote_worker_budget(monkeypatch):
     from threading import Event, Lock
 
     import pandas as pd
+
     from vnibb.providers.vnstock import equity_screener, runtime
 
     pool = ThreadPoolExecutor(max_workers=2)
@@ -874,8 +876,9 @@ async def test_screener_single_and_batch_share_quote_worker_budget(monkeypatch):
 @pytest.mark.asyncio
 async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client, monkeypatch):
     import pandas as pd
+
     from vnibb.api.v1 import market
-    from vnibb.providers.vnstock import equity_screener, runtime
+    from vnibb.providers.vnstock import runtime
 
     calls = {"broad_stock": 0, "listing": 0, "quotes": []}
 
@@ -933,8 +936,9 @@ def screener_supplier(monkeypatch):
     from types import SimpleNamespace
 
     import pandas as pd
+
     from vnibb.api.v1 import market
-    from vnibb.providers.vnstock import equity_screener, runtime
+    from vnibb.providers.vnstock import runtime
 
     calls = {"ratios": 0, "quotes": 0, "quote_state": "available"}
 

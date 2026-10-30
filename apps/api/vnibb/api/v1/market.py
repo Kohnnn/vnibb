@@ -11,11 +11,12 @@ import asyncio
 import logging
 import re
 import unicodedata
-from functools import wraps
-from datetime import UTC, date, datetime, time as market_time, timedelta
-from types import SimpleNamespace
-from typing import Any, Dict, List, Literal, Optional
 from collections import defaultdict
+from datetime import UTC, date, datetime, timedelta
+from datetime import time as market_time
+from functools import wraps
+from types import SimpleNamespace
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -24,38 +25,9 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, text
 
-from vnibb.core.config import settings
-from vnibb.core.database import async_session_maker, get_db
-from vnibb.core.market_cap import resolve_market_cap
-from vnibb.core.price_units import persisted_price_record, screener_price_record
-from vnibb.core.ratio_units import admitted_ratio_value
-from vnibb.core.vn_sectors import VN_SECTORS
-from vnibb.providers.vnstock.equity_screener import (
-    VnstockScreenerFetcher,
-    StockScreenerParams,
-)
-from vnibb.providers.vnstock.market_overview import (
-    VnstockMarketOverviewFetcher,
-    MarketOverviewQueryParams,
-)
-from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
-from vnibb.core.cache import cached
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
-from vnibb.models.company import Company
-from vnibb.models.financials import IncomeStatement
-from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock, StockIndex, StockPrice
-from vnibb.models.sync_status import SyncStatus
-from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
-from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
-from vnibb.services.data_quality import latest_market_business_day
-from vnibb.services.market_session import expected_market_session
-from vnibb.services.sector_service import SectorService
-from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 from vnibb.api.v1.market_heatmap import (
     HeatmapGroupBuilder,
     HeatmapGroupConfig,
@@ -65,11 +37,40 @@ from vnibb.api.v1.market_heatmap import (
     build_heatmap_sectors,
     enrich_heatmap_rows,
     filter_heatmap_rows_by_exchange,
-    heatmap_symbols as collect_heatmap_symbols,
     normalize_heatmap_rows,
     resolve_hnx30_symbols,
 )
-
+from vnibb.api.v1.market_heatmap import (
+    heatmap_symbols as collect_heatmap_symbols,
+)
+from vnibb.core.cache import cached
+from vnibb.core.config import settings
+from vnibb.core.database import async_session_maker, get_db
+from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.market_cap import resolve_market_cap
+from vnibb.core.price_units import persisted_price_record, screener_price_record
+from vnibb.core.ratio_units import admitted_ratio_value
+from vnibb.core.vn_sectors import VN_SECTORS
+from vnibb.models.company import Company
+from vnibb.models.financials import IncomeStatement
+from vnibb.models.screener import ScreenerSnapshot
+from vnibb.models.stock import Stock, StockIndex, StockPrice
+from vnibb.models.sync_status import SyncStatus
+from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
+from vnibb.providers.vnstock.equity_screener import (
+    StockScreenerParams,
+    VnstockScreenerFetcher,
+)
+from vnibb.providers.vnstock.market_overview import (
+    MarketOverviewQueryParams,
+    VnstockMarketOverviewFetcher,
+)
+from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+from vnibb.providers.vnstock.top_movers import VnstockTopMoversFetcher
+from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
+from vnibb.services.data_quality import latest_market_business_day
+from vnibb.services.market_session import expected_market_session
+from vnibb.services.sector_service import SectorService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -162,14 +163,14 @@ class HeatmapStock(BaseModel):
     symbol: str
     name: str
     sector: str
-    industry: Optional[str] = None
+    industry: str | None = None
     market_cap: float | None = None
     market_cap_provenance: dict[str, Any]
     size_value: float
     price: float
     change: float | None = None  # Absolute price change
     change_pct: float | None = None  # Percentage change
-    volume: Optional[float] = None
+    volume: float | None = None
     trade_date: str | None = None
     session_date: str | None = None
     session_status: str | None = None
@@ -180,7 +181,7 @@ class SectorGroup(BaseModel):
     """Aggregated sector data for heatmap."""
 
     sector: str
-    stocks: List[HeatmapStock]
+    stocks: list[HeatmapStock]
     total_market_cap: float | None = None
     total_size_value: float
     cap_count: int
@@ -195,11 +196,11 @@ class HeatmapResponse(BaseModel):
     group_by: str
     color_metric: str
     size_metric: str
-    sectors: List[SectorGroup]
+    sectors: list[SectorGroup]
     cached: bool = False
-    updated_at: Optional[str] = None
-    price_updated_at: Optional[str] = None
-    constituents_as_of: Optional[str] = None
+    updated_at: str | None = None
+    price_updated_at: str | None = None
+    constituents_as_of: str | None = None
     constituents_stale: bool = False
     partial: bool = False
 
@@ -208,12 +209,12 @@ class IndustryBubblePoint(BaseModel):
     symbol: str
     name: str
     sector: str
-    industry: Optional[str] = None
+    industry: str | None = None
     x: float
     y: float
     size: float
-    price: Optional[float] = None
-    change_pct: Optional[float] = None
+    price: float | None = None
+    change_pct: float | None = None
     color: str
     market_cap: float | None = None
     market_cap_provenance: dict[str, Any]
@@ -221,8 +222,8 @@ class IndustryBubblePoint(BaseModel):
 
 
 class IndustryBubbleSectorAverage(BaseModel):
-    x: Optional[float] = None
-    y: Optional[float] = None
+    x: float | None = None
+    y: float | None = None
 
 
 class IndustryBubbleResponse(BaseModel):
@@ -235,16 +236,16 @@ class IndustryBubbleResponse(BaseModel):
     sector_average: IndustryBubbleSectorAverage
     sector_point_count: int
     displayed_point_count: int
-    data: List[IndustryBubblePoint]
-    updated_at: Optional[str] = None
+    data: list[IndustryBubblePoint]
+    updated_at: str | None = None
 
 
 class SectorBoardStock(BaseModel):
     symbol: str
-    price: Optional[float] = None
-    change_pct: Optional[float] = None
-    volume: Optional[float] = None
-    market_cap: Optional[float] = None
+    price: float | None = None
+    change_pct: float | None = None
+    volume: float | None = None
+    market_cap: float | None = None
     market_cap_provenance: dict[str, Any]
     color: str
 
@@ -254,71 +255,71 @@ class SectorBoardSector(BaseModel):
     change_pct: float | None
     constituent_count: int
     displayed_count: int
-    stocks: List[SectorBoardStock]
+    stocks: list[SectorBoardStock]
 
 
 class SectorBoardResponse(BaseModel):
-    market_summary: Dict[str, dict[str, Any]]
-    sectors: List[SectorBoardSector]
+    market_summary: dict[str, dict[str, Any]]
+    sectors: list[SectorBoardSector]
     sort_by: str
     limit_per_sector: int
-    updated_at: Optional[str] = None
+    updated_at: str | None = None
 
 
 class MoneyFlowTrailPoint(BaseModel):
     date: str
-    s_trend: Optional[float] = None
-    s_strength: Optional[float] = None
+    s_trend: float | None = None
+    s_strength: float | None = None
 
 
 class MoneyFlowTrendStock(BaseModel):
     symbol: str
-    name: Optional[str] = None
-    sector: Optional[str] = None
-    price: Optional[float] = None
-    change_pct: Optional[float] = None
-    s_trend: Optional[float] = None
-    s_strength: Optional[float] = None
+    name: str | None = None
+    sector: str | None = None
+    price: float | None = None
+    change_pct: float | None = None
+    s_trend: float | None = None
+    s_strength: float | None = None
     quadrant: str
     color: str
-    trail: List[MoneyFlowTrailPoint]
+    trail: list[MoneyFlowTrailPoint]
 
 
 class MoneyFlowTrendResponse(BaseModel):
     timeframe: str
     benchmark: str
-    center: List[float]
-    reference_symbol: Optional[str] = None
-    sector: Optional[str] = None
-    stocks: List[MoneyFlowTrendStock]
-    updated_at: Optional[str] = None
+    center: list[float]
+    reference_symbol: str | None = None
+    sector: str | None = None
+    stocks: list[MoneyFlowTrendStock]
+    updated_at: str | None = None
 
 
 class MarketIndicesResponse(BaseModel):
     count: int
-    data: List[dict[str, Any]]
-    updated_at: Optional[str] = None
-    source: Optional[str] = None
-    error: Optional[str] = None
+    data: list[dict[str, Any]]
+    updated_at: str | None = None
+    source: str | None = None
+    error: str | None = None
 
 
 class MarketTopMoversResponse(BaseModel):
     type: str
     index: str
     count: int
-    data: List[dict[str, Any]]
-    updated_at: Optional[str] = None
-    error: Optional[str] = None
+    data: list[dict[str, Any]]
+    updated_at: str | None = None
+    error: str | None = None
     is_last_session: bool = False
-    session_label: Optional[str] = None
+    session_label: str | None = None
     source: str | None = None
     is_stale: bool | None = None
 
 
 class MarketSectorPerformanceResponse(BaseModel):
     count: int
-    data: List[dict[str, Any]]
-    error: Optional[str] = None
+    data: list[dict[str, Any]]
+    error: str | None = None
 
 
 class MarketBreadthExchangeData(BaseModel):
@@ -328,79 +329,79 @@ class MarketBreadthExchangeData(BaseModel):
     decliners: int
     unchanged: int
     unknown_change: int = 0
-    ad_ratio: Optional[float] = None
-    pct_above_sma20: Optional[float] = None
-    pct_above_sma50: Optional[float] = None
+    ad_ratio: float | None = None
+    pct_above_sma20: float | None = None
+    pct_above_sma50: float | None = None
     new_highs_52w: int = 0
     new_lows_52w: int = 0
 
 
 class MarketBreadthResponse(BaseModel):
     count: int
-    data: List[MarketBreadthExchangeData]
-    updated_at: Optional[str] = None
-    error: Optional[str] = None
+    data: list[MarketBreadthExchangeData]
+    updated_at: str | None = None
+    error: str | None = None
 
 
 class EarningsSeasonItem(BaseModel):
     symbol: str
     name: str
-    exchange: Optional[str] = None
+    exchange: str | None = None
     period: str
-    updated_at: Optional[str] = None
-    revenue: Optional[float] = None
-    net_income: Optional[float] = None
-    eps: Optional[float] = None
-    gross_margin: Optional[float] = None
-    revenue_yoy: Optional[float] = None
-    earnings_yoy: Optional[float] = None
-    gross_margin_delta: Optional[float] = None
-    score: Optional[float] = None
+    updated_at: str | None = None
+    revenue: float | None = None
+    net_income: float | None = None
+    eps: float | None = None
+    gross_margin: float | None = None
+    revenue_yoy: float | None = None
+    earnings_yoy: float | None = None
+    gross_margin_delta: float | None = None
+    score: float | None = None
     signal: str
 
 
 class EarningsSeasonResponse(BaseModel):
     count: int
-    season: Optional[str] = None
-    data: List[EarningsSeasonItem]
-    updated_at: Optional[str] = None
-    error: Optional[str] = None
+    season: str | None = None
+    data: list[EarningsSeasonItem]
+    updated_at: str | None = None
+    error: str | None = None
 
 
 class WorldIndicesResponse(BaseModel):
     count: int
-    data: List[dict[str, Any]]
+    data: list[dict[str, Any]]
     source: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ForexRatesResponse(BaseModel):
     count: int
-    data: List[dict[str, Any]]
+    data: list[dict[str, Any]]
     source: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class CommoditiesResponse(BaseModel):
     count: int
-    data: List[dict[str, Any]]
+    data: list[dict[str, Any]]
     source: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ResearchRssItem(BaseModel):
     title: str
     url: str
-    published_at: Optional[str] = None
-    description: Optional[str] = None
+    published_at: str | None = None
+    description: str | None = None
 
 
 class ResearchRssFeedResponse(BaseModel):
     source: str
     count: int
-    data: List[ResearchRssItem]
+    data: list[ResearchRssItem]
     fetched_at: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 RSS_FEED_URLS: dict[str, list[str]] = {
@@ -549,7 +550,7 @@ INDUSTRY_BUBBLE_COLORS = [
 ]
 
 
-def _resolve_board_color(change_pct: Optional[float]) -> str:
+def _resolve_board_color(change_pct: float | None) -> str:
     if change_pct is None:
         return "yellow"
     if change_pct >= 6.8:
@@ -650,7 +651,7 @@ async def _fetch_benchmark_history_from_provider(start_date: date, end_date: dat
         return pd.DataFrame(columns=["time", "close_index"])
 
 
-def _map_text_to_sector_name(value: Optional[str]) -> Optional[str]:
+def _map_text_to_sector_name(value: str | None) -> str | None:
     normalized_value = _normalize_lookup_text(value)
     if not normalized_value:
         return None
@@ -723,7 +724,7 @@ def _normalize_market_index_code(value: Any) -> str:
     return MARKET_INDEX_ALIASES.get(normalized, normalized.replace("-", ""))
 
 
-def _coerce_market_number(value: Any) -> Optional[float]:
+def _coerce_market_number(value: Any) -> float | None:
     try:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
@@ -883,7 +884,7 @@ def _normalize_market_index_metrics(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _is_suspicious_market_index_value(index_code: str, value: Optional[float]) -> bool:
+def _is_suspicious_market_index_value(index_code: str, value: float | None) -> bool:
     if value is None:
         return False
     min_expected = MARKET_INDEX_MIN_EXPECTED_VALUE.get(index_code)
@@ -1037,7 +1038,7 @@ def _is_probably_rss_payload(payload: str) -> bool:
     return content.startswith("<?xml") or "<rss" in content or "<feed" in content
 
 
-def _to_float(value: Any) -> Optional[float]:
+def _to_float(value: Any) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -1063,7 +1064,7 @@ def _first_non_none(*values: Any) -> Any:
     return None
 
 
-def _pick_optional_float(*values: Any) -> Optional[float]:
+def _pick_optional_float(*values: Any) -> float | None:
     for value in values:
         parsed = _to_float(value)
         if parsed is not None:
@@ -1077,14 +1078,14 @@ def _normalize_symbol(value: Any) -> str:
     return str(value).strip().upper()
 
 
-def _normalize_text(value: Any) -> Optional[str]:
+def _normalize_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
 
 
-def _parse_datetime_like(value: Any) -> Optional[datetime]:
+def _parse_datetime_like(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -1102,12 +1103,12 @@ def _parse_datetime_like(value: Any) -> Optional[datetime]:
     return None
 
 
-def _serialize_datetime_like(value: Any) -> Optional[str]:
+def _serialize_datetime_like(value: Any) -> str | None:
     parsed = _parse_datetime_like(value)
     return parsed.isoformat() if parsed else None
 
 
-def _latest_timestamp(values: List[Any]) -> Optional[str]:
+def _latest_timestamp(values: list[Any]) -> str | None:
     future_cutoff = datetime.utcnow() + timedelta(days=1)
     parsed_values = [
         parsed
@@ -1119,7 +1120,7 @@ def _latest_timestamp(values: List[Any]) -> Optional[str]:
     return max(parsed_values).isoformat()
 
 
-def _quarter_label(year: Any, quarter: Any) -> Optional[str]:
+def _quarter_label(year: Any, quarter: Any) -> str | None:
     if year is None or quarter is None:
         return None
     try:
@@ -1128,7 +1129,7 @@ def _quarter_label(year: Any, quarter: Any) -> Optional[str]:
         return None
 
 
-def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+def _growth_rate(current: float | None, previous: float | None) -> float | None:
     if current is None or previous in (None, 0):
         return None
     if abs(previous) < 0.001:
@@ -1136,7 +1137,7 @@ def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optiona
     return round(((current - previous) / abs(previous)) * 100, 2)
 
 
-def _margin_rate(numerator: Optional[float], denominator: Optional[float]) -> Optional[float]:
+def _margin_rate(numerator: float | None, denominator: float | None) -> float | None:
     if numerator is None or denominator in (None, 0):
         return None
     if abs(denominator) < 0.001:
@@ -1145,9 +1146,9 @@ def _margin_rate(numerator: Optional[float], denominator: Optional[float]) -> Op
 
 
 def _earnings_signal(
-    revenue_yoy: Optional[float],
-    earnings_yoy: Optional[float],
-    margin_delta: Optional[float],
+    revenue_yoy: float | None,
+    earnings_yoy: float | None,
+    margin_delta: float | None,
 ) -> tuple[str, float]:
     score = 50.0
     if revenue_yoy is not None:
@@ -1176,7 +1177,7 @@ def _earnings_period_sort_key(period: str | None) -> int:
     return year * 10 + quarter
 
 
-def _normalize_mover_type(value: Optional[str]) -> str:
+def _normalize_mover_type(value: str | None) -> str:
     if value is None:
         return "gainer"
 
@@ -1188,7 +1189,7 @@ def _normalize_mover_type(value: Optional[str]) -> str:
     return "gainer"
 
 
-def _extract_snapshot_change_pct(extended_metrics: dict[str, Any]) -> Optional[float]:
+def _extract_snapshot_change_pct(extended_metrics: dict[str, Any]) -> float | None:
     return _to_float(
         _first_non_none(
             extended_metrics.get("change_1d"),
@@ -1199,7 +1200,7 @@ def _extract_snapshot_change_pct(extended_metrics: dict[str, Any]) -> Optional[f
     )
 
 
-def _extract_snapshot_value_traded(extended_metrics: dict[str, Any]) -> Optional[float]:
+def _extract_snapshot_value_traded(extended_metrics: dict[str, Any]) -> float | None:
     return _to_float(
         _first_non_none(
             extended_metrics.get("value_traded"),
@@ -1340,7 +1341,7 @@ def _normalize_screener_row(item: Any) -> dict[str, Any]:
     }
 
 
-def _resolve_sector_name(symbol: str, industry: Optional[str], sector_hint: Optional[str]) -> str:
+def _resolve_sector_name(symbol: str, industry: str | None, sector_hint: str | None) -> str:
     mapped_sector_hint = _map_text_to_sector_name(sector_hint)
     if mapped_sector_hint:
         return mapped_sector_hint
@@ -1373,7 +1374,7 @@ def _resolve_sector_name(symbol: str, industry: Optional[str], sector_hint: Opti
     return "Other"
 
 
-async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Optional[str]]]:
+async def _load_stock_metadata(symbols: list[str]) -> dict[str, dict[str, str | None]]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
@@ -1420,7 +1421,7 @@ async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Option
             )
         ).all()
 
-    metadata: Dict[str, Dict[str, Optional[str]]] = {
+    metadata: dict[str, dict[str, str | None]] = {
         _normalize_symbol(symbol): {
             "exchange": _normalize_text(exchange),
             "industry": _normalize_text(industry),
@@ -1458,7 +1459,7 @@ async def _load_stock_metadata(symbols: List[str]) -> Dict[str, Dict[str, Option
     return metadata
 
 
-async def _load_latest_price_time(symbols: List[str]) -> str | None:
+async def _load_latest_price_time(symbols: list[str]) -> str | None:
     """Return the freshest daily StockPrice time among the heatmap symbols."""
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
@@ -1480,12 +1481,12 @@ async def _load_latest_price_time(symbols: List[str]) -> str | None:
         return None
 
 
-async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
+async def _load_change_pct_map(symbols: list[str]) -> dict[str, float]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
 
-    change_map: Dict[str, float] = {}
+    change_map: dict[str, float] = {}
 
     try:
         async with async_session_maker() as session:
@@ -1509,7 +1510,7 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                 )
             ).mappings().all()
 
-            price_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
+            price_lookup: dict[str, dict[int, float]] = defaultdict(dict)
             for row in price_rows:
                 price = persisted_price_record(row)
                 symbol, rn = row["symbol"], row["rn"]
@@ -1550,7 +1551,7 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
                     )
                 ).mappings().all()
 
-                snapshot_lookup: Dict[str, Dict[int, float]] = defaultdict(dict)
+                snapshot_lookup: dict[str, dict[int, float]] = defaultdict(dict)
                 for row in snapshot_rows:
                     price = screener_price_record(row)
                     symbol, rn = row["symbol"], row["rn"]
@@ -1572,13 +1573,13 @@ async def _load_change_pct_map(symbols: List[str]) -> Dict[str, float]:
 
 
 async def _load_latest_snapshot_metrics(
-    symbols: List[str],
-) -> Dict[str, dict[str, Any]]:
+    symbols: list[str],
+) -> dict[str, dict[str, Any]]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
 
-    metrics_map: Dict[str, dict[str, Any]] = {}
+    metrics_map: dict[str, dict[str, Any]] = {}
 
     try:
         async with async_session_maker() as session:
@@ -1651,7 +1652,7 @@ async def _load_latest_snapshot_metrics(
     return metrics_map
 
 
-async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, Optional[float]]]:
+async def _load_latest_ratio_metrics(symbols: list[str]) -> dict[str, dict[str, float | None]]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
@@ -1709,7 +1710,7 @@ async def _load_latest_ratio_metrics(symbols: List[str]) -> Dict[str, dict[str, 
     }
 
 
-async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[float]]:
+async def _load_latest_income_revenue(symbols: list[str]) -> dict[str, float | None]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
@@ -1743,7 +1744,7 @@ async def _load_latest_income_revenue(symbols: List[str]) -> Dict[str, Optional[
     return {_normalize_symbol(row["symbol"]): _to_float(row.get("revenue")) for row in rows}
 
 
-def _expected_latest_trading_day(today: Optional[date] = None) -> date:
+def _expected_latest_trading_day(today: date | None = None) -> date:
     """Most recent weekday on/before ``today`` (ignores VN holidays).
 
     Used only as a *staleness floor*: if the freshest screener snapshot predates
@@ -1759,7 +1760,7 @@ def _expected_latest_trading_day(today: Optional[date] = None) -> date:
     return anchor
 
 
-def _coerce_to_date(value: Any) -> Optional[date]:
+def _coerce_to_date(value: Any) -> date | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -1772,7 +1773,7 @@ def _coerce_to_date(value: Any) -> Optional[date]:
         return None
 
 
-async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str, Any]]:
+async def _load_latest_screener_rows_from_db(limit: int = 500) -> list[dict[str, Any]]:
     """Only a completed daily Universe can supply whole-market DB rows."""
     cache_result = await CacheManager().get_screener_data(
         symbol=None, source=None, allow_stale=True
@@ -1785,9 +1786,9 @@ async def _load_latest_screener_rows_from_db(limit: int = 500) -> List[dict[str,
     return rows[:limit]
 
 
-async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]:
+async def _fetch_market_screener_rows(limit: int = 1500) -> list[dict[str, Any]]:
     cache_manager = CacheManager()
-    screener_rows: List[dict[str, Any]] = []
+    screener_rows: list[dict[str, Any]] = []
 
     cache_result = await cache_manager.get_screener_data(
         symbol=None, source=None, allow_stale=True
@@ -1816,7 +1817,7 @@ async def _fetch_market_screener_rows(limit: int = 1500) -> List[dict[str, Any]]
     return screener_rows
 
 
-def _canonical_price_frame(rows: List[Any]) -> pd.DataFrame:
+def _canonical_price_frame(rows: list[Any]) -> pd.DataFrame:
     prices = []
     for row in rows:
         price = persisted_price_record(row)
@@ -1827,8 +1828,8 @@ def _canonical_price_frame(rows: List[Any]) -> pd.DataFrame:
 
 
 async def _load_latest_technical_indicator_map(
-    symbols: List[str],
-) -> Dict[str, Dict[str, Optional[float]]]:
+    symbols: list[str],
+) -> dict[str, dict[str, float | None]]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
@@ -1859,9 +1860,9 @@ async def _load_latest_technical_indicator_map(
 
 
 async def _load_52_week_range_map(
-    symbols: List[str],
+    symbols: list[str],
     lookback_days: int = 380,
-) -> Dict[str, Dict[str, Optional[float]]]:
+) -> dict[str, dict[str, float | None]]:
     unique_symbols = sorted({_normalize_symbol(symbol) for symbol in symbols if symbol})
     if not unique_symbols:
         return {}
@@ -1878,7 +1879,7 @@ async def _load_52_week_range_map(
             )
         ).scalars().all()
 
-    ranges: Dict[str, Dict[str, Optional[float]]] = {}
+    ranges: dict[str, dict[str, float | None]] = {}
     for row in rows:
         price = persisted_price_record(row)
         if price["price_unit"] == "unknown":
@@ -1893,18 +1894,18 @@ async def _load_52_week_range_map(
 
 
 def _build_market_breadth_rows(
-    screener_rows: List[dict[str, Any]],
-    technical_map: Dict[str, Dict[str, Optional[float]]],
-    range_map: Dict[str, Dict[str, Optional[float]]],
-) -> List[MarketBreadthExchangeData]:
-    rows_by_exchange: Dict[str, List[dict[str, Any]]] = {"HOSE": [], "HNX": [], "UPCOM": []}
+    screener_rows: list[dict[str, Any]],
+    technical_map: dict[str, dict[str, float | None]],
+    range_map: dict[str, dict[str, float | None]],
+) -> list[MarketBreadthExchangeData]:
+    rows_by_exchange: dict[str, list[dict[str, Any]]] = {"HOSE": [], "HNX": [], "UPCOM": []}
 
     for row in screener_rows:
         exchange = _normalize_text(row.get("exchange"))
         if exchange in rows_by_exchange:
             rows_by_exchange[exchange].append(row)
 
-    payload: List[MarketBreadthExchangeData] = []
+    payload: list[MarketBreadthExchangeData] = []
     for exchange in ["HOSE", "HNX", "UPCOM"]:
         exchange_rows = rows_by_exchange[exchange]
         total = len(exchange_rows)
@@ -1979,10 +1980,10 @@ def _build_market_breadth_rows(
 
 def _resolve_industry_bubble_metric(
     row: dict[str, Any],
-    ratio_metrics: dict[str, Optional[float]],
-    revenue_map: dict[str, Optional[float]],
+    ratio_metrics: dict[str, float | None],
+    revenue_map: dict[str, float | None],
     metric: str,
-) -> Optional[float]:
+) -> float | None:
     metric = str(metric or "").strip().lower()
     if metric == "market_cap":
         return _to_float(row.get("market_cap"))
@@ -2003,9 +2004,9 @@ def _resolve_industry_bubble_metric(
 
 
 def _apply_snapshot_metrics_to_movers(
-    payload: List[dict[str, Any]],
-    metrics_map: Dict[str, dict[str, Any]],
-) -> List[dict[str, Any]]:
+    payload: list[dict[str, Any]],
+    metrics_map: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     if not payload or not metrics_map:
         return payload
 
@@ -2078,8 +2079,8 @@ def _apply_snapshot_metrics_to_movers(
 
 
 def _sort_top_movers(
-    payload: List[dict[str, Any]], mover_type: str, limit: int
-) -> List[dict[str, Any]]:
+    payload: list[dict[str, Any]], mover_type: str, limit: int
+) -> list[dict[str, Any]]:
     def _effective_pct(item: dict[str, Any]) -> float | None:
         # QA-v4 D.3: when the provider omits `price_change_pct`, derive
         # one from `price_change` and `last_price` so a row with otherwise
@@ -2116,7 +2117,7 @@ def _sort_top_movers(
     return payload[:limit]
 
 
-def _has_non_zero_top_mover_signal(payload: List[dict[str, Any]]) -> bool:
+def _has_non_zero_top_mover_signal(payload: list[dict[str, Any]]) -> bool:
     for item in payload:
         change_pct = _to_float(item.get("price_change_pct"))
         if change_pct is not None and abs(change_pct) > 1e-9:
@@ -2160,7 +2161,7 @@ async def _load_retained_mover_inputs() -> list[dict[str, Any]]:
 
 async def _build_last_session_top_movers(
     index: str, mover_type: str, limit: int
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if mover_type not in TOP_MOVER_TYPES:
         return []
 
@@ -2220,7 +2221,7 @@ async def _build_last_session_top_movers(
 
 async def _build_snapshot_top_movers(
     index: str, mover_type: str, limit: int
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     cache_manager = CacheManager()
     cache_result = await cache_manager.get_screener_data(
         symbol=None,
@@ -2235,7 +2236,7 @@ async def _build_snapshot_top_movers(
         for symbol in (VN_SECTORS.get("vn30").symbols if VN_SECTORS.get("vn30") else [])
     }
 
-    rows: List[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for item in cache_result.data:
         symbol = _normalize_symbol(getattr(item, "symbol", None))
         if not symbol:
@@ -2320,7 +2321,7 @@ async def _build_snapshot_top_movers(
     )
 
     session_by_symbol = {row["symbol"]: row.get("market_session") for row in rows}
-    payload: List[dict[str, Any]] = []
+    payload: list[dict[str, Any]] = []
     for row in sorted_rows:
         last_price = _to_float(row.get("last_price"))
         change_pct = _to_float(row.get("price_change_pct"))
@@ -2354,7 +2355,7 @@ async def _build_snapshot_top_movers(
     return payload[:limit]
 
 
-def _clean_rss_description(raw_description: Optional[str]) -> Optional[str]:
+def _clean_rss_description(raw_description: str | None) -> str | None:
     if not raw_description:
         return None
 
@@ -2911,7 +2912,7 @@ async def get_market_breadth() -> MarketBreadthResponse:
 @cached(ttl=600, key_prefix="earnings_season")
 async def get_earnings_season(
     limit: int = Query(default=25, ge=5, le=100),
-    exchange: Optional[str] = Query(default=None),
+    exchange: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> EarningsSeasonResponse:
     exchange_filter = _normalize_text(exchange)
@@ -3099,10 +3100,10 @@ async def get_industry_bubble(
         raise HTTPException(status_code=400, detail="Reference symbol is required")
 
     cache_manager = CacheManager()
-    screener_rows: List[dict[str, Any]] = []
+    screener_rows: list[dict[str, Any]] = []
     fresh_rows: list[dict[str, Any]] | None = None
 
-    async def _fetch_fresh_rows() -> List[dict[str, Any]]:
+    async def _fetch_fresh_rows() -> list[dict[str, Any]]:
         nonlocal fresh_rows
         params = StockScreenerParams(
             symbol=None,
@@ -3238,7 +3239,7 @@ async def get_industry_bubble(
 
     sector_rows = [row for row in screener_rows if _same_sector(row)]
 
-    points: List[IndustryBubblePoint] = []
+    points: list[IndustryBubblePoint] = []
     for index, row in enumerate(sector_rows):
         ticker = row.get("symbol", "")
         ratio_metrics = ratio_map.get(ticker, {})
@@ -3310,11 +3311,11 @@ async def get_industry_bubble(
 @cached(ttl=180, key_prefix="sector_board_v2_cap_lineage")
 async def get_sector_board(
     limit_per_sector: int = Query(default=15, ge=5, le=30),
-    sectors: Optional[str] = Query(default=None),
+    sectors: str | None = Query(default=None),
     sort_by: str = Query(default="volume", pattern=r"^(volume|market_cap|change_pct)$"),
     db: AsyncSession = Depends(get_db),
 ) -> SectorBoardResponse:
-    screener_rows: List[dict[str, Any]] = []
+    screener_rows: list[dict[str, Any]] = []
     cache_manager = CacheManager()
 
     try:
@@ -3350,7 +3351,7 @@ async def get_sector_board(
         _normalize_lookup_text(item) for item in (sectors or "").split(",") if str(item).strip()
     }
 
-    grouped: Dict[str, List[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in screener_rows:
         ticker = row["symbol"]
         metadata = metadata_map.get(ticker) or {}
@@ -3375,8 +3376,8 @@ async def get_sector_board(
         value = _to_float(row.get(sort_by))
         return value if value is not None else float("-inf")
 
-    sector_payloads: List[SectorBoardSector] = []
-    sector_market_caps: Dict[str, float | None] = {}
+    sector_payloads: list[SectorBoardSector] = []
+    sector_market_caps: dict[str, float | None] = {}
     for sector_name, rows in grouped.items():
         valid_rows = [row for row in rows if _to_float(row.get("change_pct")) is not None]
         weighted_rows = [
@@ -3453,11 +3454,11 @@ async def get_sector_board(
 @router.get("/money-flow-trend", response_model=MoneyFlowTrendResponse)
 @cached(ttl=300, key_prefix="money_flow_trend")
 async def get_money_flow_trend(
-    symbol: Optional[str] = Query(
+    symbol: str | None = Query(
         default=None, description="Reference symbol to infer sector peers"
     ),
-    symbols: Optional[str] = Query(default=None, description="Comma-separated symbol list"),
-    sector: Optional[str] = Query(default=None, description="Sector filter"),
+    symbols: str | None = Query(default=None, description="Comma-separated symbol list"),
+    sector: str | None = Query(default=None, description="Sector filter"),
     timeframe: str = Query(default="medium", pattern=r"^(short|medium|long)$"),
     trail_length: int = Query(default=8, ge=3, le=20),
     db: AsyncSession = Depends(get_db),
@@ -3468,7 +3469,7 @@ async def get_money_flow_trend(
         _normalize_symbol(item) for item in (symbols or "").split(",") if _normalize_symbol(item)
     ]
 
-    screener_rows: List[dict[str, Any]] = []
+    screener_rows: list[dict[str, Any]] = []
     cache_manager = CacheManager()
     try:
         cache_result = await cache_manager.get_screener_data(
@@ -3509,7 +3510,7 @@ async def get_money_flow_trend(
         if row.get("change_pct") is None and ticker in change_map:
             row["change_pct"] = change_map[ticker]
 
-    sector_name: Optional[str] = None
+    sector_name: str | None = None
     if manual_symbols:
         universe_symbols = manual_symbols
     else:
@@ -3631,7 +3632,7 @@ async def get_money_flow_trend(
 
     screener_map = {row["symbol"]: row for row in screener_rows if row.get("symbol")}
     trail_points_required = max(trail_length, 4)
-    stocks_payload: List[MoneyFlowTrendStock] = []
+    stocks_payload: list[MoneyFlowTrendStock] = []
 
     for ticker, group in price_frame.groupby("symbol"):
         merged = group.merge(index_frame, on="time", how="inner")
@@ -3652,7 +3653,7 @@ async def get_money_flow_trend(
             continue
 
         merged = merged.iloc[-len(rs_series) :].reset_index(drop=True)
-        trail: List[MoneyFlowTrailPoint] = []
+        trail: list[MoneyFlowTrailPoint] = []
         step = int(config["step"])
         for idx in range(
             max(0, len(rs_series) - trail_points_required * step), len(rs_series), step
@@ -3714,7 +3715,7 @@ async def get_money_flow_trend(
 @cached(ttl=120, key_prefix="market_top_movers")
 async def get_market_top_movers(
     type: str = Query(default="gainer", pattern=r"^(gainer|loser|volume|value|gainers|losers)$"),
-    mode: Optional[str] = Query(
+    mode: str | None = Query(
         default=None,
         pattern=r"^(gainer|loser|volume|value|gainers|losers)$",
     ),
@@ -3871,14 +3872,14 @@ async def get_market_sector_performance(
 ) -> MarketSectorPerformanceResponse:
     cache_manager = CacheManager()
 
-    async def _build_sector_payload(rows: List[dict[str, Any]]) -> MarketSectorPerformanceResponse:
+    async def _build_sector_payload(rows: list[dict[str, Any]]) -> MarketSectorPerformanceResponse:
         sectors = await SectorService.calculate_sector_performance(rows)
         if not include_empty:
             sectors = [sector for sector in sectors if sector.total_stocks > 0]
         payload = [item.model_dump(mode="json", by_alias=True) for item in sectors]
         return MarketSectorPerformanceResponse(count=len(payload), data=payload)
 
-    async def _load_cached_sector_rows() -> List[dict[str, Any]]:
+    async def _load_cached_sector_rows() -> list[dict[str, Any]]:
         cache_result = await cache_manager.get_screener_data(
             symbol=None,
             source=settings.vnstock_source,
@@ -3887,7 +3888,7 @@ async def get_market_sector_performance(
         if not cache_result.data:
             return []
 
-        rows: List[dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for item in cache_result.data:
             symbol = _normalize_symbol(getattr(item, "symbol", None))
             if not symbol:
@@ -3960,7 +3961,7 @@ async def get_market_sector_performance(
             for item in screener_data
         ]
         return await _build_sector_payload(rows)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning("Market sector performance live fetch timed out")
         try:
             cached_rows = await _load_cached_sector_rows()
@@ -4173,10 +4174,10 @@ class FlowCoverageEntry(BaseModel):
 
 class FlowCoverageResponse(BaseModel):
     window_days: int
-    last_data_date: Optional[date] = None
+    last_data_date: date | None = None
     count: int
     symbols_unavailable: int = 0
-    data: List[FlowCoverageEntry]
+    data: list[FlowCoverageEntry]
 
 
 @router.get("/flow-coverage", response_model=FlowCoverageResponse)
@@ -4260,23 +4261,23 @@ class FreshnessBucket(BaseModel):
     label: str
     timestamp_basis: str
     scope: str
-    fetched_at: Optional[datetime] = None
-    last_data_date: Optional[date] = None
-    raw_last_data_date: Optional[date] = None
-    settled_last_data_date: Optional[date] = None
-    age_days: Optional[float] = None
+    fetched_at: datetime | None = None
+    last_data_date: date | None = None
+    raw_last_data_date: date | None = None
+    settled_last_data_date: date | None = None
+    age_days: float | None = None
     status: str  # "fresh" | "stale" | "critical" | "unknown"
-    reason: Optional[str] = None
-    detail: Optional[str] = None
+    reason: str | None = None
+    detail: str | None = None
 
 
 class FreshnessResponse(BaseModel):
     timestamp: datetime
     overall: str  # "fresh" | "stale" | "critical"
-    buckets: List[FreshnessBucket]
+    buckets: list[FreshnessBucket]
 
 
-def _classify_age(days: Optional[float], stale_threshold: float, critical_threshold: float) -> str:
+def _classify_age(days: float | None, stale_threshold: float, critical_threshold: float) -> str:
     if days is None:
         return "unknown"
     if days >= critical_threshold:
@@ -4288,7 +4289,7 @@ def _classify_age(days: Optional[float], stale_threshold: float, critical_thresh
 
 async def _load_market_news_freshness(
     db: AsyncSession,
-) -> tuple[Optional[datetime], Optional[datetime]]:
+) -> tuple[datetime | None, datetime | None]:
     from vnibb.models.market_news import MarketNews
 
     result = await db.execute(
@@ -4336,7 +4337,7 @@ async def get_market_freshness(
 
     news_dt, news_crawled_dt = await _load_market_news_freshness(db)
 
-    def _age(value) -> Optional[float]:
+    def _age(value) -> float | None:
         if value is None:
             return None
         if hasattr(value, "date"):
@@ -4427,17 +4428,17 @@ class DataSourceEntry(BaseModel):
     description: str
     timestamp_basis: str
     scope: str
-    fetched_at: Optional[datetime] = None
-    last_updated: Optional[datetime] = None
-    age_days: Optional[float] = None
+    fetched_at: datetime | None = None
+    last_updated: datetime | None = None
+    age_days: float | None = None
     status: str  # "fresh" | "stale" | "critical" | "unknown"
-    next_sync: Optional[str] = None
+    next_sync: str | None = None
 
 
 class DataSourcesResponse(BaseModel):
     timestamp: datetime
     overall: str
-    sources: List[DataSourceEntry]
+    sources: list[DataSourceEntry]
 
 
 # Curated public-safe set of sources. Each entry maps a stable `key` to:
@@ -4575,8 +4576,8 @@ async def get_data_sources_freshness(
     statuses: list[str] = []
 
     for spec in _PUBLIC_SOURCES:
-        last_value: Optional[datetime] = None
-        fetched_at: Optional[datetime] = None
+        last_value: datetime | None = None
+        fetched_at: datetime | None = None
         try:
             if spec["key"] == "market_news":
                 last_value, fetched_at = await _load_market_news_freshness(db)
@@ -4605,8 +4606,8 @@ async def get_data_sources_freshness(
                     "could not roll back after failed probe for %s", spec["table"]
                 )
 
-        age_days: Optional[float] = None
-        last_dt: Optional[datetime] = None
+        age_days: float | None = None
+        last_dt: datetime | None = None
         if last_value is not None:
             if hasattr(last_value, "date") and not isinstance(last_value, date):
                 last_dt = last_value
