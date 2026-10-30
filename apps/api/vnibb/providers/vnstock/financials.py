@@ -752,9 +752,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     or re.match(r"^\d{4}Q[1-4]$", col_str)
                 )
 
-            row_based = any(
-                c in df.columns for c in ["item", "item_id", "itemId", "item_name", "itemName"]
-            ) and any(_column_is_period(c) for c in df.columns)
+            row_based = (
+                any(c in df.columns for c in ["item", "item_id", "itemId", "item_name", "itemName"])
+                and any(_column_is_period(c) for c in df.columns)
+            ) or all(c in df.columns for c in ["period", "id", "value"])
 
             # Limit records for period-based data only
             if not row_based:
@@ -800,7 +801,8 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
     ) -> list[FinancialStatementData]:
         """Transform raw financial data to standardized format."""
         results: list[FinancialStatementData] = []
-        if data and all(row.get("statement_type") and "unit_metadata" in row for row in data):
+        is_vas_long = any("period" in row and "id" in row and "value" in row for row in data)
+        if not is_vas_long and data and all(row.get("statement_type") and "unit_metadata" in row for row in data):
             from vnibb.services.financial_service import admit_statement_rows
 
             return admit_statement_rows([FinancialStatementData.model_validate(row) for row in data], params.period)
@@ -941,6 +943,126 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             metadata["normalization_multiplier"] = multiplier
             metadata.setdefault("raw_value", numeric / provider_multiplier if numeric is not None else None)
             return numeric * multiplier if numeric is not None else None, metadata
+
+        if is_vas_long:
+            from vnibb.services.financial_service import admit_statement_rows
+
+            # Only IDs whose semantics are documented in the Fundamental guide and
+            # its linked taxonomy article are mapped; names are presentation only.
+            vas_ids = {
+                "income": {
+                    "IS_NET_REVENUE": "revenue",
+                    "IS_GROSS_PROFIT": "gross_profit",
+                    "IS_NET_PROFIT_AFTER_TAX": "net_income",
+                },
+                "balance": {
+                    "BS_TOTAL_ASSETS": "total_assets",
+                    "BS_SHORT_TERM_ASSETS": "current_assets",
+                    "BS_CASH_AND_PRECIOUS_METALS": "cash_and_equivalents",
+                    "BS_TRADE_RECEIVABLES": "accounts_receivable",
+                    "BS_INVENTORIES": "inventory",
+                    "BS_FIXED_ASSETS": "fixed_assets",
+                    "BS_CUSTOMER_DEPOSITS": "customer_deposits",
+                },
+                "cashflow": {
+                    "CF_NET_CASH_FLOWS_FROM_OPERATING_ACTIVITIES": "operating_cash_flow",
+                },
+            }
+            report_names = {
+                "income": {"income", "income_statement"},
+                "balance": {"balance", "balance_sheet"},
+                "cashflow": {"cashflow", "cash_flow"},
+            }
+            periods: dict[str, list[dict[str, Any]]] = {}
+            for row in data:
+                period = str(row.get("period") or "").strip().upper()
+                annual = re.fullmatch(r"20\d{2}", period)
+                quarterly = re.fullmatch(r"20\d{2}-Q[1-4]", period)
+                if (annual and params.period == "year") or (quarterly and params.period == "quarter"):
+                    periods.setdefault(period, []).append(row)
+
+            for period in sorted(periods, key=_period_sort_key, reverse=True)[:params.limit]:
+                rows = periods[period]
+                attrs = rows[0].get("_provider_attrs") or {}
+                metrics: dict[str, Any] = {}
+                lineage: dict[str, Any] = {}
+                identities: set[tuple[Any, ...]] = set()
+                reason = None
+                for row in rows:
+                    metadata = row.get("_provider_attrs") or {}
+                    sources = [str(value).strip().upper() for value in
+                               (row.get("_source"), row.get("source"), metadata.get("source")) if value]
+                    symbols = [str(value).strip().upper() for value in
+                               (row.get("symbol"), metadata.get("symbol")) if value]
+                    reports = [str(value).strip().lower() for value in
+                               (row.get("_statement_type"), row.get("statement_type"), row.get("report"), metadata.get("report")) if value]
+                    if not sources or any(source != "VCI" for source in sources):
+                        reason = "conflicting_statement_source"
+                    elif not symbols or any(symbol != params.symbol for symbol in symbols):
+                        reason = "conflicting_statement_symbol"
+                    elif not reports or any(report not in report_names[params.statement_type.value] for report in reports):
+                        reason = "conflicting_statement_type"
+                    year = int(period[:4])
+                    quarter = int(period[-1]) if "-Q" in period else None
+                    if any(record.get(key) is not None and str(record[key]) != str(year)
+                           for record in (row, metadata) for key in ("fiscal_year", "fiscalYear", "yearReport")) or any(
+                        record.get(key) is not None and str(record[key]) != str(quarter)
+                        for record in (row, metadata)
+                        for key in ("fiscal_quarter", "fiscalQuarter", "quarter", "lengthReport", "length_report")
+                    ):
+                        reason = "conflicting_fiscal_identity"
+                    report_basis = _report_basis(row, period)
+                    scope_values = [value for value in (row.get("consolidation_basis"), metadata.get("consolidation_basis"), report_basis.get("consolidation_basis")) if value]
+                    flow_values = [value for value in (row.get("flow_basis"), metadata.get("flow_basis"), report_basis.get("flow_basis")) if value]
+                    if len(set(scope_values)) > 1 or len(set(flow_values)) > 1:
+                        reason = "conflicting_statement_basis"
+                    scope = scope_values[0] if scope_values else None
+                    flow = flow_values[0] if flow_values else None
+                    identities.add((scope, flow))
+                    metric = vas_ids[params.statement_type.value].get(row.get("id"))
+                    if not metric:
+                        continue
+                    if params.statement_type == StatementType.BALANCE and row.get("off_balance") is not False:
+                        continue
+                    # Unit is per item; frame-level unit/multiplier cannot override it.
+                    value_row = dict(row, _source="VCI", _value_unit=row.get("unit"),
+                                     _provider_value_multiplier=1, _normalization_contract=None,
+                                     consolidation_basis=scope, flow_basis=flow)
+                    number, evidence = _normalize_value(row.get("value"), value_row, str(row.get("id")), metric, period)
+                    evidence.update(source_id=row.get("id"), source_record=row,
+                                    consolidation_basis=scope, flow_basis=flow)
+                    if _coerce_number(row.get("value")) is None:
+                        evidence["unavailable_reason"] = "missing_value"
+                    previous = lineage.get(metric)
+                    if previous:
+                        same = (previous.get("source_id") == evidence.get("source_id")
+                                and previous.get("source_unit") == evidence.get("source_unit")
+                                and previous.get("provider_value") == evidence.get("provider_value")
+                                and previous.get("consolidation_basis") == scope
+                                and previous.get("flow_basis") == flow)
+                        if not same:
+                            lineage[metric] = {"unavailable_reason": "conflicting_metric_rows",
+                                               "components": [previous, evidence]}
+                            metrics.pop(metric, None)
+                        continue
+                    lineage[metric] = evidence
+                    if number is not None and not evidence.get("unavailable_reason"):
+                        metrics[metric] = number
+
+                if len(identities) != 1:
+                    reason = "conflicting_statement_basis"
+                scope, flow = next(iter(identities)) if len(identities) == 1 else (None, None)
+                if "cash_and_equivalents" in metrics:
+                    metrics["cash"] = metrics["cash_and_equivalents"]
+                statement = FinancialStatementData(
+                    symbol=params.symbol, period=period, statement_type=params.statement_type.value,
+                    source="VCI", currency="VND", value_unit="VND", unit_metadata=lineage,
+                    consolidation_basis=scope, flow_basis=flow, unavailable_reason=reason,
+                    raw_data={"period": period, "provider_rows": rows, "provider_attrs": attrs},
+                    updated_at=datetime.now(UTC), **metrics,
+                )
+                results.append(statement)
+            return admit_statement_rows(results, params.period)
 
 
         def _metric_mapping(statement: str) -> dict[str, str]:
