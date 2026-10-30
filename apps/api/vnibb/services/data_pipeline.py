@@ -317,7 +317,16 @@ class DataPipeline:
             else:
                 frame = history_callable(start=start, end=end, interval=interval)
             if isinstance(frame, pd.DataFrame):
-                frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=source, provider=quote, asset_type=getattr(quote, "asset_type", None)))
+                asset_type = getattr(quote, "asset_type", None)
+                if (
+                    str(asset_type or "").lower() in {"index", "derivative"}
+                    and frame.attrs.get("price_unit") is None
+                    and frame.attrs.get("priceUnit") is None
+                ):
+                    # A derivative contract is quoted in index points; declare
+                    # that unit explicitly instead of leaving it unverified.
+                    frame.attrs["price_unit"] = "index_points"
+                frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=source, provider=quote, asset_type=asset_type))
             return frame
 
         frame = await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
@@ -391,7 +400,7 @@ class DataPipeline:
                 frame = await self._fetch_quote_history_frame(
                     symbol=symbol, start=start, end=end, interval="1D", bypass_internal_retry=True,
                 )
-                if any(str(row.get("price_source") or "").upper() not in {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI"} for row in frame.to_dict(orient="records")):
+                if any(str(row.get("price_source") or "").upper() not in {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI", "VNSTOCK5_HISTORY:VCI"} for row in frame.to_dict(orient="records")):
                     raise ValueError(f"Free VCI provenance required for {symbol}") from exc
                 return frame
         prepared = []

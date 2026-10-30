@@ -136,3 +136,50 @@ def test_long_ratio_conflicts_and_unknown_units_are_withheld():
     assert result.pe is None
     assert result.roe is None
     assert result.provider_evidence == rows
+
+
+def test_generation_five_rt_long_ids_map_to_canonical_fields():
+    # Real 5.x VCI long ratio shape: one value row per id per fiscal period,
+    # RT_* taxonomy ids, explicit unit column, RT_CAT_* category rows present.
+    rows = [
+        {"period": "2025", "id": "RT_CAT_VALUE", "name": "Valuation", "unit": "", "value": None},
+        {"period": "2025", "id": "RT_VALUE_PE", "name": "P/E", "unit": "lần", "value": 12.5},
+        {"period": "2025", "id": "RT_VALUE_PB", "name": "P/B", "unit": "lần", "value": 1.8},
+        {"period": "2025", "id": "RT_PRT_ROE", "name": "ROE", "unit": "%", "value": 21.0},
+        {"period": "2025", "id": "RT_LEV_DE", "name": "D/E", "unit": "lần", "value": 0.7},
+        {"period": "2025", "id": "RT_LQD_CR", "name": "Current ratio", "unit": "lần", "value": 2.2},
+        {"period": "2024", "id": "RT_VALUE_PE", "name": "P/E", "unit": "lần", "value": 10.0},
+        {"period": "2024", "id": "RT_PRT_ROE", "name": "ROE", "unit": "%", "value": 18.0},
+    ]
+    result = VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol="VNM", period="year"), rows,
+    )
+    assert [(r.period, r.pe, r.pb, r.roe, r.debt_equity, r.current_ratio) for r in result] == [
+        ("2025", 12.5, 1.8, 21.0, 0.7, 2.2),
+        ("2024", 10.0, None, 18.0, None, None),
+    ]
+
+
+def test_generation_five_rt_frame_without_mapped_ids_yields_empty():
+    # Only category rows and unmapped/NaN value rows: no admitted value must
+    # surface as success; the period is dropped rather than returned null-laden.
+    rows = [
+        {"period": "2025", "id": "RT_CAT_VALUE", "name": "Valuation", "unit": "", "value": None},
+        {"period": "2025", "id": "RT_VALUE_BETA", "name": "Beta", "unit": "lần", "value": 1.1},
+        {"period": "2025", "id": "RT_BANK_CAR", "name": "CAR", "unit": "%", "value": 9.0},
+        {"period": "2025", "id": "RT_VALUE_MARKET_CAP", "name": "Market cap", "unit": "tỷ VNĐ", "value": 1234},
+    ]
+    assert VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol="VNM", period="year"), rows,
+    ) == []
+
+
+def test_generation_five_rt_period_nan_values_are_skipped():
+    rows = [
+        {"period": "2025", "id": "RT_VALUE_PE", "name": "P/E", "unit": "lần", "value": float("nan")},
+        {"period": "2025", "id": "RT_PRT_ROA", "name": "ROA", "unit": "%", "value": 5.0},
+    ]
+    result = VnstockFinancialRatiosFetcher.transform_data(
+        FinancialRatiosQueryParams(symbol="VNM", period="year"), rows,
+    )
+    assert [(r.period, r.pe, r.roa) for r in result] == [("2025", None, 5.0)]

@@ -36,6 +36,7 @@ def postgres_contract_database_url(environ: dict[str, str] | None = None) -> str
 
 
 mock_vnstock = MagicMock()
+mock_vnstock.status.return_value = {"authenticated": False, "active": False, "tier": "guest"}
 sys.modules["vnstock"] = mock_vnstock
 
 os.environ["ENVIRONMENT"] = "test"

@@ -157,4 +157,4 @@ class VnstockStockPriceFetcher:
             
         except Exception as e:
             logger.error(f"Stock price fetch failed for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch quote for {symbol}: {e}")
+            raise ProviderError(f"Failed to fetch quote for {symbol}: {e}", "vnstock") from e

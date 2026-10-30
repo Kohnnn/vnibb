@@ -41,15 +41,38 @@ def _sdk(monkeypatch, **exports):
 
 
 @pytest.mark.asyncio
-async def test_registration_accepts_authenticated_v5_status(isolated_registration, monkeypatch):
-    calls = []
-    _sdk(monkeypatch, setup_api_key=lambda key: calls.append(key) or {"authenticated": True, "tier": "free"})
+async def test_free_tier_supplied_golden_key_persists_nothing(isolated_registration, monkeypatch):
+    persisted = {"value": None}
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: (persisted.__setitem__("value", key), {"authenticated": True, "tier": "golden"})[1],
+        login=lambda key: (persisted.__setitem__("value", key), {"authenticated": True, "tier": "golden"})[1],
+        status=lambda: {"authenticated": False, "tier": "guest"},
+        logout=lambda: None,
+    )
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "free")
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "free")
 
     result = await registration.ensure_vnstock_registration()
 
-    assert result.registered is True
-    assert result.reason == "registered"
-    assert calls == ["synthetic-key"]
+    assert result.registered is False
+    assert result.reason == "registration_failed"
+    # The free runtime must never call a persisting login for a user-supplied key.
+    assert persisted["value"] is None
+
+
+@pytest.mark.asyncio
+async def test_free_tier_without_persisting_validator_declines(isolated_registration, monkeypatch):
+    calls = []
+    _sdk(monkeypatch, setup_api_key=lambda key: calls.append(key) or {"authenticated": True, "tier": "free"})
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "free")
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "free")
+
+    result = await registration.ensure_vnstock_registration()
+
+    assert result.registered is False
+    assert result.reason == "registration_failed"
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -57,10 +80,18 @@ async def test_registration_accepts_authenticated_v5_status(isolated_registratio
 async def test_golden_registration_requires_entitled_sdk_status(isolated_registration, monkeypatch, tier, expected):
     monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
     monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
-    _sdk(monkeypatch, setup_api_key=lambda key: {"authenticated": True, "tier": tier})
+    cleared = []
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: True,
+        status=lambda: {"authenticated": True, "tier": tier},
+        logout=lambda: cleared.append(True),
+    )
 
     result = await registration.ensure_vnstock_registration()
     assert result.registered is expected
+    if not expected:
+        assert cleared == [True]
 
 
 @pytest.mark.asyncio
@@ -68,6 +99,8 @@ async def test_sdk_auth_error_does_not_disclose_key(isolated_registration, monke
     def failed_auth(key):
         raise RuntimeError(key)
 
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
     _sdk(monkeypatch, setup_api_key=failed_auth)
     result = await registration.ensure_vnstock_registration()
     assert not result.registered
@@ -76,12 +109,18 @@ async def test_sdk_auth_error_does_not_disclose_key(isolated_registration, monke
 
 
 @pytest.mark.asyncio
-async def test_golden_cannot_reuse_free_registration(isolated_registration, monkeypatch):
-    _sdk(monkeypatch, setup_api_key=lambda key: {"authenticated": True, "tier": "free"})
-    assert (await registration.ensure_vnstock_registration()).registered
+async def test_golden_registration_rejects_free_tier_status(isolated_registration, monkeypatch):
     monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
     monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    cleared = []
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: True,
+        status=lambda: {"authenticated": True, "tier": "free"},
+        logout=lambda: cleared.append(True),
+    )
     assert not (await registration.ensure_vnstock_registration()).registered
+    assert cleared == [True]
 
 
 @pytest.mark.asyncio
@@ -90,13 +129,43 @@ async def test_registration_rejects_false_or_malformed_v5_status(
     isolated_registration, monkeypatch, status
 ):
     calls = []
-    _sdk(monkeypatch, setup_api_key=lambda key: calls.append(key) or status)
+    cleared = []
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: calls.append(key) or True,
+        status=lambda: status,
+        logout=lambda: cleared.append(True),
+    )
 
     result = await registration.ensure_vnstock_registration()
 
     assert result.registered is False
     assert result.reason == "registration_failed"
     assert calls == ["synthetic-key"]
+    assert cleared == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [{"authenticated": True}, {"authenticated": True, "tier": ""}])
+async def test_registration_rejects_authenticated_empty_tier(
+    isolated_registration, monkeypatch, status
+):
+    cleared = []
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: True,
+        status=lambda: status,
+        logout=lambda: cleared.append(True),
+    )
+
+    result = await registration.ensure_vnstock_registration()
+
+    assert result.registered is False
+    assert cleared == [True]
 
 
 @pytest.mark.asyncio
@@ -108,6 +177,8 @@ async def test_sdk_nonstandard_exit_is_registration_failure(isolated_registratio
         calls.append(key)
         raise error
 
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
     _sdk(monkeypatch, setup_api_key=failed_auth)
 
     result = await registration.ensure_vnstock_registration()
@@ -120,21 +191,31 @@ async def test_sdk_nonstandard_exit_is_registration_failure(isolated_registratio
 @pytest.mark.asyncio
 async def test_failed_v5_login_does_not_fall_back_to_v4(isolated_registration, monkeypatch):
     calls = []
+    cleared = []
 
     def failed_v5(key):
         calls.append(("v5", key))
-        return {"authenticated": False}
+        return True
 
     def forbidden_v4(key):
         calls.append(("v4", key))
         return True
 
-    _sdk(monkeypatch, setup_api_key=failed_v5, change_api_key=forbidden_v4)
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(
+        monkeypatch,
+        setup_api_key=failed_v5,
+        status=lambda: {"authenticated": False},
+        logout=lambda: cleared.append(True),
+        change_api_key=forbidden_v4,
+    )
 
     result = await registration.ensure_vnstock_registration()
 
     assert result.registered is False
     assert calls == [("v5", "synthetic-key")]
+    assert cleared == [True]
 
 
 @pytest.mark.asyncio
@@ -150,9 +231,15 @@ async def test_concurrent_registration_shares_blocked_authentication(isolated_re
         calls.append(key)
         loop.call_soon_threadsafe(worker_started.set)
         unblock_worker.wait()
-        return {"authenticated": True, "tier": "free"}
+        return True
 
-    _sdk(monkeypatch, setup_api_key=blocked_auth)
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(
+        monkeypatch,
+        setup_api_key=blocked_auth,
+        status=lambda: {"authenticated": True, "tier": "golden"},
+    )
     first = asyncio.create_task(registration.ensure_vnstock_registration())
     try:
         await asyncio.wait_for(worker_started.wait(), timeout=1)
@@ -175,8 +262,15 @@ async def test_shared_persistent_state_does_not_skip_device_authentication(
     import json
 
     calls = []
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
     cache_reads = []
-    _sdk(monkeypatch, setup_api_key=lambda key: calls.append(key) or {"authenticated": False})
+    _sdk(
+        monkeypatch,
+        setup_api_key=lambda key: calls.append(key) or True,
+        status=lambda: {"authenticated": False},
+        logout=lambda: None,
+    )
 
     class SharedCache:
         async def get(self, _key):
@@ -209,13 +303,19 @@ async def test_registration_cancellation_returns_before_worker_and_holds_lock(
     def blocked_auth(_key):
         loop.call_soon_threadsafe(worker_started.set)
         unblock_worker.wait()
-        return {"authenticated": True, "tier": "free"}
+        return True
 
     async def release_lock(key, lock):
         released.append((key, lock))
         lock_released.set()
 
-    _sdk(monkeypatch, setup_api_key=blocked_auth)
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "golden")
+    monkeypatch.setattr(registration.settings, "vnstock_runtime_tier", "golden")
+    _sdk(
+        monkeypatch,
+        setup_api_key=blocked_auth,
+        status=lambda: {"authenticated": True, "tier": "golden"},
+    )
     monkeypatch.setattr(registration, "_release_lock", release_lock)
     task = asyncio.create_task(registration.ensure_vnstock_registration())
 

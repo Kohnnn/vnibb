@@ -1175,7 +1175,7 @@ class MongoMarketDataService:
             normalized_rows: list[dict[str, Any]] = []
             for raw in rows:
                 if source == "vnstock-data" and str(raw.get("price_source") or "").upper() not in {
-                    "VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI",
+                    "VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI", "VNSTOCK5_HISTORY:VCI",
                 }:
                     raise ValueError(f"Free VCI provenance required for EOD fallback: {symbol_upper}")
                 trade_date = raw.get("tradeDate")

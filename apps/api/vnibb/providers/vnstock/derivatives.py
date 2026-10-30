@@ -131,7 +131,7 @@ class VnstockDerivativesFetcher:
             
         except Exception as e:
             logger.error(f"Derivatives fetch failed for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch derivatives data for {symbol}: {e}")
+            raise ProviderError(f"Failed to fetch derivatives data for {symbol}: {e}", "vnstock") from e
     
     @staticmethod
     async def list_contracts() -> List[str]:

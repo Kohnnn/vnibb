@@ -141,15 +141,26 @@ class VnstockPriceDepthFetcher:
             if not bids and not asks and records:
                 r = records[0]
                 for i in range(1, 4):
-                    bid_price = r.get(f"bidPrice{i}") or r.get(f"bid{i}")
-                    bid_vol = r.get(f"bidVol{i}") or r.get(f"bidVolume{i}")
+                    # vnstock 5.x native order_book emits canonical
+                    # bid_price_1..3/bid_vol_1..3/ask_price_1..3/ask_vol_1..3.
+                    bid_price = r.get(f"bidPrice{i}") or r.get(f"bid{i}") or r.get(f"bid_price_{i}")
+                    bid_vol = (
+                        r.get(f"bidVol{i}") or r.get(f"bidVolume{i}")
+                        or r.get(f"bid_vol_{i}")
+                    )
                     if bid_price:
                         bids.append(
                             OrderLevel(price=float(bid_price), volume=int(bid_vol or 0))
                         )
 
-                    ask_price = r.get(f"offerPrice{i}") or r.get(f"askPrice{i}") or r.get(f"ask{i}")
-                    ask_vol = r.get(f"offerVol{i}") or r.get(f"askVolume{i}") or r.get(f"askVol{i}")
+                    ask_price = (
+                        r.get(f"offerPrice{i}") or r.get(f"askPrice{i}")
+                        or r.get(f"ask{i}") or r.get(f"ask_price_{i}")
+                    )
+                    ask_vol = (
+                        r.get(f"offerVol{i}") or r.get(f"askVolume{i}")
+                        or r.get(f"askVol{i}") or r.get(f"ask_vol_{i}")
+                    )
                     if ask_price:
                         asks.append(
                             OrderLevel(price=float(ask_price), volume=int(ask_vol or 0))

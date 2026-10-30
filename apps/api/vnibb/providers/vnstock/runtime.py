@@ -24,6 +24,62 @@ def validate_free_runtime() -> None:
             "Use a clean community environment or rebuild the credential-free image "
             "without historical premium runtime mounts."
         )
+    _refuse_persisted_paid_account()
+
+
+def _refuse_persisted_paid_account() -> None:
+    """Refuse acquisition when the installed SDK already holds a paid credential.
+
+    A Golden/Diamond credential persisted by the SDK stays active for later
+    provider calls even under a free-tier runtime, so the free runtime must fail
+    closed instead of silently acquiring on someone else's entitlement. The SDK
+    is imported here when absent: a fresh process (scheduler/CLI, no lifespan)
+    must be checked on its first import, not only after a later one.
+    """
+    module = sys.modules.get("vnstock")
+    if module is None:
+        try:
+            module = __import__("vnstock")
+        except Exception:
+            # The SDK is genuinely absent: nothing can be persisted, and a later
+            # provider import fails on its own. Proceed without provider access.
+            return
+    status = getattr(module, "status", None)
+    if not callable(status):
+        raise RuntimeError(
+            "Free runtime cannot verify the installed vnstock credential state; "
+            "refusing to acquire without a credential status check."
+        )
+    try:
+        state = status()
+    except Exception as exc:
+        raise RuntimeError(
+            "Free runtime could not read the installed vnstock credential state; "
+            "refusing to acquire."
+        ) from exc
+    if not isinstance(state, dict):
+        raise RuntimeError(
+            "Installed vnstock credential status is malformed; refusing to acquire."
+        )
+    authenticated = state.get("authenticated")
+    if authenticated is None:
+        authenticated = state.get("has_api_key")
+    if authenticated is not True:
+        return
+    tier = str(state.get("tier") or "").strip().lower()
+    if tier in {"guest", "free"}:
+        return
+    if not tier:
+        # An authenticated credential that reports no tier is an unverifiable
+        # state: fail closed rather than acquire on an unknown plan.
+        raise RuntimeError(
+            "Installed vnstock reports an authenticated credential with no "
+            "verifiable paid tier; refusing to acquire."
+        )
+    raise RuntimeError(
+        f"Free runtime cannot use an authenticated {tier} credential; "
+        "authenticate as a free or guest account."
+    )
 
 
 def validate_runtime() -> None:
@@ -41,6 +97,11 @@ def validate_runtime() -> None:
 
 def import_vnstock_symbol(name: str) -> tuple[Any, str]:
     validate_runtime()
+    tier = os.getenv("VNSTOCK_RUNTIME_TIER", settings.vnstock_runtime_tier).strip().lower()
+    if tier == "free":
+        # Enforce the free-tier guard here too: callers that stub validate_runtime
+        # must not be able to bypass the persisted-paid-credential refusal.
+        _refuse_persisted_paid_account()
     module = __import__("vnstock", fromlist=[name])
     return getattr(module, name), "vnstock"
 

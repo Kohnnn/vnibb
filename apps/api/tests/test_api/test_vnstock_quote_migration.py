@@ -125,6 +125,33 @@ async def test_volume_profile_is_not_mislabeled_as_order_book(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_native_order_book_snake_case_is_parsed(monkeypatch):
+    class Market:
+        def equity(self, symbol):
+            assert symbol == "VNM"
+            return self
+
+        def order_book(self, *, source):
+            assert source == "VCI"
+            frame = pd.DataFrame([{
+                "bid_price_1": 39200.0, "bid_vol_1": 11200,
+                "bid_price_2": 39100.0, "bid_vol_2": 500,
+                "ask_price_1": 39300.0, "ask_vol_1": 800,
+                "ask_price_2": 39400.0, "ask_vol_2": 300,
+            }])
+            frame.attrs["price_unit"] = "VND"
+            return frame
+
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Market, "vnstock"))
+    depth = await VnstockPriceDepthFetcher.fetch("VNM")
+    assert (depth.bid_1.price, depth.bid_1.volume) == (39200.0, 11200)
+    assert (depth.ask_1.price, depth.ask_1.volume) == (39300.0, 800)
+    assert (depth.bid_2.price, depth.ask_2.price) == (39100.0, 39400.0)
+    assert depth.total_bid_volume == 11700
+    assert depth.total_ask_volume == 1100
+
+
+@pytest.mark.asyncio
 async def test_empty_foreign_flow_does_not_substitute_ohlcv(monkeypatch):
     class Trading:
         def __init__(self, *, symbol, source):

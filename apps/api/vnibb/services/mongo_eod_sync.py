@@ -181,7 +181,7 @@ async def _acquire_eod(client: Any, symbol: str, start: date, end: date,
             error_type = EmptyEodAcquisition if isinstance(exc, EmptyEodAcquisition) else RuntimeError
             raise error_type("Free VCI returned no EOD bars in the requested window") from exc
         if any(str(row.get("price_source") or "").upper() not in
-               {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI"} for row in rows):
+               {"VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI", "VNSTOCK5_HISTORY:VCI"} for row in rows):
             raise RuntimeError("Free VCI returned no source-backed EOD bars") from exc
         summary["fallbacks"] += 1
         return rows, "vnstock-data"

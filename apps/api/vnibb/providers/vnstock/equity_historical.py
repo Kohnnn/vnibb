@@ -7,7 +7,7 @@ for Vietnam-listed stocks using the vnstock library.
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -35,8 +35,8 @@ class EquityHistoricalQueryParams(BaseModel):
         description="Stock ticker symbol (e.g., VNM, FPT, VIC)",
     )
     start_date: date = Field(
-        ...,
-        description="Start date for historical data (YYYY-MM-DD)",
+        default_factory=lambda: date.today() - timedelta(days=365),
+        description="Start date for historical data (YYYY-MM-DD); defaults to one year ago",
     )
     end_date: date = Field(
         default_factory=date.today,

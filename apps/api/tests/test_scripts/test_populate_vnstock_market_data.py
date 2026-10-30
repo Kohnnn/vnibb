@@ -308,6 +308,58 @@ def test_non_vci_sources_are_refused_for_every_entrypoint(sdk, source):
         mongo.resolve_symbols("FPT", source)
 
 
+
+def test_missing_module_tolerated_so_free_runtime_still_imports(monkeypatch):
+    import builtins
+
+    from vnibb.providers.vnstock import runtime
+
+    monkeypatch.delitem(sys.modules, "vnstock", raising=False)
+    original_import = builtins.__import__
+
+    def block_vnstock(name, *args, **kwargs):
+        if name == "vnstock":
+            raise ImportError(name)
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", block_vnstock)
+
+    # An absent SDK persists nothing; the refusal must not block the free runtime.
+    runtime._refuse_persisted_paid_account()
+
+
+def test_status_call_that_raises_fails_closed(sdk):
+    def explode():
+        raise ValueError("boom")
+
+    sdk.status = explode
+    with pytest.raises(RuntimeError, match="could not read"):
+        fetch("quote.history")
+
+
+@pytest.mark.parametrize("surface", ["missing", "noncallable"])
+def test_missing_status_reader_fails_closed(sdk, surface):
+    if surface == "missing":
+        del sdk.status
+    else:
+        sdk.status = "not-callable"
+    with pytest.raises(RuntimeError, match="cannot verify"):
+        fetch("quote.history")
+
+
+@pytest.mark.parametrize("state", ["authenticated", ["authenticated"]])
+def test_malformed_status_fails_closed(sdk, state):
+    sdk.status = lambda: state
+    with pytest.raises(RuntimeError, match="malformed"):
+        fetch("quote.history")
+
+
+def test_authenticated_empty_tier_fails_closed(sdk):
+    sdk.status = lambda: {"authenticated": True, "tier": ""}
+    with pytest.raises(RuntimeError, match="no.*verifiable paid tier"):
+        fetch("quote.history")
+
+
 def test_persisted_paid_account_is_refused_before_acquisition(sdk):
     sdk.status = lambda: {"authenticated": True, "tier": "golden"}
     with pytest.raises(RuntimeError, match="free or guest account"):

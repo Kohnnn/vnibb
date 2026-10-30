@@ -28,6 +28,22 @@ Signal = Literal["strong_buy", "buy", "neutral", "sell", "strong_sell"]
 def normalize_history_frame(
     frame: pd.DataFrame, *, symbol: str, source: str, provider: Any = None,
 ) -> pd.DataFrame:
+    actual_source = str((getattr(frame, "attrs", None) or {}).get("source") or "").upper()
+    if actual_source and actual_source != str(source or "").upper():
+        # A frame's declared source wins provenance; the requested source cannot
+        # be relabelled onto it. Refuse rather than serving another feed's rows.
+        logger.warning(
+            "Skipping technical history with mismatched source: %s requested=%s actual=%s",
+            symbol, source, actual_source,
+        )
+        excluded = pd.DataFrame()
+        excluded.attrs["unit_exclusion"] = {
+            "reason": "source_mismatch",
+            "excluded_count": int(len(frame)),
+            "requested_source": str(source or "").upper(),
+            "actual_source": actual_source,
+        }
+        return excluded
     normalized = history_price_records(frame, symbol=symbol, source=source, provider=provider)
     unresolved_units = sorted(
         {

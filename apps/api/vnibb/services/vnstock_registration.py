@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -95,19 +96,66 @@ async def _register_with_lock(api_key: str, fingerprint: str) -> RegistrationRes
         await _release_lock(lock_key, lock)
 
 
+def _vnstock_auth_surface() -> tuple[Any, Any, Any]:
+    """Resolve (persist_login, read_status, clear_login) from the installed SDK.
+
+    The SDK exposes no credential check that avoids persistence: server tier is
+    read from the stored key. So we only ever call the persisting login when the
+    configured tier allows a persisted credential, and read status to decide.
+    """
+    import vnstock
+
+    persist = getattr(vnstock, "login", None) or getattr(vnstock, "setup_api_key", None)
+    read = getattr(vnstock, "status", None)
+    clear = getattr(vnstock, "logout", None)
+    return persist, read, clear
+
+
+def _normalized_status(status: Any) -> Optional[dict]:
+    if not isinstance(status, dict):
+        return None
+    if "authenticated" in status or "tier" in status:
+        return status
+    return None
+
+
+def _clear_persisted_login(clear: Any) -> None:
+    try:
+        if callable(clear):
+            clear()
+    except BaseException:
+        logger.warning("Failed to clear persisted VNStock credential")
+
+
 def _register_api_key(api_key: str) -> bool:
     try:
-
-        from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+        from vnibb.providers.vnstock.runtime import validate_source
 
         validate_source(settings.vnstock_source)
-        setup_api_key, _ = import_vnstock_symbol("setup_api_key")
-        status = setup_api_key(api_key)
-        if not isinstance(status, dict) or status.get("authenticated") is not True:
+        if settings.vnstock_runtime_tier != "golden":
+            # The installed SDK persists whatever key it is given and offers no
+            # persistence-free verification. A free runtime must never store a
+            # user-supplied credential: refuse without calling login.
             return False
-        if settings.vnstock_runtime_tier == "golden":
-            return status.get("tier") in {"golden", "diamond"}
-        return status.get("tier") == "free"
+
+        persist, read, clear = _vnstock_auth_surface()
+        if not callable(persist):
+            return False
+        result = persist(api_key)
+        if result is False:
+            return False
+        status = _normalized_status(read()) if callable(read) else None
+        if status is None:
+            _clear_persisted_login(clear)
+            return False
+        admitted = (
+            status.get("authenticated") is True
+            and status.get("tier") in {"golden", "diamond"}
+        )
+        if not admitted:
+            _clear_persisted_login(clear)
+            return False
+        return True
     except BaseException:
         logger.warning("VNStock API key authentication failed")
         return False

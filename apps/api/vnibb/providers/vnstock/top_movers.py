@@ -258,6 +258,11 @@ def _parse_price_board_record(row: dict) -> Optional[dict]:
         symbol=symbol,
     )
     known_unit = price_record["price_unit"] == "VND"
+    # Traded value is a currency amount in its own right; a board without an
+    # explicit VND value unit cannot certify it, so it is withheld independently
+    # of the price unit rather than ranking by an unverified number.
+    value_unit = str(row.get("value_unit") or row.get("accumulated_value_unit") or "").strip().upper()
+    value = value if value is not None and value_unit == "VND" else None
     return {
         "symbol": symbol,
         "price": price_record["price"] if known_unit else None,
@@ -342,7 +347,9 @@ class VnstockTopMoversFetcher:
                                 if "exchange" not in all_df.columns:
                                     raise ValueError("Exchange listing has no exchange column")
                                 exchange = "HNX" if index == "HNX" else "HOSE"
-                                all_df = all_df[all_df["exchange"] == exchange]
+                                # 5.x Listing reports HOSE as its canonical `HSX` code.
+                                exchange_values = all_df["exchange"].astype(str).str.upper().replace({"HSX": "HOSE"})
+                                all_df = all_df[exchange_values == exchange]
                                 symbols = all_df["symbol"].head(100).tolist()
                                 logger.info(
                                     "Got %s symbols from fallback (source=%s)", len(symbols), source
@@ -368,11 +375,14 @@ class VnstockTopMoversFetcher:
                         # Flatten MultiIndex columns
                         df = _flatten_multiindex_df(df)
                         unit = df.attrs.get("price_unit") or df.attrs.get("priceUnit")
+                        value_unit = df.attrs.get("value_unit") or df.attrs.get("valueUnit")
 
                         records = df.to_dict(orient="records")
-                        if unit is not None:
-                            for record in records:
+                        for record in records:
+                            if unit is not None:
                                 record.setdefault("price_unit", unit)
+                            if value_unit is not None:
+                                record.setdefault("value_unit", value_unit)
                         logger.info(
                             "Got %s records from price_board (source=%s)", len(records), source
                         )
@@ -428,7 +438,9 @@ class VnstockTopMoversFetcher:
             elif type == "volume":
                 sorted_data = sorted(parsed_data, key=lambda x: x.get("volume") or 0, reverse=True)
             elif type == "value":
-                sorted_data = sorted(parsed_data, key=lambda x: x.get("value") or 0, reverse=True)
+                # Rank only rows whose traded value carries explicit VND evidence.
+                certified = [d for d in parsed_data if d.get("value") is not None]
+                sorted_data = sorted(certified, key=lambda x: x.get("value") or 0, reverse=True)
             else:
                 sorted_data = parsed_data
 

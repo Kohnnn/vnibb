@@ -76,9 +76,9 @@ def test_transform_data_does_not_infer_debt_equity_from_unitless_liabilities():
 
     data = VnstockFinancialRatiosFetcher.transform_data(params, raw_rows)
 
-    assert len(data) == 1
-    assert data[0].period == "2024"
-    assert data[0].debt_equity is None
+    # Unitless liabilities/equity carry no mapped ratio id, so the period is
+    # withheld entirely instead of returning a null-laden success row.
+    assert data == []
 
 
 def test_transform_data_row_based_returns_empty_without_period_columns():

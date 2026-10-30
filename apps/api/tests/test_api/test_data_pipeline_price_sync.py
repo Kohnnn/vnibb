@@ -54,6 +54,14 @@ class FakeSession:
     def __init__(self):
         self._latest_price = None
 
+
+    def get_bind(self):
+        return types.SimpleNamespace(dialect=types.SimpleNamespace(name="sqlite"))
+
+    @property
+    def bind(self):
+        return self.get_bind()
+
     async def __aenter__(self):
         return self
 

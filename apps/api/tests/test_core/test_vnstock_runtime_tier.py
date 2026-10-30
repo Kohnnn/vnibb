@@ -105,6 +105,9 @@ def test_free_runtime_guard_rejects_each_paid_package(monkeypatch, paid_module):
 def test_free_runtime_guard_accepts_clean_community_environment(monkeypatch):
     from vnibb.providers.vnstock import runtime
 
+    community = types.ModuleType("vnstock")
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
 
     assert runtime.validate_free_runtime() is None
@@ -117,6 +120,7 @@ def test_runtime_imports_community_in_clean_free_environment(monkeypatch, symbol
     community = types.ModuleType("vnstock")
     community_symbol = type(symbol, (), {})
     setattr(community, symbol, community_symbol)
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
     monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
 
@@ -199,7 +203,9 @@ def test_direct_importer_rejects_non_free_vci_policy_before_import(monkeypatch, 
 def test_finance_does_not_supply_missing_community_symbols(monkeypatch):
     from vnibb.providers.vnstock import runtime
 
-    monkeypatch.setitem(sys.modules, "vnstock", types.ModuleType("vnstock"))
+    community = types.ModuleType("vnstock")
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    monkeypatch.setitem(sys.modules, "vnstock", community)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
     with pytest.raises(AttributeError, match="Finance"):
         runtime.get_finance_class()

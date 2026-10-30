@@ -319,8 +319,10 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 result.provider_evidence = [dict(row) for row in data]
             return results
 
-        def _canonical_ratio(evidence: list[dict], period_keys: list[Any] | None = None, **payload: Any) -> FinancialRatioData:
-            return FinancialRatioData(**normalize_ratio_payload(payload, evidence, payload.get("period"), period_keys))
+        def _canonical_ratio(evidence: list[dict], period_keys: list[Any] | None = None, field_ids: dict[str, str] | None = None, **payload: Any) -> FinancialRatioData:
+            return FinancialRatioData(**normalize_ratio_payload(
+                payload, evidence, payload.get("period"), period_keys, field_ids=field_ids,
+            ))
 
         def _to_float(value: Any) -> Optional[float]:
             if value is None:
@@ -564,6 +566,34 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 "ocf_sales": "ocf_sales",
                 "revenue_growth": "revenue_growth",
                 "earnings_growth": "earnings_growth",
+                # vnstock 5.x long-form ratio ids use the RT_* taxonomy. Only ids
+                # whose unit semantics exactly match a canonical FinancialRatioData
+                # field are mapped. RT_CAT_* category rows carry no value, RT_BANK_*
+                # is bank-only, and RT_VALUE_EBITDA/EBIT/EQUITY/BETA/MARKET_CAP are
+                # money (tỷ VNĐ) or counts that would need scaling, so all are
+                # withheld rather than published raw into a VND field.
+                "rt_value_pe": "pe",
+                "rt_value_pb": "pb",
+                "rt_value_ps": "ps",
+                "rt_value_ev_ebitda": "ev_ebitda",
+                "rt_value_dividend_yield": "dividend_yield",
+                "rt_lev_de": "debt_equity",
+                "rt_lev_da": "debt_assets",
+                "rt_lev_equity_to_assets": "equity_to_assets",
+                "rt_lev_financial_leverage": "equity_multiplier",
+                "rt_lqd_cr": "current_ratio",
+                "rt_lqd_qr": "quick_ratio",
+                "rt_lqd_cash_ratio": "cash_ratio",
+                # RT_EFF_ATR is an asset turn (`vòng`), matching asset_turnover.
+                # RT_EFF_DIO/DSO/DPO (days) and RT_EFF_FATR (fixed-asset turn) have
+                # no model field with the same unit semantics, so stay unmapped.
+                "rt_eff_atr": "asset_turnover",
+                "rt_prt_roe": "roe",
+                "rt_prt_roa": "roa",
+                "rt_prt_roic": "roic",
+                "rt_prt_gross_margin": "gross_margin",
+                "rt_prt_net_margin": "net_margin",
+                "rt_prt_ebit_margin": "operating_margin",
             }
 
             raw_fields = {
@@ -588,27 +618,49 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
             by_period: dict[str, dict[str, Any]] = {
                 period: {"symbol": params.symbol.upper(), "period": period} for period in periods
             }
+            ids_by_period: dict[str, dict[str, str]] = {period: {} for period in periods}
 
             for row in data:
                 item_id = row.get("item_id")
                 if not item_id:
                     continue
-                item_id_lower = str(item_id).strip().lower()
+                item_id_text = str(item_id).strip()
+                item_id_lower = item_id_text.lower()
                 for raw_key, period in period_columns:
                     if raw_key not in row:
                         continue
                     value = _to_float(row.get(raw_key))
-                    if value is None:
+                    if value is None or value != value:
                         continue
                     if item_id_lower in metric_map:
                         field = metric_map[item_id_lower]
                         if by_period[period].get(field) is None:
                             by_period[period][field] = value
+                            if item_id_lower.startswith("rt_"):
+                                ids_by_period[period][field] = item_id_text
                         continue
             results = []
             for period in periods:
+                payload = by_period[period]
+                if not any(
+                    key not in {"symbol", "period"} and value is not None
+                    for key, value in payload.items()
+                ):
+                    # A period whose rows carry no mapped ratio id (RT_CAT_*,
+                    # RT_BANK_*, unmapped ids) has no admitted value; skip it
+                    # instead of emitting null-laden success.
+                    logger.debug(
+                        "Skipping ratio period %s for %s: no mapped metric id",
+                        period, params.symbol,
+                    )
+                    continue
                 try:
-                    results.append(_canonical_ratio(data, [key for key, normalized in period_columns if normalized == period], **by_period[period]))
+                    results.append(_canonical_ratio(
+                        data,
+                        [key for key, normalized in period_columns if normalized == period],
+                        field_ids=ids_by_period[period],
+                        **payload,
+                    ))
                 except Exception as e:
                     logger.warning(f"Skipping invalid ratio row: {e}")
             return results

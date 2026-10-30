@@ -105,11 +105,40 @@ def _declared_unit(key: Any, unit: Any) -> str:
     return "unknown"
 
 
-def normalize_ratio_payload(payload: Mapping[str, Any], evidence: list[dict], period: str | None = None, period_keys: list[Any] | None = None) -> dict:
+def _field_unit(unit: Any) -> str:
+    """Classify a declared unit for an id-resolved percent field.
+
+    Only an explicit percentage is admitted for a percent field; a ratio label
+    such as `lần`/`times` contradicts it and withholds the value.
+    """
+    text = str(unit or "").strip().lower()
+    if text in {"%", "percent", "percentage", "pct"}:
+        return "percent"
+    if text in {"fraction", "decimal"}:
+        return "fraction"
+    return "conflict" if text else "unknown"
+
+
+def normalize_ratio_payload(
+    payload: Mapping[str, Any],
+    evidence: list[dict],
+    period: str | None = None,
+    period_keys: list[Any] | None = None,
+    field_ids: Mapping[str, str] | None = None,
+) -> dict:
+    """Admit ratio cells and stamp canonical units.
+
+    `field_ids` maps a canonical field name to the provider id that was already
+    resolved for it (e.g. `{"roe": "RT_PRT_ROE"}`). When present the stable
+    provider id, not a localized `name`, is the identity: a row whose id matches
+    is admitted for that field, and only unit compatibility is checked. A unit
+    that contradicts the field's expected type still withholds the value.
+    """
     normalized = dict(payload)
     units = {}
     for metric in PERCENT_RATIO_FIELDS:
         candidates = []
+        field_id = _identity(field_ids.get(metric)) if field_ids and field_ids.get(metric) else None
         for row in evidence:
             declarations = [row[key] for key in ("unit", "Unit") if key in row] or [None]
             if "item_id" in row:
@@ -120,14 +149,28 @@ def normalize_ratio_payload(payload: Mapping[str, Any], evidence: list[dict], pe
                 parts = key if isinstance(key, tuple) else (key,)
                 identities = {_identity(part) for part in parts}
                 identities |= {re.sub(r"_?(percent|pct)$", "", identity) for identity in identities}
-                if value is None or not identities.intersection(_ALIASES[metric]):
+                if value is None:
+                    continue
+                if field_id is not None:
+                    # The stable provider id decides the field; the localized
+                    # name is evidence only and never gates admission.
+                    if field_id not in identities:
+                        continue
+                elif not identities.intersection(_ALIASES[metric]):
                     continue
                 try:
                     numeric = float(value)
                 except (TypeError, ValueError):
                     continue
                 if math.isfinite(numeric):
-                    candidates.append((numeric, _declared_unit(key, unit)))
+                    declared = _declared_unit(key, unit)
+                    if field_id is not None:
+                        # The id selects the field; the explicit unit string
+                        # governs the type, with the label used only when the
+                        # row carries no unit of its own.
+                        explicit = _field_unit(unit)
+                        declared = explicit if explicit != "unknown" else _declared_unit(key, None)
+                    candidates.append((numeric, declared))
         if metric == "dividend_yield" and not candidates and payload.get(metric) is None:
             normalized[metric] = None
             continue
