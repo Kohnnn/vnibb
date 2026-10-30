@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 
 
-
 class BalanceSheetQueryParams(BaseModel):
     """Query parameters for balance sheet data."""
     
@@ -78,6 +77,7 @@ class VnstockBalanceSheetFetcher(BaseFetcher[BalanceSheetQueryParams, BalanceShe
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
         from sys import maxsize
+
         from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
 
         return await VnstockFinancialsFetcher.extract_data(
@@ -90,7 +90,12 @@ class VnstockBalanceSheetFetcher(BaseFetcher[BalanceSheetQueryParams, BalanceShe
         data: List[dict[str, Any]],
     ) -> List[BalanceSheetData]:
         from sys import maxsize
-        from vnibb.providers.vnstock.financials import FinancialsQueryParams, StatementType, VnstockFinancialsFetcher
+
+        from vnibb.providers.vnstock.financials import (
+            FinancialsQueryParams,
+            StatementType,
+            VnstockFinancialsFetcher,
+        )
         from vnibb.services.financial_service import admit_statement_rows
 
         statements = VnstockFinancialsFetcher.transform_data(

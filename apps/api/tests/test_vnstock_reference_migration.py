@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers.vnstock import runtime
 from vnibb.providers.vnstock.company_events import VnstockCompanyEventsFetcher

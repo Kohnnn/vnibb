@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional

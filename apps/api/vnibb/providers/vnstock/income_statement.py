@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 
 
-
 class IncomeStatementQueryParams(BaseModel):
     """Query parameters for income statement data."""
 
@@ -79,6 +78,7 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
         credentials: dict[str, str] | None = None,
     ) -> List[dict[str, Any]]:
         from sys import maxsize
+
         from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
 
         return await VnstockFinancialsFetcher.extract_data(
@@ -91,7 +91,12 @@ class VnstockIncomeStatementFetcher(BaseFetcher[IncomeStatementQueryParams, Inco
         data: List[dict[str, Any]],
     ) -> List[IncomeStatementData]:
         from sys import maxsize
-        from vnibb.providers.vnstock.financials import FinancialsQueryParams, StatementType, VnstockFinancialsFetcher
+
+        from vnibb.providers.vnstock.financials import (
+            FinancialsQueryParams,
+            StatementType,
+            VnstockFinancialsFetcher,
+        )
         from vnibb.services.financial_service import admit_statement_rows
 
         statements = VnstockFinancialsFetcher.transform_data(

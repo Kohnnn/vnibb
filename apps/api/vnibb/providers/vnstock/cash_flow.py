@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 from vnibb.providers.base import BaseFetcher
 
 
-
 class CashFlowQueryParams(BaseModel):
     """Query parameters for cash flow data."""
     
@@ -75,6 +74,7 @@ class VnstockCashFlowFetcher(BaseFetcher[CashFlowQueryParams, CashFlowData]):
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
         from sys import maxsize
+
         from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
 
         return await VnstockFinancialsFetcher.extract_data(
@@ -87,7 +87,12 @@ class VnstockCashFlowFetcher(BaseFetcher[CashFlowQueryParams, CashFlowData]):
         data: List[dict[str, Any]],
     ) -> List[CashFlowData]:
         from sys import maxsize
-        from vnibb.providers.vnstock.financials import FinancialsQueryParams, StatementType, VnstockFinancialsFetcher
+
+        from vnibb.providers.vnstock.financials import (
+            FinancialsQueryParams,
+            StatementType,
+            VnstockFinancialsFetcher,
+        )
         from vnibb.services.financial_service import admit_statement_rows
 
         statements = VnstockFinancialsFetcher.transform_data(

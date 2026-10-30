@@ -10,21 +10,17 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from vnibb.core.cache import build_cache_key
-from vnibb.core.cache_constants import PIPELINE_TTL_SCREENER
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import normalize_screener_record
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from vnibb.services.screener_metadata import screener_metadata_updates
-from vnibb.core.vn_sectors import resolve_sector_name
-from vnibb.models.company import Company
 from vnibb.models.screener import ScreenerSnapshot
-from vnibb.models.stock import Stock, StockPrice
+from vnibb.models.stock import Stock
 from vnibb.services.pipeline.base import BasePipeline
+from vnibb.services.screener_metadata import screener_metadata_updates
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +86,8 @@ class ScreenerPipeline(BasePipeline):
     ) -> int:
         """Sync admitted VCI financial ratios into screener snapshots."""
         from vnibb.providers.vnstock.financial_ratios import (
-            FinancialRatiosQueryParams, VnstockFinancialRatiosFetcher,
+            FinancialRatiosQueryParams,
+            VnstockFinancialRatiosFetcher,
         )
         from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 

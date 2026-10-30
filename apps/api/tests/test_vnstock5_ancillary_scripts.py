@@ -1,10 +1,15 @@
 
 import pandas as pd
 import pytest
-
-from scripts import run_trading_hours_intraday, seed_stocks, test_simple, verify_database
-from scripts import verify_vnstock_integration
 from vnibb.providers.vnstock import runtime
+
+from scripts import (
+    run_trading_hours_intraday,
+    seed_stocks,
+    test_simple,
+    verify_database,
+    verify_vnstock_integration,
+)
 
 
 @pytest.mark.asyncio

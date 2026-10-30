@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 from vnibb.api.v1 import equity
-from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source
+from vnibb.core.price_units import (
+    history_price_records,
+    normalize_price_record,
+    persisted_price_record,
+    persisted_price_source,
+)
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalQueryParams,
     VnstockEquityHistoricalFetcher,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-
 from vnibb.providers.vnstock import runtime
 from vnibb.providers.vnstock.top_movers import (
     VnstockTopMoversFetcher,

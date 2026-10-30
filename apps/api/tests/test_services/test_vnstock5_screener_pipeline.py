@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 import pandas as pd
 import pytest
 from sqlalchemy import select
-
 from vnibb.core.config import settings
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
