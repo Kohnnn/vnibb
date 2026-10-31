@@ -412,6 +412,19 @@ async def _load_financial_statement_fallback(
                 for name in FinancialStatementData.model_fields:
                     if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
                         setattr(restored, name, None)
+            # The column is the authoritative stored state. A `canonical_data`
+            # entry that disagrees with it is stale, and serving the canonical
+            # would make this reader disagree with the MCP reader, which reads
+            # the column. Adopt the column value and keep the canonical's
+            # provenance so the metric stays certified.
+            for name in FinancialStatementData.model_fields:
+                if name in {"fiscal_year", "fiscal_quarter"}:
+                    continue
+                stored_value = getattr(row, name, None)
+                if not isinstance(stored_value, (int, float)):
+                    continue
+                if getattr(restored, name, None) != stored_value:
+                    setattr(restored, name, stored_value)
             restored.raw_data = raw
             fallback_rows[index] = restored
             statement = restored

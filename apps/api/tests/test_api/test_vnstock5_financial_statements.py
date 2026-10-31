@@ -546,3 +546,61 @@ async def test_dedicated_fetchers_admit_evidenced_zero(sdk, statement):
     result = await fetcher.fetch(params(symbol="HPG"))
 
     assert getattr(result[0], STATEMENTS[statement][3]) == 0
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+@pytest.mark.parametrize("stale", [False, True])
+async def test_retained_metric_reads_agree_across_rest_and_mcp(statement, stale):
+    """REST rebuilds a statement from `canonical_data`; MCP reads the SQL column.
+    A retained metric must read identically through both, or a stale canonical
+    would make the two surfaces disagree about the same row."""
+    from sqlalchemy import BigInteger, Integer, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from vnibb.api.v1.equity import _load_financial_statement_fallback
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+
+    model = {"income": IncomeStatement, "balance": BalanceSheet, "cashflow": CashFlow}[statement]
+    metric = STATEMENTS[statement][3]
+    second = {"income": "gross_profit", "balance": "inventory",
+              "cashflow": "investing_cash_flow"}[statement]
+    base = {"symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025}
+    column_value = 555.0
+    # `stale` models a canonical that disagrees with the column the upsert keeps.
+    # `statement_type` is the provider form the pipeline writes into `canonical_data`.
+    canonical = {**base, "source": "VCI", "currency": "VND", "value_unit": "VND",
+                 "statement_type": statement,
+                 "consolidation_basis": "consolidated", "flow_basis": "annual",
+                 metric: 100, second: 444 if stale else column_value,
+                 "unit_metadata": {
+                     metric: {"source_unit": "VND", "value_unit": "VND"},
+                     second: {"source_unit": "VND", "value_unit": "VND"}}}
+
+    engine = create_async_engine("sqlite+aiosqlite://")
+    table = model.__table__
+    original = table.c.id.type
+    table.c.id.type = BigInteger().with_variant(Integer, "sqlite")
+    async with engine.begin() as connection:
+        await connection.run_sync(table.create)
+    table.c.id.type = original
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as session:
+        session.add(model(id=1, **base, source="VCI", raw_data={"_financial_lineage": {
+            "canonical_data": canonical, "retained_metrics": [second]}},
+            **{metric: 100, second: column_value}))
+        await session.commit()
+
+        rest = (await _load_financial_statement_fallback(
+            db=session, symbol="HPG", statement_type=STATEMENTS[statement][0],
+            period="2025", limit=1))[0]
+        stored = (await session.execute(select(model))).scalars().all()[0]
+        mcp = _admit_statement_row(
+            {column.name: getattr(stored, column.name)
+             for column in model.__table__.columns}, model)
+
+    # MCP reads the stored column; REST rebuilds from `canonical_data`. When the
+    # two disagree the canonical is stale, so neither reader may serve it and
+    # both must publish the column value the upsert kept.
+    assert getattr(rest, second) == column_value
+    assert mcp.get(second) == column_value
+    assert getattr(rest, second) == mcp.get(second)
