@@ -818,8 +818,15 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     }
     values = {name: payload.get(name) for name in ("symbol", "period", "fiscal_year", "fiscal_quarter", "source")}
     units = dict(metadata.get("unit_metadata") or {})
+    # A metric the sync retained keeps its stored value but may no longer carry
+    # the source and unit it was stored under. Serving it here would relabel
+    # older, differently-sourced data as freshly verified, so it is withheld.
+    unprovenanced = set(lineage.get("unprovenanced_metrics") or ()) - set(units)
     for column, field in monetary.items():
         if field in FinancialStatementData.model_fields:
+            if column in unprovenanced:
+                values[field] = None
+                continue
             values[field] = payload.get(column)
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
@@ -828,8 +835,13 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     admitted = admit_statement_rows([
         FinancialStatementData(**values, **metadata, statement_type=statement_type, raw_data=raw)
     ], payload.get("period_type") or "year")[0]
-    unavailable = {}
+    unavailable = {
+        column: "retained_metric_without_provenance"
+        for column in monetary if column in unprovenanced and payload.get(column) is not None
+    }
     for column, field in monetary.items():
+        if column in unavailable:
+            continue
         if payload.get(column) is not None and getattr(admitted, field, None) is None:
             unavailable[column] = (
                 admitted.unavailable_reason

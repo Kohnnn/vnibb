@@ -122,7 +122,8 @@ async def test_generation_five_explicit_synthetic_basis_admits_vnd_unscaled(sdk,
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
-@pytest.mark.parametrize("scenario", ["basisless", "verified", "rejected_metric", "no_metric"])
+@pytest.mark.parametrize("scenario", ["basisless", "verified", "incompatible_basis",
+                                      "rejected_metric", "no_metric"])
 async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, scenario, monkeypatch, test_engine):
     from datetime import datetime
     from unittest.mock import AsyncMock
@@ -142,7 +143,33 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
     year = datetime.utcnow().year - 1
     period = str(year)
     original_time = datetime(2020, 1, 2)
-    original_raw = {"_financial_lineage": {"source": "VCI", "evidence": "retained"}}
+    # A legacy row carries no canonical lineage: the retained columns survive the
+    # upsert but their source and unit evidence does not, so they must not be
+    # served under the incoming source.
+    legacy_raw = {"_financial_lineage": {"source": "VCI", "evidence": "retained"}}
+    # A row with lineage keeps its metrics' provenance and may be served.
+    verified_raw = {"_financial_lineage": {
+        "source": "VCI", "evidence": "retained",
+        "canonical_data": {"symbol": "HPG", "period": period, "fiscal_year": year,
+                           "source": "VCI", "value_unit": "VND",
+                           "consolidation_basis": "consolidated", "flow_basis": "annual",
+                           metric: 777, second_metric: 444,
+                           "unit_metadata": {second_metric: {"source_unit": "VND"}}},
+    }}
+    # A prior row whose own provenance disagrees with the incoming statement: the
+    # retained value must not be served inside a statement it does not belong to.
+    incompatible_raw = {"_financial_lineage": {
+        "source": "vnstock", "evidence": "retained",
+        "canonical_data": {"symbol": "HPG", "period": period, "fiscal_year": year,
+                           "source": "vnstock", "value_unit": "VND",
+                           "consolidation_basis": "separate", "flow_basis": "annual",
+                           metric: 777, second_metric: 444,
+                           "unit_metadata": {second_metric: {"source_unit": "VND"}}},
+    }}
+    original_raw = {
+        "verified": verified_raw,
+        "incompatible_basis": incompatible_raw,
+    }.get(scenario, legacy_raw)
 
     if test_engine.dialect.name == "sqlite":
         def recreate(connection):
@@ -198,10 +225,32 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
             SyncStatus.sync_type == "financial_acquisition", SyncStatus.status != "running"
         ))).all()
         assert receipts[-1].additional_data == outcome
-        if scenario in {"verified", "basisless"}:
+        if scenario in {"verified", "basisless", "incompatible_basis"}:
             assert result == 1 and outcome["complete"] is True
             assert outcome["period_outcomes"][period]["status"] == "stored"
             assert getattr(stored, metric) == 100
+            # The adapter maps only a subset of the model; an unmapped metric the
+            # source omits must survive the upsert instead of being nulled.
+            assert getattr(stored, second_metric) == 444
+            lineage = (stored.raw_data or {}).get("_financial_lineage") or {}
+            canonical = lineage.get("canonical_data") or {}
+            if scenario == "verified":
+                # Recoverable provenance matching the incoming statement: the
+                # retained value and its unit stay in the lineage, so readers
+                # rebuild it instead of serving None.
+                assert canonical.get(second_metric) == 444
+                assert canonical["unit_metadata"][second_metric] == {"source_unit": "VND"}
+                assert lineage.get("retained_metrics") == [second_metric]
+                assert not lineage.get("unprovenanced_metrics")
+            else:
+                # The prior value must not be re-admitted under the incoming
+                # identity: either its evidence is gone (legacy) or its source and
+                # basis disagree (incompatible). The key stays present because the
+                # payload carries every model field, but must remain empty, and the
+                # column is flagged as unprovenanced.
+                assert canonical.get(second_metric) is None
+                assert second_metric in lineage.get("unprovenanced_metrics", [])
+                assert second_metric not in lineage.get("retained_metrics", [])
             cache.assert_awaited_once()
         else:
             assert result == 0 and outcome["complete"] is False

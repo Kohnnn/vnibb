@@ -140,6 +140,15 @@ MARKET_INDEX_ALIASES = {
 }
 
 
+_FINANCIAL_ROW_COLUMNS = {"id", "symbol", "period", "period_type", "fiscal_year",
+                          "fiscal_quarter", "source", "created_at", "updated_at", "raw_data"}
+
+
+def financial_metric_columns(model) -> set[str]:
+    """Metric columns a financial upsert must not clear when the source omits them."""
+    return {column.name for column in model.__table__.columns} - _FINANCIAL_ROW_COLUMNS
+
+
 def get_upsert_stmt(
     model,
     index_elements,
@@ -3705,8 +3714,84 @@ class DataPipeline:
                                 }
                             payload = {**canonical, "raw_data": raw_payload}
 
+                            # The upsert preserves columns the source omits, so the
+                            # lineage written into raw_data must agree with the row
+                            # that will actually be stored. `canonical` is the
+                            # incoming payload, where every unmapped field is None;
+                            # reading the API back from it would serve `eps=None`
+                            # while the column holds the retained value.
+                            #
+                            # A retained metric also keeps the provenance it was
+                            # stored under. Relabelling it with the incoming source
+                            # and unit would present older, differently-sourced data
+                            # as freshly verified, so a metric whose prior evidence
+                            # cannot be recovered is left out of the lineage and
+                            # withheld by the reader instead.
+                            existing_rows = (
+                                await session.execute(
+                                    select(model).where(
+                                        model.symbol == symbol,
+                                        model.period == period_value,
+                                        model.period_type == normalized_period,
+                                    )
+                                )
+                            ).scalars().all()
+                            existing_row = existing_rows[0] if existing_rows else None
+                            existing_raw = getattr(existing_row, "raw_data", None)
+                            prior_canonical = (
+                                (existing_raw.get("_financial_lineage") or {}).get("canonical_data")
+                                if isinstance(existing_raw, dict) else None
+                            )
+                            retained = set()
+                            if isinstance(prior_canonical, dict):
+                                prior_metadata = prior_canonical.get("unit_metadata")
+                                prior_metadata = prior_metadata if isinstance(prior_metadata, dict) else {}
+                                # A retained metric is only served if its own
+                                # provenance matches the statement it would now
+                                # appear in. Admission validates units and basis per
+                                # statement, not per metric, so merging a value from a
+                                # different source or consolidation basis would
+                                # present it as freshly verified under the incoming
+                                # identity.
+                                compatible = (
+                                    str(prior_canonical.get("source") or "").upper()
+                                    == str(canonical.get("source") or "").upper()
+                                    and str(prior_canonical.get("consolidation_basis") or "")
+                                    == str(canonical.get("consolidation_basis") or "")
+                                    and str(prior_canonical.get("flow_basis") or "")
+                                    == str(canonical.get("flow_basis") or "")
+                                    and str(prior_canonical.get("value_unit") or "")
+                                    == str(canonical.get("value_unit") or "")
+                                )
+                                for key in financial_metric_columns(model):
+                                    if canonical.get(key) is not None or prior_canonical.get(key) is None:
+                                        continue
+                                    if compatible and key in prior_metadata:
+                                        canonical[key] = prior_canonical[key]
+                                        canonical.setdefault("unit_metadata", {})[key] = prior_metadata[key]
+                                        retained.add(key)
+                            # Anything the upsert keeps but `canonical_data` does not
+                            # describe has no recoverable provenance. Derive that set
+                            # from the stored columns: a legacy row retains values
+                            # without ever entering the merge loop above.
+                            unprovenanced = sorted(
+                                key for key in financial_metric_columns(model)
+                                if canonical.get(key) is None
+                                and getattr(existing_row, key, None) is not None
+                            )
+                            raw_payload["_financial_lineage"]["canonical_data"] = canonical
+                            raw_payload["_financial_lineage"]["retained_metrics"] = sorted(retained)
+                            raw_payload["_financial_lineage"]["unprovenanced_metrics"] = unprovenanced
+
+                            # The VCI adapter maps only a subset of the model's
+                            # columns; every unmapped one arrives as None. Letting
+                            # those overwrite would erase stored values (eps,
+                            # total_liabilities, depreciation, ...) on any row the
+                            # source condition admits, so keep the existing value
+                            # whenever the incoming one is absent.
                             stmt = get_upsert_stmt(
                                 model, ["symbol", "period", "period_type"], values,
+                                preserve_existing_on_null=financial_metric_columns(model),
                                 update_condition=source_update_condition(model, values["source"]),
                             )
                             result = await session.execute(stmt.returning(model.id))
