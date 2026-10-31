@@ -94,7 +94,15 @@ async def test_generation_five_long_statements_route_vci_preserve_source_attrs_a
     assert result[0].period == expected_period
     assert len(result[0].raw_data["provider_rows"]) == 2
     assert result[0].raw_data["provider_attrs"]["provider_cap"] == "one_period"
-    assert getattr(result[0], STATEMENTS[statement][3]) is None
+    # No report header in the frame. An annual period is the full-year total, so
+    # the adapter declares the basis and admits. A balance sheet is a point-in-time
+    # figure and is exempt from the flow-basis check; a quarter of a flow statement
+    # cannot have its basis inferred from the label, so it stays withheld.
+    if period == "year" or statement == "balance":
+        assert getattr(result[0], STATEMENTS[statement][3]) == 100
+        assert result[0].consolidation_basis == "consolidated"
+    else:
+        assert getattr(result[0], STATEMENTS[statement][3]) is None
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
@@ -190,7 +198,7 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
             SyncStatus.sync_type == "financial_acquisition", SyncStatus.status != "running"
         ))).all()
         assert receipts[-1].additional_data == outcome
-        if scenario == "verified":
+        if scenario in {"verified", "basisless"}:
             assert result == 1 and outcome["complete"] is True
             assert outcome["period_outcomes"][period]["status"] == "stored"
             assert getattr(stored, metric) == 100
@@ -331,9 +339,11 @@ async def test_dedicated_fetchers_use_vci_and_shared_admission(sdk, statement, b
 
     assert len(result) == 2
     assert calls[0][1:7] == (STATEMENTS[statement][0], "year", "en", False, "long", "vci")
-    assert getattr(result[0], STATEMENTS[statement][3]) == (100 if basis else None)
+    # The v5 VCI route carries no report header; the adapter declares the
+    # consolidated/annual basis instead of withholding the figure.
+    assert getattr(result[0], STATEMENTS[statement][3]) == 100
     assert result[0].raw_data["provider_attrs"]["source"] == "vci"
-    assert result[0].consolidation_basis == ("consolidated" if basis else None)
+    assert result[0].consolidation_basis == "consolidated"
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
@@ -393,8 +403,10 @@ async def test_dedicated_extractors_preserve_provider_errors(monkeypatch, statem
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
-@pytest.mark.parametrize("invalid", ["source", "unit", "basis"])
+@pytest.mark.parametrize("invalid", ["source", "unit"])
 async def test_dedicated_fetchers_withhold_unverified_zero(sdk, statement, invalid):
+    """An unverified source or unit still withholds a zero; those are real
+    integrity failures, unlike a missing report header."""
     from vnibb.providers.vnstock.balance_sheet import (
         BalanceSheetQueryParams,
         VnstockBalanceSheetFetcher,
@@ -416,16 +428,47 @@ async def test_dedicated_fetchers_withhold_unverified_zero(sdk, statement, inval
     frame.loc[:, "value"] = 0
     if invalid == "source":
         frame.attrs["source"] = "kbs"
-    elif invalid == "unit":
-        frame.loc[:, "unit"] = "unknown"
     else:
-        frame.attrs.pop("consolidation_basis")
+        frame.loc[:, "unit"] = "unknown"
     frames[(statement, "year", report)] = frame
 
     result = await fetcher.fetch(params(symbol="HPG"))
 
     assert result
     assert getattr(result[0], STATEMENTS[statement][3]) is None
+
+
+@pytest.mark.parametrize("statement", STATEMENTS)
+async def test_dedicated_fetchers_declare_basis_when_header_absent(sdk, statement):
+    """A zero with no report header is still admitted: the adapter declares the
+    consolidated/annual basis rather than withholding the figure."""
+    from vnibb.providers.vnstock.balance_sheet import (
+        BalanceSheetQueryParams,
+        VnstockBalanceSheetFetcher,
+    )
+    from vnibb.providers.vnstock.cash_flow import CashFlowQueryParams, VnstockCashFlowFetcher
+    from vnibb.providers.vnstock.income_statement import (
+        IncomeStatementQueryParams,
+        VnstockIncomeStatementFetcher,
+    )
+
+    fetcher, params = {
+        "income": (VnstockIncomeStatementFetcher, IncomeStatementQueryParams),
+        "balance": (VnstockBalanceSheetFetcher, BalanceSheetQueryParams),
+        "cashflow": (VnstockCashFlowFetcher, CashFlowQueryParams),
+    }[statement]
+    _, frames, _ = sdk
+    report = STATEMENTS[statement][1]
+    frame = sdk_frame(report, statement, "2025", basis=True)
+    frame.loc[:, "value"] = 0
+    frame.attrs.pop("consolidation_basis")
+    frames[(statement, "year", report)] = frame
+
+    result = await fetcher.fetch(params(symbol="HPG"))
+
+    assert result
+    assert getattr(result[0], STATEMENTS[statement][3]) == 0
+    assert result[0].consolidation_basis == "consolidated"
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)

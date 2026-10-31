@@ -11,7 +11,8 @@ PRIMARY_FINANCIAL_SOURCES: tuple[str, ...] = ("vietcap",)
 SECONDARY_FINANCIAL_SOURCES: tuple[str, ...] = ("VCI",)
 # ponytail: add issuer sources only with field-bound admission and ownership-safe writes.
 
-# Order matters: readers pick the first source that has rows.
+# Membership, not rank: snapshots compete every admitted source on fiscal recency,
+# so a newer secondary period supersedes an older primary one.
 ADMITTED_FINANCIAL_SOURCES: tuple[str, ...] = (
     *PRIMARY_FINANCIAL_SOURCES,
     *SECONDARY_FINANCIAL_SOURCES,

@@ -26,11 +26,7 @@ from sqlalchemy import select
 from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
-from vnibb.core.financial_sources import (
-    ADMITTED_FINANCIAL_SOURCES,
-    PRIMARY_FINANCIAL_SOURCES,
-    SECONDARY_FINANCIAL_SOURCES,
-)
+from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
@@ -1217,15 +1213,14 @@ async def _get_latest_symbol_document(
             _query_limit(1),
         ]
     )
-    for source_values in (
-        list(PRIMARY_FINANCIAL_SOURCES),
-        list(SECONDARY_FINANCIAL_SOURCES),
-    ):
-        source_queries = [_query_equal("source", source_values), *queries]
-        rows = await list_collection_documents(collection_id, queries=source_queries)
-        if rows:
-            return rows[0]
-    return None
+    # Recency, not source rank, decides the snapshot: the ordering below is only
+    # meaningful when every admitted source competes in one query. Ranking by
+    # source first returned a stale primary row ahead of a newer admitted one.
+    rows = await list_collection_documents(
+        collection_id,
+        queries=[_query_equal("source", list(ADMITTED_FINANCIAL_SOURCES)), *queries],
+    )
+    return rows[0] if rows else None
 
 
 async def _get_symbol_rows(

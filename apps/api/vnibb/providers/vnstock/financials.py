@@ -936,7 +936,23 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                           and str(head.get("PeriodEnd")) == f"{year.group(1)}12"):
                         result["flow_basis"] = "annual"
                     return result
-            return {"consolidation_basis": row.get("consolidation_basis"), "flow_basis": row.get("flow_basis")}
+            # The v5 VCI route returns a flat table with no report header, so
+            # `source_reports` is absent and neither the consolidation scope nor
+            # the flow basis can be read from the payload. VCI publishes the
+            # consolidated (hợp nhất) statement as the standard listed-company
+            # report, and a period of the form `20\d{2}` is the full-year total.
+            # Declare both here and record the assumption in lineage instead of
+            # withholding every monetary field.
+            declared_scope = row.get("consolidation_basis") or "consolidated"
+            declared_flow = row.get("flow_basis")
+            if declared_flow is None and re.fullmatch(r"(?:FY)?20\d{2}", normalized):
+                declared_flow = "annual"
+            return {
+                "consolidation_basis": declared_scope,
+                "flow_basis": declared_flow,
+                "basis_declared": row.get("consolidation_basis") is None,
+                "flow_declared": row.get("flow_basis") is None and declared_flow is not None,
+            }
 
         def _normalize_value(value: Any, row: dict[str, Any], label: str, metric: str, period: str):
             source = str(row.get("_source") or "").upper()
@@ -1066,6 +1082,10 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     number, evidence = _normalize_value(row.get("value"), value_row, str(row.get("id")), metric, period)
                     evidence.update(source_id=row.get("id"), source_record=row,
                                     consolidation_basis=scope, flow_basis=flow)
+                    if report_basis.get("basis_declared"):
+                        evidence["basis_declared"] = "consolidated"
+                    if report_basis.get("flow_declared"):
+                        evidence["flow_declared"] = True
                     if _coerce_number(row.get("value")) is None:
                         evidence["unavailable_reason"] = "missing_value"
                     previous = lineage.get(metric)

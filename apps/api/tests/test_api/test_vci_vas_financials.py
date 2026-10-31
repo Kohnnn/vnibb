@@ -57,12 +57,16 @@ def test_vas_unknown_unit_duplicate_off_balance_and_missing_value():
     assert math.isnan(result.raw_data["provider_rows"][4]["value"])
 
 
-def test_vas_missing_basis_does_not_admit_even_when_record_looks_standardized():
+def test_vas_missing_basis_declares_consolidated_and_admits():
+    """The v5 VCI route carries no report header, so the adapter declares the
+    consolidated basis rather than withholding every monetary field."""
     data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100), basis=False)
     data[0].update(statement_type="income", unit_metadata={})
     result = transform(StatementType.INCOME, data)[0]
-    assert result.revenue is None
-    assert result.unit_metadata["revenue"]["unavailable_reason"] == "unverified_statement_basis"
+    assert result.revenue == 100
+    assert result.consolidation_basis == "consolidated"
+    assert result.flow_basis == "annual"
+    assert result.unit_metadata["revenue"]["basis_declared"] == "consolidated"
     assert result.raw_data["provider_rows"][0]["value"] == 100
 
 
@@ -147,12 +151,25 @@ def test_vas_accounts_receivable_uses_only_trade_receivables(reverse):
     assert result.raw_data["provider_rows"] == data
 
 
-def test_vas_annual_period_does_not_prove_annual_flow():
+def test_vas_annual_period_declares_annual_flow_when_header_absent():
+    """A `20\\d{2}` period is the full-year total; the v5 route omits the report
+    header that would otherwise prove it, so the adapter declares `annual`."""
     data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100))
     data[0]["_provider_attrs"].pop("flow_basis")
     result = transform(StatementType.INCOME, data)[0]
+    assert result.revenue == 100
+    assert result.flow_basis == "annual"
+    assert result.unit_metadata["revenue"]["flow_declared"] is True
+
+
+def test_vas_quarter_period_does_not_declare_annual_flow():
+    """Only a bare `20\\d{2}` period is a full-year total; a quarter must not be
+    silently promoted to annual."""
+    data = rows("income_statement", ("2025-Q1", "IS_NET_REVENUE", "VNĐ", 100))
+    data[0]["_provider_attrs"].pop("flow_basis")
+    result = transform(StatementType.INCOME, data, period="quarter")[0]
     assert result.revenue is None
-    assert result.unit_metadata["revenue"]["unavailable_reason"] == "unknown_annual_flow_basis"
+    assert result.flow_basis is None
 
 
 def test_vas_mixed_basis_withholds_entire_period():
