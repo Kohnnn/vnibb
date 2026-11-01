@@ -694,6 +694,53 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     assert admitted.get("income_before_tax") == expected
 
 
+
+@pytest.mark.parametrize("canonical_state,expected", [
+    ("omitted", 555.0),   # a partial canonical says nothing: the column stays served
+    ("null", None),       # a stated null is an explicit no-value: withheld
+    ("equal", 555.0),
+    ("different", None),
+])
+def test_lineage_omitted_metric_is_served_where_a_stated_null_is_withheld(canonical_state, expected):
+    """A partial canonical omitting the metric must not read as an explicit null.
+
+    Older `canonical_data` need not contain every money field. Omitting one
+    leaves the stored column served; stating it null or different withholds it.
+    Both readers must agree, or the REST fallback returns null for a column MCP
+    still serves.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    canonical = {
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        "unit_metadata": {"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+    }
+    if canonical_state == "null":
+        canonical["revenue"] = None
+    elif canonical_state == "equal":
+        canonical["revenue"] = 555.0
+    elif canonical_state == "different":
+        canonical["revenue"] = 444.0
+
+    row = SimpleNamespace(revenue=555.0)
+    restored = _restore_lineage_statement(
+        row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
+        FinancialStatementData(**canonical),
+    )
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   revenue=555.0, raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert restored.revenue == expected
+    assert admitted.get("revenue") == expected
+
 @pytest.mark.parametrize("stored,capex,capital_expenditure,expected", [
     # `capex` and `capital_expenditure` are one metric. A canonical holding the
     # alias while the stored column disagrees must not leak the alias.

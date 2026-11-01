@@ -331,14 +331,15 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
         if not isinstance(stored_value, (int, float)):
             continue
         # Only a field the canonical actually states can disagree. The sync dumps
-        # every field, but an older canonical may omit a metric entirely, which
-        # says nothing about the stored column and leaves it served.
+        # every field, but a partial canonical may omit a metric entirely; that
+        # says nothing about the column, so the stored value is served as it is.
         stated_fields = [field for field in family if field in restored.model_fields_set]
-        if not stated_fields:
-            continue
         stated = sorted({getattr(restored, field, None) for field in stated_fields
                          if getattr(restored, field, None) is not None})
-        if stated != [stored_value]:
+        # A stated null is an explicit no-value and disagrees; an omitted metric
+        # says nothing and leaves the stored observation served.
+        disagrees = stated != [stored_value] if stated_fields else False
+        if disagrees:
             for field in family:
                 cleared[field] = None
                 unavailable[field] = {
@@ -347,7 +348,8 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
                 }
             withheld[column] = stored_value
         else:
-            # Serve the agreed value under every spelling the canonical may use.
+            # Stated-and-agreeing, or omitted: serve the stored observation under
+            # every spelling the canonical may be read by.
             for field in family:
                 cleared[field] = stored_value
     if cleared:
