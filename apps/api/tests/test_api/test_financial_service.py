@@ -692,3 +692,51 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     assert restored.pre_tax_profit == expected
     # MCP serves the column name; both must resolve to the same decision.
     assert admitted.get("income_before_tax") == expected
+
+
+@pytest.mark.parametrize("stored,capex,expected", [
+    # `capex` and `capital_expenditure` are one metric. A canonical holding the
+    # alias while the stored column disagrees must not leak the alias.
+    (-50.0, -40.0, None),
+    (-50.0, None, None),
+    (-50.0, -50.0, -50.0),
+])
+def test_lineage_withholds_both_spellings_of_an_aliased_metric(stored, capex, expected):
+    """A withheld metric is cleared under every spelling, on both readers.
+
+    `CashFlow` has a `capital_expenditure` column but no `capex` column, and
+    the canonical may state either name. Clearing only one spelling would leave
+    the other visible while MCP withholds the column.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import CashFlow
+
+    canonical = {field: None for field in FinancialStatementData.model_fields}
+    canonical.update({
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "cashflow",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        "capex": capex,
+        "unit_metadata": {"capital_expenditure": {"source_unit": "VND", "value_unit": "VND"}},
+    })
+    row = SimpleNamespace(**{
+        column.name: (stored if column.name == "capital_expenditure" else None)
+        for column in CashFlow.__table__.columns
+    })
+    restored = _restore_lineage_statement(
+        row, {"_financial_lineage": {"canonical_data": canonical}}, CashFlow,
+        FinancialStatementData(**canonical),
+    )
+
+    payload = {column.name: None for column in CashFlow.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   capital_expenditure=stored,
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, CashFlow)
+
+    assert restored.capital_expenditure == expected
+    assert restored.capex == expected
+    assert admitted.get("capital_expenditure") == expected
