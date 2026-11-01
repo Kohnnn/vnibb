@@ -149,6 +149,20 @@ def financial_metric_columns(model) -> set[str]:
     return {column.name for column in model.__table__.columns} - _FINANCIAL_ROW_COLUMNS
 
 
+
+# SQL column -> every canonical field name that can describe it. `canonical_data`
+# is a `model_dump` of the provider model, whose field names differ from the SQL
+# columns for a few metrics.
+_CANONICAL_SPELLINGS = {
+    "income_before_tax": ("income_before_tax", "pre_tax_profit", "profit_before_tax"),
+    "income_tax": ("income_tax", "tax_expense"),
+    "non_current_liabilities": ("non_current_liabilities", "long_term_liabilities"),
+    "capital_expenditure": ("capital_expenditure", "capex"),
+    "cash_and_equivalents": ("cash_and_equivalents", "cash"),
+    "total_equity": ("total_equity", "equity"),
+    "net_change_in_cash": ("net_change_in_cash", "net_cash_flow"),
+}
+
 def get_upsert_stmt(
     model,
     index_elements,
@@ -3764,20 +3778,31 @@ class DataPipeline:
                                     == str(canonical.get("value_unit") or "")
                                 )
                                 for key in financial_metric_columns(model):
-                                    if canonical.get(key) is not None or prior_canonical.get(key) is None:
+                                    spellings = _CANONICAL_SPELLINGS.get(key, (key,))
+                                    if any(canonical.get(name) is not None for name in spellings):
                                         continue
-                                    if compatible and key in prior_metadata:
-                                        canonical[key] = prior_canonical[key]
-                                        canonical.setdefault("unit_metadata", {})[key] = prior_metadata[key]
+                                    held = next((name for name in spellings
+                                                 if prior_canonical.get(name) is not None), None)
+                                    if held is None:
+                                        continue
+                                    if compatible and held in prior_metadata:
+                                        canonical[held] = prior_canonical[held]
+                                        canonical.setdefault("unit_metadata", {})[held] = prior_metadata[held]
                                         retained.add(key)
                             # Anything the upsert keeps but `canonical_data` does not
                             # describe has no recoverable provenance. Derive that set
                             # from the stored columns: a legacy row retains values
                             # without ever entering the merge loop above.
+                            # A column and its canonical field may differ in name
+                            # (`income_before_tax` vs `pre_tax_profit`); check every
+                            # spelling before calling a retained value unprovenanced.
                             unprovenanced = sorted(
                                 key for key in financial_metric_columns(model)
-                                if canonical.get(key) is None
-                                and getattr(existing_row, key, None) is not None
+                                if getattr(existing_row, key, None) is not None
+                                and all(
+                                    canonical.get(spelling) is None
+                                    for spelling in _CANONICAL_SPELLINGS.get(key, (key,))
+                                )
                             )
                             raw_payload["_financial_lineage"]["canonical_data"] = canonical
                             raw_payload["_financial_lineage"]["retained_metrics"] = sorted(retained)

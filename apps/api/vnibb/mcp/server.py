@@ -811,6 +811,8 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     aliases = {
         "income_before_tax": "pre_tax_profit", "income_tax": "tax_expense",
         "non_current_liabilities": "long_term_liabilities",
+        "cash_and_equivalents": "cash", "total_equity": "equity",
+        "net_change_in_cash": "net_cash_flow",
     }
     monetary = {
         column.name: aliases.get(column.name, column.name)
@@ -818,15 +820,6 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     }
     values = {name: payload.get(name) for name in ("symbol", "period", "fiscal_year", "fiscal_quarter", "source")}
     units = dict(metadata.get("unit_metadata") or {})
-    # A metric the sync retained keeps its stored value but may no longer carry
-    # the source and unit it was stored under. Serving it here would relabel
-    # older, differently-sourced data as freshly verified, so it is withheld.
-    unprovenanced = set(lineage.get("unprovenanced_metrics") or ()) - set(units)
-    withheld = {}
-    # A stored metric whose value disagrees with `canonical_data` is not backed
-    # by this lineage, so it is withheld and disclosed raw. The statement stays
-    # served: the canonical still describes every metric that agrees, and only
-    # the disagreeing cells lose their provenance.
     # Mirrors `equity._STATEMENT_CANONICAL_ALIASES`; a canonical may carry a
     # metric under an equivalent name, which still describes the column.
     _CANONICAL_ALIASES = {
@@ -836,6 +829,29 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
         "capital_expenditure": "capex", "capex": "capital_expenditure",
     }
+    _CANONICAL_ALIASES_NAMES: dict[str, list[str]] = {}
+    for _alias, _target in _CANONICAL_ALIASES.items():
+        _CANONICAL_ALIASES_NAMES.setdefault(_target, []).append(_alias)
+    # A metric the sync retained keeps its stored value but may no longer carry
+    # the source and unit it was stored under. Serving it here would relabel
+    # older, differently-sourced data as freshly verified, so it is withheld.
+    # `unprovenanced_metrics` names columns; `unit_metadata` names canonical
+    # fields, so a metric with a valid unit under any spelling is provenanced.
+    unprovenanced = {
+        column for column in (lineage.get("unprovenanced_metrics") or ())
+        if not any(
+            spelling in units
+            for spelling in (
+                column, monetary.get(column, column),
+                *_CANONICAL_ALIASES_NAMES.get(monetary.get(column, column), ()),
+            )
+        )
+    }
+    withheld = {}
+    # A stored metric whose value disagrees with `canonical_data` is not backed
+    # by this lineage, so it is withheld and disclosed raw. The statement stays
+    # served: the canonical still describes every metric that agrees, and only
+    # the disagreeing cells lose their provenance.
 
     _CONFLICT = object()
     _UNSTATED = object()
