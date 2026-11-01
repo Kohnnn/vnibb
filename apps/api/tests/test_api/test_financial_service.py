@@ -647,6 +647,11 @@ async def test_get_financials_with_ttm_propagates_cancellation(monkeypatch):
         # The alias does not license a disagreement; the row is withheld.
         (555.0, "profit_before_tax", 444.0, None),
         (555.0, "pre_tax_profit", 444.0, None),
+        # The sync dumps every field, so a metric it holds as `None` is an
+        # explicit "no value". Over a stored number that disagrees and must be
+        # withheld on both surfaces, not read as an absent field.
+        (555.0, "pre_tax_profit", None, None),
+        (555.0, "profit_before_tax", None, None),
     ],
 )
 def test_lineage_alias_agreement_matches_between_readers(column_value, canonical_metric, canonical_value, expected):
@@ -655,23 +660,23 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     A canonical may carry `profit_before_tax` while the column is
     `income_before_tax`. Both readers must agree on whether that value is
     backed, so a disagreement cannot be served by one surface and withheld by
-    the other.
+    the other, and an explicit `None` must not be read as a missing field.
     """
     from types import SimpleNamespace
-
-    from sqlalchemy import BigInteger, Integer
 
     from vnibb.api.v1.equity import _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
 
-    canonical = {
+    # `model_dump` shape: every field present, unstated metrics explicit `None`.
+    canonical = {field: None for field in FinancialStatementData.model_fields}
+    canonical.update({
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
         "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
-        "consolidation_basis": "consolidated", "flow_basis": "annual",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
         canonical_metric: canonical_value,
         "unit_metadata": {"pre_tax_profit": {"source_unit": "VND", "value_unit": "VND"}},
-    }
+    })
     row = SimpleNamespace(income_before_tax=column_value)
     restored = _restore_lineage_statement(
         row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,

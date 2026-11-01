@@ -838,14 +838,22 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     }
 
     def _canonical_value(field: str) -> Any:
-        if field in canonical:
-            return canonical.get(field)
-        return next((canonical.get(alias) for alias, target in _CANONICAL_ALIASES.items()
-                     if target == field and alias in canonical), None)
+        """Return the canonical value for `field`, or None when unstated.
+
+        A semantic alias names the same metric, so take whichever spelling the
+        canonical states a value under. Both spellings are `None` for a metric
+        the sync holds as an explicit no-value, which then disagrees with a
+        stored number and is withheld here and in the REST reader alike.
+        """
+        value = canonical.get(field)
+        if value is None:
+            value = next((canonical.get(alias)
+                          for alias, target in _CANONICAL_ALIASES.items()
+                          if target == field), None)
+        return value
     disagreeing = {
         column for column, field in monetary.items()
         if payload.get(column) is not None
-        and _canonical_value(field) is not None
         and _canonical_value(field) != payload.get(column)
     }
     for column, field in monetary.items():
