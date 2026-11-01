@@ -318,17 +318,16 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
         stored_value = getattr(row, column, None)
         if not isinstance(stored_value, (int, float)):
             continue
-        # The canonical may carry the value under a semantic alias of `name`
-        # (e.g. `capex` for `capital_expenditure`); a matching alias means the
-        # lineage still describes the column.
+        # A semantic alias names the same metric (e.g. `capex` for
+        # `capital_expenditure`). The sync dumps every field, so take whichever
+        # spelling the canonical states a value under; a value is withheld only
+        # when the resolved metric disagrees with the stored column.
         candidate = getattr(restored, name, None)
         if candidate is None:
             alias_value = next((getattr(restored, alias, None)
                                 for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
                                 if target == name), None)
             if alias_value is not None:
-                # The lineage carries the value under a semantic alias; serve it
-                # on the canonical field so the alias does not read as absent.
                 candidate = alias_value
                 cleared[name] = alias_value
         if candidate != stored_value:
