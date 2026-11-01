@@ -907,6 +907,17 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
                                 if field != column and field in units else units[column])
+    # A metric the row does not store (`goodwill`, `selling_general_admin`, or a
+    # column added after the row was written) lives only in the canonical. REST
+    # enriches those from `canonical_data`; MCP must serve the same value, or
+    # the surfaces disagree. A stored column always wins: the row is ground
+    # truth for anything it actually holds.
+    for name, value in canonical.items():
+        if (name in FinancialStatementData.model_fields and name not in basis_fields
+                and name not in {"statement_type", "raw_data"}
+                and payload.get(name) is None and values.get(name) is None):
+            payload[name] = value
+            values[name] = value
     metadata["unit_metadata"] = units
     admitted = admit_statement_rows([
         FinancialStatementData(**values, **metadata, statement_type=statement_type, raw_data=raw)

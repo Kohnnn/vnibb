@@ -701,16 +701,17 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     (555.0, "equal", 555.0),
     (555.0, "different", None),
     # The reverse direction: the row holds no value, but the canonical states
-    # one. That number was never stored, so both readers serve the null.
-    (None, "equal", None),
-    (None, "number", None),
+    # one. Provenance lives in the canonical, so that number is served and the
+    # row is enriched rather than left null.
+    (None, "equal", 555.0),
+    (None, "number", 555.0),
 ])
-def test_lineage_serves_only_values_the_row_actually_stores(stored, canonical_state, expected):
-    """Neither reader may invent a value the stored row does not hold.
+def test_lineage_serves_what_the_canonical_proves(stored, canonical_state, expected):
+    """The row wins where it holds a value; the canonical fills where it does not.
 
-    A partial canonical that omits a metric leaves the stored column served; a
-    stated null or different number withholds it. When the column is null but
-    the canonical states a number, the number was never stored and must not be
+    A partial canonical omitting a metric says nothing, so the stored column
+    stays served; a stated null or different number withholds it. When the row
+    holds no value the canonical is the only provenance left, so its number is
     served. Both readers must agree in every direction.
     """
     from types import SimpleNamespace
@@ -744,6 +745,41 @@ def test_lineage_serves_only_values_the_row_actually_stores(stored, canonical_st
 
     assert restored.revenue == expected
     assert admitted.get("revenue") == expected
+
+
+def test_lineage_serves_a_metric_that_has_no_sql_column():
+    """`selling_general_admin` exists only in the canonical, on every model.
+
+    No column can hold it, so clearing it because the row's column is null
+    would drop a value REST served before the parity fix. Both readers must
+    serve the canonical value.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    canonical = {
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        "selling_general_admin": -88e9,
+        "unit_metadata": {"selling_general_admin": {"source_unit": "VND", "value_unit": "VND"}},
+    }
+    assert "selling_general_admin" not in {c.name for c in IncomeStatement.__table__.columns}
+
+    restored = _restore_lineage_statement(
+        SimpleNamespace(), {"_financial_lineage": {"canonical_data": canonical}},
+        IncomeStatement, FinancialStatementData(**canonical),
+    )
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert restored.selling_general_admin == -88e9
+    assert admitted.get("selling_general_admin") == -88e9
 @pytest.mark.parametrize("stored,capex,capital_expenditure,expected", [
     # `capex` and `capital_expenditure` are one metric. A canonical holding the
     # alias while the stored column disagrees must not leak the alias.
