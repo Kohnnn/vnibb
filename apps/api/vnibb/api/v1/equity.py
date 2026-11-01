@@ -330,20 +330,23 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
         stored_value = getattr(row, column, None)
         if not isinstance(stored_value, (int, float)):
             continue
-        # The sync dumps every field, so a spelling may be null. Every non-null
-        # spelling must state the same value and match the stored column; any
-        # disagreement is withheld rather than resolved by iteration order.
-        stated = sorted({getattr(restored, field, None) for field in family
+        # Only a field the canonical actually states can disagree. The sync dumps
+        # every field, but an older canonical may omit a metric entirely, which
+        # says nothing about the stored column and leaves it served.
+        stated_fields = [field for field in family if field in restored.model_fields_set]
+        if not stated_fields:
+            continue
+        stated = sorted({getattr(restored, field, None) for field in stated_fields
                          if getattr(restored, field, None) is not None})
         if stated != [stored_value]:
             for field in family:
                 cleared[field] = None
+                unavailable[field] = {
+                    **unavailable.get(field, {}),
+                    "unavailable_reason": "stored_statement_disagrees_with_lineage",
+                }
             withheld[column] = stored_value
-            unavailable[name] = {
-                **unavailable.get(name, {}),
-                "unavailable_reason": "stored_statement_disagrees_with_lineage",
-            }
-        elif stated:
+        else:
             # Serve the agreed value under every spelling the canonical may use.
             for field in family:
                 cleared[field] = stored_value
@@ -1276,7 +1279,10 @@ async def _cross_fill_income_statement_rows(
         if item.consolidation_basis is None or (item.source, item.consolidation_basis, item.flow_basis) != (
             cashflow_row.source, cashflow_row.consolidation_basis, cashflow_row.flow_basis):
             continue
-        if item.depreciation is None:
+        depreciation_rejected = bool(
+            (item.unit_metadata.get("depreciation") or {}).get("unavailable_reason")
+        )
+        if item.depreciation is None and not depreciation_rejected:
             item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
             item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
             item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}

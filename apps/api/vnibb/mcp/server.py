@@ -838,20 +838,24 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     }
 
     _CONFLICT = object()
+    _UNSTATED = object()
 
     def _canonical_value(field: str) -> Any:
-        """Return the canonical value for `field`, or `_CONFLICT`/None otherwise.
+        """Return the canonical value for `field`, or a sentinel.
 
-        A semantic alias names the same metric. Every non-null spelling must
-        state the same value; a conflict returns `_CONFLICT` so the column is
-        withheld rather than resolved by iteration order. All-null means the
-        sync holds the metric as an explicit no-value, which still disagrees
-        with a stored number.
+        `_UNSTATED` when the canonical omits the metric and all its aliases: an
+        older canonical says nothing about the column, so it stays served.
+        `_CONFLICT` when non-null spellings disagree; the column is withheld
+        rather than resolved by iteration order. A stated null disagrees with a
+        stored number.
         """
         spellings = [field] + [alias for alias, target in _CANONICAL_ALIASES.items()
                                if target == field]
-        stated = {canonical.get(spelling) for spelling in spellings
-                  if canonical.get(spelling) is not None}
+        present = [spelling for spelling in spellings if spelling in canonical]
+        if not present:
+            return _UNSTATED
+        stated = {canonical[spelling] for spelling in present
+                  if canonical[spelling] is not None}
         if len(stated) > 1:
             return _CONFLICT
         return next(iter(stated), None)
@@ -859,6 +863,7 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         column for column, field in monetary.items()
         if payload.get(column) is not None
         and (value := _canonical_value(field)) is not _CONFLICT
+        and value is not _UNSTATED
         and value != payload.get(column)
     }
     conflicting = {
