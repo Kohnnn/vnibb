@@ -3782,7 +3782,6 @@ class DataPipeline:
                             raw_payload["_financial_lineage"]["canonical_data"] = canonical
                             raw_payload["_financial_lineage"]["retained_metrics"] = sorted(retained)
                             raw_payload["_financial_lineage"]["unprovenanced_metrics"] = unprovenanced
-
                             # The VCI adapter maps only a subset of the model's
                             # columns; every unmapped one arrives as None. Letting
                             # those overwrite would erase stored values (eps,

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 import vnibb.services.data_pipeline as pipeline_module
@@ -14,6 +15,7 @@ from vnibb.services.data_pipeline import DataPipeline
 def financial_sync(monkeypatch):
     persisted = []
     cached = []
+    prior_rows = []
     pipeline = DataPipeline()
 
     class FixtureDateTime(datetime):
@@ -34,6 +36,17 @@ def financial_sync(monkeypatch):
         def returning(self, *columns):
             return self
 
+    class RowsResult:
+        def __init__(self, rows):
+            self._rows = list(rows)
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+
     class RecordingSession:
         async def __aenter__(self):
             return self
@@ -41,8 +54,10 @@ def financial_sync(monkeypatch):
         async def __aexit__(self, *args):
             return False
 
-        async def execute(self, values):
-            return Result()
+        async def execute(self, statement):
+            # The lineage merge reads the stored row before deciding what the
+            # upsert keeps; every other statement is the upsert itself.
+            return RowsResult(prior_rows) if type(statement).__name__ == "Select" else Result()
 
         async def commit(self):
             pass
@@ -83,6 +98,9 @@ def financial_sync(monkeypatch):
         )
         return persisted, cached
 
+    # The fixture exposes the stored prior row so a test can model the row a
+    # sync is updating, and the exact upsert values the pipeline persisted.
+    sync.prior_rows = prior_rows
     return sync
 
 
@@ -337,3 +355,65 @@ async def test_rejected_provider_metrics_are_not_derived_or_crossfilled(financia
 
     assert persisted == []
     assert cached == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_lineage_withholds_metrics_the_source_condition_rejects(financial_sync):
+    """The lineage must describe the row the upsert actually keeps.
+
+    A KBS sync receives a row whose stored `investing_cash_flow` came from
+    `vietcap`. The conflict-update condition refuses to overwrite `vietcap`
+    with the incoming source, so the column keeps 555 while the incoming
+    canonical carries `investing_cash_flow=None`. Writing the incoming
+    canonical unchanged would let a reader rebuild the row as null and present
+    that as the stored state; the metric is withheld instead.
+    """
+    income = statement(
+        "cashflow",
+        operating_cash_flow=80e9,
+        investing_cash_flow=None,
+        unit_metadata={"operating_cash_flow": {"source_unit": "VND", "value_unit": "VND"}},
+    )
+    financial_sync.prior_rows[:] = [SimpleNamespace(
+        investing_cash_flow=555e9,
+        raw_data={"_financial_lineage": {"canonical_data": {
+            "source": "vietcap", "consolidation_basis": "consolidated",
+            "flow_basis": "single_quarter", "value_unit": "VND",
+            "unit_metadata": {"investing_cash_flow": {"source_unit": "VND", "value_unit": "VND"}},
+        }}},
+    )]
+
+    persisted, _ = await financial_sync([income])
+
+    canonical = persisted[0]["raw_data"]["_financial_lineage"]["canonical_data"]
+    # The lineage records no value here; the reader withholds the stored column
+    # because the canonical no longer describes it.
+    assert canonical["investing_cash_flow"] is None
+    assert canonical["unavailable_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_upsert_lineage_keeps_metrics_the_upsert_retains(financial_sync):
+    """A retained metric's lineage survives when the upsert keeps the value."""
+    income = statement(
+        "income",
+        revenue=None,
+        unit_metadata={"gross_profit": {"source_unit": "VND", "value_unit": "VND"}},
+        gross_profit=100e9,
+    )
+    financial_sync.prior_rows[:] = [SimpleNamespace(
+        revenue=900e9,
+        raw_data={"_financial_lineage": {"canonical_data": {
+            "source": "KBS", "consolidation_basis": "consolidated",
+            "flow_basis": "single_quarter", "value_unit": "VND", "revenue": 900e9,
+            "unit_metadata": {"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+        }}},
+    )]
+
+    persisted, _ = await financial_sync([income])
+
+    canonical = persisted[0]["raw_data"]["_financial_lineage"]["canonical_data"]
+    assert canonical["revenue"] == 900e9
+    # `values` is built before the lineage merge, so the SQL column keeps the
+    # value the upsert preserves; only the lineage is normalized here.
+    assert canonical["gross_profit"] == 100e9

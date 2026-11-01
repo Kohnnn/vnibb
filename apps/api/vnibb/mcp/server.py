@@ -822,11 +822,41 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     # the source and unit it was stored under. Serving it here would relabel
     # older, differently-sourced data as freshly verified, so it is withheld.
     unprovenanced = set(lineage.get("unprovenanced_metrics") or ()) - set(units)
+    withheld = {}
+    # A stored metric whose value disagrees with `canonical_data` is not backed
+    # by this lineage, so it is withheld and disclosed raw. The statement stays
+    # served: the canonical still describes every metric that agrees, and only
+    # the disagreeing cells lose their provenance.
+    # Mirrors `equity._STATEMENT_CANONICAL_ALIASES`; a canonical may carry a
+    # metric under an equivalent name, which still describes the column.
+    _CANONICAL_ALIASES = {
+        "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
+        "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
+        "equity": "total_equity", "total_equity": "equity",
+        "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
+        "capital_expenditure": "capex", "capex": "capital_expenditure",
+    }
+
+    def _canonical_value(field: str) -> Any:
+        if field in canonical:
+            return canonical.get(field)
+        return next((canonical.get(alias) for alias, target in _CANONICAL_ALIASES.items()
+                     if target == field and alias in canonical), None)
+    disagreeing = {
+        column for column, field in monetary.items()
+        if payload.get(column) is not None
+        and _canonical_value(field) is not None
+        and _canonical_value(field) != payload.get(column)
+    }
     for column, field in monetary.items():
-        if field in FinancialStatementData.model_fields:
-            if column in unprovenanced:
-                values[field] = None
-                continue
+        if field not in FinancialStatementData.model_fields:
+            continue
+        if column in disagreeing:
+            values[field] = None
+            withheld[column] = "stored_statement_disagrees_with_lineage"
+        elif column in unprovenanced:
+            values[field] = None
+        else:
             values[field] = payload.get(column)
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
@@ -839,6 +869,7 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         column: "retained_metric_without_provenance"
         for column in monetary if column in unprovenanced and payload.get(column) is not None
     }
+    unavailable.update(withheld)
     for column, field in monetary.items():
         if column in unavailable:
             continue

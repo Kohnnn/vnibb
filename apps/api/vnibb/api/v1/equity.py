@@ -91,7 +91,11 @@ from vnibb.providers.vnstock.subsidiaries import SubsidiariesQueryParams, Vnstoc
 from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
-from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
+from vnibb.services.data_pipeline import (
+    CACHE_TTL_ORDERBOOK,
+    CACHE_TTL_ORDERBOOK_DAILY,
+    financial_metric_columns,
+)
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
 from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
@@ -275,6 +279,72 @@ async def _refresh_profile_cache(symbol: str) -> None:
             raise
         logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
 
+# Model field -> SQL column for the financial fields whose names differ. The
+# MCP reader applies the same mapping, so both readers resolve one column.
+_STATEMENT_SQL_COLUMNS = {
+    "pre_tax_profit": "income_before_tax",
+    "profit_before_tax": "income_before_tax",
+    "tax_expense": "income_tax",
+    "long_term_liabilities": "non_current_liabilities",
+}
+_STATEMENT_CANONICAL_ALIASES = {
+    "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
+    "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
+    "equity": "total_equity", "total_equity": "equity",
+    "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
+    "capital_expenditure": "capex", "capex": "capital_expenditure",
+}
+
+
+
+
+def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restored: FinancialStatementData) -> FinancialStatementData:
+    """Serve a stored row from its `canonical_data` while the two agree.
+
+    A sync can leave a canonical that no longer describes the row the upsert
+    kept. Restoring such a canonical would serve a value its lineage does not
+    back, and copying the stored column over it while keeping the canonical's
+    provenance certifies it anyway. Only the disagreeing metrics are withheld,
+    each with its own unavailable reason, so the rest of the statement stays
+    readable.
+    """
+    unavailable = dict(restored.unit_metadata)
+    cleared = {}
+    withheld = {}
+    for name in FinancialStatementData.model_fields:
+        if name in {"fiscal_year", "fiscal_quarter"}:
+            continue
+        column = _STATEMENT_SQL_COLUMNS.get(name, name)
+        stored_value = getattr(row, column, None)
+        if not isinstance(stored_value, (int, float)):
+            continue
+        # The canonical may carry the value under a semantic alias of `name`
+        # (e.g. `capex` for `capital_expenditure`); a matching alias means the
+        # lineage still describes the column.
+        candidate = getattr(restored, name, None)
+        if candidate is None:
+            alias_value = next((getattr(restored, alias, None)
+                                for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
+                                if target == name), None)
+            if alias_value is not None:
+                # The lineage carries the value under a semantic alias; serve it
+                # on the canonical field so the alias does not read as absent.
+                candidate = alias_value
+                cleared[name] = alias_value
+        if candidate != stored_value:
+            cleared[name] = None
+            withheld[column] = stored_value
+            unavailable[name] = {
+                **unavailable.get(name, {}),
+                "unavailable_reason": "stored_statement_disagrees_with_lineage",
+            }
+    if cleared:
+        restored = restored.model_copy(update={**cleared, "unit_metadata": unavailable})
+    # The withheld column value is still a real stored observation; disclose it
+    # rather than dropping it from the response.
+    restored.raw_data = {**raw, **({"withheld_observations": withheld} if withheld else {})}
+    return restored
+
 
 async def _load_financial_statement_fallback(
     db: AsyncSession,
@@ -412,22 +482,12 @@ async def _load_financial_statement_fallback(
                 for name in FinancialStatementData.model_fields:
                     if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
                         setattr(restored, name, None)
-            # The column is the authoritative stored state. A `canonical_data`
-            # entry that disagrees with it is stale, and serving the canonical
-            # would make this reader disagree with the MCP reader, which reads
-            # the column. Adopt the column value and keep the canonical's
-            # provenance so the metric stays certified.
-            for name in FinancialStatementData.model_fields:
-                if name in {"fiscal_year", "fiscal_quarter"}:
-                    continue
-                stored_value = getattr(row, name, None)
-                if not isinstance(stored_value, (int, float)):
-                    continue
-                if getattr(restored, name, None) != stored_value:
-                    setattr(restored, name, stored_value)
-            restored.raw_data = raw
-            fallback_rows[index] = restored
-            statement = restored
+            # A column value is served from `canonical_data` only when the
+            # lineage still describes the row that was stored. Adopting a
+            # disagreeing column while keeping the canonical's provenance would
+            # relabel a value the lineage does not back as admitted.
+            fallback_rows[index] = _restore_lineage_statement(row, raw, model, restored)
+            statement = fallback_rows[index]
         else:
             statement.source = getattr(row, "source", None)
             statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
@@ -1199,6 +1259,7 @@ async def _cross_fill_income_statement_rows(
             item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
         if (
             item.ebitda is None
+            and (item.unit_metadata.get("ebitda") or {}).get("unavailable_reason") is None
             and item.operating_income is not None
             and item.depreciation is not None
         ):

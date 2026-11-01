@@ -909,50 +909,89 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                 cleaned = stripped
             return cleaned
 
-        def _report_basis(row: dict[str, Any], period: str) -> dict[str, Any]:
+        def _normalize_scope(value: Any) -> Any:
+            """Fold equivalent consolidation labels so casing cannot fake a conflict."""
+            return value.strip().casefold() if isinstance(value, str) else value
+
+
+        def _header_basis(row: dict[str, Any], period: str) -> list[dict[str, Any]]:
+            """Basis evidence from report headers whose full period identity matches.
+
+            A header counts only when its year, term and begin/end span all match
+            the requested period, so a same-year quarterly header cannot stand in
+            for an annual one. Every matching header is returned; the caller
+            reconciles them instead of taking the first.
+            """
             normalized = str(period).upper()
             year = re.search(r"(20\d{2})", normalized)
             quarter = re.search(r"Q([1-4])", normalized)
+            matches: list[dict[str, Any]] = []
             for report in (row.get("_provider_attrs") or {}).get("source_reports", []):
                 for head in report.get("Head", []):
                     if not year or str(head.get("YearPeriod")) != year.group(1):
                         continue
                     term = str(head.get("TermCode") or head.get("TermNameEN") or "").upper()
-                    if quarter and term not in {f"Q{quarter.group(1)}", f"QUARTER {quarter.group(1)}"}:
-                        continue
-                    scope = next((unit.get("UnitedNameEN") or unit.get("UnitedName") for unit in report.get("Unit", [])
-                                  if unit.get("UnitedCode") == head.get("United")), head.get("United"))
-                    result = {"consolidation_basis": scope, "source_head": head}
+                    begin, end = str(head.get("PeriodBegin")), str(head.get("PeriodEnd"))
+                    flow = None
                     if quarter:
                         q = int(quarter.group(1))
-                        begin = f"{year.group(1)}{(q - 1) * 3 + 1:02d}"
-                        end = f"{year.group(1)}{q * 3:02d}"
-                        if str(head.get("PeriodBegin")) == begin and str(head.get("PeriodEnd")) == end:
-                            result["flow_basis"] = "single_quarter"
-                        elif str(head.get("PeriodBegin")) == f"{year.group(1)}01" and str(head.get("PeriodEnd")) == end:
-                            result["flow_basis"] = "cumulative_ytd"
-                    elif (term in {"FY", "YEAR", "ANNUAL"}
-                          and str(head.get("PeriodBegin")) == f"{year.group(1)}01"
-                          and str(head.get("PeriodEnd")) == f"{year.group(1)}12"):
-                        result["flow_basis"] = "annual"
-                    return result
-            # The v5 VCI route returns a flat table with no report header, so
-            # `source_reports` is absent and neither the consolidation scope nor
-            # the flow basis can be read from the payload. VCI publishes the
-            # consolidated (hợp nhất) statement as the standard listed-company
-            # report, and a period of the form `20\d{2}` is the full-year total.
-            # Declare both here and record the assumption in lineage instead of
-            # withholding every monetary field.
-            declared_scope = row.get("consolidation_basis") or "consolidated"
-            declared_flow = row.get("flow_basis")
-            if declared_flow is None and re.fullmatch(r"(?:FY)?20\d{2}", normalized):
-                declared_flow = "annual"
-            return {
-                "consolidation_basis": declared_scope,
-                "flow_basis": declared_flow,
-                "basis_declared": row.get("consolidation_basis") is None,
-                "flow_declared": row.get("flow_basis") is None and declared_flow is not None,
+                        if term not in {f"Q{q}", f"QUARTER {q}"}:
+                            continue
+                        if begin == f"{year.group(1)}{(q - 1) * 3 + 1:02d}" and end == f"{year.group(1)}{q * 3:02d}":
+                            flow = "single_quarter"
+                        elif begin == f"{year.group(1)}01" and end == f"{year.group(1)}{q * 3:02d}":
+                            flow = "cumulative_ytd"
+                    elif term in {"FY", "YEAR", "ANNUAL"}:
+                        if begin == f"{year.group(1)}01" and end == f"{year.group(1)}12":
+                            flow = "annual"
+                    else:
+                        continue
+                    if flow is None:
+                        continue
+                    scope = next(
+                        (unit.get("UnitedNameEN") or unit.get("UnitedName")
+                         for unit in report.get("Unit", []) if unit.get("UnitedCode") == head.get("United")),
+                        head.get("United"),
+                    )
+                    matches.append({"consolidation_basis": scope, "flow_basis": flow, "source_head": head})
+            return matches
+
+        def _report_basis(row: dict[str, Any], period: str) -> dict[str, Any]:
+            """Reconcile explicit row, frame and matching report-header evidence.
+
+            Conflicting or absent evidence is never replaced by an assumption.
+            """
+            attrs = row.get("_provider_attrs") or {}
+            headers = _header_basis(row, period)
+            # Conflict is judged on the folded label so casings cannot fake a
+            # disagreement; the original spelling is what gets served.
+            scope_values = [
+                value for value in (
+                    row.get("consolidation_basis"), attrs.get("consolidation_basis"),
+                    *(head.get("consolidation_basis") for head in headers),
+                ) if value
+            ]
+            scopes = {_normalize_scope(value) for value in scope_values}
+            flows = {
+                value for value in (
+                    row.get("flow_basis"), attrs.get("flow_basis"),
+                    *(head.get("flow_basis") for head in headers),
+                ) if value
             }
+            result: dict[str, Any] = {}
+            if len(scopes) == 1:
+                result["consolidation_basis"] = next(
+                    value for value in scope_values
+                    if _normalize_scope(value) == next(iter(scopes))
+                )
+            if len(flows) == 1:
+                result["flow_basis"] = next(iter(flows))
+            if headers:
+                result["source_head"] = headers[0]["source_head"]
+            if len(scopes) > 1 or len(flows) > 1:
+                result["unavailable_reason"] = "conflicting_statement_basis"
+                return result
+            return result
 
         def _normalize_value(value: Any, row: dict[str, Any], label: str, metric: str, period: str):
             source = str(row.get("_source") or "").upper()
@@ -1062,13 +1101,14 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                         for key in ("fiscal_quarter", "fiscalQuarter", "quarter", "lengthReport", "length_report")
                     ):
                         reason = "conflicting_fiscal_identity"
+                    # `_report_basis` reconciles the row, frame and header
+                    # evidence and flags disagreement; the caller only folds its
+                    # conflict into the period reason.
                     report_basis = _report_basis(row, period)
-                    scope_values = [value for value in (row.get("consolidation_basis"), metadata.get("consolidation_basis"), report_basis.get("consolidation_basis")) if value]
-                    flow_values = [value for value in (row.get("flow_basis"), metadata.get("flow_basis"), report_basis.get("flow_basis")) if value]
-                    if len(set(scope_values)) > 1 or len(set(flow_values)) > 1:
-                        reason = "conflicting_statement_basis"
-                    scope = scope_values[0] if scope_values else None
-                    flow = flow_values[0] if flow_values else None
+                    if report_basis.get("unavailable_reason"):
+                        reason = report_basis["unavailable_reason"]
+                    scope = report_basis.get("consolidation_basis")
+                    flow = report_basis.get("flow_basis")
                     identities.add((scope, flow))
                     metric = vas_ids[params.statement_type.value].get(row.get("id"))
                     if not metric:
@@ -1082,10 +1122,6 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
                     number, evidence = _normalize_value(row.get("value"), value_row, str(row.get("id")), metric, period)
                     evidence.update(source_id=row.get("id"), source_record=row,
                                     consolidation_basis=scope, flow_basis=flow)
-                    if report_basis.get("basis_declared"):
-                        evidence["basis_declared"] = "consolidated"
-                    if report_basis.get("flow_declared"):
-                        evidence["flow_declared"] = True
                     if _coerce_number(row.get("value")) is None:
                         evidence["unavailable_reason"] = "missing_value"
                     previous = lineage.get(metric)

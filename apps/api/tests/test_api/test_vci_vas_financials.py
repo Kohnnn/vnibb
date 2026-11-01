@@ -57,16 +57,19 @@ def test_vas_unknown_unit_duplicate_off_balance_and_missing_value():
     assert math.isnan(result.raw_data["provider_rows"][4]["value"])
 
 
-def test_vas_missing_basis_declares_consolidated_and_admits():
-    """The v5 VCI route carries no report header, so the adapter declares the
-    consolidated basis rather than withholding every monetary field."""
+def test_vas_missing_basis_withholds_rather_than_declaring():
+    """No row, frame or header evidence means no asserted basis.
+
+    A `20\\d{2}` period label is not proof of an annual reporting basis, and the
+    v5 route's flat table is not proof of a consolidated scope, so the metric is
+    withheld instead of being admitted under an invented declaration.
+    """
     data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100), basis=False)
     data[0].update(statement_type="income", unit_metadata={})
     result = transform(StatementType.INCOME, data)[0]
-    assert result.revenue == 100
-    assert result.consolidation_basis == "consolidated"
-    assert result.flow_basis == "annual"
-    assert result.unit_metadata["revenue"]["basis_declared"] == "consolidated"
+    assert result.revenue is None
+    assert result.consolidation_basis is None
+    assert result.flow_basis is None
     assert result.raw_data["provider_rows"][0]["value"] == 100
 
 
@@ -151,15 +154,18 @@ def test_vas_accounts_receivable_uses_only_trade_receivables(reverse):
     assert result.raw_data["provider_rows"] == data
 
 
-def test_vas_annual_period_declares_annual_flow_when_header_absent():
-    """A `20\\d{2}` period is the full-year total; the v5 route omits the report
-    header that would otherwise prove it, so the adapter declares `annual`."""
+def test_vas_annual_period_without_header_does_not_declare_annual_flow():
+    """A `20\\d{2}` label alone does not prove an annual flow basis.
+
+    With no header and no frame attribute the basis is absent, so the metric is
+    withheld rather than admitted under a declared `annual`.
+    """
     data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100))
     data[0]["_provider_attrs"].pop("flow_basis")
+    data[0]["_provider_attrs"].pop("consolidation_basis", None)
     result = transform(StatementType.INCOME, data)[0]
-    assert result.revenue == 100
-    assert result.flow_basis == "annual"
-    assert result.unit_metadata["revenue"]["flow_declared"] is True
+    assert result.revenue is None
+    assert result.flow_basis is None
 
 
 def test_vas_quarter_period_does_not_declare_annual_flow():
@@ -179,4 +185,49 @@ def test_vas_mixed_basis_withholds_entire_period():
     result = transform(StatementType.INCOME, data)[0]
     assert result.revenue is None
     assert result.gross_profit is None
+    assert result.unavailable_reason == "conflicting_statement_basis"
+
+
+def test_vas_frame_only_separate_basis_is_served_not_conflicted():
+    """An explicit frame-level `separate` basis is evidence, not a conflict.
+
+    The adapter must not assume a `consolidated` default that contradicts the
+    captured frame attribute and reject the row as `conflicting_statement_basis`.
+    """
+    data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100))
+    data[0]["_provider_attrs"].update(consolidation_basis="separate", flow_basis="annual")
+    result = transform(StatementType.INCOME, data)[0]
+    assert result.revenue == 100
+    assert result.consolidation_basis == "separate"
+    assert result.flow_basis == "annual"
+
+
+def test_vas_annual_header_is_matched_by_full_period_not_first_same_year():
+    """The annual header is chosen by year, term and span, not first-same-year.
+
+    A quarterly header that shares the year must not stand in for the annual
+    one; the annual header supplies the flow basis and the row is admitted.
+    """
+    data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100), basis=False)
+    data[0]["_provider_attrs"]["source_reports"] = [{"Head": [
+        {"YearPeriod": "2025", "TermCode": "Q1", "United": "C",
+         "PeriodBegin": "202501", "PeriodEnd": "202503"},
+        {"YearPeriod": "2025", "TermCode": "FY", "United": "C",
+         "PeriodBegin": "202501", "PeriodEnd": "202512"},
+    ], "Unit": [{"UnitedCode": "C", "UnitedNameEN": "consolidated"}]}]
+    result = transform(StatementType.INCOME, data)[0]
+    assert result.revenue == 100
+    assert result.flow_basis == "annual"
+    assert result.consolidation_basis == "consolidated"
+
+
+def test_vas_disagreeing_header_and_frame_basis_is_withheld():
+    """Header `separate` against frame `consolidated` is a conflict, not a pick."""
+    data = rows("income_statement", ("2025", "IS_NET_REVENUE", "VNĐ", 100))
+    data[0]["_provider_attrs"]["source_reports"] = [{"Head": [
+        {"YearPeriod": "2025", "TermCode": "FY", "United": "S",
+         "PeriodBegin": "202501", "PeriodEnd": "202512"},
+    ], "Unit": [{"UnitedCode": "S", "UnitedNameEN": "separate"}]}]
+    result = transform(StatementType.INCOME, data)[0]
+    assert result.revenue is None
     assert result.unavailable_reason == "conflicting_statement_basis"

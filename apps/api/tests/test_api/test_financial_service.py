@@ -635,3 +635,55 @@ async def test_get_financials_with_ttm_propagates_cancellation(monkeypatch):
 
     with pytest.raises(asyncio.CancelledError):
         await get_financials_with_ttm(symbol="VNM", statement_type="income", period="TTM")
+
+
+@pytest.mark.parametrize(
+    "column_value,canonical_metric,canonical_value,expected",
+    [
+        # A canonical that states the metric under a semantic alias still
+        # describes the column, so an agreeing value is served.
+        (444.0, "profit_before_tax", 444.0, 444.0),
+        (444.0, "pre_tax_profit", 444.0, 444.0),
+        # The alias does not license a disagreement; the row is withheld.
+        (555.0, "profit_before_tax", 444.0, None),
+        (555.0, "pre_tax_profit", 444.0, None),
+    ],
+)
+def test_lineage_alias_agreement_matches_between_readers(column_value, canonical_metric, canonical_value, expected):
+    """REST and MCP resolve an aliased lineage the same way.
+
+    A canonical may carry `profit_before_tax` while the column is
+    `income_before_tax`. Both readers must agree on whether that value is
+    backed, so a disagreement cannot be served by one surface and withheld by
+    the other.
+    """
+    from types import SimpleNamespace
+
+    from sqlalchemy import BigInteger, Integer
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    canonical = {
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+        "consolidation_basis": "consolidated", "flow_basis": "annual",
+        canonical_metric: canonical_value,
+        "unit_metadata": {"pre_tax_profit": {"source_unit": "VND", "value_unit": "VND"}},
+    }
+    row = SimpleNamespace(income_before_tax=column_value)
+    restored = _restore_lineage_statement(
+        row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
+        FinancialStatementData(**canonical),
+    )
+
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   income_before_tax=column_value,
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert restored.pre_tax_profit == expected
+    # MCP serves the column name; both must resolve to the same decision.
+    assert admitted.get("income_before_tax") == expected

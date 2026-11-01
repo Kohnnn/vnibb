@@ -94,15 +94,12 @@ async def test_generation_five_long_statements_route_vci_preserve_source_attrs_a
     assert result[0].period == expected_period
     assert len(result[0].raw_data["provider_rows"]) == 2
     assert result[0].raw_data["provider_attrs"]["provider_cap"] == "one_period"
-    # No report header in the frame. An annual period is the full-year total, so
-    # the adapter declares the basis and admits. A balance sheet is a point-in-time
-    # figure and is exempt from the flow-basis check; a quarter of a flow statement
-    # cannot have its basis inferred from the label, so it stays withheld.
-    if period == "year" or statement == "balance":
-        assert getattr(result[0], STATEMENTS[statement][3]) == 100
-        assert result[0].consolidation_basis == "consolidated"
-    else:
-        assert getattr(result[0], STATEMENTS[statement][3]) is None
+    # No report header in the frame and no frame attribute, so no basis is
+    # stated. A `20\d{2}` label is not proof of an annual flow basis and a
+    # balance sheet is not proof of a consolidated scope, so every metric is
+    # withheld rather than admitted under an inferred declaration.
+    assert getattr(result[0], STATEMENTS[statement][3]) is None
+    assert result[0].consolidation_basis is None
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
@@ -225,7 +222,10 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
             SyncStatus.sync_type == "financial_acquisition", SyncStatus.status != "running"
         ))).all()
         assert receipts[-1].additional_data == outcome
-        if scenario in {"verified", "basisless", "incompatible_basis"}:
+        # `basisless` supplies no row, frame or header basis: the adapter
+        # declares none, so every metric is withheld and the stored row is
+        # untouched below.
+        if scenario in {"verified", "incompatible_basis"}:
             assert result == 1 and outcome["complete"] is True
             assert outcome["period_outcomes"][period]["status"] == "stored"
             assert getattr(stored, metric) == 100
@@ -388,11 +388,13 @@ async def test_dedicated_fetchers_use_vci_and_shared_admission(sdk, statement, b
 
     assert len(result) == 2
     assert calls[0][1:7] == (STATEMENTS[statement][0], "year", "en", False, "long", "vci")
-    # The v5 VCI route carries no report header; the adapter declares the
-    # consolidated/annual basis instead of withholding the figure.
-    assert getattr(result[0], STATEMENTS[statement][3]) == 100
+    # Frame attributes carry the basis when present. With them the figure is
+    # admitted; without them neither the consolidation scope nor the flow basis
+    # is readable from the v5 VCI route, and basis is not inferred from the
+    # period label, so the figure is withheld.
+    assert getattr(result[0], STATEMENTS[statement][3]) == (100 if basis else None)
     assert result[0].raw_data["provider_attrs"]["source"] == "vci"
-    assert result[0].consolidation_basis == "consolidated"
+    assert result[0].consolidation_basis == ("consolidated" if basis else None)
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
@@ -488,9 +490,8 @@ async def test_dedicated_fetchers_withhold_unverified_zero(sdk, statement, inval
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
-async def test_dedicated_fetchers_declare_basis_when_header_absent(sdk, statement):
-    """A zero with no report header is still admitted: the adapter declares the
-    consolidated/annual basis rather than withholding the figure."""
+async def test_dedicated_fetchers_withhold_when_header_absent(sdk, statement):
+    """A figure with no report header has no stated basis, so it is withheld."""
     from vnibb.providers.vnstock.balance_sheet import (
         BalanceSheetQueryParams,
         VnstockBalanceSheetFetcher,
@@ -510,14 +511,14 @@ async def test_dedicated_fetchers_declare_basis_when_header_absent(sdk, statemen
     report = STATEMENTS[statement][1]
     frame = sdk_frame(report, statement, "2025", basis=True)
     frame.loc[:, "value"] = 0
-    frame.attrs.pop("consolidation_basis")
+    frame.attrs.pop("consolidation_basis", None)
     frames[(statement, "year", report)] = frame
 
     result = await fetcher.fetch(params(symbol="HPG"))
 
     assert result
-    assert getattr(result[0], STATEMENTS[statement][3]) == 0
-    assert result[0].consolidation_basis == "consolidated"
+    assert getattr(result[0], STATEMENTS[statement][3]) is None
+    assert result[0].consolidation_basis is None
 
 
 @pytest.mark.parametrize("statement", STATEMENTS)
@@ -566,15 +567,18 @@ async def test_retained_metric_reads_agree_across_rest_and_mcp(statement, stale)
               "cashflow": "investing_cash_flow"}[statement]
     base = {"symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025}
     column_value = 555.0
-    # `stale` models a canonical that disagrees with the column the upsert keeps.
+    # `stale` models a canonical that no longer describes the stored column.
     # `statement_type` is the provider form the pipeline writes into `canonical_data`.
     canonical = {**base, "source": "VCI", "currency": "VND", "value_unit": "VND",
                  "statement_type": statement,
                  "consolidation_basis": "consolidated", "flow_basis": "annual",
-                 metric: 100, second: 444 if stale else column_value,
+                 metric: 100, second: column_value,
                  "unit_metadata": {
                      metric: {"source_unit": "VND", "value_unit": "VND"},
                      second: {"source_unit": "VND", "value_unit": "VND"}}}
+    # The upsert keeps a column the source omitted; when that stored value
+    # disagrees with the canonical, the lineage no longer backs it.
+    stored_column = 444.0 if stale else column_value
 
     engine = create_async_engine("sqlite+aiosqlite://")
     table = model.__table__
@@ -587,7 +591,7 @@ async def test_retained_metric_reads_agree_across_rest_and_mcp(statement, stale)
     async with sessions() as session:
         session.add(model(id=1, **base, source="VCI", raw_data={"_financial_lineage": {
             "canonical_data": canonical, "retained_metrics": [second]}},
-            **{metric: 100, second: column_value}))
+            **{metric: 100, second: stored_column}))
         await session.commit()
 
         rest = (await _load_financial_statement_fallback(
@@ -598,9 +602,44 @@ async def test_retained_metric_reads_agree_across_rest_and_mcp(statement, stale)
             {column.name: getattr(stored, column.name)
              for column in model.__table__.columns}, model)
 
-    # MCP reads the stored column; REST rebuilds from `canonical_data`. When the
-    # two disagree the canonical is stale, so neither reader may serve it and
-    # both must publish the column value the upsert kept.
-    assert getattr(rest, second) == column_value
-    assert mcp.get(second) == column_value
+    # Neither reader may serve a value the lineage does not back. A disagreeing
+    # column is withheld on both surfaces rather than relabelled with the
+    # canonical's provenance, so the two never disagree about the same row.
+    expected = None if stale else column_value
+    assert getattr(rest, second) == expected
+    assert mcp.get(second) == expected
     assert getattr(rest, second) == mcp.get(second)
+
+
+@pytest.mark.asyncio
+async def test_report_basis_ignores_wrong_span_and_case_only_differences(sdk):
+    """Only headers matching the full period identity may contribute a basis.
+
+    A header whose span belongs to another year must not contaminate the scope
+    set and fake a conflict, and labels that differ only by casing describe the
+    same scope; the original spelling is what gets served.
+    """
+    _, frames, active = sdk
+    frame = sdk_frame("income_statement", "income", "2025", basis=True)
+    frame.attrs["consolidation_basis"] = "consolidated"
+    frame.attrs["source_reports"] = [
+        # Matching annual header in a different casing: same scope, no conflict.
+        {"Head": [{"YearPeriod": "2025", "TermCode": "FY",
+                   "PeriodBegin": "202501", "PeriodEnd": "202512",
+                   "United": "C"}],
+         "Unit": [{"UnitedCode": "C", "UnitedNameEN": "Consolidated"}]},
+        # A header naming another scope but spanning 2024: out of period.
+        {"Head": [{"YearPeriod": "2025", "TermCode": "FY",
+                   "PeriodBegin": "202401", "PeriodEnd": "202412",
+                   "United": "S"}],
+         "Unit": [{"UnitedCode": "S", "UnitedNameEN": "Separate"}]},
+    ]
+    frames[("income", "year", "income_statement")] = frame
+
+    result = await VnstockFinancialsFetcher.fetch(
+        FinancialsQueryParams(symbol="HPG", statement_type=StatementType("income"), period="year", limit=1)
+    )
+
+    assert result[0].consolidation_basis == "consolidated"
+    assert result[0].flow_basis == "annual"
+    assert result[0].revenue == 100
