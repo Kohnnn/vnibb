@@ -10,23 +10,24 @@ import os
 import sys
 
 runtime_tier = os.getenv("VNSTOCK_RUNTIME_TIER", "free").strip().lower()
-if runtime_tier != "free":
-    print("VNSTOCK_RUNTIME_TIER must be 'free'; paid runtimes are disabled", file=sys.stderr)
+if runtime_tier not in {"free", "golden"}:
+    print("VNSTOCK_RUNTIME_TIER must be 'free' or 'golden'", file=sys.stderr)
     raise SystemExit(1)
 source = os.getenv("VNSTOCK_SOURCE", "VCI").strip().upper()
 if source != "VCI":
     print("VNSTOCK_SOURCE must be 'VCI'; alternate sources are disabled", file=sys.stderr)
     raise SystemExit(1)
-paid_modules = ("vnstock_data", "vnstock_ta", "vnstock_pipeline", "vnstock_news", "vnii")
-present = [name for name in paid_modules if find_spec(name) is not None]
-if present:
-    print(
-        f"Free runtime contains forbidden paid modules: {','.join(present)}. "
-        "Rebuild the credential-free image and remove historical premium runtime mounts; "
-        "do not import or authenticate these modules.",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
+if runtime_tier == "free":
+    paid_modules = ("vnstock_data", "vnstock_ta", "vnstock_pipeline", "vnstock_news", "vnii")
+    present = [name for name in paid_modules if find_spec(name) is not None]
+    if present:
+        print(
+            f"Free runtime contains forbidden paid modules: {','.join(present)}. "
+            "Rebuild the credential-free image and remove historical premium runtime mounts; "
+            "do not import or authenticate these modules.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
 modules = ["uvicorn", "vnstock"]
 missing = []

@@ -793,6 +793,7 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
         return future
 
     class History:
+        attrs = {"price_unit": "THOUSAND_VND"}
         empty = False
 
         def __init__(self, price):
@@ -802,19 +803,17 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
             return [{"time": datetime.now().isoformat(), "close": self.price, "volume": 123}]
 
     class Provider:
-        def stock(self, **kwargs):
+        def __init__(self, **kwargs):
             calls.append(kwargs)
-            price = 70.1
+            self.price = 70.1
             if kwargs["symbol"] == "FPT":
-                price = 57.4 if sum(call["symbol"] == "FPT" for call in calls) == 1 else 57.6
+                self.price = 57.4 if sum(call["symbol"] == "FPT" for call in calls) == 1 else 57.6
 
-            def history(**_kwargs):
-                loop.call_soon_threadsafe(started.set)
-                if not release.wait(5):
-                    raise TimeoutError("Test did not release quote worker")
-                return History(price)
-
-            return SimpleNamespace(quote=SimpleNamespace(history=history))
+        def history(self, **_kwargs):
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(5):
+                raise TimeoutError("Test did not release quote worker")
+            return History(self.price)
 
     async def no_quote(*_args, **_kwargs):
         return None
@@ -830,7 +829,7 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
         [json.dumps({"action": "subscribe", "symbols": ["VNM"]})], keep_open=True,
     )
     monkeypatch.setattr(loop, "run_in_executor", submit)
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Provider)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Provider)
     monkeypatch.setattr(runtime, "_reference_jobs", {})
     monkeypatch.setattr(QuoteCache, "_cache", {})
     monkeypatch.setattr(QuoteCache, "_ttl_seconds", 0)

@@ -55,7 +55,7 @@ from vnibb.services.data_quality import latest_market_business_day
 from vnibb.services.market_session import expected_market_session
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-from vnibb.providers.vnstock import get_stock
+from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 from vnibb.api.v1.market_heatmap import (
     HeatmapGroupBuilder,
     HeatmapGroupConfig,
@@ -70,12 +70,6 @@ from vnibb.api.v1.market_heatmap import (
     resolve_hnx30_symbols,
 )
 
-try:
-    from vnstock.explorer.misc import vcb_exchange_rate, btmc_goldprice, sjc_gold_price
-except Exception:  # pragma: no cover - defensive import guard
-    vcb_exchange_rate = None
-    btmc_goldprice = None
-    sjc_gold_price = None
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -632,11 +626,13 @@ def _compute_money_flow_metrics(
 
 async def _fetch_benchmark_history_from_provider(start_date: date, end_date: date) -> pd.DataFrame:
     def _load_history() -> pd.DataFrame:
-        stock = get_stock("VNINDEX")
-        history = stock.quote.history(
+        source = validate_source(settings.vnstock_source)
+        Market, _ = import_vnstock_symbol("Market")
+        history = Market().index("VNINDEX").ohlcv(
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            show_log=False,
+            source=source,
+            floating=None,
         )
         if history is None or history.empty:
             return pd.DataFrame(columns=["time", "close_index"])
@@ -4021,16 +4017,9 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
 
 @router.get("/forex-rates", response_model=ForexRatesResponse)
 async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexRatesResponse:
-    if vcb_exchange_rate is None:
-        return ForexRatesResponse(
-            count=0,
-            data=[],
-            source="vnstock:vcb_exchange_rate",
-            error="vcb_exchange_rate helper unavailable",
-        )
-
     def _sync_fetch() -> list[dict[str, Any]]:
-        frame = vcb_exchange_rate()
+        Retail, _ = import_vnstock_symbol("Retail")
+        frame = Retail().exchange_rate()
         if frame is None or len(frame.index) == 0:
             return []
 
@@ -4041,8 +4030,8 @@ async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexR
                 {
                     "currency_code": row.get("currency_code"),
                     "currency_name": row.get("currency_name"),
-                    "buy_cash": _to_float(row.get("buy _cash")),
-                    "buy_transfer": _to_float(row.get("buy _transfer")),
+                    "buy_cash": _to_float(row.get("buy_cash")),
+                    "buy_transfer": _to_float(row.get("buy_transfer")),
                     "sell": _to_float(row.get("sell")),
                     "date": row.get("date"),
                 }
@@ -4052,53 +4041,16 @@ async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexR
 
     try:
         data = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=15)
-        return ForexRatesResponse(count=len(data), data=data, source="vnstock:vcb_exchange_rate")
+        return ForexRatesResponse(count=len(data), data=data, source="vnstock5:Retail.exchange_rate")
     except Exception as e:
         logger.warning(f"Forex rates fetch failed: {e}")
         return ForexRatesResponse(
-            count=0, data=[], source="vnstock:vcb_exchange_rate", error=str(e)
+            count=0, data=[], source="vnstock5:Retail.exchange_rate", error=str(e)
         )
 
 
 @router.get("/commodities", response_model=CommoditiesResponse)
 async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> CommoditiesResponse:
-    def _sync_fetch() -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-
-        if btmc_goldprice is not None:
-            btmc = btmc_goldprice()
-            if btmc is not None and len(btmc.index) > 0:
-                for item in btmc.to_dict(orient="records"):
-                    rows.append(
-                        {
-                            "source": "BTMC",
-                            "name": item.get("name"),
-                            "symbol": item.get("karat"),
-                            "buy_price": _to_float(item.get("buy_price")),
-                            "sell_price": _to_float(item.get("sell_price")),
-                            "reference_price": _to_float(item.get("world_price")),
-                            "time": item.get("time"),
-                        }
-                    )
-
-        if sjc_gold_price is not None:
-            sjc = sjc_gold_price()
-            if sjc is not None and len(sjc.index) > 0:
-                for item in sjc.to_dict(orient="records"):
-                    rows.append(
-                        {
-                            "source": "SJC",
-                            "name": item.get("gold_type") or item.get("name") or "SJC Gold",
-                            "symbol": item.get("brand") or item.get("type") or "SJC",
-                            "buy_price": _to_float(item.get("buy_price") or item.get("buy")),
-                            "sell_price": _to_float(item.get("sell_price") or item.get("sell")),
-                            "reference_price": None,
-                            "time": item.get("updated_at") or item.get("time"),
-                        }
-                    )
-
-        return rows[:limit]
-
     try:
         yahoo_rows = await _fetch_yahoo_commodities(limit)
         if yahoo_rows:
@@ -4106,16 +4058,12 @@ async def get_commodities(limit: int = Query(default=20, ge=1, le=40)) -> Commod
                 count=len(yahoo_rows), data=yahoo_rows, source="yahoo_finance:commodities"
             )
 
-        if btmc_goldprice is None and sjc_gold_price is None:
-            return CommoditiesResponse(
-                count=0,
-                data=[],
-                source="vnstock:gold_price",
-                error="gold price helpers unavailable",
-            )
-
-        data = await asyncio.wait_for(asyncio.to_thread(_sync_fetch), timeout=20)
-        return CommoditiesResponse(count=len(data), data=data, source="vnstock:gold_price")
+        return CommoditiesResponse(
+            count=0,
+            data=[],
+            source="vnstock:gold_price",
+            error="gold price helpers unavailable",
+        )
     except Exception as e:
         logger.warning(f"Commodities fetch failed: {e}")
         return CommoditiesResponse(

@@ -5,6 +5,14 @@ image="${1:?usage: $0 registry.example.com/vnibb/api:<release-tag>}"
 revision="${IMAGE_RELEASE_REVISION:-}"
 platform="${PLATFORM:-linux/arm64}"
 
+case "$platform" in
+  linux/amd64|linux/arm64) ;;
+  *)
+    echo "Unsupported VNStock 5.2.1 image platform: $platform; use linux/amd64 or linux/arm64" >&2
+    exit 1
+    ;;
+esac
+
 if [[ -z "$revision" ]]; then
   revision="$(git rev-parse --verify HEAD)"
 fi

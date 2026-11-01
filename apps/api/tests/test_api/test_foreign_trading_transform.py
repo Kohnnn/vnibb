@@ -56,6 +56,7 @@ def test_transform_data_accepts_iso_datetime_strings():
 @pytest.mark.asyncio
 async def test_price_board_normalizes_foreign_value_aliases(monkeypatch):
     class FakeFrame:
+        attrs = {"price_unit": "VND", "value_unit": "VND"}
         def __len__(self):
             return 2
 
@@ -78,8 +79,9 @@ async def test_price_board_normalizes_foreign_value_aliases(monkeypatch):
         def __init__(self, source):
             assert source == "VCI"
 
-        def price_board(self, **kwargs):
-            assert kwargs["symbols_list"] == ["VNM", "FPT"]
+        def price_board(self, *, symbols_list, get_unified):
+            assert symbols_list == ["VNM", "FPT"]
+            assert get_unified is True
             return FakeFrame()
 
     monkeypatch.setattr(

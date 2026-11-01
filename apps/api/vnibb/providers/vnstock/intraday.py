@@ -72,14 +72,15 @@ class VnstockIntradayFetcher(BaseFetcher[IntradayQueryParams, IntradayTradeData]
         
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
+                from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
-                df = stock.quote.intraday()
+                quote = get_quote_class()(symbol=query["symbol"], source=validate_source(settings.vnstock_source))
+                df = quote.intraday(page_size=query.get("limit", 100))
                 
                 if df is None or df.empty:
                     return []
+                if str(df.attrs.get("price_unit", "")).upper() != "VND":
+                    raise ValueError("VCI intraday price unit is unavailable")
                 
                 return df.tail(query.get("limit", 100)).to_dict("records")
             except Exception as e:
@@ -109,7 +110,7 @@ class VnstockIntradayFetcher(BaseFetcher[IntradayQueryParams, IntradayTradeData]
                     volume=row.get("volume") or row.get("khoiLuong"),
                     change=row.get("change") or row.get("thayDoi"),
                     change_pct=row.get("pctChange") or row.get("phanTram"),
-                    match_type=row.get("matchType") or row.get("action") or row.get("loaiGiaoDich"),
+                    match_type=row.get("match_type") or row.get("matchType") or row.get("action") or row.get("loaiGiaoDich"),
                 ))
             except Exception as e:
                 logger.warning(f"Skipping invalid intraday row: {e}")

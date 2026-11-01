@@ -1,6 +1,6 @@
 # Vietcap Backfill Scripts
 
-Bounded public Vietcap IQ/trading ingestion into MongoDB `vnibb-market`. Vietcap is primary; only free vnstock VCI is an eligible fallback. VCI uses the same upstream and is not an independent outage fallback.
+Bounded public Vietcap IQ/trading ingestion into MongoDB `vnibb-market`. Vietcap is primary; explicitly sourced vnstock VCI is the only eligible supplementary VNStock source. VCI uses the same upstream and is not an independent outage fallback. Acquisition requires the applicable source-owner permission and coverage contract.
 
 ## Quick start
 

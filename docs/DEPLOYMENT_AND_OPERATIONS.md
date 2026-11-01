@@ -41,11 +41,12 @@ The intended deployment topology is:
 3. the backend exposes HTTP and WebSocket surfaces
 4. the `vnibb-mcp` sidecar exposes the read-only MCP HTTP surface for VniAgent and remote clients
 5. the self-hosted database stack backs persistence, runtime state, auth, and cache
-6. Vietcap IQ/Trading is the primary Vietnamese ingestion source for structured financials and market data; free VNStock VCI is supplementary where supported
-7. `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI` are the only supported execution policy; the shared provider importer rejects installed or already-loaded Sponsor packages before any VNStock import can authenticate, including direct OHLCV backfill calls outside startup
-8. the free-compatible API image is built once, published and deployed by immutable digest; do not mount or bootstrap premium packages for this deployment
-9. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
-10. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
+6. Vietcap IQ/Trading is the primary Vietnamese ingestion source for structured financials and market data; explicitly sourced VNStock VCI is supplementary where supported
+7. Unified `vnstock` 5.2.1 serves both `VNSTOCK_RUNTIME_TIER=free` (default) and `golden`; `VNSTOCK_SOURCE=VCI` is required and alternate sources are rejected. Free runs no startup account check and does not modify persisted credentials; Golden requires an authenticated Golden or Diamond registration and fails closed otherwise. CLI and non-API scripts use an isolated `VNSTOCK_HOME`
+8. Free rejects discoverable legacy sponsor packages before any VNStock import; Golden permits but does not use them. Neither entitlement nor installation authorizes acquisition, persistence or redistribution
+9. one credential-free image supports both tiers and is published and deployed by immutable digest; do not mount or bootstrap sponsor packages for this deployment
+10. migrations run through the one-shot `migrate` service before API/MCP replacement; the API process does not migrate at startup
+11. API scheduling remains disabled and the profiled `scheduler` worker is the only scheduler runtime
 
 ```text
 Vercel frontend
@@ -86,8 +87,8 @@ VniAgent server context path
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Primary Vietnamese source** | Vietcap IQ/Trading public API | Lossless provider records and descriptor-admitted fields; unknown units, dates, fiscal basis or coverage stay unverified |
-| **Supplementary parser/transport** | Free VNStock 4.0.x, VCI only | Supported free calls to the same Vietcap upstream; not independent outage protection |
-| **AI Assist dependency** | VNAI 2.6.2 publisher wheel | Constrained free-tier dependency; installation does not authorize sponsor modules or AI spend |
+| **Supplementary parser/transport** | Unified VNStock 5.2.1, VCI only | Supported VCI calls to the same Vietcap upstream; not independent outage protection. Golden registration changes entitlement, not source rights or admission |
+| **SDK account state** | `vnstock.setup_api_key` / `status` | Golden requires an authenticated Golden or Diamond account at startup; free performs no startup check and does not delete credentials. Status may involve I/O, and the SDK persists credentials locally, so isolate `VNSTOCK_HOME` outside API startup |
 
 ### Database & Persistence
 
@@ -174,7 +175,7 @@ Financial admission retains unknown units/scale/date/basis as unavailable, never
 
 ## Data Flow: Raw Data to Widgets
 
-The large diagram below is a historical pipeline reference. Current Vietnamese ingestion starts with Vietcap IQ/Trading, stores lossless Mongo envelopes and admitted PostgreSQL fields, and uses only free VCI for supported supplementary requests. Current runtime commands and safe local/production recovery are in `oracle_runbook.md`; do not follow the diagram's obsolete KBS/DNSE/scraper or premium fallback paths.
+The large diagram below is a historical pipeline reference. Current Vietnamese ingestion starts with Vietcap IQ/Trading, stores lossless Mongo envelopes and admitted PostgreSQL fields, and uses explicitly sourced VCI for supported supplementary requests. Current runtime commands and safe local/production recovery are in `oracle_runbook.md`; do not follow the diagram's obsolete KBS/DNSE/scraper or sponsor fallback paths.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -557,7 +558,7 @@ Keep durable writes pointed at the verified self-hosted database stack: PostgreS
 - dashboards remain local-first with a durable save path
 - verify deploys with `bash scripts/oracle/runtime_verify.sh` before treating a rollout as successful
 
-Use existing client pacing and bounded acquisition budgets. The configured client floor is one request per second per client/worker; it is neither an upstream quota guarantee nor an aggregate ceiling, and overlapping concurrent phases are not additive throughput. Confirm process containment before treating a queued acquisition phase as sequential; see the dated containment-risk note in [Oracle Runbook](oracle_runbook.md#13-october-2026-concurrent-acquisition-containment-risk). Retired KBS or paid-runtime calls-per-day/minute recommendations must not be reused as free-VCI entitlement. Review actual provider errors and durable partial/failure receipts before raising attempt budgets.
+Use existing client pacing and bounded acquisition budgets. The configured client floor is one request per second per client/worker; it is neither an upstream quota guarantee nor an aggregate ceiling, and overlapping concurrent phases are not additive throughput. Confirm process containment before treating a queued acquisition phase as sequential; see the dated containment-risk note in [Oracle Runbook](oracle_runbook.md#13-october-2026-concurrent-acquisition-containment-risk). Neither retired KBS/paid-runtime limits nor Golden entitlement establishes VCI quota, data rights or coverage. Review actual provider errors and durable partial/failure receipts before raising attempt budgets.
 
 ### Why `CACHE_BACKEND=auto` is acceptable
 

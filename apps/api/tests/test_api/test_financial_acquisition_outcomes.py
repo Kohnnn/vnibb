@@ -2,6 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import Select
 import vnibb.services.data_pipeline as module
 from vnibb.providers.vnstock.financials import FinancialStatementData, VnstockFinancialsFetcher
 from vnibb.services.data_pipeline import DataPipeline
@@ -45,6 +46,9 @@ def acquisition(monkeypatch):
                     return Result(())
                 self.pending.append(statement.values)
                 return Result()
+            if isinstance(statement, Select):
+                # A read for prior lineage; the stub stores no rows to return.
+                return Result(())
             values = statement.compile().params
             self.pending.append(('receipt', values))
             return Result()

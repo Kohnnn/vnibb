@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 _QUALIFIED_RETAINED_PRICE_SOURCES = frozenset({"vietcap_vnd", "vnstock_vnd"} | {
     f"{prefix}:{provider}"
-    for prefix in ("vnstock_vnd", "vnstock_history", "vnstock_data_history")
+    for prefix in ("vnstock_vnd", "vnstock_history", "vnstock_data_history", "vnstock5_history")
     for provider in ("KBS", "VCI", "TCBS")
 })
 T = TypeVar("T")

@@ -201,3 +201,42 @@ async def test_ev_sales_repair_and_reverse_order_income_writer_do_not_deadlock(m
         async with admin.begin() as connection:
             await connection.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
         await admin.dispose()
+
+
+@pytest.mark.asyncio
+async def test_market_cap_backfill_rejects_unsafe_write():
+    with pytest.raises(RuntimeError, match="Market-cap backfill is disabled"):
+        await repair._backfill_market_cap(500)
+
+
+@pytest.mark.asyncio
+async def test_market_cap_target_fails_before_database_work(monkeypatch, capsys):
+    monkeypatch.setattr(repair, "parse_args", lambda: argparse.Namespace(
+        target="market-cap", audit_only=False, batch_size=500, output_json="unused.json"
+    ))
+
+    async def unexpected_database_work():
+        raise AssertionError("must reject before database work")
+
+    monkeypatch.setattr(repair, "_collect_metrics", unexpected_database_work)
+    assert await repair.main() != 0
+    assert "Market-cap backfill is disabled" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_industry_listing_uses_explicit_vci(monkeypatch):
+    import pandas as pd
+
+    calls = []
+
+    class Listing:
+        def __init__(self, source):
+            calls.append(source)
+
+        def symbols_by_industries(self):
+            return pd.DataFrame([{"symbol": "FPT", "industry_name": "Technology"}])
+
+    monkeypatch.setattr(repair, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(repair, "_get_listing_sources", lambda: ["VCI"])
+    assert await repair._fetch_provider_industry_map() == {"FPT": "Technology"}
+    assert calls == ["VCI"]

@@ -164,16 +164,12 @@ class VnstockStockQuoteFetcher:
                 # Fetch last 3 days to ensure we get data even on weekends/holidays
                 start_date = today - timedelta(days=5)
                 
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_quote_class
 
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(
-                    symbol=symbol,
-                    source=source.upper(),
-                )
-                
+                quote = get_quote_class()(symbol=symbol, source=source)
+
                 # Fetch historical data for recent days
-                df = stock.quote.history(
+                df = quote.history(
                     start=start_date.isoformat(),
                     end=today.isoformat(),
                     interval="1D",
@@ -182,7 +178,7 @@ class VnstockStockQuoteFetcher:
                 if df is None or df.empty:
                     return None
                 
-                records = history_price_records(df, symbol=symbol, source=source, provider=stock.quote)
+                records = history_price_records(df, symbol=symbol, source=source, provider=quote)
                 if not records:
                     return None
                 
@@ -200,6 +196,9 @@ class VnstockStockQuoteFetcher:
                 return StockQuoteData(symbol=symbol), False
             
             latest, prev = result
+            if latest["price_unit"] == "unknown":
+                return StockQuoteData(symbol=symbol), False
+
             
             # A missing close is not a zero-price trade.
             raw_price = latest.get("close")
@@ -239,7 +238,7 @@ class VnstockStockQuoteFetcher:
                     latest.get("updated_at") or latest.get("time") or latest.get("date")
                 ),
                 as_of=_coerce_quote_timestamp(latest.get("time") or latest.get("date"), preserve_timezone=True),
-                upstream_source=latest.get("source"),
+                upstream_source=latest.get("price_source") or latest.get("source"),
             )
             
             # Store in cache

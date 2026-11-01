@@ -130,49 +130,32 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
             try:
                 from vnibb.providers.vnstock.runtime import (
                     get_listing_class,
-                    get_vnstock_class,
+                    get_company_class,
                     validate_source,
                 )
 
+                source = validate_source(settings.vnstock_source)
                 Listing = get_listing_class()
-                Vnstock = get_vnstock_class()
+                Company = get_company_class()
 
+                overview = Company(symbol=query["symbol"], source=source).overview()
                 record: dict[str, Any] = {}
-                candidate_sources = [validate_source(settings.vnstock_source)]
-
-                for source in candidate_sources:
-                    try:
-                        stock = Vnstock().stock(symbol=query["symbol"], source=source)
-                        overview = stock.company.overview()
-                    except Exception as source_error:
-                        logger.debug(
-                            "vnstock profile fetch failed for %s source=%s: %s",
-                            query["symbol"],
-                            source,
-                            source_error,
-                        )
-                        continue
-
-                    if overview is None or overview.empty:
-                        continue
-
+                if overview is not None and not overview.empty:
                     source_record = overview.to_dict("records")[0]
-                    for key, value in source_record.items():
-                        if _is_present(value) and not _is_present(record.get(key)):
-                            record[key] = value
+                    record = {key: value for key, value in source_record.items() if _is_present(value)}
 
                 if not record:
                     logger.warning(f"No profile data for {query['symbol']}")
                     return []
 
-                # Get company name from Listing (overview doesn't include it)
+                # Enrich the overview with the listing name when supplied.
                 try:
-                    listing = Listing(source=validate_source(settings.vnstock_source))
+                    listing = Listing(source=source)
                     symbols_df = listing.all_symbols()
                     if symbols_df is not None and not symbols_df.empty:
                         match = symbols_df[symbols_df["symbol"] == query["symbol"]]
-                        if not match.empty:
-                            record["organ_name"] = match.iloc[0].get("organ_name", "")
+                        if not match.empty and _is_present(match.iloc[0].get("organ_name")):
+                            record["organ_name"] = match.iloc[0]["organ_name"]
                 except Exception as e:
                     logger.debug(f"Failed to get company name from listing: {e}")
 

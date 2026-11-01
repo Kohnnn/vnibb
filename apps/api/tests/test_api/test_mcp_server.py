@@ -524,18 +524,85 @@ async def test_mcp_snapshots_use_only_postgres_context(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_latest_financial_prefers_iq_before_newer_vci(monkeypatch):
+async def test_latest_financial_ranks_admitted_sources_by_recency(monkeypatch):
     calls = []
 
     async def read(collection, queries):
-        source = queries[0]["values"]
-        calls.append(source)
-        return [{"symbol": "FPT", "source": source[0], "fiscal_year": 2025}]
+        calls.append(queries[0]["values"])
+        return [{"symbol": "FPT", "source": "VCI", "fiscal_year": 2026}]
 
     monkeypatch.setattr(server, "list_collection_documents", read)
     row = await server._get_latest_symbol_document("income_statements", "FPT")
-    assert row["source"] == "vietcap"
-    assert calls == [["vietcap"]]
+    assert row["source"] == "VCI"
+    # Every admitted source competes in one ordered query, so a newer secondary
+    # period is not masked by an older primary row.
+    assert calls == [["vietcap", "VCI"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rows,expected",
+    [
+        # Older primary must not mask a newer secondary.
+        (
+            [
+                {"id": 1, "symbol": "FPT", "source": "vietcap", "fiscal_year": 2024, "period": "2024"},
+                {"id": 2, "symbol": "FPT", "source": "VCI", "fiscal_year": 2026, "period": "2026"},
+            ],
+            "VCI",
+        ),
+        # Reverse: newer primary wins.
+        (
+            [
+                {"id": 1, "symbol": "FPT", "source": "vietcap", "fiscal_year": 2026, "period": "2026"},
+                {"id": 2, "symbol": "FPT", "source": "VCI", "fiscal_year": 2024, "period": "2024"},
+            ],
+            "vietcap",
+        ),
+        # Same fiscal year: the later quarter decides.
+        (
+            [
+                {"id": 1, "symbol": "FPT", "source": "vietcap", "fiscal_year": 2026, "fiscal_quarter": 1, "period": "Q1-2026"},
+                {"id": 2, "symbol": "FPT", "source": "VCI", "fiscal_year": 2026, "fiscal_quarter": 3, "period": "Q3-2026"},
+            ],
+            "VCI",
+        ),
+    ],
+)
+async def test_latest_financial_selects_newest_period_across_sources(
+    monkeypatch, rows, expected
+) -> None:
+    """Ordering must actually select the newest period, not merely run one query."""
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session
+    from vnibb.mcp.server import _apply_sql_queries
+    from vnibb.models.financials import IncomeStatement
+
+    engine = create_engine("sqlite://")
+    IncomeStatement.__table__.create(engine)
+    with Session(engine) as session:
+        session.add_all(IncomeStatement(**row) for row in rows)
+        session.commit()
+
+        captured = {}
+
+        async def read(collection, queries):
+            captured["queries"] = queries
+            stmt = _apply_sql_queries(select(IncomeStatement), IncomeStatement, list(queries))
+            return [
+                {"source": r.source, "fiscal_year": r.fiscal_year}
+                for r in session.execute(stmt).scalars().all()
+            ]
+
+        monkeypatch.setattr(server, "list_collection_documents", read)
+        row = await server._get_latest_symbol_document("income_statements", "FPT")
+
+    assert row["source"] == expected
+    # The order clauses must be present, otherwise the newest period is arbitrary.
+    ordered = [
+        q["attribute"] for q in captured["queries"] if q["method"] in {"orderAsc", "orderDesc"}
+    ]
+    assert "fiscal_year" in ordered and "fiscal_quarter" in ordered
 
 
 @pytest.mark.asyncio
@@ -608,16 +675,14 @@ async def test_latest_financial_withholds_issuer_even_with_partial_evidence(monk
     calls = []
 
     async def read(collection, queries):
-        sources = queries[0]["values"]
-        calls.append(sources)
-        if sources == ["issuer_report"]:
-            return [{"source": "issuer_report", "fiscal_year": 2025,
-                     "raw_data": {"_financial_lineage": {"issuer_evidence": ISSUER_EVIDENCE}}}]
+        calls.append(queries[0]["values"])
+        # An issuer row may exist, but it is not an admitted source, so the
+        # combined admitted-source query must not surface it.
         return []
 
     monkeypatch.setattr(server, "list_collection_documents", read)
     assert await server._get_latest_symbol_document("financial_ratios", "FPT") is None
-    assert calls == [["vietcap"], ["VCI"]]
+    assert calls == [["vietcap", "VCI"]]
 
 
 @pytest.mark.asyncio
@@ -625,13 +690,12 @@ async def test_latest_financial_preserves_existing_source_precedence(monkeypatch
     calls = []
 
     async def read(collection, queries):
-        sources = queries[0]["values"]
-        calls.append(sources)
-        return [] if sources == ["vietcap"] else [{"source": "VCI"}]
+        calls.append(queries[0]["values"])
+        return [{"source": "VCI"}]
 
     monkeypatch.setattr(server, "list_collection_documents", read)
     assert (await server._get_latest_symbol_document("financial_ratios", "FPT"))["source"] == "VCI"
-    assert calls == [["vietcap"], ["VCI"]]
+    assert calls == [["vietcap", "VCI"]]
 
 
 

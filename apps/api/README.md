@@ -37,28 +37,38 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
 - **Database:** Self-hosted database stack
 - **ORM:** SQLAlchemy 2.0 (async)
 - **Cache:** Cache tier with in-process memory fallback
-- **Data:** Vietcap IQ primary and community VNStock 4.0.9 VCI only
+- **Data:** Vietcap IQ primary and explicitly sourced VNStock 5.2.1 VCI supplement
 
 ---
 
 ## VNStock Alignment
 
-- The API requires `vnstock>=4.0.4,<4.1`. CI and immutable release images install
-  SHA-256-constrained VNStock 4.0.9 and VNAI 2.6.2 publisher wheels from
-  `constraints-vnstock.txt` while unrelated packages remain on public PyPI.
-- `VNSTOCK_RUNTIME_TIER=free` and `VNSTOCK_SOURCE=VCI` are the only accepted
-  runtime settings. Installed sponsor packages never select a paid runtime.
-  KBS, TCBS, MSN, FMP and DNSE are not execution fallbacks.
-- Image build, container startup, and local API startup reject discoverable
-  `vnstock_data`, `vnstock_ta`, `vnstock_pipeline`, `vnstock_news`, and `vnii`
-  before provider import/authentication. Rebuild without historical premium
-  runtime mounts or use a clean community virtual environment.
-- Unsupported VCI datasets report unavailable/provider failure; they do not
-  switch providers or synthesize observations. Stored historical lineage is retained.
-- The default request allowance is the documented guest guidance of about
-  20 requests/minute, split into 18 main and 2 reinforcement calls. Free community
-  registration is not assumed and an API key does not unlock a paid package here.
-- International Yahoo feeds are independent of this Vietnamese ingestion policy.
+- Both `VNSTOCK_RUNTIME_TIER=free` (default) and `golden` use the unified
+  `vnstock` 5.2.1 SDK. CI and release images use publisher-wheel constraints in
+  `constraints-vnstock.txt` while unrelated dependencies remain on public PyPI.
+  The Python 3.12 slim image supports only `linux/amd64` and `linux/arm64`;
+  its build rejects unsupported targets and does not fall back to a source build.
+- `VNSTOCK_SOURCE=VCI` is required; KBS, TCBS, MSN, FMP and DNSE are not
+  execution fallbacks. VCI shares upstream exposure with Vietcap IQ.
+- Golden requires `VNSTOCK_API_KEY` via a deployment secret. Startup calls
+  `vnstock.setup_api_key` and requires an authenticated `golden` or `diamond`
+  result; a missing key, registration timeout, lock contention or insufficient
+  tier aborts startup without disclosing the key. SDK registration verifies
+  remotely and persists the credential locally. Do not commit or log it. Golden
+  permits legacy sponsor packages but does not use them; neither tier installs
+  packages at runtime.
+- Free mode performs no startup account or registration check and does not
+  inspect or delete persisted SDK credentials. Use an isolated `VNSTOCK_HOME`
+  for CLI and scripts so a persisted paid account cannot be reused by accident.
+  Free still rejects discoverable legacy sponsor packages before SDK import.
+- Unsupported datasets report unavailable/provider failure; no alternate source
+  or synthetic observations are substituted. Unit, reporting-basis and source
+  admission remain mandatory. Entitlement does not authorize acquisition,
+  persistence or redistribution, or establish dataset coverage.
+- Default local pacing remains 18 main and 2 reinforcement calls per minute,
+  with a 20/minute per-operation ceiling; Golden does not increase it automatically.
+  This is not a cross-process quota ledger. International Yahoo feeds and the
+  Vietcombank forex route are independent of Vietnamese VCI equity ingestion.
 
 ---
 
@@ -118,7 +128,7 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs)
 
 Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
 
-Build the immutable free image outside OCI, publish it, resolve its digest, and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. Do not supply sponsor credentials or install packages at container startup.
+Build the immutable image outside OCI, publish it, resolve its digest, and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. The same image serves free and Golden tiers; do not supply credentials at build time or install packages at container startup.
 
 ```bash
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
@@ -142,9 +152,9 @@ DATA_BACKEND=postgres  # Postgres is the only data backend
 SUPABASE_JWT_SECRET=your-jwt-secret
 ALLOW_ANONYMOUS_DASHBOARD_WRITES=true
 REDIS_URL=redis://localhost:6379/0  # cache-tier connection
-VNSTOCK_RUNTIME_TIER=free
+VNSTOCK_RUNTIME_TIER=free  # free|golden; golden requires VNSTOCK_API_KEY in the secret store
 VNSTOCK_SOURCE=VCI
-VNSTOCK_RUNTIME_INSTALL=0  # Paid modules and runtime installation are disabled
+VNSTOCK_RUNTIME_INSTALL=0  # Runtime installation is disabled
 VNSTOCK_RATE_LIMIT_RPS=0.3  # 18 main calls/minute
 VNSTOCK_REINFORCEMENT_RPS=0.03333333333333333  # 2 calls/minute
 VNSTOCK_CALLS_PER_MINUTE=20
@@ -194,16 +204,10 @@ When `VNIBB_MCP_URL` is configured, VniAgent runtime context reads use the MCP c
 
 Canonical implementation notes live in `../../docs/VNIBB_MCP_READONLY.md`.
 
-Premium package strategy:
-- The single `Dockerfile` produces an immutable runtime image; it never installs premium packages at startup.
-- Build a premium image with the BuildKit `vnstock_api_key` secret and a verified installer SHA-256, then deploy the published image digest.
-
-VNStock alignment notes:
-- Use `VNSTOCK_SOURCE=KBS` (recommended), `VCI`, or `DNSE`; TCBS is retired.
-- `VNSTOCK_RUNTIME_TIER=free` keeps optional premium imports off the startup path.
-- Premium modules (`vnstock_data`, `vnstock_ta`, `vnstock_pipeline`,
-  `vnstock_news`, `vnii`) require separately verified sponsor installation and
-  compatibility before enabling `VNSTOCK_RUNTIME_TIER=premium`.
+The single Dockerfile produces an immutable SDK runtime image; no authenticated
+installer or runtime package installation is supported. See the
+[VNStock reference](docs/vnstock_api_documentation.md) for registration, VCI
+admission, unsupported routes and acquisition prerequisites.
 
 ---
 

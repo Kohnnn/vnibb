@@ -232,7 +232,8 @@ class VnstockInsiderDealsFetcher:
             def _fetch():
                 from vnibb.providers.vnstock.runtime import get_company_class, validate_source
 
-                company = get_company_class()(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
+                source = validate_source(settings.vnstock_source)
+                company = get_company_class()(symbol=symbol.upper(), source=source)
                 return VnstockInsiderDealsFetcher._raw_records(company, limit)
 
             loop = asyncio.get_event_loop()

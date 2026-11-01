@@ -133,24 +133,20 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
 
         def _fetch_sync() -> List[dict]:
             try:
-                from vnibb.providers.vnstock.runtime import get_vnstock_class
+                from vnibb.providers.vnstock.runtime import get_trading_class, validate_source
 
-                Vnstock = get_vnstock_class()
-                # Foreign flow fields are currently exposed reliably on VCI price board.
-                stock = Vnstock().stock(symbol=query["symbol"], source="VCI")
-                # Preferred path: real-time board snapshot exposes foreign buy/sell fields.
-                board = stock.trading.price_board(symbols_list=[query["symbol"]])
-                if board is not None and not board.empty:
-                    return board.to_dict("records")[: query.get("limit", 30)]
-
-                # Fallback path: historical quote does not include foreign flows but keeps endpoint resilient.
-                df = stock.quote.history(start="2025-01-01", end="2025-12-31", interval="1D")
-
+                source = validate_source(settings.vnstock_source)
+                trading = get_trading_class()(symbol=query["symbol"], source=source)
+                df = trading.foreign_trade(limit=query.get("limit", 30))
                 if df is None or df.empty:
                     return []
-
-                # Return limited rows
-                return df.tail(query.get("limit", 30)).to_dict("records")
+                records = df.to_dict("records")[: query.get("limit", 30)]
+                if str(df.attrs.get("value_unit", "")).upper() != "VND":
+                    for row in records:
+                        for key in list(row):
+                            if "value" in str(key).lower():
+                                row.pop(key)
+                return records
             except Exception as e:
                 logger.error(f"vnstock foreign trading fetch error: {e}")
                 raise ProviderError(
@@ -179,6 +175,7 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                     "foreignBuyVolume",
                     "buyForeignQuantity",
                     "foreign_buy_volume",
+                    "fr_buy_volume_total",
                     "foreign_buy_vol",
                     ("match", "foreign_buy_volume"),
                     ("foreign", "buy_volume"),
@@ -189,6 +186,7 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                     "foreignSellVolume",
                     "sellForeignQuantity",
                     "foreign_sell_volume",
+                    "fr_sell_volume_total",
                     "foreign_sell_vol",
                     ("match", "foreign_sell_volume"),
                     ("foreign", "sell_volume"),
@@ -198,6 +196,7 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                     row,
                     "foreignBuyValue",
                     "foreign_buy_value",
+                    "fr_buy_value_total",
                     ("match", "foreign_buy_value"),
                     ("foreign", "buy_value"),
                     ("foreign_trading", "buy_value"),
@@ -206,6 +205,7 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                     row,
                     "foreignSellValue",
                     "foreign_sell_value",
+                    "fr_sell_value_total",
                     ("match", "foreign_sell_value"),
                     ("foreign", "sell_value"),
                     ("foreign_trading", "sell_value"),
@@ -214,6 +214,7 @@ class VnstockForeignTradingFetcher(BaseFetcher[ForeignTradingQueryParams, Foreig
                     row,
                     "foreignNetValue",
                     "foreign_net_value",
+                    "fr_net_value_total",
                     ("match", "foreign_net_value"),
                     ("foreign", "net_value"),
                     ("foreign_trading", "net_value"),

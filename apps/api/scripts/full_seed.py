@@ -88,17 +88,20 @@ async def run_seeding():
     # 6. Indices
     logger.info("Step 6: Syncing Market Indices...")
     try:
-        from vnstock import Vnstock
+        from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
-        stock = Vnstock()
+        Market, _ = import_vnstock_symbol("Market")
+        source = validate_source("VCI")
         indices = ["VNINDEX", "HNXINDEX", "UPCOMINDEX", "VN30INDEX"]
         total_idx = 0
         async with async_session_maker() as session:
             for idx in indices:
                 try:
-                    df = stock.stock(symbol=idx, source="VCI").quote.history(
+                    df = Market().index(idx).ohlcv(
                         start=(datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d"),
                         end=datetime.now().strftime("%Y-%m-%d"),
+                        source=source,
+                        floating=None,
                     )
                     if df is not None and not df.empty:
                         from vnibb.models.stock import StockIndex

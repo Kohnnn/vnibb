@@ -197,58 +197,10 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
 
                 company = create_reference_company(query["symbol"], settings.vnstock_source)
 
-                # Get company events
-                events_df = None
-                try:
-                    events_callable = getattr(company, "events", None)
-                    if callable(events_callable):
-                        events_df = events_callable()
-                except Exception:
-                    events_df = None
-
+                events_df = company.events()
                 if events_df is None or events_df.empty:
-                    # Fallback: synthesize event-like records from dividends
-                    dividends_df = None
-                    try:
-                        dividends_callable = getattr(company, "dividends", None)
-                        if callable(dividends_callable):
-                            dividends_df = dividends_callable()
-                    except Exception:
-                        dividends_df = None
-                    if dividends_df is not None and not dividends_df.empty:
-                        records = dividends_df.head(query.get("limit", 30)).to_dict("records")
-                        fallback_events: List[dict[str, Any]] = []
-                        for row in records:
-                            fallback_events.append(
-                                {
-                                    "eventType": "DIVIDEND",
-                                    "eventName": row.get("type") or "Dividend",
-                                    "eventDate": row.get("exDate")
-                                    or row.get("recordDate")
-                                    or row.get("paymentDate"),
-                                    "exDate": row.get("exDate") or row.get("exRightDate"),
-                                    "recordDate": row.get("recordDate"),
-                                    "paymentDate": row.get("paymentDate"),
-                                    "description": row.get("description"),
-                                    "value": supplied(row, "cashDividend", "ratio", "stockDividend"),
-                                }
-                            )
-                        if fallback_events:
-                            return sorted(
-                                fallback_events,
-                                key=lambda item: _parse_sortable_event_date(
-                                    item.get("eventDate")
-                                    or item.get("exDate")
-                                    or item.get("recordDate")
-                                    or item.get("paymentDate")
-                                )
-                                or datetime.min,
-                                reverse=True,
-                            )[: query.get("limit", 30)]
-
                     logger.info(f"No events data for {query['symbol']}")
                     return []
-
                 return events_df.to_dict("records")
 
             except Exception as e:
@@ -260,50 +212,10 @@ class VnstockCompanyEventsFetcher(BaseFetcher[CompanyEventsQueryParams, CompanyE
                 )
 
         try:
-            data = await run_reference_provider(
+            return await run_reference_provider(
                 _fetch_sync, settings.vnstock_timeout,
                 key=("company_events", settings.vnstock_source, tuple(sorted(query.items()))),
             )
-
-            if data:
-                return data
-
-            # Async fallback: map dividend history to event records
-            try:
-                from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
-
-                dividends = await VnstockDividendsFetcher.fetch(query["symbol"])
-                mapped: List[dict[str, Any]] = []
-                for dividend in dividends[: query.get("limit", 30)]:
-                    mapped.append(
-                        {
-                            "eventType": "DIVIDEND",
-                            "eventName": dividend.dividend_type or "Dividend",
-                            "eventDate": dividend.ex_date
-                            or dividend.record_date
-                            or dividend.payment_date,
-                            "exDate": dividend.ex_date,
-                            "recordDate": dividend.record_date,
-                            "paymentDate": dividend.payment_date,
-                            "description": dividend.description,
-                            "value": next((value for value in (
-                                dividend.cash_dividend, dividend.dividend_ratio, dividend.stock_dividend,
-                            ) if value is not None), None),
-                        }
-                    )
-                return sorted(
-                    mapped,
-                    key=lambda item: _parse_sortable_event_date(
-                        item.get("eventDate")
-                        or item.get("exDate")
-                        or item.get("recordDate")
-                        or item.get("paymentDate")
-                    )
-                    or datetime.min,
-                    reverse=True,
-                )[: query.get("limit", 30)]
-            except Exception:
-                return []
         except asyncio.TimeoutError:
             raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
 

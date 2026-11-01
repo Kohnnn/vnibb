@@ -4055,21 +4055,24 @@ async def test_market_forex_rates_smoke_returns_data(client, monkeypatch):
             assert orient == "records"
             return self._rows
 
-    def fake_vcb_exchange_rate():
-        return FakeFrame(
-            [
-                {
-                    "currency_code": "USD",
-                    "currency_name": "US DOLLAR",
-                    "buy _cash": "24,500",
-                    "buy _transfer": "24,520",
-                    "sell": "24,860",
-                    "date": "2026-02-15",
-                }
-            ]
-        )
+    class Retail:
+        def exchange_rate(self):
+            return FakeFrame(
+                [
+                    {
+                        "currency_code": "USD",
+                        "currency_name": "US DOLLAR",
+                        "buy_cash": 24500.0,
+                        "buy_transfer": 24520.0,
+                        "sell": 24860.0,
+                        "date": "2026-02-15",
+                    }
+                ]
+            )
 
-    monkeypatch.setattr("vnibb.api.v1.market.vcb_exchange_rate", fake_vcb_exchange_rate)
+    monkeypatch.setattr(
+        "vnibb.api.v1.market.import_vnstock_symbol", lambda name: (Retail, "vnstock")
+    )
 
     response = await client.get("/api/v1/market/forex-rates?limit=1")
     assert response.status_code == 200
@@ -4080,46 +4083,18 @@ async def test_market_forex_rates_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_market_commodities_smoke_returns_data(client, monkeypatch):
-    class FakeFrame:
-        def __init__(self, rows):
-            self._rows = rows
-            self.index = [0]
-
-        def to_dict(self, orient: str):
-            assert orient == "records"
-            return self._rows
-
+async def test_market_commodities_reports_removed_gold_helpers(client, monkeypatch):
     async def fake_yahoo_commodities(limit: int):
         return []
 
-    def fake_btmc_goldprice():
-        return FakeFrame(
-            [
-                {
-                    "name": "Gold 9999",
-                    "karat": "9999",
-                    "buy_price": "88,500,000",
-                    "sell_price": "90,200,000",
-                    "world_price": "2,900",
-                    "time": "2026-02-15 10:15",
-                }
-            ]
-        )
-
-    def fake_sjc_gold_price():
-        return FakeFrame([])
-
     monkeypatch.setattr("vnibb.api.v1.market._fetch_yahoo_commodities", fake_yahoo_commodities)
-    monkeypatch.setattr("vnibb.api.v1.market.btmc_goldprice", fake_btmc_goldprice)
-    monkeypatch.setattr("vnibb.api.v1.market.sjc_gold_price", fake_sjc_gold_price)
 
     response = await client.get("/api/v1/market/commodities?limit=1")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["count"] == 1
-    assert payload["data"][0]["source"] == "BTMC"
-    assert payload["data"][0]["buy_price"] == 88500000.0
+    assert payload["count"] == 0
+    assert payload["data"] == []
+    assert payload["error"] == "gold price helpers unavailable"
 
 
 @pytest.mark.asyncio

@@ -93,22 +93,20 @@ def stub_reference_fetch(monkeypatch, dataset, fetcher, **kwargs):
 
 @pytest.mark.parametrize("source,guard_error", [("KBS", None), ("VCI", RuntimeError("paid runtime forbidden"))])
 def test_reference_company_guards_precede_provider_construction(monkeypatch, source, guard_error):
-    import sys
     from unittest.mock import Mock
 
     from vnibb.providers.vnstock import runtime
 
     constructor = Mock(side_effect=AssertionError("rejected runtime must not construct a provider"))
     guarded_import = Mock(side_effect=guard_error)
-    monkeypatch.setitem(sys.modules, "vnstock.explorer.vci", SimpleNamespace(Company=constructor))
-    monkeypatch.setattr(runtime, "import_vnstock_symbol", guarded_import)
+    monkeypatch.setattr(runtime, "get_company_class", guarded_import)
 
     with pytest.raises(RuntimeError if guard_error else ValueError):
         runtime.create_reference_company("VNM", source)
 
     constructor.assert_not_called()
     if guard_error:
-        guarded_import.assert_called_once_with("Company")
+        guarded_import.assert_called_once_with()
     else:
         guarded_import.assert_not_called()
 
@@ -122,7 +120,6 @@ def test_reference_company_guards_precede_provider_construction(monkeypatch, sou
     ("company_events", "VnstockCompanyEventsFetcher", "events"),
 ])
 async def test_reference_fetcher_constructs_only_company(monkeypatch, dataset, fetcher, method):
-    import sys
     from importlib import import_module
 
     import pandas as pd
@@ -139,19 +136,11 @@ async def test_reference_fetcher_constructs_only_company(monkeypatch, dataset, f
         calls.append(kwargs)
         return SimpleNamespace(**{method: fetch_rows})
 
-    def forbid_legacy_client():
-        raise AssertionError("Reference requests must not construct Finance through Vnstock")
-
-    def guarded_import(name):
-        calls.append(("guard", name))
-
-    monkeypatch.setattr(runtime, "import_vnstock_symbol", guarded_import)
-    monkeypatch.setitem(sys.modules, "vnstock.explorer.vci", SimpleNamespace(Company=company))
-    monkeypatch.setattr(runtime, "get_vnstock_class", forbid_legacy_client)
+    monkeypatch.setattr(runtime, "get_company_class", lambda: company)
     provider = getattr(import_module(f"vnibb.providers.vnstock.{dataset}"), fetcher)
 
     assert await provider.extract_data({"symbol": "VNM", "limit": 20}) == rows
-    assert calls == [("guard", "Company"), {"symbol": "VNM"}, method]
+    assert calls == [{"symbol": "VNM", "source": "VCI"}, method]
 
 
 @pytest.mark.asyncio

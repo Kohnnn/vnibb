@@ -1,21 +1,16 @@
 """
 Trading Stats Provider - Company Trading Statistics
 
-Provides trading statistics for a company.
-Uses vnstock company.trading_stats() method (VCI only).
+The former company aggregate is not provided by vnstock 5 session statistics.
 """
 
-import asyncio
-import logging
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 
 
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -59,9 +54,7 @@ class TradingStatsQueryParams(BaseModel):
 
 class VnstockTradingStatsFetcher:
     """
-    Fetcher for company trading statistics.
-    
-    Wraps vnstock company.trading_stats() method (VCI source only).
+    Fetcher for the removed company trading-statistics aggregate.
     """
     
     @staticmethod
@@ -77,40 +70,7 @@ class VnstockTradingStatsFetcher:
         Returns:
             TradingStatsData record
         """
-        try:
-            def _fetch():
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
-
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
-
-
-                df = stock.company.trading_stats()
-                if df is None or len(df) == 0:
-                    return {}
-                return df.to_dict(orient="records")[0] if len(df) > 0 else {}
-            
-            loop = asyncio.get_event_loop()
-            record = await loop.run_in_executor(None, _fetch)
-            
-            return TradingStatsData(
-                symbol=symbol.upper(),
-                avg_volume_10d=record.get("avgVolume10d") or record.get("aveVolume10d"),
-                avg_volume_30d=record.get("avgVolume30d") or record.get("aveVolume30d"),
-                avg_volume_60d=record.get("avgVolume60d") or record.get("aveVolume60d"),
-                avg_value_10d=record.get("avgValue10d") or record.get("aveValue10d"),
-                avg_value_30d=record.get("avgValue30d") or record.get("aveValue30d"),
-                high_52w=record.get("high52w") or record.get("highest52Week"),
-                low_52w=record.get("low52w") or record.get("lowest52Week"),
-                price_change_1m=record.get("priceChange1m") or record.get("percentChange1m"),
-                price_change_3m=record.get("priceChange3m") or record.get("percentChange3m"),
-                price_change_6m=record.get("priceChange6m") or record.get("percentChange6m"),
-                price_change_1y=record.get("priceChange1y") or record.get("percentChange1y"),
-                foreign_percent=record.get("foreignPercent") or record.get("foreignOwnership"),
-                foreign_room=record.get("foreignRoom") or record.get("roomForeignRemain"),
-                beta=record.get("beta"),
-            )
-            
-        except Exception as e:
-            logger.error(f"Trading stats fetch failed for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch trading stats for {symbol}: {e}")
+        raise ProviderError(
+            f"Company trading statistics are unavailable in vnstock 5 for {symbol.upper()}",
+            provider="vnstock",
+        )

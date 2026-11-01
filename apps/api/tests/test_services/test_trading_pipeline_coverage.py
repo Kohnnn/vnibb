@@ -181,27 +181,38 @@ def test_trade_upsert_preserves_colliding_observation(monkeypatch, dataset, symb
 def consumer(monkeypatch):
     sql = SQLStore()
     mongo = MongoStore()
-    state = SimpleNamespace(sql=sql, mongo=mongo, frames={}, failed_symbols=set(), calls=[])
+    state = SimpleNamespace(sql=sql, mongo=mongo, frames={}, failed_symbols=set(), calls=[], unit="thousand_VND")
 
-    class Vnstock:
-        def stock(self, *, symbol, source):
+    class Quote:
+        def __init__(self, *, symbol, source):
             assert source == "VCI"
+            self.symbol = symbol
 
-            def intraday(page_size=100, last_time=None):
-                state.calls.append((symbol, page_size, last_time))
-                if symbol in state.failed_symbols:
-                    raise RuntimeError("Provider unavailable")
-                frame = state.frames[symbol].iloc[-page_size:].copy()
-                frame.attrs = dict(state.frames[symbol].attrs)
-                return frame
+        def intraday(self, *args, **kwargs):
+            page_size = kwargs["page_size"]
+            state.calls.append((self.symbol, page_size, None))
+            if self.symbol in state.failed_symbols:
+                raise RuntimeError("Provider unavailable")
+            frame = state.frames[self.symbol].iloc[-page_size:].copy()
+            frame.attrs = dict(state.frames[self.symbol].attrs)
+            if state.unit is not None:
+                frame.attrs["price_unit"] = state.unit
+            return frame
 
-            return SimpleNamespace(quote=SimpleNamespace(intraday=intraday))
+    def primary(client, symbol, *, page_size):
+        if symbol in state.failed_symbols:
+            raise RuntimeError("Provider unavailable")
+        state.calls.append((symbol, page_size, None))
+        frame = state.frames[symbol].iloc[-page_size:].copy()
+        frame.attrs = dict(state.frames[symbol].attrs)
+        frame["price"] *= 1000
+        return frame
 
     monkeypatch.setattr(data_pipeline, "async_session_maker", sql.session)
     monkeypatch.setattr(sync_all_data, "async_session_maker", sql.session)
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Vnstock)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
-    monkeypatch.setattr(trading_acquisition, "fetch_primary_trades", Mock(side_effect=RuntimeError("Primary unavailable")))
+    monkeypatch.setattr(trading_acquisition, "fetch_primary_trades", primary)
     monkeypatch.setattr(mongo_market_data_service, "get_mongo_market_data_service", lambda: mongo)
     monkeypatch.setattr(data_pipeline.RateLimiter, "wait", AsyncMock())
     monkeypatch.setattr(data_pipeline.DataPipeline, "_is_after_market_close", lambda self: True)
@@ -448,3 +459,41 @@ async def test_malformed_primary_envelope_falls_back_without_publishing_empty_ba
     assert len(consumer.mongo.trades("FPT")) == 4
     assert not [doc for doc in consumer.mongo.documents.values()
                 if doc.get("batchReceipt") and doc["symbol"] == "FPT" and doc["rowCount"] == 0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unit,expected_price", [("thousand_VND", 12500), ("VND", 12.5)])
+async def test_sdk_vci_fallback_is_bounded_sample_with_declared_units(consumer, monkeypatch, unit, expected_price):
+    monkeypatch.setattr(trading_acquisition, "fetch_primary_trades", Mock(side_effect=RuntimeError("Primary unavailable")))
+    consumer.unit = unit
+    consumer.frames["FPT"] = trade_frame(1100)
+    progress = {}
+
+    count = await data_pipeline.DataPipeline().sync_intraday_trades(
+        trade_date=TRADE_DATE, symbols=["FPT"], progress=progress, limit=5000,
+    )
+
+    assert consumer.calls == [("FPT", 1000, None)]
+    assert count == 1000
+    coverage = progress["acquisition_outcomes"]["FPT"]
+    assert coverage["provider"] == "vnstock:VCI"
+    assert coverage["scope"] == "sampled"
+    assert coverage["completed_session"] is False
+    assert coverage["denominator_trade_count"] is None
+    assert {row["price"] for row in consumer.sql.ticks} == {expected_price}
+
+
+@pytest.mark.asyncio
+async def test_sdk_vci_fallback_rejects_undocumented_price_units(consumer, monkeypatch):
+    monkeypatch.setattr(trading_acquisition, "fetch_primary_trades", Mock(side_effect=RuntimeError("Primary unavailable")))
+    consumer.unit = None
+    consumer.frames["FPT"] = trade_frame(1)
+    progress = {}
+
+    assert await data_pipeline.DataPipeline().sync_intraday_trades(
+        trade_date=TRADE_DATE, symbols=["FPT"], progress=progress, limit=500,
+    ) == 0
+    assert progress["error_count"] == 1
+    assert consumer.sql.ticks == []
+    assert consumer.sql.flows == {}
+    assert consumer.mongo.documents == {}

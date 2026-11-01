@@ -115,6 +115,7 @@ def history_price_records(
     frame: Any, *, symbol: str, source: str, provider: Any = None,
     asset_type: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Normalize SDK 5 history without inheriting retained legacy unit contracts."""
     attrs = getattr(frame, "attrs", {})
     attrs = attrs if isinstance(attrs, dict) else {}
     frame_fields = getattr(frame, "__dict__", {})
@@ -129,7 +130,7 @@ def history_price_records(
     else:
         module = str(attrs.get("provider_module") or "")
     sponsor = module.startswith(("vnstock_data", "vnstock_ta"))
-    provenance = f"{'vnstock_data_history' if sponsor else 'vnstock_history'}:{actual_source}"
+    provenance = f"{'vnstock_data_history' if sponsor else 'vnstock5_history'}:{actual_source}"
     category = frame_fields.get("category") or attrs.get("asset_type") or attrs.get("category") or asset_type
     if category is None and provider is not None and not isinstance(provider, str):
         category = getattr(provider, "asset_type", None)

@@ -29,12 +29,12 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     
     # Data Processing
-    "pandas>=1.5.3",
+    "pandas>=2.0",
     "openpyxl>=3.1.2",
     "numpy>=1.24.0",
     
     # Data Providers
-    "vnstock>=4.0.4,<4.1",  # Community VCI only; paid runtime packages are excluded
+    "vnstock==5.2.1",  # Unified SDK; source and account tier remain explicit
 
 
     

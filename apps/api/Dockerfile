@@ -5,6 +5,12 @@ WORKDIR /app
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG IMAGE_RELEASE_REVISION=unknown
+ARG TARGETPLATFORM
+
+RUN case "$TARGETPLATFORM" in \
+    linux/amd64|linux/arm64) ;; \
+    *) printf 'Unsupported VNStock 5.2.1 image platform: %s\n' "$TARGETPLATFORM" >&2; exit 1 ;; \
+    esac
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONPATH=/opt/venv/lib/python3.12/site-packages \
@@ -31,8 +37,8 @@ COPY . .
 RUN printf '%s\n' "$IMAGE_RELEASE_REVISION" > /app/.release-revision
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --isolated --no-cache-dir --index-url https://pypi.org/simple -c constraints-vnstock.txt . \
-    && python -c "from importlib.metadata import version; print(f'vnstock {version(\"vnstock\")} | vnai {version(\"vnai\")}')"
+    && pip install --isolated --no-cache-dir --only-binary=vnstock --index-url https://pypi.org/simple -c constraints-vnstock.txt . \
+    && python -c "from importlib.metadata import version; installed = version('vnstock'); assert installed == '5.2.1', installed; print(f'vnstock {installed}')"
 
 RUN python -c "from importlib.util import find_spec; modules = ('vnstock_data', 'vnstock_ta', 'vnstock_pipeline', 'vnstock_news', 'vnii'); present = [name for name in modules if find_spec(name) is not None]; assert not present, f'Paid modules are forbidden in the free image: {present}'"
 

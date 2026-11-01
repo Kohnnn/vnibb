@@ -177,7 +177,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # VNStock Provider
     # ==========================================================================
-    vnstock_api_key: Optional[str] = None  # Retained for deployment compatibility; not a paid runtime selector
+    vnstock_api_key: Optional[str] = Field(default=None, repr=False, exclude=True)
     vnstock_runtime_tier: str = "free"
     vnstock_source: str = "VCI"
     vnstock_timeout: int = Field(default=25, ge=1)  # Request timeout in seconds
@@ -520,14 +520,14 @@ class Settings(BaseSettings):
     @classmethod
     def validate_vnstock_runtime_tier(cls, v: str) -> str:
         tier = (v or "free").strip().lower()
-        if tier != "free":
-            raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free'; paid runtimes are disabled")
+        if tier not in {"free", "golden"}:
+            raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free' or 'golden'")
         return tier
 
     @field_validator("vnstock_source")
     @classmethod
     def validate_vnstock_source(cls, v: str) -> str:
-        """Accept only the approved free VCI source at the configuration boundary."""
+        """Accept only the approved VCI source at the configuration boundary."""
         normalized = (v or "VCI").strip().upper()
         if normalized != "VCI":
             raise ValueError("VNSTOCK_SOURCE must be 'VCI'; alternate sources are disabled")

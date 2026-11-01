@@ -656,7 +656,6 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
 
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
     monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace())
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: object)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 0.02)
@@ -751,9 +750,6 @@ async def test_heatmap_distinct_batches_progress_at_child_worker_capacity(client
                     active -= 1
 
     monkeypatch.setattr(equity_screener, "_executor", pool)
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(
-        stock=lambda **kwargs: SimpleNamespace(quote=Quote(**kwargs)),
-    ))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market.settings, "vnstock_timeout", 6)
@@ -883,9 +879,6 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
 
     calls = {"broad_stock": 0, "listing": 0, "quotes": []}
 
-    def broad_stock_is_forbidden():
-        calls["broad_stock"] += 1
-        raise AssertionError("Quote-only acquisition must not construct Finance")
 
     class Listing:
         def __init__(self, *, source):
@@ -909,10 +902,11 @@ async def test_heatmap_quote_only_uses_real_listing_exchange_before_limit(client
 
         def history(self, *, start, end):
             return pd.DataFrame([{
-                "time": date.today().isoformat(), "close": 100.0, "volume": 1_000_000,
+                "time": date.today().isoformat(), "close": 100_000.0, "volume": 1_000_000,
+                "price_unit": "VND",
             }])
 
-    monkeypatch.setattr(equity_screener, "get_vnstock", broad_stock_is_forbidden)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda *_args: (_ for _ in ()).throw(AssertionError("Quote-only acquisition must not construct Fundamental")))
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
@@ -958,7 +952,10 @@ def screener_supplier(monkeypatch):
 
     def ratios(**kwargs):
         calls["ratios"] += 1
-        return pd.DataFrame([{"pe": 12.0, "pb": 2.0}])
+        return pd.DataFrame([
+            {"period": "2025", "id": "RT_VALUE_PE", "name": "P/E", "unit": "lần", "value": 12.0},
+            {"period": "2025", "id": "RT_VALUE_PB", "name": "P/B", "unit": "lần", "value": 2.0},
+        ])
 
     def history(**kwargs):
         calls["quotes"] += 1
@@ -979,12 +976,18 @@ def screener_supplier(monkeypatch):
             return history(**kwargs)
 
 
-    supplier = SimpleNamespace(
-        finance=SimpleNamespace(ratio=ratios), quote=SimpleNamespace(history=history),
-    )
-    monkeypatch.setattr(equity_screener, "get_vnstock", lambda: SimpleNamespace(stock=lambda **_kw: supplier))
+    class Fundamental:
+        def equity(self, symbol):
+            return SimpleNamespace(ratio=ratios)
+
+    def import_symbol(name):
+        if name != "Fundamental":
+            raise AssertionError(name)
+        return Fundamental, "vnstock"
+
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", import_symbol)
     monkeypatch.setattr(market, "_load_latest_screener_rows_from_db", lambda **_kw: _async([]))
     monkeypatch.setattr(market, "_load_stock_metadata", lambda _s: _async({}))
     monkeypatch.setattr(market, "_load_change_pct_map", lambda _s: _async({"VNM": 3.2}))

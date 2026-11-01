@@ -56,7 +56,7 @@ The goal is not to be just another screener or charting page. VNIBB is meant to 
 
 Run from `vnibb/`.
 
-Start PostgreSQL and MongoDB before the API: [`Database recovery and local startup`](docs/oracle_runbook.md#database-recovery-and-local-startup) provides authenticated loopback-only Docker services and migrations. Vietnamese ingestion is Vietcap IQ/Trading primary with free `vnstock` VCI only; KBS, TCBS and sponsor packages are not execution fallbacks. Use the bounded [IQ ingestion CLI](apps/api/scripts/vietcap/README.md) to populate lossless provider records and evidence-backed structured fields, then run the [MCP database smoke](docs/VNIBB_MCP_DEPLOYMENT.md). A healthy process alone does not prove populated or fresh data.
+Start PostgreSQL and MongoDB before the API: [`Database recovery and local startup`](docs/oracle_runbook.md#database-recovery-and-local-startup) provides authenticated loopback-only Docker services and migrations. Vietnamese ingestion is Vietcap IQ/Trading primary with explicitly sourced `vnstock` VCI as a supplement; KBS, TCBS and separate sponsor packages are not execution fallbacks. Use the bounded [IQ ingestion CLI](apps/api/scripts/vietcap/README.md) only when acquisition is authorized, then run the [MCP database smoke](docs/VNIBB_MCP_DEPLOYMENT.md). A healthy process alone does not prove populated or fresh data.
 
 
 ```bash
@@ -80,7 +80,7 @@ pnpm --filter frontend dev
 # 6. Open: http://localhost:3000 (frontend), http://localhost:8000/docs (API docs), and http://127.0.0.1:8001/health (MCP health)
 ```
 
-The API install uses PyPI for general dependencies and SHA-256-constrained wheels from the [official VNStock package index](https://vnstocks.com/api/simple/) for `vnstock` 4.0.9 and its `vnai` 2.6.2 dependency. Keep `apps/api/constraints-vnstock.txt` in the install command for local setup, CI, and Docker; no VNStock credential is required for these free packages. Only community vnstock VCI is enabled, and the image rejects installed sponsor modules, including `vnii`; no authenticated premium installer or runtime mount is supported. To check credential-free resolution without installing packages, run `python -m pytest apps/api/scripts/test_vnstock_install.py -q` in an environment with `pip` and `pytest` and network access. This explicit network check is separate from the offline API test suite. On Python 3.12, `pip install --dry-run --ignore-installed --only-binary=:all:` resolved the API `[dev]` dependencies and confirmed both vendor wheel URLs and hashes. Artifact pinning and using PyPI as the only package index prevent the VNStock index from supplying unrelated dependencies, but future constraint updates still require independent publisher/artifact review; other PyPI packages are not hash-locked.
+The API install uses PyPI for general dependencies and SHA-256-constrained `vnstock` 5.2.1 platform wheels from the [official VNStock package index](https://vnstocks.com/api/packages/vnstock/). Keep `apps/api/constraints-vnstock.txt` in the install command for local setup, CI and Docker. The published wheels cover CPython 3.10+ on glibc Linux x86-64/aarch64, macOS x86-64/arm64 and Windows amd64; musl and other platforms are not listed. The default free runtime rejects separate sponsor packages; optional Golden registration uses `VNSTOCK_RUNTIME_TIER=golden` and `VNSTOCK_API_KEY` from a secret store. Registration verifies remotely and persists credentials locally. Both tiers require `VNSTOCK_SOURCE=VCI`; neither entitlement nor installation authorizes data acquisition. See [VNStock alignment](apps/api/README.md#vnstock-alignment).
 
 If you want VniAgent to use the MCP sidecar locally, add this backend env:
 
@@ -405,17 +405,9 @@ apps/api/vnibb/
    │
    └─► Provider Chain
         │
-        ├─► Primary: VNStock API
-        │    ├─ SUCCESS → Cache + Return
-        │    └─ FAIL → Continue
-        │
-        ├─► Secondary: Scraper Fallback
-        │    ├─ SUCCESS → Cache + Return
-        │    └─ FAIL → Continue
-        │
-        └─► Tertiary: Database Stack
-             ├─ SUCCESS → Return
-             └─ FAIL → Return stale cache or DataNotFoundError
+        ├─► Dataset-specific primary and retained-data paths
+        ├─► Explicit VCI supplement where supported and admitted
+        └─► Unavailable/provider error when no eligible data exists
    │
    ▼
 5. RESPONSE
@@ -452,32 +444,13 @@ v:n:<hash>     # news
 | `near_real_time` | `/screener`, `/sectors`, `/historical` | `public, max-age=30, stale-while-revalidate=90` |
 | `staticish` | `/profile`, `/ratios`, `/financials` | `public, max-age=300, stale-while-revalidate=1800` |
 
-## Fallback Chain
+## Data Source Boundary
 
-```
-Request
-   │
-   ▼
-1. Check Cache Tier
-   │
-   ▼
-2. Try Primary Provider (VNStock)
-   │   └─ API: VNStock (KBS, VCI, DNSE sources)
-   │
-   ▼
-3. Try Scraper Fallback
-   │   └─ cophieu68 historical scraper
-   │
-   ▼
-4. Try Database Stack
-   │   └─ Price data archival
-   │
-   ▼
-5. Return Stale Cache (if available)
-   │
-   ▼
-6. Raise DataNotFoundError
-```
+Vietnamese ingestion uses Vietcap IQ/Trading as the primary source and explicitly
+selected VCI for supported supplementary datasets. VCI shares upstream exposure
+with Vietcap and is not an independent outage fallback. Unsupported or unproven
+data remains unavailable; no alternate VNStock source or synthetic observation
+is substituted. See [VNStock alignment](apps/api/README.md#vnstock-alignment).
 
 ## Data Storage Architecture
 

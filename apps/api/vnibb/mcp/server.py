@@ -26,11 +26,7 @@ from sqlalchemy import select
 from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker, check_database_connection
-from vnibb.core.financial_sources import (
-    ADMITTED_FINANCIAL_SOURCES,
-    PRIMARY_FINANCIAL_SOURCES,
-    SECONDARY_FINANCIAL_SOURCES,
-)
+from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.price_units import normalize_price_record, persisted_price_record
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS, admitted_ratio_value
@@ -822,8 +818,45 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     }
     values = {name: payload.get(name) for name in ("symbol", "period", "fiscal_year", "fiscal_quarter", "source")}
     units = dict(metadata.get("unit_metadata") or {})
+    # A metric the sync retained keeps its stored value but may no longer carry
+    # the source and unit it was stored under. Serving it here would relabel
+    # older, differently-sourced data as freshly verified, so it is withheld.
+    unprovenanced = set(lineage.get("unprovenanced_metrics") or ()) - set(units)
+    withheld = {}
+    # A stored metric whose value disagrees with `canonical_data` is not backed
+    # by this lineage, so it is withheld and disclosed raw. The statement stays
+    # served: the canonical still describes every metric that agrees, and only
+    # the disagreeing cells lose their provenance.
+    # Mirrors `equity._STATEMENT_CANONICAL_ALIASES`; a canonical may carry a
+    # metric under an equivalent name, which still describes the column.
+    _CANONICAL_ALIASES = {
+        "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
+        "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
+        "equity": "total_equity", "total_equity": "equity",
+        "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
+        "capital_expenditure": "capex", "capex": "capital_expenditure",
+    }
+
+    def _canonical_value(field: str) -> Any:
+        if field in canonical:
+            return canonical.get(field)
+        return next((canonical.get(alias) for alias, target in _CANONICAL_ALIASES.items()
+                     if target == field and alias in canonical), None)
+    disagreeing = {
+        column for column, field in monetary.items()
+        if payload.get(column) is not None
+        and _canonical_value(field) is not None
+        and _canonical_value(field) != payload.get(column)
+    }
     for column, field in monetary.items():
-        if field in FinancialStatementData.model_fields:
+        if field not in FinancialStatementData.model_fields:
+            continue
+        if column in disagreeing:
+            values[field] = None
+            withheld[column] = "stored_statement_disagrees_with_lineage"
+        elif column in unprovenanced:
+            values[field] = None
+        else:
             values[field] = payload.get(column)
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
@@ -832,8 +865,14 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     admitted = admit_statement_rows([
         FinancialStatementData(**values, **metadata, statement_type=statement_type, raw_data=raw)
     ], payload.get("period_type") or "year")[0]
-    unavailable = {}
+    unavailable = {
+        column: "retained_metric_without_provenance"
+        for column in monetary if column in unprovenanced and payload.get(column) is not None
+    }
+    unavailable.update(withheld)
     for column, field in monetary.items():
+        if column in unavailable:
+            continue
         if payload.get(column) is not None and getattr(admitted, field, None) is None:
             unavailable[column] = (
                 admitted.unavailable_reason
@@ -1217,15 +1256,14 @@ async def _get_latest_symbol_document(
             _query_limit(1),
         ]
     )
-    for source_values in (
-        list(PRIMARY_FINANCIAL_SOURCES),
-        list(SECONDARY_FINANCIAL_SOURCES),
-    ):
-        source_queries = [_query_equal("source", source_values), *queries]
-        rows = await list_collection_documents(collection_id, queries=source_queries)
-        if rows:
-            return rows[0]
-    return None
+    # Recency, not source rank, decides the snapshot: the ordering below is only
+    # meaningful when every admitted source competes in one query. Ranking by
+    # source first returned a stale primary row ahead of a newer admitted one.
+    rows = await list_collection_documents(
+        collection_id,
+        queries=[_query_equal("source", list(ADMITTED_FINANCIAL_SOURCES)), *queries],
+    )
+    return rows[0] if rows else None
 
 
 async def _get_symbol_rows(

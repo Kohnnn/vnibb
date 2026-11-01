@@ -1,20 +1,15 @@
 """
 General Rating Provider - Company Analyst Ratings
 
-Provides analyst ratings and recommendations for stocks.
-Uses vnstock company.general_rating() method.
+The vnstock 5 SDK does not expose the former general-rating dataset.
 """
 
-import asyncio
-import logging
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -52,9 +47,7 @@ class GeneralRatingQueryParams(BaseModel):
 
 class VnstockGeneralRatingFetcher:
     """
-    Fetcher for company general ratings.
-    
-    Wraps vnstock company.general_rating() method (VCI source).
+    Fetcher for the removed company general-ratings dataset.
     """
     
     @staticmethod
@@ -68,34 +61,7 @@ class VnstockGeneralRatingFetcher:
         Returns:
             GeneralRatingData record
         """
-        try:
-            def _fetch():
-                from vnibb.providers.vnstock.runtime import get_vnstock_class, validate_source
-
-                Vnstock = get_vnstock_class()
-                stock = Vnstock().stock(symbol=symbol.upper(), source=validate_source(settings.vnstock_source))
-                df = stock.company.general_rating()
-                if df is None or len(df) == 0:
-                    return {}
-                return df.to_dict(orient="records")[0] if len(df) > 0 else {}
-            
-            loop = asyncio.get_event_loop()
-            record = await loop.run_in_executor(None, _fetch)
-            
-            return GeneralRatingData(
-                symbol=symbol.upper(),
-                valuation_score=record.get("valuation") or record.get("valuationScore"),
-                financial_health_score=record.get("financial_health") or record.get("financialHealthScore"),
-                business_model_score=record.get("business_model") or record.get("businessModelScore"),
-                business_operation_score=record.get("business_operation") or record.get("businessOperationScore"),
-                overall_score=record.get("overall") or record.get("overallScore") or record.get("score"),
-                industry_rank=record.get("industry_rank") or record.get("industryRank"),
-                industry_total=record.get("industry_total") or record.get("industryTotal"),
-                recommendation=record.get("recommendation") or record.get("action"),
-                target_price=record.get("target_price") or record.get("targetPrice"),
-                upside_pct=record.get("upside") or record.get("upsidePct"),
-            )
-            
-        except Exception as e:
-            logger.error(f"General rating fetch failed for {symbol}: {e}")
-            raise ProviderError(f"Failed to fetch general rating for {symbol}: {e}")
+        raise ProviderError(
+            f"General ratings are unavailable in vnstock 5 for {symbol.upper()}",
+            provider="vnstock",
+        )

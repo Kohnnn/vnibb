@@ -130,7 +130,7 @@ class VnstockListingFetcher:
             def _fetch():
                 Listing = get_listing_class()
                 listing = Listing(source=source)
-                df = listing.all_symbols(to_df=True)
+                df = listing.all_symbols()
                 return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
 
             loop = asyncio.get_event_loop()

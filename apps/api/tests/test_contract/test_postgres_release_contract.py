@@ -179,7 +179,7 @@ async def test_screener_quote_base_preserves_ratio_metadata_on_postgres(test_db,
         return None
 
     monkeypatch.setattr(runtime, "get_listing_class", lambda: NoProvider)
-    monkeypatch.setattr(runtime, "get_finance_class", lambda: NoProvider)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (NoProvider, "vnstock"))
     monkeypatch.setattr(runtime, "get_quote_class", lambda: NoProvider)
     pipeline = pipeline_module.DataPipeline()
     monkeypatch.setattr(pipeline, "_cache_set_json", no_cache)

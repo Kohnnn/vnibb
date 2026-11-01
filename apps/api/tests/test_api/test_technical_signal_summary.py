@@ -119,6 +119,7 @@ async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
             "volume": [1_000_000] * 260,
         }
     )
+    frame.attrs["price_unit"] = "THOUSAND_VND"
 
     async def no_retained_history(*_args, **_kwargs):
         return None
@@ -131,19 +132,12 @@ async def test_full_analysis_loads_and_merges_quote_once(monkeypatch):
             history_calls += 1
             return frame
 
-    class Stock:
-        quote = Quote()
-
-    class Vnstock:
-        def stock(self, **_kwargs):
-            return Stock()
-
     async def fetch_quote(**_kwargs):
         nonlocal quote_calls
         quote_calls += 1
         return SimpleNamespace(price=360000.0, price_unit="VND", updated_at=datetime.now()), False
 
-    monkeypatch.setattr(runtime, "get_vnstock_class", lambda: Vnstock)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: lambda **kwargs: Quote())
     monkeypatch.setattr(
         technical_analysis.VnstockStockQuoteFetcher, "fetch", staticmethod(fetch_quote)
     )
@@ -185,7 +179,7 @@ async def test_full_analysis_uses_retained_sessions_when_live_provider_is_blocke
 
     monkeypatch.setattr(equity, "_load_historical_from_mongo", retained_mongo)
     monkeypatch.setattr(equity, "_load_historical_from_db", retained_sql)
-    monkeypatch.setattr(runtime, "get_vnstock_class", blocked_provider)
+    monkeypatch.setattr(runtime, "get_quote_class", blocked_provider)
     monkeypatch.setattr(technical_analysis.VnstockStockQuoteFetcher, "fetch", blocked_provider)
 
     analysis = await asyncio.wait_for(
@@ -213,14 +207,16 @@ async def test_full_analysis_uses_retained_sessions_when_live_provider_is_blocke
 @pytest.mark.asyncio
 async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
     calls = 0
+    quote_calls = []
 
     class Quote:
         __module__ = "vnstock.explorer.vci.quote"
 
-        def __init__(self, **_kwargs):
-            pass
+        def __init__(self, *, symbol, source):
+            quote_calls.append((symbol, source))
 
-        def history(self, **_kwargs):
+        def history(self, *, start, end):
+            quote_calls.append((start, end))
             frame = pd.DataFrame({"close": list(range(100000, 130000, 1000))})
             frame.attrs["price_unit"] = "VND"
             return frame
@@ -241,6 +237,9 @@ async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
     )
 
     assert calls == 1
+    assert quote_calls[0] == ("VCI", "VCI")
+    start, end = (date.fromisoformat(value) for value in quote_calls[1])
+    assert (end - start).days == 90
     assert payload["symbol"] == "VCI"
     assert payload["price_unit"] == "VND"
     assert payload["indicators"]["sma"]["value"] == 122500.0
