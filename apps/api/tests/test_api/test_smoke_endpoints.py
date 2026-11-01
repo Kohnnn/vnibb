@@ -4941,3 +4941,55 @@ async def test_market_freshness_age_days_reflects_data_age(client, test_db):
     assert prices_bucket["fetched_at"] is None
     assert prices_bucket["age_days"] is not None
     assert prices_bucket["age_days"] >= 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cashflow_depreciation,fills", [(None, False), (70.0, True)])
+async def test_depreciation_crossfill_only_replaces_evidence_when_it_fills(
+    monkeypatch, cashflow_depreciation, fills
+):
+    """An empty cashflow depreciation must not erase the income row's own evidence.
+
+    The cross-fill borrowed the cashflow unit metadata unconditionally. With no
+    cashflow number to justify it, that overwrote the income row's provenance
+    with `{}` while leaving the value null.
+    """
+    from vnibb.api.v1 import equity
+
+    def statement(**overrides):
+        fields = {name: None for name in FinancialStatementData.model_fields}
+        fields.update({
+            "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+            "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+            "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+            "unit_metadata": {},
+        })
+        fields.update(overrides)
+        return FinancialStatementData(**fields)
+
+    income = statement(
+        depreciation=None,
+        unit_metadata={"depreciation": {"label": "Khấu hao", "source_unit": "VND"}},
+    )
+    cashflow = statement(
+        statement_type="cashflow", depreciation=cashflow_depreciation,
+        unit_metadata={} if cashflow_depreciation is None
+        else {"depreciation": {"label": "Cashflow depreciation", "source_unit": "VND"}},
+    )
+
+    async def fake_fallback(**kwargs):
+        return [cashflow]
+
+    monkeypatch.setattr(equity, "_load_financial_statement_fallback", fake_fallback)
+    monkeypatch.setattr(equity, "_enrich_financial_statement_rows", lambda rows: rows)
+
+    [filled] = await equity._cross_fill_income_statement_rows(
+        db=None, symbol="HPG", period="year", limit=5, rows=[income]
+    )
+
+    if fills:
+        assert filled.depreciation == cashflow_depreciation
+        assert filled.unit_metadata["depreciation"]["label"] == "Cashflow depreciation"
+    else:
+        assert filled.depreciation is None
+        assert filled.unit_metadata["depreciation"] == {"label": "Khấu hao", "source_unit": "VND"}

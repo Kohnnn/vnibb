@@ -1287,9 +1287,14 @@ async def _cross_fill_income_statement_rows(
             (item.unit_metadata.get("depreciation") or {}).get("unavailable_reason")
         )
         if item.depreciation is None and not depreciation_rejected:
-            item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
-            item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
-            item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
+            filled = _coerce_optional_float(cashflow_row.depreciation)
+            if filled is not None:
+                # Only an admitted cashflow number counts as a fill; taking its
+                # (empty) metadata anyway would erase the income row's own
+                # evidence for a value this branch never supplied.
+                item.depreciation = filled
+                item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
+                item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
         if (
             item.ebitda is None
             and (item.unit_metadata.get("ebitda") or {}).get("unavailable_reason") is None

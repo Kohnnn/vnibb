@@ -886,14 +886,18 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         column for column, field in monetary.items()
         if payload.get(column) is not None and _canonical_value(field) is _CONFLICT
     }
+    served_fields: set[str] = set()
     for column, field in monetary.items():
         if field not in FinancialStatementData.model_fields:
             continue
         # The other spellings of this metric must carry the same decision, or
-        # one surface serves a value the other withholds.
+        # one surface serves a value the other withholds. REST serves every
+        # spelling (`capex` alongside `capital_expenditure`), so MCP publishes
+        # the same set from the admitted model rather than only the column.
         spellings = {field, *(alias for alias, target in _CANONICAL_ALIASES.items()
                               if target == field
                               and alias in FinancialStatementData.model_fields)}
+        served_fields.update(spellings)
         if column in disagreeing or column in conflicting:
             for spelling in spellings:
                 values[spelling] = None
@@ -907,17 +911,30 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
                                 if field != column and field in units else units[column])
+    # Every spelling of a withheld metric shares the decision, matching the
+    # per-metric loop above: enrichment must not re-supply `capex` after
+    # `capital_expenditure` was withheld.
+    withheld_fields = {
+        spelling
+        for column, field in monetary.items() if column in disagreeing or column in conflicting
+        or column in unprovenanced
+        for spelling in (
+            field, *(alias for alias, target in _CANONICAL_ALIASES.items() if target == field)
+        )
+    }
     # A metric the row does not store (`goodwill`, `selling_general_admin`, or a
-    # column added after the row was written) lives only in the canonical. REST
     # enriches those from `canonical_data`; MCP must serve the same value, or
-    # the surfaces disagree. A stored column always wins: the row is ground
-    # truth for anything it actually holds.
+    # the surfaces disagree. A stored column always wins, and so does a
+    # withheld one: re-inserting the canonical number would defeat the decision
+    # the loop above just made.
+    enriched_fields: set[str] = set()
     for name, value in canonical.items():
-        if (name in FinancialStatementData.model_fields and name not in basis_fields
-                and name not in {"statement_type", "raw_data"}
+        if (value is not None and name in FinancialStatementData.model_fields
+                and name not in basis_fields
+                and name not in {"statement_type", "raw_data"} and name not in withheld_fields
                 and payload.get(name) is None and values.get(name) is None):
-            payload[name] = value
             values[name] = value
+            enriched_fields.add(name)
     metadata["unit_metadata"] = units
     admitted = admit_statement_rows([
         FinancialStatementData(**values, **metadata, statement_type=statement_type, raw_data=raw)
@@ -936,8 +953,24 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
                 or admitted.unit_metadata.get(field, {}).get("unavailable_reason")
                 or "unverified_monetary_unit"
             )
+    # Snapshot the row as it arrived: the disclosure below must show the stored
+    # numbers, not the admitted ones.
+    observation = dict(payload)
+    # Publish the admitted value under every spelling the metric is read by, so
+    # an alias (`capex`) is present and carries the admission decision, matching
+    # what REST serves. An enriched metric has no column, so the loop above never
+    # visits it; it must still pass unit admission and disclose a rejection.
+    for name in served_fields | enriched_fields:
+        if name in enriched_fields or name in payload:
+            payload[name] = getattr(admitted, name, None)
+    for name in enriched_fields:
+        if payload[name] is None:
+            unavailable[name] = (
+                admitted.unit_metadata.get(name, {}).get("unavailable_reason")
+                or "unverified_monetary_unit"
+            )
     if unavailable or admitted.unavailable_reason:
-        payload["raw_observation"] = dict(payload)
+        payload["raw_observation"] = observation
         if admitted.unavailable_reason:
             payload["unavailable_reason"] = admitted.unavailable_reason
         payload.update(dict.fromkeys(unavailable))

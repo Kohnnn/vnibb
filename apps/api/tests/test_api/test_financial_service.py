@@ -833,3 +833,71 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(
     assert restored.capital_expenditure == expected
     assert restored.capex == expected
     assert admitted.get("capital_expenditure") == expected
+
+
+def _admission_canonical(statement_type, **values):
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    canonical = {name: None for name in FinancialStatementData.model_fields}
+    canonical.update({
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND",
+        "statement_type": statement_type, "consolidation_basis": "consolidated",
+        "flow_basis": "annual", "source_periods": [], "unit_metadata": {},
+    })
+    canonical.update(values)
+    return canonical
+
+
+def test_mcp_enrichment_does_not_resupply_a_withheld_alias_spelling():
+    """Enrichment runs after withholding; it must not undo that decision.
+
+    The stored column disagrees with the canonical, so both spellings are
+    withheld. Seeding the metric from `canonical_data` afterwards re-published
+    `capex` even though `capital_expenditure` stayed null.
+    """
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import CashFlow
+
+    canonical = _admission_canonical(
+        "cashflow", capex=-40.0,
+        unit_metadata={"capex": {"source_unit": "VND", "value_unit": "VND"}},
+    )
+    payload = {column.name: None for column in CashFlow.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   capital_expenditure=-50.0,
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+
+    admitted = _admit_statement_row(payload, CashFlow)
+
+    assert admitted.get("capital_expenditure") is None
+    assert admitted.get("capex") is None
+
+
+@pytest.mark.parametrize("with_units,expected", [(False, None), (True, -88e9)])
+def test_mcp_admits_an_enriched_metric_without_a_sql_column(with_units, expected):
+    """A column-less metric still has to pass unit admission.
+
+    `selling_general_admin` has no column, so the per-column rejection loop
+    never saw it: a canonical number without unit evidence was published as if
+    verified. It is served only when the canonical carries a valid unit, and a
+    rejection is disclosed under the metric's own name.
+    """
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    assert "selling_general_admin" not in {c.name for c in IncomeStatement.__table__.columns}
+    canonical = _admission_canonical(
+        "income", selling_general_admin=-88e9,
+        unit_metadata={"selling_general_admin": {"source_unit": "VND", "value_unit": "VND"}}
+        if with_units else {},
+    )
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert admitted.get("selling_general_admin") == expected
+    if expected is None:
+        assert admitted["unavailable_metrics"]["selling_general_admin"] == "unverified_monetary_unit"
