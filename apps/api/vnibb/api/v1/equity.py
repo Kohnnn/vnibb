@@ -328,14 +328,24 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
                        and isinstance(getattr(row, _STATEMENT_SQL_COLUMNS.get(field, field)), (int, float))),
                       _STATEMENT_SQL_COLUMNS.get(name, name))
         stored_value = getattr(row, column, None)
+        stated_fields = [field for field in family if field in restored.model_fields_set]
+        stated = sorted({value for field in stated_fields
+                         if isinstance(value := getattr(restored, field, None), (int, float))})
         if not isinstance(stored_value, (int, float)):
+            # The row has no stored value here. A canonical number would be a
+            # value the database never kept; MCP serves the null, so the readers
+            # agree only if REST withholds it too.
+            if stated:
+                for field in family:
+                    cleared[field] = None
+                    unavailable[field] = {
+                        **unavailable.get(field, {}),
+                        "unavailable_reason": "stored_statement_disagrees_with_lineage",
+                    }
             continue
         # Only a field the canonical actually states can disagree. The sync dumps
         # every field, but a partial canonical may omit a metric entirely; that
         # says nothing about the column, so the stored value is served as it is.
-        stated_fields = [field for field in family if field in restored.model_fields_set]
-        stated = sorted({getattr(restored, field, None) for field in stated_fields
-                         if getattr(restored, field, None) is not None})
         # A stated null is an explicit no-value and disagrees; an omitted metric
         # says nothing and leaves the stored observation served.
         disagrees = stated != [stored_value] if stated_fields else False

@@ -695,19 +695,23 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
 
 
 
-@pytest.mark.parametrize("canonical_state,expected", [
-    ("omitted", 555.0),   # a partial canonical says nothing: the column stays served
-    ("null", None),       # a stated null is an explicit no-value: withheld
-    ("equal", 555.0),
-    ("different", None),
+@pytest.mark.parametrize("stored,canonical_state,expected", [
+    (555.0, "omitted", 555.0),   # a partial canonical says nothing: the column stays served
+    (555.0, "null", None),       # a stated null is an explicit no-value: withheld
+    (555.0, "equal", 555.0),
+    (555.0, "different", None),
+    # The reverse direction: the row holds no value, but the canonical states
+    # one. That number was never stored, so both readers serve the null.
+    (None, "equal", None),
+    (None, "number", None),
 ])
-def test_lineage_omitted_metric_is_served_where_a_stated_null_is_withheld(canonical_state, expected):
-    """A partial canonical omitting the metric must not read as an explicit null.
+def test_lineage_serves_only_values_the_row_actually_stores(stored, canonical_state, expected):
+    """Neither reader may invent a value the stored row does not hold.
 
-    Older `canonical_data` need not contain every money field. Omitting one
-    leaves the stored column served; stating it null or different withholds it.
-    Both readers must agree, or the REST fallback returns null for a column MCP
-    still serves.
+    A partial canonical that omits a metric leaves the stored column served; a
+    stated null or different number withholds it. When the column is null but
+    the canonical states a number, the number was never stored and must not be
+    served. Both readers must agree in every direction.
     """
     from types import SimpleNamespace
 
@@ -723,24 +727,23 @@ def test_lineage_omitted_metric_is_served_where_a_stated_null_is_withheld(canoni
     }
     if canonical_state == "null":
         canonical["revenue"] = None
-    elif canonical_state == "equal":
+    elif canonical_state in ("equal", "number"):
         canonical["revenue"] = 555.0
     elif canonical_state == "different":
         canonical["revenue"] = 444.0
 
-    row = SimpleNamespace(revenue=555.0)
+    row = SimpleNamespace(revenue=stored)
     restored = _restore_lineage_statement(
         row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
         FinancialStatementData(**canonical),
     )
     payload = {column.name: None for column in IncomeStatement.__table__.columns}
     payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
-                   revenue=555.0, raw_data={"_financial_lineage": {"canonical_data": canonical}})
+                   revenue=stored, raw_data={"_financial_lineage": {"canonical_data": canonical}})
     admitted = _admit_statement_row(payload, IncomeStatement)
 
     assert restored.revenue == expected
     assert admitted.get("revenue") == expected
-
 @pytest.mark.parametrize("stored,capex,capital_expenditure,expected", [
     # `capex` and `capital_expenditure` are one metric. A canonical holding the
     # alias while the stored column disagrees must not leak the alias.
