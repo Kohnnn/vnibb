@@ -311,32 +311,40 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
     unavailable = dict(restored.unit_metadata)
     cleared = {}
     withheld = {}
+    seen: set[str] = set()
     for name in FinancialStatementData.model_fields:
-        if name in {"fiscal_year", "fiscal_quarter"}:
+        if name in seen or name in {"fiscal_year", "fiscal_quarter"}:
             continue
-        column = _STATEMENT_SQL_COLUMNS.get(name, name)
+        # A semantic alias names the same metric (`capex` for
+        # `capital_expenditure`), so every spelling shares one decision and a
+        # withheld metric is cleared under all of its names.
+        family = {name, *(alias for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
+                          if target == name)}
+        seen |= family
+        # The SQL column may be named for any spelling in the family (`capex`
+        # has no column; `capital_expenditure` does).
+        column = next((_STATEMENT_SQL_COLUMNS.get(field, field) for field in family
+                       if hasattr(row, _STATEMENT_SQL_COLUMNS.get(field, field))
+                       and isinstance(getattr(row, _STATEMENT_SQL_COLUMNS.get(field, field)), (int, float))),
+                      _STATEMENT_SQL_COLUMNS.get(name, name))
         stored_value = getattr(row, column, None)
         if not isinstance(stored_value, (int, float)):
             continue
-        # A semantic alias names the same metric (e.g. `capex` for
-        # `capital_expenditure`). The sync dumps every field, so take whichever
-        # spelling the canonical states a value under; a value is withheld only
-        # when the resolved metric disagrees with the stored column.
-        candidate = getattr(restored, name, None)
-        if candidate is None:
-            alias_value = next((getattr(restored, alias, None)
-                                for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
-                                if target == name), None)
-            if alias_value is not None:
-                candidate = alias_value
-                cleared[name] = alias_value
+        # The sync dumps every field; take whichever spelling states a value.
+        candidate = next((getattr(restored, field, None) for field in family
+                          if getattr(restored, field, None) is not None), None)
         if candidate != stored_value:
-            cleared[name] = None
+            for field in family:
+                cleared[field] = None
             withheld[column] = stored_value
             unavailable[name] = {
                 **unavailable.get(name, {}),
                 "unavailable_reason": "stored_statement_disagrees_with_lineage",
             }
+        elif candidate is not None:
+            # Serve the value under every spelling the canonical may be read by.
+            for field in family:
+                cleared[field] = candidate
     if cleared:
         restored = restored.model_copy(update={**cleared, "unit_metadata": unavailable})
     # The withheld column value is still a real stored observation; disclose it

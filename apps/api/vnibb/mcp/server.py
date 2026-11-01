@@ -859,13 +859,21 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     for column, field in monetary.items():
         if field not in FinancialStatementData.model_fields:
             continue
+        # The other spellings of this metric must carry the same decision, or
+        # one surface serves a value the other withholds.
+        spellings = {field, *(alias for alias, target in _CANONICAL_ALIASES.items()
+                              if target == field
+                              and alias in FinancialStatementData.model_fields)}
         if column in disagreeing:
-            values[field] = None
+            for spelling in spellings:
+                values[spelling] = None
             withheld[column] = "stored_statement_disagrees_with_lineage"
         elif column in unprovenanced:
-            values[field] = None
+            for spelling in spellings:
+                values[spelling] = None
         else:
-            values[field] = payload.get(column)
+            for spelling in spellings:
+                values[spelling] = payload.get(column)
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
                                 if field != column and field in units else units[column])
