@@ -323,17 +323,19 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
         seen |= family
         # The SQL column may be named for any spelling in the family (`capex`
         # has no column; `capital_expenditure` does).
-        column = next((_STATEMENT_SQL_COLUMNS.get(field, field) for field in family
+        column = next((_STATEMENT_SQL_COLUMNS.get(field, field) for field in sorted(family)
                        if hasattr(row, _STATEMENT_SQL_COLUMNS.get(field, field))
                        and isinstance(getattr(row, _STATEMENT_SQL_COLUMNS.get(field, field)), (int, float))),
                       _STATEMENT_SQL_COLUMNS.get(name, name))
         stored_value = getattr(row, column, None)
         if not isinstance(stored_value, (int, float)):
             continue
-        # The sync dumps every field; take whichever spelling states a value.
-        candidate = next((getattr(restored, field, None) for field in family
-                          if getattr(restored, field, None) is not None), None)
-        if candidate != stored_value:
+        # The sync dumps every field, so a spelling may be null. Every non-null
+        # spelling must state the same value and match the stored column; any
+        # disagreement is withheld rather than resolved by iteration order.
+        stated = sorted({getattr(restored, field, None) for field in family
+                         if getattr(restored, field, None) is not None})
+        if stated != [stored_value]:
             for field in family:
                 cleared[field] = None
             withheld[column] = stored_value
@@ -341,10 +343,10 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
                 **unavailable.get(name, {}),
                 "unavailable_reason": "stored_statement_disagrees_with_lineage",
             }
-        elif candidate is not None:
-            # Serve the value under every spelling the canonical may be read by.
+        elif stated:
+            # Serve the agreed value under every spelling the canonical may use.
             for field in family:
-                cleared[field] = candidate
+                cleared[field] = stored_value
     if cleared:
         restored = restored.model_copy(update={**cleared, "unit_metadata": unavailable})
     # The withheld column value is still a real stored observation; disclose it
@@ -1036,6 +1038,13 @@ def _enrich_financial_statement_rows(
         if item.unavailable_reason:
             continue
         raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
+        # A provider-rejected metric is not a missing value, so it must not feed
+        # a lookup or an accounting identity. Resolve the set before any
+        # derivation and reset those fields once, at the end.
+        rejected = {
+            metric for metric, metadata in item.unit_metadata.items()
+            if isinstance(metadata, dict) and metadata.get("unavailable_reason")
+        }
 
         if item.total_equity is None:
             item.total_equity = _pick_optional_float(
@@ -1162,8 +1171,9 @@ def _enrich_financial_statement_rows(
                 "n_3_intangible_fixed_assets",
             )
 
-        capex_value = _pick_optional_float(item.capex, item.capital_expenditure)
-        if capex_value is None:
+        capex_rejected = bool({"capex", "capital_expenditure"} & rejected)
+        capex_value = None if capex_rejected else _pick_optional_float(item.capex, item.capital_expenditure)
+        if capex_value is None and not capex_rejected:
             capex_value = _lookup_financial_metric(
                 raw_data,
                 "capex",
@@ -1175,12 +1185,12 @@ def _enrich_financial_statement_rows(
                 "mua_sam_tscd",
                 "chi_phi_dau_tu_tai_san_co_dinh",
             )
-        if item.capex is None:
+        if item.capex is None and not capex_rejected:
             item.capex = capex_value
-        if item.capital_expenditure is None:
+        if item.capital_expenditure is None and not capex_rejected:
             item.capital_expenditure = capex_value
 
-        if item.free_cash_flow is None:
+        if item.free_cash_flow is None and "free_cash_flow" not in rejected:
             item.free_cash_flow = _lookup_financial_metric(
                 raw_data,
                 "free_cash_flow",
@@ -1188,12 +1198,17 @@ def _enrich_financial_statement_rows(
             )
         if (
             item.free_cash_flow is None
+            and "free_cash_flow" not in rejected
             and item.operating_cash_flow is not None
             and capex_value is not None
         ):
             item.free_cash_flow = item.operating_cash_flow + capex_value
 
-        if item.statement_type == StatementType.INCOME.value and item.depreciation is None:
+        if (
+            item.statement_type == StatementType.INCOME.value
+            and item.depreciation is None
+            and "depreciation" not in rejected
+        ):
             cashflow_match = rows_by_period.get(str(item.period or "").upper())
             if cashflow_match is not None and cashflow_match is not item:
                 item.depreciation = _pick_optional_float(
@@ -1204,10 +1219,11 @@ def _enrich_financial_statement_rows(
                     ),
                 )
 
-        if item.ebitda is None:
+        if item.ebitda is None and "ebitda" not in rejected:
             item.ebitda = _lookup_financial_metric(raw_data, "ebitda", "ebitda_bn_vnd")
         if (
             item.ebitda is None
+            and "ebitda" not in rejected
             and item.operating_income is not None
             and item.depreciation is not None
         ):

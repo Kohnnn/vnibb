@@ -837,24 +837,33 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         "capital_expenditure": "capex", "capex": "capital_expenditure",
     }
 
-    def _canonical_value(field: str) -> Any:
-        """Return the canonical value for `field`, or None when unstated.
+    _CONFLICT = object()
 
-        A semantic alias names the same metric, so take whichever spelling the
-        canonical states a value under. Both spellings are `None` for a metric
-        the sync holds as an explicit no-value, which then disagrees with a
-        stored number and is withheld here and in the REST reader alike.
+    def _canonical_value(field: str) -> Any:
+        """Return the canonical value for `field`, or `_CONFLICT`/None otherwise.
+
+        A semantic alias names the same metric. Every non-null spelling must
+        state the same value; a conflict returns `_CONFLICT` so the column is
+        withheld rather than resolved by iteration order. All-null means the
+        sync holds the metric as an explicit no-value, which still disagrees
+        with a stored number.
         """
-        value = canonical.get(field)
-        if value is None:
-            value = next((canonical.get(alias)
-                          for alias, target in _CANONICAL_ALIASES.items()
-                          if target == field), None)
-        return value
+        spellings = [field] + [alias for alias, target in _CANONICAL_ALIASES.items()
+                               if target == field]
+        stated = {canonical.get(spelling) for spelling in spellings
+                  if canonical.get(spelling) is not None}
+        if len(stated) > 1:
+            return _CONFLICT
+        return next(iter(stated), None)
     disagreeing = {
         column for column, field in monetary.items()
         if payload.get(column) is not None
-        and _canonical_value(field) != payload.get(column)
+        and (value := _canonical_value(field)) is not _CONFLICT
+        and value != payload.get(column)
+    }
+    conflicting = {
+        column for column, field in monetary.items()
+        if payload.get(column) is not None and _canonical_value(field) is _CONFLICT
     }
     for column, field in monetary.items():
         if field not in FinancialStatementData.model_fields:
@@ -864,7 +873,7 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         spellings = {field, *(alias for alias, target in _CANONICAL_ALIASES.items()
                               if target == field
                               and alias in FinancialStatementData.model_fields)}
-        if column in disagreeing:
+        if column in disagreeing or column in conflicting:
             for spelling in spellings:
                 values[spelling] = None
             withheld[column] = "stored_statement_disagrees_with_lineage"

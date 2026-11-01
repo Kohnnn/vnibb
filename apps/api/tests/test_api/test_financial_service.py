@@ -694,19 +694,26 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     assert admitted.get("income_before_tax") == expected
 
 
-@pytest.mark.parametrize("stored,capex,expected", [
+@pytest.mark.parametrize("stored,capex,capital_expenditure,expected", [
     # `capex` and `capital_expenditure` are one metric. A canonical holding the
     # alias while the stored column disagrees must not leak the alias.
-    (-50.0, -40.0, None),
-    (-50.0, None, None),
-    (-50.0, -50.0, -50.0),
+    (-50.0, -40.0, None, None),
+    (-50.0, None, None, None),
+    (-50.0, -50.0, None, -50.0),
+    # The two spellings disagree with each other: neither is certified, and the
+    # outcome must not depend on which spelling is visited first.
+    (-50.0, -50.0, -40.0, None),
+    (-50.0, -40.0, -50.0, None),
 ])
-def test_lineage_withholds_both_spellings_of_an_aliased_metric(stored, capex, expected):
+def test_lineage_withholds_both_spellings_of_an_aliased_metric(
+    stored, capex, capital_expenditure, expected,
+):
     """A withheld metric is cleared under every spelling, on both readers.
 
     `CashFlow` has a `capital_expenditure` column but no `capex` column, and
     the canonical may state either name. Clearing only one spelling would leave
-    the other visible while MCP withholds the column.
+    the other visible, and conflicting spellings must not be resolved by
+    iteration order.
     """
     from types import SimpleNamespace
 
@@ -719,7 +726,7 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(stored, capex, ex
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
         "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "cashflow",
         "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
-        "capex": capex,
+        "capex": capex, "capital_expenditure": capital_expenditure,
         "unit_metadata": {"capital_expenditure": {"source_unit": "VND", "value_unit": "VND"}},
     })
     row = SimpleNamespace(**{
