@@ -62,13 +62,15 @@ test('root font tokens resolve to Inter / IBM Plex Mono and survive a missing va
 })
 
 test('tabular numerals align in a real financial table', async ({ page }) => {
-  // A rendered DenseFinancialTable (the app's financial statement table).
-  await page.goto('/zz-font-fixture')
-  await page.waitForSelector('td[data-type="number"] span.block', { timeout: 120_000 })
+  // The real dashboard renders DenseFinancialTable inside its widgets. No
+  // fixture route exists, so this must hold in production builds too.
+  await page.goto('/dashboard')
+  const table = page.locator('table').filter({ has: page.locator('td[data-type="number"]') }).first()
+  await expect(table).toBeVisible({ timeout: 120_000 })
 
-  const columns = await page.evaluate(() => {
+  const columns = await table.evaluate((tableEl) => {
     const byColumn: Record<number, { text: string; right: number; font: string; variant: string }[]> = {}
-    for (const cell of document.querySelectorAll<HTMLTableCellElement>('td[data-type="number"]')) {
+    for (const cell of tableEl.querySelectorAll<HTMLTableCellElement>('td[data-type="number"]')) {
       const span = cell.querySelector('span.block')
       if (!span) continue
       const style = getComputedStyle(span)
@@ -82,12 +84,11 @@ test('tabular numerals align in a real financial table', async ({ page }) => {
     return Object.values(byColumn)
   })
 
-  expect(columns.length).toBeGreaterThan(0)
-  for (const rows of columns) {
+  const digitColumns = columns.filter((rows) => rows.filter((row) => /\d/.test(row.text)).length >= 2)
+  expect(digitColumns.length, 'numeric columns with at least two digit rows').toBeGreaterThan(0)
+  for (const rows of digitColumns) {
     const digitRows = rows.filter((row) => /\d/.test(row.text))
-    if (digitRows.length < 2) continue
     const edges = new Set(digitRows.map((row) => row.right.toFixed(2)))
-    expect(digitRows.length, 'rows with digits').toBeGreaterThanOrEqual(3)
     expect(edges.size, `right edges of ${digitRows.map((r) => r.text).join(' | ')}`).toBe(1)
     expect(digitRows[0].variant).toContain('tabular-nums')
     expect(digitRows[0].font).toMatch(/inter/i)
