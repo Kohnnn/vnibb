@@ -289,31 +289,79 @@ export async function exportToPNG(target: string | HTMLElement, filename: string
 
   const footerText = provenanceFooterText(provenance);
   try {
-   const canvas = await html2canvas(element, {
-     background: resolveSurfaceColor(element),
-     useCORS: true,
-     onclone: footerText
-       ? (doc: Document, cloned: HTMLElement) => {
-           const footer = doc.createElement('div');
-           footer.textContent = footerText;
-           footer.setAttribute('data-export-provenance', '');
-           footer.style.cssText =
-             'position:absolute;left:0;right:0;bottom:0;padding:3px 8px;text-align:right;' +
-             'font:10px/1.4 ui-monospace,monospace;color:#94a3b8;background:transparent;';
-           if (doc.defaultView?.getComputedStyle(cloned).position === 'static') {
-             cloned.style.position = 'relative';
-           }
-           cloned.appendChild(footer);
-         }
-       : undefined,
-   } as Parameters<typeof html2canvas>[1]);
-
-    canvas.toBlob((blob) => {
+    const surface = resolveSurfaceColor(element);
+    const canvas = await html2canvas(element, {
+      backgroundColor: surface,
+      useCORS: true,
+    });
+    const output = footerText ? stampFooter(canvas, footerText, element.clientWidth, surface) : canvas;
+    output.toBlob((blob) => {
       if (blob) downloadBlob(blob, `${filename}.png`);
     }, 'image/png');
   } catch (error) {
     logClientError('Failed to export as PNG:', error);
   }
+}
+
+/**
+ * Paint the provenance strip below the captured bitmap. Compositing instead of
+ * injecting a DOM node keeps the widget's own layout untouched: a fixed-height
+ * widget would otherwise clip, or be overdrawn by, the appended footer.
+ */
+function stampFooter(source: HTMLCanvasElement, text: string, cssWidth: number, surface?: string): HTMLCanvasElement {
+  const scale = cssWidth > 0 ? source.width / cssWidth : 1;
+  const pad = Math.round(4 * scale);
+  const lineHeight = Math.round(15 * scale);
+  const inset = Math.round(8 * scale);
+  const probe = document.createElement('canvas').getContext('2d');
+  // jsdom has no 2D context; return the untouched capture rather than crash.
+  if (!probe) return source;
+
+  probe.font = `${Math.round(10 * scale)}px ui-monospace, monospace`;
+  const lines: string[] = [];
+  const limit = source.width - inset * 2;
+  // Wrap, never shrink: fillText's maxWidth squeezes glyphs past readability.
+  // A single token can exceed the strip (ISO timestamps in a narrow widget), so
+  // break it at measured character boundaries instead of letting it overflow.
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    let rest = word;
+    while (probe.measureText(rest).width > limit) {
+      let cut = rest.length - 1;
+      while (cut > 1 && probe.measureText(rest.slice(0, cut)).width > limit) cut -= 1;
+      lines.push(rest.slice(0, cut));
+      rest = rest.slice(cut);
+    }
+    const last = lines.length - 1;
+    const joins = last >= 0 && probe.measureText(`${lines[last]} ${rest}`).width <= limit;
+    if (joins) lines[last] += ` ${rest}`;
+    else lines.push(rest);
+  }
+
+  const out = document.createElement('canvas');
+  out.width = source.width;
+  out.height = source.height + lines.length * lineHeight + pad * 2;
+  const ctx = out.getContext('2d');
+  if (!ctx) return source;
+
+  // Match the widget's own surface (dark-theme exports are not white) so the
+  // strip never turns into a white band under a dark capture.
+  const channelAverage = surface
+    ? (surface.match(/\d+/g)?.slice(0, 3).reduce((sum, value) => sum + Number(value), 0) ?? 765) / 3
+    : 255;
+  const dark = channelAverage < 128;
+  ctx.fillStyle = surface ?? '#ffffff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(source, 0, 0);
+  ctx.fillStyle = dark ? '#475569' : '#e2e8f0';
+  ctx.fillRect(0, source.height, out.width, Math.max(1, Math.round(scale)));
+  ctx.fillStyle = dark ? '#cbd5e1' : '#64748b';
+  ctx.font = probe.font;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, index) => {
+    ctx.fillText(line, out.width - inset, source.height + pad + lineHeight * (index + 0.5));
+  });
+  return out;
 }
 
 /**

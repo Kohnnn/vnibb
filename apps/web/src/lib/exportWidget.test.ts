@@ -198,20 +198,45 @@ describe('exportToPNG', () => {
   afterEach(() => jest.resetModules());
 
   it('paints the surrounding surface and stamps source + both timestamps into the image', async () => {
-    const captures: Array<{ options: Record<string, unknown>; cloned: HTMLElement }> = [];
+    const options: Array<Record<string, unknown>> = [];
+    const drawn: string[] = [];
+    let stampedHeight = 0;
     // Dynamic import is required: the module graph must be rebuilt so the html2canvas
     // mock below replaces the static import resolved at the top of this file.
     jest.resetModules();
     jest.doMock('html2canvas', () => ({
       __esModule: true,
-      default: (element: HTMLElement, options: Record<string, unknown>) => {
-        const onclone = options.onclone as ((doc: Document, cloned: HTMLElement) => void) | undefined;
-        const cloned = document.createElement('div');
-        if (onclone) onclone(document, cloned);
-        captures.push({ options, cloned });
-        return Promise.resolve({ toBlob: (callback: (blob: null) => void) => callback(null) });
+      default: (_element: HTMLElement, opts: Record<string, unknown>) => {
+        options.push(opts);
+        return Promise.resolve({ width: 320, height: 200, toBlob: (cb: (b: null) => void) => cb(null) });
       },
     }));
+    const context = {
+      fillRect: jest.fn(),
+      drawImage: jest.fn(),
+      fillText: (text: string) => drawn.push(text),
+      measureText: (text: string) => ({ width: text.length * 6 }),
+      set fillStyle(_v: string) {},
+      set font(_v: string) {},
+      get font() { return '10px ui-monospace, monospace'; },
+      set textAlign(_v: string) {},
+      set textBaseline(_v: string) {},
+    };
+    const realCreate = document.createElement.bind(document);
+    jest.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const el = realCreate(tag);
+      // jsdom has no 2D context; stub just the members stampFooter touches.
+      if (tag === 'canvas') {
+        // jsdom ships no 2D context; stampFooter only touches these members.
+        Object.assign(el, { getContext: () => context });
+        Object.defineProperty(el, 'height', {
+          configurable: true,
+          get: () => stampedHeight,
+          set: (v: number) => { stampedHeight = v; },
+        });
+      }
+      return el;
+    }) as typeof document.createElement);
 
     document.documentElement.style.setProperty('--color-bg-primary', '#ffffff');
     const host = document.createElement('div');
@@ -229,16 +254,105 @@ describe('exportToPNG', () => {
         fetchedAt: 1762000000000,
       });
 
-      expect(captures).toHaveLength(1);
-      expect(captures[0].options.background).toBe('rgb(255, 255, 255)');
-      const stamped = captures[0].cloned.querySelector('[data-export-provenance]');
-      expect(stamped?.textContent).toContain('source: Market heatmap');
-      expect(stamped?.textContent).toContain('source_as_of: 2026-11-03T00:00:00.000Z');
-      expect(stamped?.textContent).toContain('fetched_at:');
-      expect(stamped?.textContent).not.toContain('1762000000000');
+      // html2canvas 1.4.1 reads `backgroundColor`; `background` is silently ignored.
+      expect(options[0].backgroundColor).toBe('rgb(255, 255, 255)');
+      // The strip is added below the capture, so the widget's own layout is untouched.
+      expect(stampedHeight).toBeGreaterThan(200);
+      expect(drawn.join(' ')).toContain('source: Market heatmap');
+      expect(drawn.join(' ')).toContain('source_as_of: 2026-11-03T00:00:00.000Z');
+      expect(drawn.join(' ')).toContain('fetched_at:');
+      expect(drawn.join(' ')).not.toContain('1762000000000');
     } finally {
+      jest.restoreAllMocks();
       host.remove();
       document.documentElement.style.removeProperty('--color-bg-primary');
+    }
+  });
+
+  it('keeps a dark widget surface behind the provenance strip', async () => {
+    const fills: string[] = [];
+    jest.resetModules();
+    jest.doMock('html2canvas', () => ({
+      __esModule: true,
+      default: () => Promise.resolve({ width: 320, height: 200 }),
+    }));
+    const context = {
+      fillRect: () => fills.push(context.fillStyle),
+      drawImage: jest.fn(),
+      fillText: jest.fn(),
+      measureText: (text: string) => ({ width: text.length * 6 }),
+      fillStyle: '',
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+    };
+    const realCreate = document.createElement.bind(document);
+    jest.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const el = realCreate(tag);
+      if (tag === 'canvas') Object.assign(el, { getContext: () => context });
+      return el;
+    }) as typeof document.createElement);
+
+    const host = document.createElement('div');
+    // Dark surface: the strip must not become a white band under the capture.
+    host.style.backgroundColor = 'rgb(11, 17, 32)';
+    const widget = document.createElement('div');
+    widget.id = 'png-dark-widget';
+    host.appendChild(widget);
+    document.body.appendChild(host);
+
+    try {
+      const { exportToPNG } = await import('./exportWidget');
+      await exportToPNG('png-dark-widget', 'dark', { sourceLabel: 'Dark heatmap' });
+      expect(fills[0]).toBe('rgb(11, 17, 32)');
+    } finally {
+      jest.restoreAllMocks();
+      host.remove();
+    }
+  });
+
+  it('breaks an overwide provenance token inside a narrow widget', async () => {
+    const drawn: string[] = [];
+    jest.resetModules();
+    jest.doMock('html2canvas', () => ({
+      __esModule: true,
+      default: () => Promise.resolve({ width: 140, height: 120 }),
+    }));
+    const context = {
+      fillRect: jest.fn(),
+      drawImage: jest.fn(),
+      fillText: (text: string) => drawn.push(text),
+      measureText: (text: string) => ({ width: text.length * 6 }),
+      fillStyle: '',
+      font: '',
+      textAlign: '',
+      textBaseline: '',
+    };
+    const realCreate = document.createElement.bind(document);
+    jest.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const el = realCreate(tag);
+      if (tag === 'canvas') Object.assign(el, { getContext: () => context });
+      return el;
+    }) as typeof document.createElement);
+
+    const widget = document.createElement('div');
+    widget.id = 'png-narrow-widget';
+    widget.style.width = '140px';
+    document.body.appendChild(widget);
+
+    try {
+      const { exportToPNG } = await import('./exportWidget');
+      await exportToPNG('png-narrow-widget', 'narrow', {
+        sourceLabel: 'Narrow heatmap',
+        updatedAt: '2026-11-03T00:00:00.000Z',
+      });
+      // 140px strip minus 16px inset leaves 124px = ~20 monospace characters.
+      expect(drawn.length).toBeGreaterThan(1);
+      for (const line of drawn) expect(line.length * 6).toBeLessThanOrEqual(124);
+      expect(drawn.join('')).toContain('2026-11-03T00:00:00.000Z');
+    } finally {
+      jest.restoreAllMocks();
+      widget.remove();
     }
   });
 });
