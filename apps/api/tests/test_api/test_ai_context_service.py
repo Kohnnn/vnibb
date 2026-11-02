@@ -67,6 +67,8 @@ async def test_build_runtime_context_includes_broad_market_and_symbol_context(mo
         "FPT-PROFILE",
         "FPT-NEWS",
     ]
+    # A database-backed snapshot is listed, not verified: no reference check ran.
+    assert not any(item.get("reference_checked") for item in context["source_catalog"])
     assert context["retrieval_policy"]["source_precedence"] == [
         "postgres",
         "browser_context",
