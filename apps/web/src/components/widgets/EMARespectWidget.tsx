@@ -34,7 +34,7 @@ type EmaLevel = {
 function tone(strength: string): string {
   if (strength === 'strong') return 'text-emerald-300'
   if (strength === 'moderate') return 'text-cyan-300'
-  if (strength === 'weak') return 'text-amber-300'
+  if (strength === 'weak') return 'text-[var(--color-warning)]'
   if (strength === 'fragile') return 'text-red-300'
   return 'text-[var(--text-secondary)]'
 }

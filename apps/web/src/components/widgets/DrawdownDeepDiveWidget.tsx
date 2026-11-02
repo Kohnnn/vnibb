@@ -226,7 +226,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="uppercase tracking-widest text-[var(--text-muted)]">Current DD</div>
-          <div className="font-mono text-amber-200">{formatPct(currentDrawdown)}</div>
+          <div className="font-mono text-[var(--text-secondary)]">{formatPct(currentDrawdown)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="uppercase tracking-widest text-[var(--text-muted)]">Max DD</div>
@@ -294,7 +294,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
       )}
 
       {activeEpisode && activeEpisode.daysToRecovery == null && (
-        <div className="pt-2 text-right text-[10px] text-amber-300">
+        <div className="pt-2 text-right text-[10px] text-[var(--color-warning)]">
           Current episode active since {shortDate(activeEpisode.peakDate)}.
         </div>
       )}

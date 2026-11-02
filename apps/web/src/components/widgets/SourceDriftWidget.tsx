@@ -142,7 +142,7 @@ export function SourceDriftWidget() {
                         </div>
                         <ConsensusStrip rows={rows} />
                         {missing && (
-                            <div className="mt-1 text-[10px] text-amber-300">
+                            <div className="mt-1 text-[10px] text-[var(--color-warning)]">
                                 Missing source data
                             </div>
                         )}

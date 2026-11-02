@@ -21,7 +21,7 @@
 [![Turbo](https://img.shields.io/badge/Turbo-2-26A65B?logo=vercel)](https://turbo.build/)
 [![Vercel](https://img.shields.io/badge/Vercel-Deployment-black?logo=vercel)](https://vercel.com/)
 
-[Live Demo](https://vnibb-web.vercel.app/) · [Docs Hub](./docs/README.md) · [Development Journal](./docs/DEVELOPMENT_JOURNAL.md)
+[Live site](https://web.vnibb.xyz/) · [Source](https://github.com/Kohnnn/vnibb) · [Docs Hub](./docs/README.md) · [Development Journal](./docs/DEVELOPMENT_JOURNAL.md)
 
 </div>
 

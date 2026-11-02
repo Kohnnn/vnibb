@@ -265,7 +265,7 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
                           Recovered {episode.days_to_recovery}d
                         </span>
                       ) : (
-                        <span className="inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-semibold text-amber-300">
+                        <span className="inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-semibold text-[var(--color-warning)]">
                           Recovering
                         </span>
                       )}

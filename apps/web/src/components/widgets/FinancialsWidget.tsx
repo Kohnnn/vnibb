@@ -693,7 +693,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                 {/* Table Area with Horizontal Scroll */}
                 <div className="flex-1 overflow-auto p-0.5 scrollbar-thin scrollbar-thumb-[var(--border-color)]">
                     {tableData && (tableData.periodIssues.length > 0 || tableData.invalidPeriodCount > 0) && (
-                        <div className="px-2 py-1 text-[10px] text-amber-300">
+                        <div className="px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             Fiscal period resolution: {tableData.periodIssues.filter((issue) => issue.reason === 'ambiguous-basis').length} conflicting periods excluded; {tableData.periodIssues.filter((issue) => issue.reason === 'duplicate-identical').length} identical repeats collapsed; {tableData.invalidPeriodCount} undated rows excluded.
                         </div>
                     )}
@@ -701,7 +701,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                         // Rendered next to the table, not only in the empty state: an uncertified
                         // period must disclose its reason even when other periods are populated,
                         // or the table silently shows fewer periods than the API returned (#103).
-                        <div className="px-2 py-1 text-[10px] text-amber-300">
+                        <div className="px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             {tableData.unavailableNote}
                         </div>
                     )}

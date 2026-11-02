@@ -151,7 +151,7 @@ function getNumberConfig(config: Record<string, unknown> | undefined, key: strin
 function chipClass(active: boolean) {
   return `rounded-md px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
     active
-      ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/30'
+      ? 'bg-amber-500/20 text-[var(--text-secondary)] ring-1 ring-amber-400/30'
       : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
   }`;
 }
@@ -214,8 +214,8 @@ function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[]
   if (failedFeeds.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[10px] text-amber-100/85">
-      <div className="font-black uppercase tracking-[0.14em] text-amber-200">
+    <div className="mt-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-amber-100/85">
+      <div className="font-black uppercase tracking-[0.14em] text-[var(--text-secondary)]">
         {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
       </div>
       <div className="mt-1 space-y-1">
@@ -429,7 +429,7 @@ function WorldNewsMapWidgetComponent({
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              <Globe2 className="h-3 w-3 text-amber-300" />
+              <Globe2 className="h-3 w-3 text-[var(--color-warning)]" />
               Live Coverage Map
             </div>
             <WidgetMeta
@@ -512,11 +512,11 @@ function WorldNewsMapWidgetComponent({
             <div className="mt-1 text-[10px] font-semibold text-emerald-300">{customNotice}</div>
           )}
           {customFeedFailure ? (
-            <div role="alert" className="mt-1 truncate text-[10px] text-amber-200/90">
+            <div role="alert" className="mt-1 truncate text-[10px] text-[var(--text-secondary)]/90">
               Custom RSS failed {formatFailedFeedTime(customFeedFailure.failed_at)}: {customFeedFailure.reason}
             </div>
           ) : customFeed ? (
-            <div className="mt-1 truncate text-[10px] text-amber-200/80">
+            <div className="mt-1 truncate text-[10px] text-[var(--text-secondary)]/80">
               Custom RSS active: {customFeed.name || customFeed.url}
             </div>
           ) : null}
@@ -542,7 +542,7 @@ function WorldNewsMapWidgetComponent({
                 <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:34px_34px]" />
 
                 <div className="absolute left-3 top-3 z-10 rounded border border-white/10 bg-black/35 px-2 py-1 backdrop-blur">
-                  <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                  <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                     <Layers3 className="h-3 w-3" />
                     Live Map
                   </div>
@@ -698,7 +698,7 @@ function WorldNewsMapWidgetComponent({
                   <div>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-200">
+                        <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                           {selectedBucket.region}
                         </div>
                         <h3 className="mt-1 text-lg font-black leading-tight text-white">
@@ -721,7 +721,7 @@ function WorldNewsMapWidgetComponent({
                         top topic
                       </div>
                       {selectedBucket.failed_feed_count > 0 ? (
-                        <div className="col-span-2 border-t border-amber-400/20 pt-2 text-amber-200">
+                        <div className="col-span-2 border-t border-amber-400/20 pt-2 text-[var(--text-secondary)]">
                           <div className="font-black text-amber-100">{selectedBucket.failed_feed_count}</div>
                           failed feed{selectedBucket.failed_feed_count === 1 ? '' : 's'} in this geography
                         </div>
@@ -753,7 +753,7 @@ function WorldNewsMapWidgetComponent({
                             href={article.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="group flex items-start gap-2 text-xs font-bold leading-snug text-white hover:text-amber-200"
+                            className="group flex items-start gap-2 text-xs font-bold leading-snug text-white hover:text-[var(--text-secondary)]"
                           >
                             <span className="line-clamp-3 flex-1">{article.title}</span>
                             <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
@@ -765,7 +765,7 @@ function WorldNewsMapWidgetComponent({
                               href={article.source_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-auto hover:text-amber-200"
+                              className="ml-auto hover:text-[var(--text-secondary)]"
                             >
                               Source
                             </a>

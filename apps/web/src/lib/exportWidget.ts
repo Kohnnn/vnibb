@@ -99,6 +99,33 @@ export function rowsToCSV(rows: Array<Record<string, unknown>>): string {
   ].join('\n');
 }
 
+/**
+ * Provenance as ordered key/value pairs, shared by the CSV header block and the
+ * Excel metadata sheet so both formats describe the data the same way.
+ */
+function provenanceLines(provenance?: ExportProvenance): Array<[string, string]> {
+  if (!provenance) return [];
+  const resolved = buildExportProvenance(provenance);
+  const provRows: Array<[string, unknown]> = [
+    ['widget', resolved.widgetTitle || resolved.widgetType],
+    ['symbol', resolved.symbol],
+    ['source', resolved.sourceLabel],
+    ['api_group', resolved.apiGroup],
+    ['endpoint', resolved.endpoint],
+    ['source_as_of', resolved.updatedAt ?? 'unknown'],
+    ['fetched_at', resolved.fetchedAt],
+    ['coverage', resolved.coverage],
+    ['cached', resolved.cached],
+    ['adjustment_mode', resolved.adjustmentMode],
+    ['warnings', resolved.warnings?.join(' · ') || undefined],
+    ['data_status', deriveWidgetHealth(resolved)?.label],
+    ['captured_at', resolved.capturedAt],
+  ];
+  return provRows
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => [key, String(value).replace(/[\r\n]+/g, ' ')]);
+}
+
 export function exportToCSV(data: any, filename: string, provenance?: ExportProvenance) {
   let rows: any[] = [];
   
@@ -117,35 +144,80 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
   if (!rows.length) return;
   
   const csv = rowsToCSV(rows);
-
-  const prefixLines: string[] = [];
-  if (provenance) {
-    const resolved = buildExportProvenance(provenance);
-    const provRows: Array<[string, unknown]> = [
-      ['widget', resolved.widgetTitle || resolved.widgetType],
-      ['symbol', resolved.symbol],
-      ['source', resolved.sourceLabel],
-      ['api_group', resolved.apiGroup],
-      ['endpoint', resolved.endpoint],
-      ['source_as_of', resolved.updatedAt ?? 'unknown'],
-      ['fetched_at', resolved.fetchedAt],
-      ['coverage', resolved.coverage],
-      ['cached', resolved.cached],
-      ['adjustment_mode', resolved.adjustmentMode],
-      ['warnings', resolved.warnings?.join(' · ') || undefined],
-      ['data_status', deriveWidgetHealth(resolved)?.label],
-      ['captured_at', resolved.capturedAt],
-    ];
-    for (const [key, value] of provRows) {
-      if (value !== undefined && value !== null && value !== '') {
-        prefixLines.push(`# ${key},${String(value).replace(/[\r\n]+/g, ' ')}`);
-      }
-    }
-  }
+  const prefixLines = provenanceLines(provenance).map(([key, value]) => `# ${key},${value}`);
 
   const body = prefixLines.length ? `${prefixLines.join('\n')}\n${csv}` : csv;
   const blob = new Blob([body], { type: 'text/csv' });
   downloadBlob(blob, `${filename}.csv`);
+}
+
+/**
+ * Export data to a real `.xlsx` workbook (SpreadsheetML, no extra dependency).
+ *
+ * Sheet "Data" holds the rows with the same columns as the CSV path; sheet
+ * "Metadata" holds the provenance pairs. Cell type follows the original JS
+ * value: finite numbers stay numeric, everything else is text with the CSV
+ * formula guard, so `-5.3` is a number and `"007"` stays text.
+ */
+export function exportToXLSX(data: any, filename: string, provenance?: ExportProvenance) {
+  const rows: Array<Record<string, unknown>> = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object'
+      ? Array.isArray(data.data || data.records || data.results)
+        ? data.data || data.records || data.results
+        : [data]
+      : [];
+
+  if (!rows.length) return;
+
+  const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  const meta: Array<[string, string]> = [['field', 'value'], ...provenanceLines(provenance)];
+
+  const sheet = (name: string, table: unknown[][]) =>
+    `<Worksheet ss:Name="${escapeXml(name)}"><Table>` +
+    table
+      .map(
+        (cells) =>
+          `<Row>${cells
+            .map((cell) => {
+              if (typeof cell === 'number' && Number.isFinite(cell)) {
+                return `<Cell><Data ss:Type="Number">${cell}</Data></Cell>`;
+              }
+              const text = cell === null || cell === undefined
+                ? ''
+                : typeof cell === 'object'
+                  ? JSON.stringify(cell)
+                  : String(cell);
+              return `<Cell><Data ss:Type="String">${escapeXml(guardFormula(text))}</Data></Cell>`;
+            })
+            .join('')}</Row>`,
+      )
+      .join('') +
+    '</Table></Worksheet>';
+
+  const workbook =
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"' +
+    ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' +
+    sheet('Data', [headers, ...rows.map((row) => headers.map((header) => row[header]))]) +
+    sheet('Metadata', meta) +
+    '</Workbook>';
+
+  const blob = new Blob([workbook], { type: 'application/vnd.ms-excel' });
+  downloadBlob(blob, `${filename}.xls`);
+}
+
+/** Text cells keep their type; only formula-like text gets the CSV guard. */
+function guardFormula(text: string): string {
+  return /^\s*[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /**

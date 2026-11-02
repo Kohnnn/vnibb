@@ -33,7 +33,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 function rsiClass(rsi: number): string {
   if (rsi >= 70) return 'text-red-300'
   if (rsi <= 30) return 'text-emerald-300'
-  return 'text-amber-300'
+  return 'text-[var(--color-warning)]'
 }
 
 export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetProps) {

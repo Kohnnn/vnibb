@@ -57,7 +57,7 @@ function renderHighlightedText(text: string, tokens: string[]) {
 
   return parts.map((part, index) =>
     escapedTokens.some((token) => new RegExp(`^${token}$`, 'i').test(part)) ? (
-      <mark key={`${part}-${index}`} className="rounded bg-amber-400/20 px-0.5 text-amber-100">
+      <mark key={`${part}-${index}`} className="rounded bg-amber-400/20 px-0.5 text-[var(--text-secondary)]">
         {part}
       </mark>
     ) : (
@@ -288,7 +288,7 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                       </span>
                     )}
                     {item.isMarketWideFallback && (
-                      <span className="rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200">
+                      <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
                         Market-wide
                       </span>
                     )}

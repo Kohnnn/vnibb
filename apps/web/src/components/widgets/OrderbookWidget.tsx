@@ -216,7 +216,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
           <>
             <div className="border-b border-[var(--border-subtle)] px-3 py-3 bg-[var(--bg-primary)]">
               {hasReferencePrices ? (
-                <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-100">
+                <div className="mb-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-[10px] leading-4 text-amber-100">
                   Provider depth did not include priced levels. The price column uses latest close as a reference, not live bid/ask depth.
                 </div>
               ) : null}
@@ -304,7 +304,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                   </div>
                   <div className="text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
                     {entry.price !== null ? (
-                      <span className={hasReferencePrices ? 'text-amber-200' : undefined}>
+                      <span className={hasReferencePrices ? 'text-[var(--text-secondary)]' : undefined}>
                         {entry.price.toLocaleString()}
                       </span>
                     ) : '--'}

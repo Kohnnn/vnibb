@@ -65,7 +65,7 @@ export function WidgetGroupSelector({
         data-testid="ticker-scope-badge"
         className={
           isDetached
-            ? `${CONTROL_CLASS} bg-amber-500/15 text-amber-300`
+            ? `${CONTROL_CLASS} bg-amber-500/15 text-[var(--color-warning)]`
             : `${CONTROL_CLASS} bg-[var(--bg-tertiary)] text-[var(--text-muted)]`
         }
       >

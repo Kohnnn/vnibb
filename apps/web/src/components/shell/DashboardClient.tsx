@@ -12,6 +12,7 @@ import { canEditDashboard } from '@/contexts/DashboardContext/helpers';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { WidgetWrapper, widgetRegistry } from '@/components/widgets';
 import { DashboardSkeleton } from '@/components/shell/DashboardSkeleton';
+import { OfflineBanner } from '@/components/shell/OfflineBanner';
 import {
     PERIOD_OPTIONS,
     DATA_SOURCE_OPTIONS,
@@ -1322,6 +1323,8 @@ function DashboardContent() {
                     unitDisplay={unitConfig.display}
                     onUnitDisplayChange={setUnit}
                 />
+
+                <OfflineBanner />
 
                 <FreshnessBanner />
 

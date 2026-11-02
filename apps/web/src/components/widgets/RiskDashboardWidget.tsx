@@ -100,14 +100,14 @@ function computeHurstFromPrices(prices: number[]): number | null {
 function classifyHurst(hurst: number | null): { label: string; tone: string } {
   if (hurst === null) return { label: 'Insufficient Data', tone: 'text-[var(--text-secondary)]' };
   if (hurst > 0.55) return { label: 'Trending', tone: 'text-emerald-300' };
-  if (hurst < 0.45) return { label: 'Mean-Reverting', tone: 'text-amber-300' };
+  if (hurst < 0.45) return { label: 'Mean-Reverting', tone: 'text-[var(--color-warning)]' };
   return { label: 'Random Walk', tone: 'text-cyan-300' };
 }
 
 function riskGrade(score: number): { label: string; tone: string } {
   if (score >= 80) return { label: 'Low Risk', tone: 'text-emerald-300' };
   if (score >= 60) return { label: 'Balanced', tone: 'text-cyan-300' };
-  if (score >= 40) return { label: 'Elevated', tone: 'text-amber-300' };
+  if (score >= 40) return { label: 'Elevated', tone: 'text-[var(--color-warning)]' };
   return { label: 'High Risk', tone: 'text-rose-300' };
 }
 
@@ -231,7 +231,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
     // (weight * stress * 100), so they sum to the total deduction (100 - score).
     const drivers = [
       { label: 'Drawdown Stress', value: weights.drawdown * drawdownStress * 100, tone: 'text-rose-300' },
-      { label: 'Volatility Stress', value: weights.vol * volStress * 100, tone: 'text-amber-300' },
+      { label: 'Volatility Stress', value: weights.vol * volStress * 100, tone: 'text-[var(--color-warning)]' },
       { label: 'Relative DD', value: weights.relDd * relDdStress * 100, tone: 'text-fuchsia-300' },
       { label: 'Tracking Error', value: weights.tracking * trackingStress * 100, tone: 'text-cyan-300' },
       { label: 'Downside Dev', value: weights.downside * downsideStress * 100, tone: 'text-sky-300' },
@@ -492,7 +492,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95 (period)</div>
-                      <div className="mt-1 font-mono text-amber-300">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
+                      <div className="mt-1 font-mono text-[var(--color-warning)]">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95 (period)</div>

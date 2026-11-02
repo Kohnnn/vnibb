@@ -186,7 +186,7 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
-              <div className="text-amber-300 font-mono">{Number(metric?.current_signal ?? 0).toFixed(4)}</div>
+              <div className="text-[var(--color-warning)] font-mono">{Number(metric?.current_signal ?? 0).toFixed(4)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Histogram</div>

@@ -262,7 +262,7 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area Low · lower bound of the price range that contained 70% of volume.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">VAL <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-amber-300 font-mono">{valPrice != null ? valPrice.toFixed(2) : '-'}</div>
+          <div className="text-[var(--color-warning)] font-mono">{valPrice != null ? valPrice.toFixed(2) : '-'}</div>
         </div>
       </div>
 

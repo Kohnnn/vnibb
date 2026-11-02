@@ -47,7 +47,7 @@ export function WidgetHeader({
 
   return (
     <div className={cn(
-      "flex items-center justify-between px-3 py-2",
+      "flex items-center justify-between gap-2 px-3 py-2",
       "border-b border-[var(--border-subtle)] bg-[var(--bg-widget-header)]/70",
       "shrink-0",
       className
@@ -68,7 +68,7 @@ export function WidgetHeader({
       </div>
 
       {/* Right: Actions & Controls */}
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex max-w-[65%] items-center gap-0.5 overflow-x-auto sm:max-w-none">
         {/* Symbol Link Toggle */}
         {showLinkToggle && widgetId && (
           <LinkToggleButton widgetId={widgetId} />

@@ -8,8 +8,6 @@ jest.mock('@/hooks/useComparison', () => ({
   usePeers: jest.fn(),
 }));
 
-jest.mock('@/lib/api', () => ({ exportPeers: jest.fn() }));
-
 jest.mock('recharts', () => {
   const Stub = ({ children }: { children?: React.ReactNode }) => <div>{children}</div>;
   return {

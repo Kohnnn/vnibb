@@ -659,7 +659,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
                     {statementNote && (
-                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                        <div className="mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             {statementNote}
                         </div>
                     )}

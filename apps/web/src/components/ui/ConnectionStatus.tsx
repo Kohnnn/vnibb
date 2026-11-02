@@ -79,7 +79,7 @@ export function ConnectionStatus() {
         <div className="flex items-center gap-2 text-[var(--color-warning)]">
           <div className="flex items-center gap-1">
             <WifiOff size={12} className="opacity-80" />
-            <span className="hidden sm:inline">Status: Degraded</span>
+            <span className="hidden sm:inline">Status: Offline</span>
           </div>
           <button
             onClick={() => checkConnection()}

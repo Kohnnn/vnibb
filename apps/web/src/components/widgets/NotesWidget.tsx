@@ -175,7 +175,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                     <button type="button" onClick={save} disabled={!canSave} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-green-400 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Save thesis"><Save size={13} /></button>
                 </div>
             </div>
-            {!canSave && <p role="status" className="rounded border border-amber-500/30 p-2 text-xs text-amber-300">System workspace is read-only. Use Templates or Blank workspace in the sidebar, add a tab and Notes widget, then save your thesis there.</p>}
+            {!canSave && <p role="status" className="rounded border border-amber-500/30 p-2 text-xs text-[var(--color-warning)]">System workspace is read-only. Use Templates or Blank workspace in the sidebar, add a tab and Notes widget, then save your thesis there.</p>}
             <fieldset disabled={!canSave} className="contents">
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 text-[10px]" aria-label="Investment Thesis completion checklist">
                 <div className="flex items-center justify-between text-[var(--text-muted)]"><span>Thesis completion</span><span>{completedChecks}/6</span></div>
@@ -209,7 +209,7 @@ function EvidenceItem({ item, citation, itemId, onDetach }: { item: NotebookItem
     return <div className="flex items-start justify-between gap-2 rounded bg-[var(--bg-tertiary)] p-1.5"><div className="min-w-0">
         <div className="truncate text-[var(--text-primary)]">{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-blue-300">{recorded!.title}<ExternalLink size={10} /></a> : recorded?.title || itemId}</div>
         {details && <div className="text-[10px] text-[var(--text-muted)]">{details}</div>}
-        {!item && <div className="text-[10px] text-amber-300">Original research unavailable or deleted. Citation only; original content is not included.</div>}
+        {!item && <div className="text-[10px] text-[var(--color-warning)]">Original research unavailable or deleted. Citation only; original content is not included.</div>}
     </div><button type="button" onClick={onDetach} className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-red-300" aria-label={`Detach evidence ${recorded?.title || itemId}`}><Unlink size={12} /></button></div>;
 }
 

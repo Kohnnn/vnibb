@@ -217,7 +217,7 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                     />
 
                     {dataQualityIssues.length ? (
-                        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-100">
+                        <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-[10px] leading-4 text-amber-100">
                             <div className="font-bold uppercase tracking-[0.14em]">Data quality</div>
                             <div className="mt-1">{dataQualityIssues.slice(0, 2).join(' ')}</div>
                         </div>

@@ -103,7 +103,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
     return [
       { key: 'loan_to_deposit', icon: Landmark, accent: 'text-sky-300' },
       { key: 'nim', icon: TrendingUp, accent: 'text-emerald-300' },
-      { key: 'credit_cost', icon: ShieldCheck, accent: 'text-amber-300' },
+      { key: 'credit_cost', icon: ShieldCheck, accent: 'text-[var(--color-warning)]' },
       { key: 'equity_to_assets', icon: Building2, accent: 'text-cyan-300' },
     ].map((item) => ({
       ...item,

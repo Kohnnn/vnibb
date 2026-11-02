@@ -40,7 +40,7 @@ function getRegime(percentile: number) {
     return { label: 'Low Vol', className: 'text-emerald-300', stopMultiple: 1.2 };
   }
   if (percentile < 67) {
-    return { label: 'Normal Vol', className: 'text-amber-300', stopMultiple: 1.5 };
+    return { label: 'Normal Vol', className: 'text-[var(--color-warning)]', stopMultiple: 1.5 };
   }
   return { label: 'High Vol', className: 'text-red-300', stopMultiple: 2.0 };
 }
@@ -176,7 +176,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">ATR %</div>
-          <div className="text-amber-300 font-mono">{atrPct.toFixed(2)}%</div>
+          <div className="text-[var(--color-warning)] font-mono">{atrPct.toFixed(2)}%</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Regime</div>

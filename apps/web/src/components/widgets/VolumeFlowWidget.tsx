@@ -163,7 +163,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Divergence Months</div>
-              <div className="font-mono text-amber-300">{metric?.divergence_months ?? 0}</div>
+              <div className="font-mono text-[var(--color-warning)]">{metric?.divergence_months ?? 0}</div>
             </div>
           </div>
 

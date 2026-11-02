@@ -40,7 +40,7 @@ function getSectorRead(value: number | null) {
   }
   if (value >= 0.65) return { label: 'Tight cluster', tone: 'text-emerald-300' }
   if (value >= 0.35) return { label: 'Moderate cluster', tone: 'text-cyan-300' }
-  return { label: 'Loose dispersion', tone: 'text-amber-200' }
+  return { label: 'Loose dispersion', tone: 'text-[var(--text-secondary)]' }
 }
 
 function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }: CorrelationMatrixWidgetProps) {

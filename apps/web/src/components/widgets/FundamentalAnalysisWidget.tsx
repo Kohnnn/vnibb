@@ -82,7 +82,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   const hasData = Boolean(summary || strengths.length || risks.length || sections.length || valuation || competitiveAdvantage);
   const sectionErrors = Object.entries(payload?.section_errors ?? {});
   const partialWarning = (textValue(data?.error) || sectionErrors.length > 0) ? (
-    <div role="alert" aria-label="Partial fundamental analysis" className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+    <div role="alert" aria-label="Partial fundamental analysis" className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-xs text-[var(--color-warning)]">
       <p>Partial data unavailable</p>
       {sectionErrors.length > 0 && (
         <ul className="mt-1 list-inside list-disc">
@@ -144,7 +144,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
                 {valuationVerified ? textValue(valuation.valuation_verdict)?.replace('_', ' ') ?? 'no verdict' : 'unverified units'}
               </div>
             </div>
-            {!valuationVerified && <p role="status" className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">{comparisonUnavailableReason}</p>}
+            {!valuationVerified && <p role="status" className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-xs text-[var(--color-warning)]">{comparisonUnavailableReason}</p>}
             <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
               <Metric label="MoS" value={valuationVerified ? pct(valuation.margin_of_safety) : null} />
               <Metric label="Method" value={textValue(valuation.valuation_method)?.toUpperCase()} />
@@ -236,7 +236,7 @@ function Metric({ label, value }: { label: string; value?: string | null }) {
 
 function PointList({ title, items, tone }: { title: string; items: FundamentalAnalysisItem[]; tone: 'positive' | 'negative' }) {
   if (items.length === 0) return null;
-  const toneClass = tone === 'positive' ? 'text-emerald-300' : 'text-amber-300';
+  const toneClass = tone === 'positive' ? 'text-emerald-300' : 'text-[var(--color-warning)]';
 
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

@@ -269,7 +269,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
         >
             <div className="h-full flex flex-col bg-[var(--bg-primary)]">
                 {error && hasData && (
-                    <div role="alert" className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                    <div role="alert" className="border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
                         {error.message}
                     </div>
                 )}

@@ -174,7 +174,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             {
                 label: 'Gross Margin Delta',
                 value: marginDelta,
-                tone: 'text-amber-300',
+                tone: 'text-[var(--color-warning)]',
             },
         ];
     }, [comparableIncome, latestIncome]);

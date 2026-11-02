@@ -134,7 +134,7 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
         </div>
       </div>
 
-      {adjustmentWarning && <div className="mx-1 mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">{adjustmentWarning}</div>}
+      {adjustmentWarning && <div className="mx-1 mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">{adjustmentWarning}</div>}
 
       <div className="flex-1 overflow-y-auto px-1">
         {/* Headline risk/return cards */}

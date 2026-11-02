@@ -26,16 +26,49 @@ const plexMono = localFont({
   fallback: ["monospace"],
 });
 
+/**
+ * Canonical origin. Preview deployments and localhost must not advertise
+ * themselves as canonical, so only the production host is pinned; every other
+ * environment keeps Next's per-request origin.
+ */
+const VNIBB_CANONICAL_ORIGIN = "https://web.vnibb.xyz";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || VNIBB_CANONICAL_ORIGIN;
+
+const SITE_DESCRIPTION =
+  "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.";
+
 export const metadata: Metadata = {
+  // No root-level canonical: a layout-level canonical would make every page
+  // (login, dashboard, shares) claim the site root. Pages that need one set it.
+  metadataBase: new URL(SITE_URL),
   title: "VniBB | Research cockpit for Vietnamese equities",
-  description:
-    "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.",
+  description: SITE_DESCRIPTION,
+  applicationName: "VniBB",
+  manifest: "/manifest.json",
   openGraph: {
     title: "VniBB | Research cockpit for Vietnamese equities",
-    description:
-      "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.",
+    description: SITE_DESCRIPTION,
     type: "website",
+    url: "/",
+    siteName: "VniBB",
+    locale: "en_US",
+    images: [
+      {
+        url: "/brand/og-vnibb.png",
+        width: 1200,
+        height: 630,
+        alt: "VniBB wordmark on the brand plate",
+      },
+    ],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "VniBB | Research cockpit for Vietnamese equities",
+    description: SITE_DESCRIPTION,
+    images: ["/brand/og-vnibb.png"],
+  },
+  /* Favicon/app-icon artwork is not in the brand pack and needs approval;
+     Next keeps serving the existing /favicon.ico until that lands. */
 };
 
 // Theme and UI preferences pre-hydration scripts

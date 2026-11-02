@@ -177,7 +177,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
         </div>
         <div className="flex-1 px-2 py-2">
           {isFallback && (
-            <div role="alert" className="mb-2 text-[10px] text-amber-300">
+            <div role="alert" className="mb-2 text-[10px] text-[var(--color-warning)]">
               {error?.message} Showing previously received ratio history.{' '}
               <button type="button" onClick={() => refetch()}>Retry</button>
             </div>

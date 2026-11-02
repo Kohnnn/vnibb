@@ -18,6 +18,11 @@ export const VNIBB_LOGO_CLEAR_SPACE = 0.055;
 
 export const VNIBB_BRAND_NAME = 'VniBB';
 export const VNIBB_BRAND_DESCRIPTOR = 'Research cockpit for Vietnamese equities';
+/** Public site and source repository, used by email/social channel artwork. */
+export const VNIBB_CANONICAL_URL = 'https://web.vnibb.xyz';
+export const VNIBB_REPOSITORY_URL = 'https://github.com/Kohnnn/vnibb';
+/** Absolute wordmark URL for channels that cannot resolve page-relative paths. */
+export const VNIBB_WORDMARK_URL = `${VNIBB_CANONICAL_URL}/brand/vnibb-wordmark-master.svg`;
 
 /** Plate size for a wordmark of `width` px: wordmark + 2X on each axis. */
 export function getLogoPlateSize(width: number) {

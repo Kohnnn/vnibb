@@ -446,7 +446,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
             {isDegraded && (
                 <div
                     role="status"
-                    className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200"
+                    className="mb-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]"
                 >
                     VniAgent is unavailable: no AI model is configured on the server. Add a browser-local API key in AI Settings to chat without server configuration.
                 </div>

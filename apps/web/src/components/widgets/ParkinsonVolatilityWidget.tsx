@@ -41,7 +41,7 @@ type SeriesPoint = {
 
 function regimeTone(regime: string): string {
   if (regime === 'low') return 'text-emerald-300'
-  if (regime === 'high') return 'text-amber-300'
+  if (regime === 'high') return 'text-[var(--color-warning)]'
   if (regime === 'extreme') return 'text-red-300'
   return 'text-cyan-300'
 }
@@ -174,7 +174,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Close 30D</div>
-              <div className="font-mono text-amber-300">
+              <div className="font-mono text-[var(--color-warning)]">
                 {Number(metric?.current_close_close_vol_30d_pct ?? 0).toFixed(2)}%
               </div>
             </div>

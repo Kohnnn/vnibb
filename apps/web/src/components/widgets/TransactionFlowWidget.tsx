@@ -353,7 +353,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
           ) : (
             <div className="space-y-3">
               {isStale ? (
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                   Latest transaction flow snapshot is {staleDays} days old. Showing the last available session until the pipeline refreshes.
                 </div>
               ) : null}
