@@ -654,6 +654,9 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
                 "symbol": ["VNM", "FPT"], "exchange": "HOSE", "type": "STOCK",
             })
 
+    # A shared provider job from an earlier test would serve this request without
+    # ever reaching the controlled executor.
+    monkeypatch.setattr(market, "_market_provider_jobs", {})
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
     monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
