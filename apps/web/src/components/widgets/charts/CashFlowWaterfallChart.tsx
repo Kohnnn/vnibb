@@ -29,9 +29,8 @@ function splitLabel(label: string): string[] {
 }
 
 function formatDelta(changePct: number | null | undefined): string {
-  if (changePct === null || changePct === undefined) return '';
-  const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change' });
-  return formatted === EMPTY_VALUE ? '' : `${changePct > 0 ? '+' : ''}${formatted}`;
+  // formatPercent owns missing (`n/a`), non-meaningful (`n/m`) and the sign.
+  return formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
 }
 
 export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfallChartProps) {

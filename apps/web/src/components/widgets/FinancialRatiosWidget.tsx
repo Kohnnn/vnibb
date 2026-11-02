@@ -12,7 +12,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { clampPercentage, convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
+import { convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useUnit } from '@/contexts/UnitContext';
@@ -44,8 +44,10 @@ function formatPct(metricKey: string, value: number | null | undefined): string 
             ? 'yoy_change'
             : 'margin';
 
+    // Let formatPercent apply the clamp: pre-clamping to null turned a
+    // non-meaningful value into `n/a` instead of `n/m`.
     return CANONICAL_PERCENT_KEYS[metricKey]
-        ? formatPercent(clampPercentage(value, clamp), { decimals: 2, input: 'percent' })
+        ? formatPercent(value, { decimals: 2, input: 'percent', clamp })
         : formatPercent(value, { decimals: 2, input: 'auto', clamp });
 }
 
