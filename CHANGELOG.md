@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Heatmap timeout coverage synchronizes coordinator start and cleanup explicitly, proving that repeated timed-out requests retain one acquisition until its running children finish. The regression no longer depends on thread submission speed; production deadlines are unchanged.
 - Migrate the application to the unified `vnstock` 5.2.1 SDK and explicit VCI routes. Golden registration requires an authenticated Golden or Diamond account and fails closed on missing credentials or registration failure; guest-paced defaults remain unchanged. Entitlement does not authorize acquisition or bypass source, unit or reporting-basis admission (#191, #168).
 - Price-depth capability skips no longer count as empty acquisitions. A disabled entitlement, an outside-hours gate or a free-tier refusal records `skipped` with a reason and leaves the symbol pending, so the intraday rotation can no longer certify it as covered; a genuine empty provider batch and a genuine failure keep their own meaning. The free-tier refusal is now a typed `ProviderError.capability` signal instead of a message match.
 - The daily market owner requests the qualified provider-board session cohort (`acquire_sessions=True`), so no-trade and suspended symbols stay active and certifiable while a missing or rejected session stays an error. Wiring this path does not authorize acquisition: it remains gated on source permission and recovery (#168, #171, #172).
