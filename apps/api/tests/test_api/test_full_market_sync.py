@@ -436,7 +436,6 @@ async def test_daily_owner_rejects_incomplete_board_input(test_engine, monkeypat
 
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from vnibb.models.stock import Stock
     from vnibb.models.sync_status import SyncStatus
     from vnibb.providers.vnstock import runtime
