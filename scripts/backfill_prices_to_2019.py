@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import time
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from vnibb.services.mongo_eod_sync import (
     run_mongo_eod_catchup,
 )
 from vnibb.services.sync_all_data import FullMarketSync
+from vnibb.services.vnstock_registration import ensure_vnstock_registration
 
 DATASETS = ("financials", "ratios", "reference", "market", "eod")
 REFERENCE = ("profiles", "shareholders", "officers", "subsidiaries", "company_news", "company_events", "dividends", "insider_deals")
@@ -235,9 +237,34 @@ async def bootstrap_listing(args):
             close()
 
 
+async def _ensure_golden_registration() -> None:
+    """Register the configured Golden key before any --apply acquisition.
+
+    This CLI has no API lifespan. Free tier needs no credential; Golden fails
+    closed on any failure. Inventory stays provider-free and never calls this.
+    """
+    from vnibb.core.config import settings
+
+    if settings.vnstock_runtime_tier != "golden":
+        return
+    raw = os.getenv("STARTUP_VNSTOCK_REG_TIMEOUT_SECONDS")
+    try:
+        timeout = max(1, int(raw)) if raw is not None else 10
+    except ValueError:
+        timeout = 10
+    try:
+        result = await asyncio.wait_for(ensure_vnstock_registration(), timeout=timeout)
+    except Exception:
+        raise RuntimeError("VNStock Golden registration failed") from None
+    if not result.registered:
+        raise RuntimeError(f"VNStock Golden registration failed: {result.reason}")
+
+
 async def main(argv=None):
     args = parse_args(argv)
     bootstrap = None
+    if args.apply:
+        await _ensure_golden_registration()
     if args.apply and args.revalidate_empty_receipts is None and (args.bootstrap_listing or not args.symbols):
         bootstrap = await bootstrap_listing(args)
     symbols = await resolve_symbols(args.symbols)

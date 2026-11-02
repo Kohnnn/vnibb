@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+import os
 import signal
 
 from vnibb.core.cache import redis_client
@@ -8,13 +9,39 @@ from vnibb.core.config import settings
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.scheduler import shutdown_scheduler, start_scheduler
 from vnibb.services.realtime_pipeline import get_realtime_pipeline
+from vnibb.services.vnstock_registration import ensure_vnstock_registration
 
 logger = logging.getLogger(__name__)
+
+
+def _registration_timeout() -> int:
+    raw = os.getenv("STARTUP_VNSTOCK_REG_TIMEOUT_SECONDS")
+    try:
+        return max(1, int(raw)) if raw is not None else 10
+    except ValueError:
+        return 10
+
+
+async def _ensure_golden_registration() -> None:
+    """Register the configured Golden key before any scheduled acquisition.
+
+    The scheduler process has no API lifespan, so it must register itself.
+    Free tier needs no credential; Golden fails closed on any failure.
+    """
+    if settings.vnstock_runtime_tier != "golden":
+        return
+    try:
+        result = await asyncio.wait_for(ensure_vnstock_registration(), timeout=_registration_timeout())
+    except Exception:
+        raise RuntimeError("VNStock Golden registration failed") from None
+    if not result.registered:
+        raise RuntimeError(f"VNStock Golden registration failed: {result.reason}")
 
 
 async def start() -> None:
     if settings.scheduler_role != "scheduler":
         raise RuntimeError("SCHEDULER_ROLE=scheduler is required for vnibb.scheduler_worker")
+    await _ensure_golden_registration()
     try:
         await redis_client.connect()
     except Exception as exc:
