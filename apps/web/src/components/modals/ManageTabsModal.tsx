@@ -117,7 +117,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 z-[100] bg-[rgba(2,6,23,0.72)] backdrop-blur-sm"
+                className="fixed inset-0 z-[100] bg-[rgb(2_6_23_/_0.72)]"
                 aria-hidden="true"
                 onClick={handleCancel}
             />
@@ -126,7 +126,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
             <div className="fixed inset-0 flex items-center justify-center z-[101] p-4">
                 <div
                     ref={dialogRef}
-                    className="bg-[var(--bg-modal)] border border-[var(--border-color)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] w-full max-w-md"
+                    className="w-full max-w-md rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] shadow-lg"
                     onClick={e => e.stopPropagation()}
                     role="dialog"
                     aria-modal="true"
@@ -139,7 +139,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                         <button
                             type="button"
                             onClick={handleCancel}
-                            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                            className="rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                             aria-label="Close manage tabs"
                         >
                             <X size={20} />
@@ -156,11 +156,11 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                 onDragOver={(e) => handleDragOver(e, index)}
                                 onDragEnd={handleDragEnd}
                                 className={`
-                                    flex items-center gap-2 p-2 rounded-lg
-                                    bg-[var(--bg-tertiary)]/60 border border-[var(--border-color)]
+                                    flex items-center gap-2 p-2 rounded-md
+                                    bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]
                                     ${draggedIndex === index ? 'opacity-50' : ''}
-                                    ${dragOverIndex === index ? 'ring-2 ring-blue-500' : ''}
-                                    transition-all
+                                    ${dragOverIndex === index ? 'ring-2 ring-[var(--focus-ring-color)]' : ''}
+                                    transition-colors
                                 `}
                             >
                                 {/* Drag handle */}
@@ -182,7 +182,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                     value={tab.name}
                                     aria-label="Tab name"
                                     onChange={(e) => handleNameChange(index, e.target.value)}
-                                    className="flex-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                    className="flex-1 rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                     placeholder="Tab name"
                                 />
 
@@ -192,10 +192,10 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                                     onClick={() => handleDelete(index)}
                                     disabled={localTabs.length <= 1}
                                     className={`
-                                        p-2 rounded-lg transition-colors
+                                        rounded p-2 transition-colors
                                         ${localTabs.length <= 1
-                                            ? 'text-[var(--text-muted)]/40 cursor-not-allowed'
-                                            : 'text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-secondary)]'
+                                            ? 'cursor-not-allowed text-[var(--text-muted)] opacity-40'
+                                            : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                         }
                                     `}
                                     title={localTabs.length <= 1 ? 'Cannot delete the only tab' : 'Delete tab'}
@@ -212,7 +212,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                             onClick={handleAddTab}
                             disabled={reachedTabLimit}
                             title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : undefined}
-                            className="w-full flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-blue-400/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-[var(--border-strong)] p-3 text-[var(--text-muted)] transition-colors hover:border-[var(--color-accent-primary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <Plus size={18} />
                             <span>Add New Tab</span>
@@ -229,14 +229,14 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                         <button
                             type="button"
                             onClick={handleCancel}
-                            className="px-4 py-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                            className="rounded-md px-4 py-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                             Cancel
                         </button>
                         <button
                             type="button"
                             onClick={handleSave}
-                            className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors font-medium"
+                            className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)]"
                         >
                             Save Changes
                         </button>

@@ -65,7 +65,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                     symbol: stock.symbol,
                     label: stock.symbol,
                     description: `${stock.name} · ${stock.industry}`,
-                    icon: <TrendingUp size={16} className="text-[var(--color-accent-primary)]" />,
+                    icon: <TrendingUp size={16} className="text-[var(--text-secondary)]" />,
                 });
             });
             return results;
@@ -82,7 +82,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                 symbol: stock.symbol,
                 label: stock.symbol,
                 description: `${stock.name} · ${stock.industry}`,
-                icon: <TrendingUp size={16} className="text-[var(--color-accent-primary)]" />,
+                icon: <TrendingUp size={16} className="text-[var(--text-secondary)]" />,
             });
         });
 
@@ -160,7 +160,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 z-50 bg-[rgba(0,0,0,0.6)]"
+                className="fixed inset-0 z-50 bg-[rgb(2_6_23_/_0.72)]"
                 role="button"
                 tabIndex={0}
                 aria-label="Close command palette"
@@ -175,7 +175,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
 
             {/* Modal */}
             <div className="fixed top-[20%] left-1/2 -translate-x-1/2 w-full max-w-lg z-50">
-                <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-xl shadow-2xl overflow-hidden">
+                <div className="overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-lg">
                     {/* Search Input */}
                     <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-default)]">
                         <Search size={20} className="text-[var(--text-secondary)]" />
@@ -219,7 +219,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                                             onClose();
                                         }}
                                         className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${index === selectedIndex
-                                                ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]'
+                                                ? 'bg-[var(--color-state-bg)] text-[var(--text-primary)]'
                                                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                             }`}
                                     >

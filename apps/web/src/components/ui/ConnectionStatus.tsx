@@ -52,13 +52,13 @@ export function ConnectionStatus() {
   return (
     <div className="flex items-center gap-3 text-[10px] font-medium">
       {status === 'checking' ? (
-        <div className="flex items-center gap-1.5 text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[var(--text-muted)]">
           <Loader2 size={10} className="animate-spin" />
           <span className="hidden sm:inline">Status: Checking</span>
         </div>
       ) : status === 'online' ? (
-        <div className="flex items-center gap-1.5 text-[var(--color-success)]">
-          <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" />
+        <div className="flex items-center gap-1.5 text-[var(--text-secondary)]">
+          <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-info)]" />
           <span className="hidden sm:inline">Status: Online</span>
         </div>
       ) : status === 'degraded' ? (
@@ -70,7 +70,7 @@ export function ConnectionStatus() {
           <button
             onClick={() => checkConnection()}
             disabled={isChecking}
-            className="px-2 py-0.5 bg-[var(--color-state-bg)] border border-[var(--color-state-border)] rounded text-[var(--color-warning)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+            className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--color-warning)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
           >
             {isChecking ? 'Checking...' : 'Retry'}
           </button>
@@ -84,7 +84,7 @@ export function ConnectionStatus() {
           <button
             onClick={() => checkConnection()}
             disabled={isChecking}
-            className="px-2 py-0.5 bg-[var(--color-state-bg)] border border-[var(--color-state-border)] rounded text-[var(--color-warning)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50"
+            className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--color-warning)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
           >
             {isChecking ? 'Checking...' : 'Retry'}
           </button>

@@ -101,13 +101,13 @@ export function ExportButton({
         title="Export data"
         aria-label="Export data"
       >
-        {exported ? <Check className="w-3 h-3 text-[var(--color-success)]" /> : <Download className="w-3 h-3" />}
+        {exported ? <Check className="h-3 w-3 text-[var(--color-info)]" /> : <Download className="w-3 h-3" />}
         <span>Export</span>
         <ChevronDown className="w-2 h-2 opacity-50" />
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full right-0 mb-1 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
+        <div className="absolute bottom-full right-0 mb-1 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-md shadow-xl z-50 py-1 min-w-[100px]">
           {formats.includes('csv') && (
             <button
               onClick={exportCSV}

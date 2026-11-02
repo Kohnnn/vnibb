@@ -90,7 +90,7 @@ export function ExportButton({
             </button>
 
             {isOpen && (
-                <div className="absolute right-0 z-50 mt-2 w-40 origin-top-right rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg ring-1 ring-[rgba(0,0,0,0.05)] focus:outline-none">
+                <div className="absolute right-0 z-50 mt-2 w-40 origin-top-right rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg ring-1 ring-[var(--border-subtle)] focus:outline-none">
                     <div className="py-1">
                         <button
                             onClick={() => handleExport('csv')}

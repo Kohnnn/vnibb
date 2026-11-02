@@ -572,7 +572,7 @@ function ArtifactCard({
   }
 
   return (
-        <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-3">
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1 basis-40">
               <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-primary)]">{artifact.title}</div>
@@ -581,7 +581,7 @@ function ArtifactCard({
               )}
             </div>
             <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
-              <div className="text-[10px] text-[var(--color-accent-secondary)]">
+              <div className="text-[10px] text-[var(--text-muted)]">
                 {artifact.type === 'chart' ? artifact.chartType : artifact.type}
                 {artifact.sourceIds?.length ? ` · ${artifact.sourceIds.length} source refs` : ''}
               </div>
@@ -589,7 +589,7 @@ function ArtifactCard({
                 <button
                   type="button"
                   onClick={() => { void rateArtifact('liked') }}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-success)] hover:bg-[var(--bg-hover)]"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                 >
                   {pendingRating === 'liked' ? <Loader2 size={11} className="animate-spin" /> : ratingStatus === 'liked' ? <Check size={11} /> : <ThumbsUp size={11} />}
                   Useful
@@ -597,7 +597,7 @@ function ArtifactCard({
                 <button
                   type="button"
                   onClick={() => { void rateArtifact('disliked') }}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-error)] hover:bg-[var(--bg-hover)]"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   {pendingRating === 'disliked' ? <Loader2 size={11} className="animate-spin" /> : ratingStatus === 'disliked' ? <Check size={11} /> : <ThumbsDown size={11} />}
                   Not useful
@@ -607,7 +607,7 @@ function ArtifactCard({
                 <button
                   type="button"
                   onClick={handleSaveToNotebook}
-                  className="inline-flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-semibold text-violet-200 hover:bg-violet-500/20"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   {savedArtifacts[notebookDedupeKey] ? <Check size={11} /> : <BookMarked size={11} />}
                   {savedArtifacts[notebookDedupeKey] ? 'Saved to research notebook' : 'Save table to research notebook'}
@@ -621,7 +621,7 @@ function ArtifactCard({
                       type="button"
                       onClick={() => { void handleJumpToWidget() }}
                       title={`Open ${intent.label} without changing the destination workspace ticker`}
-                      className="inline-flex items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-info)] hover:bg-[var(--bg-hover)]"
+                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <ExternalLink size={11} />
                       Open {intent.label}
@@ -640,7 +640,7 @@ function ArtifactCard({
                             const picked = destinations.find((item) => item.tabId === event.target.value)
                             if (picked) onDestinationChange(artifact.id, picked)
                           }}
-                          className="w-full min-w-0 max-w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)] focus-visible:outline-blue-400"
+                          className="w-full min-w-0 max-w-full rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         >
                           {destinations.map((item) => <option key={item.tabId} value={item.tabId}>{item.label}</option>)}
                         </select>
@@ -652,7 +652,7 @@ function ArtifactCard({
                       <button
                         type="button"
                         onClick={() => { void handleCreateWidget() }}
-                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-secondary)] hover:bg-[var(--color-accent-primary)]/20"
+                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       >
                         <Plus size={11} />
                         Add {intent.symbol ? `${intent.symbol} ` : ''}{intent.label}
@@ -668,7 +668,7 @@ function ArtifactCard({
             <p
               role="status"
               data-provenance-widget={promotedWidget?.widgetId}
-              className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[var(--color-success)]"
+              className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[var(--color-info)]"
             >
               <Check size={11} />
               Added to {addedToLabel}

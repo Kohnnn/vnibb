@@ -123,15 +123,6 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
     custom: <MessageSquare size={12} />,
 };
 
-const CATEGORY_COLORS: Record<string, string> = {
-    analysis: '#3B82F6',
-    comparison: '#10B981',
-    fundamentals: '#06B6D4',
-    technical: '#8B5CF6',
-    news: '#F97316',
-    custom: '#F59E0B',
-};
-
 function normalizePromptCategory(category?: Prompt['category']): NonNullable<Prompt['category']> {
     if (!category) return 'custom';
     return category;
@@ -312,7 +303,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Backdrop */}
             <div
-                className="absolute inset-0 bg-[rgba(0,0,0,0.6)]"
+                className="absolute inset-0 bg-[rgb(2_6_23_/_0.72)]"
                 role="button"
                 tabIndex={0}
                 aria-label="Close prompts library"
@@ -327,7 +318,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
 
             {/* Modal */}
             <div
-                className="relative w-full max-w-2xl max-h-[80vh] bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg shadow-2xl overflow-hidden flex flex-col"
+                className="relative flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-lg"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="prompt-library-title"
@@ -335,7 +326,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-color)] shrink-0">
                     <div className="flex items-center gap-2">
-                        <Sparkles size={18} className="text-blue-400" />
+                        <Sparkles size={18} className="text-[var(--color-accent-primary)]" />
                         <div>
                             <h2 id="prompt-library-title" className="text-base font-semibold text-[var(--text-primary)]">VniAgent Prompt Library</h2>
                             <p className="text-xs text-[var(--text-muted)]">Context-aware prompt templates for Vietnam market research</p>
@@ -344,14 +335,14 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setIsAddingNew(true)}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors text-xs font-medium"
+                            className="flex items-center gap-1.5 rounded-md border border-[var(--border-strong)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                             <Plus size={14} />
                             Add Prompt
                         </button>
                         <button
                             onClick={onClose}
-                            className="p-1.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            className="rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                             aria-label="Close prompts library"
                         >
                             <X size={18} />
@@ -363,8 +354,8 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                 <div className="px-4 py-3 border-b border-[var(--border-color)] shrink-0">
                     {(symbol || widgetContext || activeTabName) && (
                         <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
-                            {symbol ? <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-blue-300">{symbol}</span> : null}
-                            {widgetContext ? <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-cyan-200 inline-flex items-center gap-1"><Layers3 size={10} />@{widgetContext}</span> : null}
+                            {symbol ? <span className="rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[var(--color-info)]">{symbol}</span> : null}
+                            {widgetContext ? <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1 text-[var(--text-secondary)]"><Layers3 size={10} />@{widgetContext}</span> : null}
                             {activeTabName ? <span className="rounded-full border border-[var(--border-default)] px-2 py-1">{activeTabName}</span> : null}
                         </div>
                     )}
@@ -380,7 +371,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 value={searchQuery}
                                 aria-label="Search prompts"
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full pl-8 pr-3 py-1.5 rounded bg-[var(--bg-primary)] border border-[var(--border-default)] text-[var(--text-primary)] text-xs placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50"
+                                className="w-full rounded border border-[var(--border-strong)] bg-[var(--bg-primary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             />
                         </div>
                         <div className="flex gap-1">
@@ -388,9 +379,9 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 <button
                                     key={cat}
                                     onClick={() => setSelectedCategory(cat)}
-                                    className={`px-2 py-1 rounded text-[11px] font-medium transition-colors ${selectedCategory === cat
-                                            ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+                                    className={`rounded border px-2 py-1 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] ${selectedCategory === cat
+                                            ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
+                                            : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                         }`}
                                 >
                                     {cat.charAt(0).toUpperCase() + cat.slice(1)}
@@ -410,7 +401,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 value={newPromptName}
                                 aria-label="Prompt name"
                                 onChange={(e) => setNewPromptName(e.target.value)}
-                                className="w-full px-3 py-1.5 rounded bg-[var(--bg-primary)] border border-[var(--border-default)] text-[var(--text-primary)] text-xs placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50"
+                                className="w-full rounded border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 autoFocus
                             />
                             <textarea
@@ -419,7 +410,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 aria-label="Prompt content"
                                 onChange={(e) => setNewPromptContent(e.target.value)}
                                 rows={3}
-                                className="w-full px-3 py-1.5 rounded bg-[var(--bg-primary)] border border-[var(--border-default)] text-[var(--text-primary)] text-xs placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 resize-none"
+                                className="w-full resize-none rounded border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             />
                             <div className="flex justify-end gap-2">
                                 <button
@@ -430,7 +421,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 </button>
                                 <button
                                     onClick={handleAddPrompt}
-                                    className="px-3 py-1 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 transition-colors"
+                                    className="rounded bg-[var(--color-accent-primary)] px-3 py-1 text-xs text-white transition-colors hover:bg-[var(--color-accent-hover)]"
                                 >
                                     Save Prompt
                                 </button>
@@ -447,7 +438,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                             return (
                             <div
                                 key={prompt.id}
-                                className="group flex items-start gap-3 p-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-accent)] transition-all cursor-pointer"
+                                className="group flex cursor-pointer items-start gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 role="button"
                                 tabIndex={0}
                                 onKeyDown={(e) => {
@@ -459,24 +450,19 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 onClick={() => handleSelectPrompt(prompt)}
                             >
                                 {/* Category Icon */}
-                                <div
-                                    className="w-6 h-6 rounded flex items-center justify-center shrink-0 mt-0.5"
-                                    style={{
-                                        backgroundColor: `${CATEGORY_COLORS[normalizedCategory]}20`,
-                                        color: CATEGORY_COLORS[normalizedCategory]
-                                    }}
-                                >
+                                {/* Category colour was decorative (#199): one neutral tile, icon carries the meaning. */}
+                                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
                                     {CATEGORY_ICONS[normalizedCategory]}
                                 </div>
 
                                 {/* Content */}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                        <h3 className="text-xs font-medium text-[var(--text-primary)] group-hover:text-blue-400 transition-colors">
+                                        <h3 className="text-xs font-medium text-[var(--text-primary)] transition-colors group-hover:text-[var(--color-accent-primary)]">
                                             {prompt.name}
                                         </h3>
                                         {prompt.recommendedWidgetKeys?.length ? (
-                                            <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-500/10 text-cyan-300">
+                                            <span className="rounded border border-[var(--border-strong)] px-1.5 py-0.5 text-[9px] text-[var(--text-secondary)]">
                                                 Widget-aware
                                             </span>
                                         ) : null}
@@ -505,7 +491,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                             e.stopPropagation();
                                             handleDeletePrompt(prompt.id);
                                         }}
-                                        className="p-1 rounded opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10 transition-all"
+                                        className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
                                         aria-label={`Delete ${prompt.name}`}
                                     >
                                         <Trash2 size={14} />

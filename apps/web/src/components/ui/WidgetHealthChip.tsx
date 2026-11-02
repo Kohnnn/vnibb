@@ -5,22 +5,26 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { formatAbsoluteTimestamp, formatTime } from '@/lib/formatDate';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
+/* System states are neutral/blue only (#197): saved, loading, warning and
+   failed never borrow red/green, which are reserved for financial direction.
+   Cached/stale/limited read as "attention" via the warning token; live and
+   awaiting-update share the neutral info token. */
 const warningBadgeStyle = {
-  backgroundColor: 'color-mix(in srgb, #f59e0b 12%, transparent)',
-  borderColor: 'color-mix(in srgb, #f59e0b 28%, transparent)',
-  color: 'color-mix(in srgb, #b45309 72%, var(--text-primary) 28%)',
+  backgroundColor: 'var(--color-state-bg)',
+  borderColor: 'var(--color-state-border)',
+  color: 'var(--color-warning)',
 } as const;
 
 const infoBadgeStyle = {
-  backgroundColor: 'color-mix(in srgb, #38bdf8 12%, transparent)',
-  borderColor: 'color-mix(in srgb, #38bdf8 28%, transparent)',
-  color: 'color-mix(in srgb, #0ea5e9 72%, var(--text-primary) 28%)',
+  backgroundColor: 'var(--color-state-bg)',
+  borderColor: 'var(--color-state-border)',
+  color: 'var(--color-info)',
 } as const;
 
 const liveBadgeStyle = {
-  backgroundColor: 'color-mix(in srgb, #10b981 12%, transparent)',
-  borderColor: 'color-mix(in srgb, #10b981 32%, transparent)',
-  color: 'color-mix(in srgb, #059669 72%, var(--text-primary) 28%)',
+  backgroundColor: 'var(--color-state-bg)',
+  borderColor: 'var(--color-state-border)',
+  color: 'var(--color-info)',
 } as const;
 
 function getPresentation(status: WidgetHealthState['status']) {
@@ -92,7 +96,7 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="z-[120] mt-2 w-64 rounded-xl border border-[var(--border-default)] bg-[rgba(10,15,26,0.98)] p-3 text-left shadow-2xl"
+        className="z-[120] mt-2 w-64 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-3 text-left text-[var(--text-primary)] shadow-lg"
       >
         <div className="mb-2 flex items-center gap-1.5 border-b border-[var(--border-subtle)] pb-2">
           <Icon size={12} />

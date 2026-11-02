@@ -24,7 +24,7 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
                     className="sr-only peer"
                     {...props}
                 />
-                <div className="peer h-6 w-11 rounded-full bg-[var(--bg-tertiary)] peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[var(--color-accent-primary)] peer-checked:bg-[var(--color-accent-primary)] after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-[var(--border-color)] after:bg-[var(--bg-elevated)] after:transition-all after:content-[''] peer-checked:after:translate-x-full peer-checked:after:border-[var(--text-primary)]" />
+                <div className="peer h-6 w-11 rounded-full border border-[var(--border-strong)] bg-[var(--bg-tertiary)] after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-[var(--text-secondary)] after:transition-all after:content-[''] peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--focus-ring-color)] peer-checked:border-[var(--color-accent-primary)] peer-checked:bg-[var(--color-accent-primary)] peer-checked:after:translate-x-full peer-checked:after:bg-white" />
             </label>
         )
     }

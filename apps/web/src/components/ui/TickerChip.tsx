@@ -15,13 +15,13 @@ export function TickerChip({ symbol, name, onRemove, className }: TickerChipProp
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-1.5 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-xs font-bold text-[var(--color-accent-secondary)]',
+        'inline-flex items-center gap-1.5 rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1 text-xs font-bold text-[var(--text-primary)]',
         className
       )}
     >
       <CompanyLogo symbol={symbol} name={name} size={14} />
       <span>{symbol}</span>
-      {name && <span className="hidden sm:inline text-[10px] text-[var(--color-accent-secondary)]">{name}</span>}
+      {name && <span className="hidden text-[10px] text-[var(--text-muted)] sm:inline">{name}</span>}
       {onRemove && (
         <button
           type="button"
@@ -29,7 +29,7 @@ export function TickerChip({ symbol, name, onRemove, className }: TickerChipProp
             event.stopPropagation();
             onRemove();
           }}
-          className="rounded-full p-0.5 text-[var(--color-accent-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--color-error)]"
+          className="rounded-full p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
           aria-label={`Remove ${symbol}`}
         >
           <X size={12} />

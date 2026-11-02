@@ -45,7 +45,7 @@ export class WidgetErrorBoundary extends Component<Props, State> {
 
             return (
                 <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-                    <AlertTriangle size={32} className="text-amber-500 mb-3" />
+                    <AlertTriangle size={32} className="mb-3 text-[var(--color-warning)]" />
                     <h3 className="mb-1 text-sm font-medium text-[var(--text-secondary)]">
                         Widget Error
                     </h3>
@@ -62,7 +62,7 @@ export class WidgetErrorBoundary extends Component<Props, State> {
                                 this.handleReset();
                             }
                         }}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 rounded transition-colors"
+                        className="inline-flex items-center gap-1 rounded border border-[var(--border-strong)] px-3 py-1.5 text-xs text-[var(--color-info)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         aria-label="Retry"
                     >
                         <RefreshCw size={12} />

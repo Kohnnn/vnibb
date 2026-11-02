@@ -311,7 +311,7 @@ export function DenseFinancialTable({
     <div className={cn('min-w-0 w-full', className)}>
       <div
         ref={scrollRef}
-        className="overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400"
+        className="overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         role="region"
         aria-label="Financial statement periods; scroll horizontally for all columns"
         tabIndex={0}
@@ -336,7 +336,7 @@ export function DenseFinancialTable({
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : '',
                     chartable && isSelectedColumn ? 'text-[var(--color-accent-primary)]' : '',
-                    sortable || chartable ? 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400' : ''
+                    sortable || chartable ? 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]' : ''
                   )}
                   style={{ ...(column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }), scrollMarginLeft: metricColumnWidth }}
                   aria-sort={isActiveSort ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
@@ -382,7 +382,7 @@ export function DenseFinancialTable({
                     rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/25' : '',
                     row.isGroup ? 'section-header-row bg-[var(--bg-surface)] font-semibold' : '',
                     isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : '',
-                    row.selected ? 'bg-[var(--color-accent-primary)]/10 ring-1 ring-inset ring-[var(--color-accent-primary)]' : ''
+                    row.selected ? 'bg-[var(--color-state-bg)] ring-1 ring-inset ring-[var(--color-accent-primary)]' : ''
                   )}
                 >
                   <td
@@ -499,14 +499,14 @@ export function DenseFinancialTable({
                             className={cn(
                               'inline-flex rounded px-1 py-0.5 text-[9px] font-semibold leading-none',
                               growthDetail.basis === 'change'
-                                ? 'bg-[var(--bg-hover)] text-[var(--text-secondary)]'
+                                ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                                 : growthDetail.hasNegativeBase
                                 ? 'bg-[var(--color-state-bg)] text-[var(--color-warning)]'
                                 : growthPct === 0
-                                ? 'bg-[var(--bg-hover)] text-[var(--text-secondary)]'
+                                ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                                 : growthPct >= 0
-                                ? 'bg-[var(--color-state-bg)] text-[var(--color-success)]'
-                                : 'bg-[var(--color-state-bg)] text-[var(--color-error)]'
+                                ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
+                                : 'bg-[var(--color-negative-bg)] text-[var(--color-negative)]'
                             )}
                             title={describePercentChange(growthDetail)}
                           >

@@ -104,8 +104,10 @@ export function FreshnessBanner() {
       className={cn(
         'flex h-[61px] shrink-0 items-start gap-3 border-b px-4 py-2 text-[12px] leading-5',
         !showWarning
-          ? 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
-          : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]',
+          ? 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
+          : isCritical
+            ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
+            : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]',
       )}
     >
       {showWarning && (
@@ -113,7 +115,7 @@ export function FreshnessBanner() {
           size={14}
           className={cn(
             'mt-0.5 shrink-0',
-            isCritical ? 'text-[var(--color-error)]' : 'text-[var(--color-warning)]',
+            isCritical ? 'text-[var(--color-info)]' : 'text-[var(--color-warning)]',
           )}
         />
       )}
@@ -121,7 +123,7 @@ export function FreshnessBanner() {
         role="region"
         aria-label="Data freshness details"
         tabIndex={0}
-        className="min-h-0 min-w-0 flex-1 self-stretch overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current"
+        className="min-h-0 min-w-0 flex-1 self-stretch overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
       >
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           {showWarning ? (
@@ -152,7 +154,7 @@ export function FreshnessBanner() {
         <button
           type="button"
           onClick={handleDismiss}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-current/70 transition-colors hover:bg-white/10 hover:text-current"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-current opacity-70 transition-colors hover:bg-[var(--bg-hover)] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
           aria-label="Dismiss banner for this session"
         >
           <X size={12} />

@@ -14,13 +14,14 @@ interface FilterChipProps {
   className?: string;
 }
 
-// `green`/`red` are financial direction (gain/loss) and use the shared
-// direction tokens so colour-vision mode applies; chips also carry a label.
+/* The `color` prop is kept for call-site compatibility, but every tone now
+   resolves to the same neutral selected state: red/green are reserved for
+   financial direction, and decorative chip colours were retired (#199). */
 const COLORS = {
-  blue: 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border-[var(--color-state-border)] hover:border-[var(--color-accent-primary)]',
-  green: 'bg-price-up text-[var(--color-positive)] border-[var(--color-positive)] hover:border-[var(--color-positive)]',
-  red: 'bg-price-down text-[var(--color-negative)] border-[var(--color-negative)] hover:border-[var(--color-negative)]',
-  gray: 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-default)]',
+  blue: 'bg-[var(--color-state-bg)] text-[var(--text-primary)] border-[var(--color-accent-primary)]',
+  green: 'bg-[var(--color-state-bg)] text-[var(--text-primary)] border-[var(--color-accent-primary)]',
+  red: 'bg-[var(--color-state-bg)] text-[var(--text-primary)] border-[var(--color-accent-primary)]',
+  gray: 'bg-[var(--color-state-bg)] text-[var(--text-primary)] border-[var(--color-accent-primary)]',
 };
 
 function FilterChipComponent({
@@ -44,9 +45,8 @@ function FilterChipComponent({
         }
       }}
       className={cn(
-        "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all cursor-pointer select-none",
-        active ? COLORS[color] : 'border-[var(--border-subtle)] bg-transparent text-[var(--text-muted)] hover:border-[var(--border-color)] hover:text-[var(--text-secondary)]',
-        active && "shadow-lg shadow-blue-900/10",
+        "inline-flex cursor-pointer select-none items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
+        active ? COLORS[color] : 'border-[var(--border-strong)] bg-transparent text-[var(--text-muted)] hover:border-[var(--text-secondary)] hover:text-[var(--text-secondary)]',
         className
       )}
     >

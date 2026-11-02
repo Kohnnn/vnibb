@@ -36,7 +36,7 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
                     min={min}
                     max={max}
                     step={step}
-                    className="w-full h-2 bg-[var(--bg-tertiary)] rounded-lg appearance-none cursor-pointer accent-[var(--color-accent-primary)]"
+                    className="w-full h-2 bg-zinc-700 rounded-md appearance-none cursor-pointer accent-blue-600"
                     {...props}
                 />
             </div>

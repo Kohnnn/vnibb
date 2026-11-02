@@ -26,7 +26,7 @@ export function QuantWarningBanner({ warning, forwardLooking, className }: Quant
         </div>
       )}
       {forwardLooking && (
-        <div className="mt-1 rounded border border-violet-500/25 bg-violet-500/5 px-2 py-1 text-[9px] leading-3 text-violet-200/90">
+        <div className="mt-1 rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1 text-[9px] leading-3 text-[var(--text-secondary)]">
           Forward-looking statistic: uses future bars relative to the signal date. Not a point-in-time tradable signal.
         </div>
       )}

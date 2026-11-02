@@ -101,7 +101,7 @@ export function CopilotFeedbackBar({
           {statusText && (
             <>
               <span>·</span>
-              <span className="text-[var(--color-success)]">{statusText}</span>
+              <span className="text-[var(--color-info)]">{statusText}</span>
             </>
           )}
         </div>
@@ -111,7 +111,7 @@ export function CopilotFeedbackBar({
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
               placeholder="Optional review note"
-              className="w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] text-[var(--text-primary)] outline-none focus:border-[var(--color-accent-primary)]"
+              className="w-full rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
               rows={2}
             />
             <div className="flex flex-wrap gap-2">
@@ -125,8 +125,8 @@ export function CopilotFeedbackBar({
                     className={cn(
                       'rounded-full border px-2 py-1 text-[10px] transition-colors',
                       selected
-                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
-                        : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                        ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
+                        : 'border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                     )}
                   >
                     {reason.label}
@@ -153,8 +153,8 @@ export function CopilotFeedbackBar({
           className={cn(
             'inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors',
             currentVote === 'up'
-              ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
-              : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+              ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
+              : 'border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
             pendingVote ? 'cursor-not-allowed opacity-70' : '',
           )}
         >
@@ -168,8 +168,8 @@ export function CopilotFeedbackBar({
           className={cn(
             'inline-flex items-center gap-1 rounded-md border px-2 py-1 transition-colors',
             currentVote === 'down'
-              ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
-              : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+              ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
+              : 'border-[var(--border-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
             pendingVote ? 'cursor-not-allowed opacity-70' : '',
           )}
         >

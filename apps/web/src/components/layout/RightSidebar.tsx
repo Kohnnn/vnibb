@@ -20,8 +20,8 @@ export function RightSidebar({
     children
 }: RightSidebarProps) {
     const asideClassName = overlay
-        ? `fixed top-12 bottom-0 right-0 z-40 bg-[var(--bg-secondary)] border-l border-[var(--border-color)] transition-transform duration-300 ease-in-out flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`
-        : `relative h-full w-full bg-[var(--bg-secondary)] border-l border-[var(--border-color)] flex flex-col shadow-[0_12px_32px_rgba(2,6,23,0.22)]`;
+        ? `fixed top-12 bottom-0 right-0 z-40 flex flex-col border-l border-[var(--border-strong)] bg-[var(--bg-secondary)] shadow-lg transition-transform duration-300 ease-in-out`
+        : `relative flex h-full w-full flex-col border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)]`;
 
     const asideStyle: CSSProperties = overlay
         ? {
@@ -40,14 +40,14 @@ export function RightSidebar({
             style={asideStyle}
         >
             {/* Header */}
-            <div className="h-10 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]/70">
+            <div className="flex h-10 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-4">
                 <div className="flex items-center gap-2 text-[var(--color-accent-primary)]">
                     <MessageSquare size={16} />
                     <span className="font-semibold text-sm">VniAgent</span>
                 </div>
                 <button
                     onClick={onToggle}
-                    className="p-1 hover:bg-[var(--bg-elevated)] rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                     aria-label="Close VniAgent"
                 >
                     <ChevronRight size={16} />
@@ -74,7 +74,7 @@ export function SidebarTrigger({ isOpen, onClick }: { isOpen: boolean; onClick: 
     return (
         <button
             onClick={onClick}
-            className="p-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--color-accent-primary)]"
+            className="rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
             title="Open VniAgent"
             aria-label="Open VniAgent"
         >

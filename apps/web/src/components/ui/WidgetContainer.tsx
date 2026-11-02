@@ -71,8 +71,8 @@ export function WidgetContainer({
   return (
     <div className={cn(
       "widget-container h-full min-h-0 flex flex-col",
-      "bg-secondary rounded-lg",
-      "border border-default",
+      "bg-[var(--widget-bg-solid)] rounded-[var(--widget-radius)]",
+      "border border-[var(--widget-border-default)]",
       shouldHideHeader ? "overflow-visible" : "overflow-hidden",
       className
     )}>

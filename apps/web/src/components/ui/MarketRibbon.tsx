@@ -28,18 +28,18 @@ function IndexTicker({ symbol, price, change, change_pct, direction }: IndexData
 
     return (
         <div className={cn(
-            "flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-500",
-            direction === 'up' ? "bg-price-up border-[var(--color-positive)] scale-[1.02]" :
-            direction === 'down' ? "bg-price-down border-[var(--color-negative)] scale-[1.02]" :
-            "bg-[var(--bg-secondary)]/70 border-[var(--border-default)]"
+            "flex items-center gap-2 rounded-md border px-3 py-1.5 transition-colors duration-500",
+            direction === 'up' ? "border-[var(--color-positive)] bg-[var(--color-positive-bg)]" :
+            direction === 'down' ? "border-[var(--color-negative)] bg-[var(--color-negative-bg)]" :
+            "border-[var(--border-default)] bg-[var(--bg-secondary)]"
         )}>
-            <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">{symbol}</span>
-            <span className="text-sm font-black text-[var(--text-primary)] font-mono">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">{symbol}</span>
+            <span className="font-mono text-sm font-bold text-[var(--text-primary)]">
                 {formatNumber(price)}
             </span>
             <div className={cn(
                 "flex items-center gap-1 text-[10px] font-bold",
-                priceColorClass(change)
+                isPositive ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'
             )}>
                 {isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                 <span>{isPositive ? '+' : ''}{formatNumber(change)}</span>
@@ -129,12 +129,12 @@ export function MarketRibbon() {
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
                         {isConnected ? (
-                            <div className="flex items-center gap-1 text-[10px] font-black text-[var(--color-success)] uppercase tracking-widest">
+                            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-[var(--text-secondary)]">
                                 <Wifi size={12} className="animate-pulse" />
                                 <span>Live</span>
                             </div>
                         ) : (
-                            <div className="flex items-center gap-1 text-[10px] font-black text-[var(--color-error)] uppercase tracking-widest opacity-50">
+                            <div className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
                                 <WifiOff size={12} />
                                 <span>Delayed</span>
                             </div>

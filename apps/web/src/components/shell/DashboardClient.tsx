@@ -111,7 +111,7 @@ export function DashboardSyncStatusMessage({ enabled, status }: { enabled: boole
         return <div role="status" className="mx-3 mt-2 text-xs text-[var(--text-secondary)]">Syncing dashboard changes…</div>;
     }
     if (status === 'error') {
-        return <div role="alert" className="mx-3 mt-2 text-xs text-amber-200">Cloud sync failed. Check your connection and refresh to try again.</div>;
+        return <div role="alert" className="mx-3 mt-2 text-xs text-[var(--color-warning)]">Cloud sync failed. Check your connection and refresh to try again.</div>;
     }
     if (!enabled || status === 'idle' || status === 'local') {
         return <div role="status" className="mx-3 mt-2 text-xs text-[var(--text-secondary)]">Saved on this device</div>;
@@ -222,8 +222,8 @@ function DashboardContent() {
             .filter((template): template is DashboardTemplate => Boolean(template));
     }, []);
     const migrationNoticeClass = migrationNotice?.tone === 'warning'
-        ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
-        : 'border-blue-500/20 bg-blue-500/10 text-blue-100';
+        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
+        : 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-primary)]';
 
     const updateViewport = useCallback(() => {
         if (typeof window !== 'undefined') {
@@ -1282,7 +1282,7 @@ function DashboardContent() {
 
             {!isSidebarCollapsed && effectiveLeftSidebarWidth > 0 ? (
                 <div
-                    className="hidden lg:block h-screen w-[4px] shrink-0 cursor-col-resize bg-[var(--bg-secondary)] hover:bg-blue-500/30"
+                    className="hidden lg:block h-screen w-[4px] shrink-0 cursor-col-resize bg-[var(--bg-secondary)] hover:bg-[var(--color-accent-primary)]"
                     onPointerDown={(event) => {
                         if (event.button !== 0) return;
                         event.preventDefault();
@@ -1330,7 +1330,7 @@ function DashboardContent() {
                 {backendSync.loadPaused && (
                     <div
                         role="status"
-                        className="mx-3 mt-2 rounded-md border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100"
+                        className="mx-3 mt-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
                     >
                         Cross-device sync is one-way while you have custom workspaces: changes here are
                         saved to the cloud, but this device won&apos;t auto-pull layouts from other devices.
@@ -1344,11 +1344,11 @@ function DashboardContent() {
                 {migrationNotice ? (
                     <div
                         role={migrationNotice.tone === 'warning' ? 'alert' : 'status'}
-                        className={`mx-2 mt-2 flex items-start gap-2 rounded-xl border px-3 py-2 text-xs shadow-sm sm:mx-3 lg:mx-4 ${migrationNoticeClass}`}
+                        className={`mx-2 mt-2 flex items-start gap-2 rounded-md border px-3 py-2 text-xs sm:mx-3 lg:mx-4 ${migrationNoticeClass}`}
                     >
                         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                         <div className="min-w-0 flex-1">
-                            <div className="font-black uppercase tracking-[0.14em]">
+                            <div className="font-bold uppercase tracking-[0.14em]">
                                 {migrationNotice.message}
                             </div>
                             <div className="mt-1 leading-5 opacity-85">
@@ -1370,12 +1370,12 @@ function DashboardContent() {
                 <div className="relative flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
                     {showAdminSystemLayoutControls && activeDashboard ? (
                         <div className="pointer-events-none absolute right-4 top-4 z-20">
-                            <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[color-mix(in_srgb,var(--bg-secondary)_86%,#f59e0b_14%)] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.25)] backdrop-blur-sm">
+                            <div className="pointer-events-auto flex min-w-[260px] max-w-[min(520px,calc(100vw-2rem))] flex-col gap-2 rounded-md border border-[var(--color-state-border)] bg-[var(--bg-elevated)] px-3 py-2.5 shadow-lg">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="flex min-w-0 items-start gap-2">
-                                        <Shield className="mt-0.5 h-4 w-4 text-amber-300" />
+                                        <Shield className="mt-0.5 h-4 w-4 text-[var(--color-warning)]" />
                                         <div>
-                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-warning)]">
                                                 System Dashboard Controls
                                             </div>
                                             <div className="mt-1 text-xs text-[var(--text-secondary)]">
@@ -1387,7 +1387,7 @@ function DashboardContent() {
                                         type="button"
                                         onClick={handleToggleAdminLayoutMode}
                                         disabled={!isAdmin || isPublishingSystemLayout}
-                                        className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-md border border-[var(--border-strong)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {activeDashboard.adminUnlocked ? 'Disable Admin Mode' : 'Enable Admin Mode'}
                                     </button>
@@ -1397,7 +1397,7 @@ function DashboardContent() {
                                         type="button"
                                         onClick={() => void handlePersistSystemLayout(false)}
                                         disabled={!isAdmin || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
-                                        className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-md border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Save Draft
                                     </button>
@@ -1405,7 +1405,7 @@ function DashboardContent() {
                                         type="button"
                                         onClick={() => void handlePersistSystemLayout(true)}
                                         disabled={!isAdmin || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
-                                        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}
                                     </button>
@@ -1420,10 +1420,10 @@ function DashboardContent() {
                                 <>
                             <div className="h-full w-full overflow-y-auto scrollbar-hide">
                             {activeTabIntelligence.recommendations.length > 0 && (isEditing || activeTabIntelligence.isDeadTab) ? (
-                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-amber-500/20 bg-[color-mix(in_srgb,var(--bg-secondary)_88%,#f59e0b_12%)] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.18)]">
+                                <div className="mb-2 flex flex-col gap-2 rounded-md border border-[var(--color-state-border)] bg-[var(--bg-secondary)] px-3 py-2.5">
                                     <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div>
-                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
+                                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--color-warning)]">
                                                 Dashboard Recommendations
                                             </div>
                                             <div className="mt-1 text-xs text-[var(--text-secondary)]">
@@ -1435,7 +1435,7 @@ function DashboardContent() {
                                                 <button
                                                     type="button"
                                                     onClick={handleAutoFitLayout}
-                                                    className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-500/15"
+                                                    className="rounded-md border border-[var(--border-strong)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                                                 >
                                                     Auto-fit Dashboard
                                                 </button>
@@ -1443,13 +1443,13 @@ function DashboardContent() {
                                             <button
                                                 type="button"
                                                 onClick={() => setIsWidgetLibraryOpen(true)}
-                                                className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+                                                className="rounded-md border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
                                             >
                                                 Open Widget Library
                                             </button>
                                         </div>
                                     </div>
-                                    <div className="space-y-1 text-[11px] text-amber-100/85">
+                                    <div className="space-y-1 text-[11px] text-[var(--text-secondary)]">
                                         {activeTabIntelligence.recommendations.map((recommendation) => (
                                             <div key={recommendation}>- {recommendation}</div>
                                         ))}
@@ -1457,10 +1457,10 @@ function DashboardContent() {
                                 </div>
                             ) : null}
                             {isSystemFundamentalsTab ? (
-                                <div className="mb-2 flex flex-col gap-2 rounded-2xl border border-blue-500/20 bg-[var(--bg-secondary)] px-3 py-2.5 shadow-[0_12px_32px_rgba(2,6,23,0.12)]">
+                                <div className="mb-2 flex flex-col gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div>
-                                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/80">
+                                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                                                 Financial Period View
                                             </div>
                                             <div className="mt-1 text-xs text-[var(--text-secondary)]">
@@ -1483,7 +1483,7 @@ function DashboardContent() {
                                 // rather than a broken editor.
                                 <div
                                     role="status"
-                                    className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]"
+                                    className="mb-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]"
                                 >
                                     Layout editing needs at least 1024px of workspace width. Collapse the sidebar or widen
                                     the window to move or resize widgets; your saved layout is unchanged.
@@ -1519,7 +1519,7 @@ function DashboardContent() {
                                         return (
                                             <div
                                                 key={widget.id}
-                                                className="h-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] rounded"
+                                                className="h-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] rounded"
                                                 data-widget-focus="true"
                                                 data-widget-id={widget.id}
                                                 data-widget-type={widgetType}
@@ -1598,11 +1598,11 @@ function DashboardContent() {
                                             <button
                                                 key={template.id}
                                                 onClick={() => handleSeedEmptyTab(template)}
-                                                className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/70 p-4 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-hover)]"
+                                                className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                             >
                                                 <div className="text-sm font-semibold text-[var(--text-primary)]">{template.name}</div>
                                                 <div className="mt-1 text-xs text-[var(--text-muted)]">{template.description}</div>
-                                                <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-blue-300/80">
+                                                <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                                                     {template.widgets.slice(0, 3).map((widget) => widget.type.replace(/_/g, ' ')).join(' • ')}
                                                 </div>
                                             </button>
@@ -1614,7 +1614,7 @@ function DashboardContent() {
                                             <button
                                                 key={option.type}
                                                 onClick={() => handleQuickAddWidget(option.type)}
-                                                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                                                className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                                             >
                                                 {option.label}
                                             </button>
@@ -1623,7 +1623,7 @@ function DashboardContent() {
 
                                     <button
                                         onClick={() => setIsWidgetLibraryOpen(true)}
-                                        className="rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-500"
+                                        className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-white transition-colors hover:bg-[var(--color-accent-hover)]"
                                     >
                                         Open Widget Library
                                     </button>
@@ -1643,14 +1643,14 @@ function DashboardContent() {
                                     />
                                 ) : (
                                     <div className="flex items-center justify-center h-full">
-                                        <RefreshCw className="animate-spin text-blue-500" />
+                                        <RefreshCw className="animate-spin text-[var(--color-info)]" />
                                     </div>
                                 )
                             ) : state.dashboards.length === 0 ? (
                                 <EmptyDashboardState onCreateWorkspace={handleCreateWorkspace} />
                             ) : (
                                 <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-                                    <AlertCircle size={32} className="text-amber-400" />
+                                    <AlertCircle size={32} className="text-[var(--color-warning)]" />
                                     <div className="space-y-1">
                                         <h2 className="text-lg font-semibold text-[var(--text-primary)]">Workspace unavailable</h2>
                                         <p className="text-sm text-[var(--text-muted)]">
@@ -1663,7 +1663,7 @@ function DashboardContent() {
                                                 key={dashboard.id}
                                                 type="button"
                                                 onClick={() => setActiveDashboard(dashboard.id)}
-                                                className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                                                className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                                             >
                                                 {dashboard.name}
                                             </button>
@@ -1676,7 +1676,7 @@ function DashboardContent() {
                         {!overlayAICopilot && showAICopilot ? (
                             <>
                             <div
-                                className="hidden lg:block h-full w-[4px] shrink-0 cursor-col-resize bg-[var(--bg-secondary)] hover:bg-blue-500/30"
+                                className="hidden lg:block h-full w-[4px] shrink-0 cursor-col-resize bg-[var(--bg-secondary)] hover:bg-[var(--color-accent-primary)]"
                                 onPointerDown={(event) => {
                                     if (event.button !== 0) return;
                                     event.preventDefault();
@@ -1790,7 +1790,7 @@ function DashboardContent() {
 
 function EmptyDashboardState({ onCreateWorkspace }: { onCreateWorkspace: () => void }) {
     return (
-        <div className="flex h-full flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)]/50 px-6 text-center">
+        <div className="flex h-full flex-col items-center justify-center gap-4 rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-6 text-center">
             <div className="space-y-2">
                 <h2 className="text-lg font-semibold text-[var(--text-primary)]">No Dashboard Workspace</h2>
                 <p className="text-sm text-[var(--text-muted)]">
@@ -1799,7 +1799,7 @@ function EmptyDashboardState({ onCreateWorkspace }: { onCreateWorkspace: () => v
             </div>
             <button
                 onClick={onCreateWorkspace}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                className="inline-flex items-center gap-2 rounded-md bg-[var(--color-accent-primary)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
             >
                 <PlusCircle size={16} />
                 Create Workspace
@@ -1822,7 +1822,7 @@ function EmptyWorkspaceTabsState({
     onCreateTab: () => void;
 }) {
     return (
-        <div className="flex h-full flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)]/50 px-6 text-center">
+        <div className="flex h-full flex-col items-center justify-center gap-4 rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-6 text-center">
             <div className="space-y-2">
                 <h2 className="text-lg font-semibold text-[var(--text-primary)]">
                     {editable ? `${dashboardName} has no tabs yet` : `${dashboardName} has no tabs available`}
@@ -1837,7 +1837,7 @@ function EmptyWorkspaceTabsState({
                 <button
                     type="button"
                     onClick={onCreateTab}
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+                    className="inline-flex items-center gap-2 rounded-md bg-[var(--color-accent-primary)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
                 >
                     <PlusCircle size={16} />
                     Add tab
@@ -1846,7 +1846,7 @@ function EmptyWorkspaceTabsState({
                 <button
                     type="button"
                     onClick={() => window.location.reload()}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    className="inline-flex items-center gap-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                 >
                     <RefreshCw size={16} />
                     Reload workspace
