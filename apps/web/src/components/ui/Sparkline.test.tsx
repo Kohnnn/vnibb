@@ -45,4 +45,10 @@ describe('Sparkline trend tooltip', () => {
     expect(line).toBeInTheDocument();
     expect(line).toHaveClass('price-flat');
   });
+  it('shows an unavailable percentage for a zero start without inventing zero growth', () => {
+    renderAt(1, [0, 1]);
+    const line = screen.getByText((_, el) => el?.textContent === '+1 (n/a)');
+    expect(line).toBeInTheDocument();
+    expect(line).toHaveClass('price-up');
+  })
 });

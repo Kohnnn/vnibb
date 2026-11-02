@@ -1,6 +1,9 @@
 import { render, screen } from '@testing-library/react';
 import { IncomeSankeyChart } from './IncomeSankeyChart';
 import type { IncomeSankeyModel } from '@/lib/financialVisualizations';
+import { CashFlowWaterfallChart } from './CashFlowWaterfallChart';
+import { ThemeProvider } from '@/contexts/ThemeContext';
+import type { CashFlowWaterfallModel } from '@/lib/financialVisualizations';
 
 // The chart is the only place a node states a change, so the label must carry
 // formatPercent's own states: `n/m` is meaningful and stays visible, `n/a` is
@@ -18,6 +21,16 @@ function modelWithChange(changePct: number | null): IncomeSankeyModel {
   } as unknown as IncomeSankeyModel;
 }
 
+function waterfallWithChange(changePct: number | null): CashFlowWaterfallModel {
+  return {
+    period: '2025',
+    steps: [{ id: 'operating', label: 'Operating cash flow', value: 10, start: 0, end: 10, tone: 'positive', changePct }],
+    maxValue: 10,
+    minValue: 0,
+    summary: { freeCashFlow: null, capex: null, dividends: null, netChange: 10 },
+  };
+}
+
 describe('IncomeSankeyChart node delta label', () => {
   it('keeps a non-meaningful change visible as n/m', () => {
     render(<IncomeSankeyChart model={modelWithChange(1000)} formatValue={(v) => v.toFixed(2)} />);
@@ -29,5 +42,17 @@ describe('IncomeSankeyChart node delta label', () => {
       <IncomeSankeyChart model={modelWithChange(null)} formatValue={(v) => v.toFixed(2)} />,
     );
     expect(container.textContent).not.toMatch(/n\/a/);
+  });
+});
+describe('CashFlowWaterfallChart delta labels', () => {
+  it('omits missing change and shows out-of-range change without a plus prefix', () => {
+    const { rerender, container } = render(
+      <ThemeProvider><CashFlowWaterfallChart model={waterfallWithChange(null)} formatValue={(v) => String(v)} /></ThemeProvider>,
+    );
+    expect(container.textContent).not.toMatch(/n\/a|\+/);
+
+    rerender(<ThemeProvider><CashFlowWaterfallChart model={waterfallWithChange(5000)} formatValue={(v) => String(v)} /></ThemeProvider>);
+    expect(screen.getByText('n/m')).toBeInTheDocument();
+    expect(screen.getByText('n/m').textContent).not.toMatch(/^\+/);
   });
 });

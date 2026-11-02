@@ -29,8 +29,8 @@ function splitLabel(label: string): string[] {
 }
 
 function formatDelta(changePct: number | null | undefined): string {
-  // formatPercent owns missing (`n/a`), non-meaningful (`n/m`) and the sign.
-  return formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
+  const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
+  return formatted === 'n/a' ? '' : formatted;
 }
 
 export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfallChartProps) {
