@@ -160,8 +160,15 @@ export function CopilotEvidencePanel({
       >
         <span className="flex items-center gap-2">
           <Database size={12} className="text-[var(--text-secondary)]" />
-          <span className="font-semibold uppercase tracking-wide">Evidence</span>
-          <span className="text-[10px] text-[var(--text-muted)]">{orderedSources.length} validated sources</span>
+          {/* Wording reflects the actual check result, never the presence of a URL. */}
+          <span className="font-semibold uppercase tracking-wide">
+            {checkedReferenceCount > 0 ? 'Source reference checked' : 'Sources'}
+          </span>
+          <span className="text-[10px] text-[var(--text-muted)]">
+            {checkedReferenceCount > 0
+              ? `${checkedReferenceCount} of ${orderedSources.length} checked`
+              : `${orderedSources.length} listed`}
+          </span>
         </span>
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
