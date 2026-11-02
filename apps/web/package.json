@@ -17,6 +17,7 @@
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:e2e:smoke": "playwright test --project=chromium",
+    "test:e2e:fonts": "playwright test --project=chromium --config=playwright.fonts.config.ts e2e/fonts.spec.ts",
     "qa:live-smoke": "node ./scripts/qa-live-smoke.mjs"
   },
   "dependencies": {

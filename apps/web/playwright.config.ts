@@ -5,6 +5,9 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
     testDir: './e2e',
+    /* fonts.spec.ts needs the dev-only /zz-font-fixture route; production smoke
+       builds 404 it, and this spec is run separately with playwright.fonts.config.ts. */
+    testIgnore: ['**/fonts.spec.ts'],
     /* Run tests in files in parallel */
     fullyParallel: true,
     /* Fail the build on CI if you accidentally left test.only in the source code. */
