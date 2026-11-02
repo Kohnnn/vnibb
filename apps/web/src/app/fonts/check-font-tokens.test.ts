@@ -36,9 +36,16 @@ describe("font tokens", () => {
     expect(layout).toContain('display: "swap"');
   });
 
-  it("resolves the root tokens through the font variables with fallbacks", () => {
-    expect(tokens).toMatch(/--font-family:\s*var\(--font-inter\),/);
-    expect(tokens).toMatch(/--font-mono:\s*var\(--font-plex-mono\),/);
+  it("keeps the whole fallback list inside var()", () => {
+    // A missing custom property is guaranteed-invalid at computed-value time and
+    // voids the ENTIRE declaration, so anything after the var() comma list dies
+    // with it. The fallback stack must therefore be the var() argument itself.
+    // (jsdom does not substitute var(), so the behavioral proof lives in the
+    // browser check: brand-notes/195-fonts.md.)
+    const family = tokens.match(/--font-family:\s*([^;]+);/)?.[1].trim() ?? "";
+    const mono = tokens.match(/--font-mono:\s*([^;]+);/)?.[1].trim() ?? "";
+    expect(family).toMatch(/^var\(--font-inter,\s*'Inter',\s*-apple-system,.*sans-serif\)$/);
+    expect(mono).toMatch(/^var\(--font-plex-mono,\s*'IBM Plex Mono',\s*'JetBrains Mono',.*monospace\)$/);
   });
 
   it("has no Geist references left", () => {
