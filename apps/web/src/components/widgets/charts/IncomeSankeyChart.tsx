@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import { EMPTY_VALUE, formatPercent } from '@/lib/units';
+import { formatPercent } from '@/lib/units';
 import type { FinancialFlowLink, IncomeSankeyModel } from '@/lib/financialVisualizations';
 
 interface IncomeSankeyChartProps {
@@ -45,8 +45,8 @@ const STAGE_GAP = 18;
 function formatDelta(changePct: number | null | undefined): string {
   // formatPercent owns missing (`n/a`), non-meaningful (`n/m`) and the sign.
   const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
-  // An empty delta must not leave stray whitespace in the node label.
-  return formatted === 'n/a' || formatted === 'n/m' ? '' : `  ${formatted}`;
+  // A missing delta contributes nothing; `n/m` is a real state and stays visible.
+  return formatted === 'n/a' ? '' : `  ${formatted}`;
 }
 
 export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps) {

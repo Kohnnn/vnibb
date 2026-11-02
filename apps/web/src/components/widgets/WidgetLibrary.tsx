@@ -62,7 +62,7 @@ const WIDGET_BUNDLES: WidgetBundle[] = [
         id: 'market-pulse-pack',
         name: 'Market Pulse Pack',
         description: 'Market overview, movers, breadth, heatmap, and news for top-down scanning.',
-        widgetTypes: ['market_overview', 'top_movers', 'market_breadth', 'market_heatmap', 'market_news'],
+        widgetTypes: ['market_overview', 'top_movers', 'market_breadth', 'market_news'],
         tags: ['Market', 'Scanner', 'Live'],
     },
     {

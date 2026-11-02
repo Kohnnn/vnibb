@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from 'recharts'
 import { Sparkline } from '@/components/ui/Sparkline'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
-import { EMPTY_VALUE, describePercentChange, percentChangeDetail } from '@/lib/units'
+import { EMPTY_VALUE, describePercentChange, formatPercent, percentChangeDetail } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 export interface DenseTableColumn {
@@ -511,8 +511,7 @@ export function DenseFinancialTable({
                             title={describePercentChange(growthDetail)}
                           >
                             {growthDetail.label ? `${growthDetail.label} ` : ''}
-                            {growthPct >= 0 ? '+' : ''}
-                            {growthPct.toFixed(1)}%
+                            {formatPercent(growthPct, { decimals: 1, input: 'percent', signed: true })}
                           </span>
                         ) : null}
                         </div>
