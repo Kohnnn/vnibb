@@ -1,4 +1,4 @@
-// Checkbox component for VNIBB Design System
+// Checkbox component for VniBB Design System
 import React from 'react';
 
 interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {

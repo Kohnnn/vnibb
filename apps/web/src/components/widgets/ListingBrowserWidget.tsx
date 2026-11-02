@@ -132,7 +132,7 @@ export function ListingBrowserWidget({
       empty: !hasData,
       apiGroup: '/listing',
       endpoint: group === 'ALL' ? '/api/v1/symbols' : `/api/v1/symbols/group/${group}`,
-      sourceLabel: 'VNIBB listing universe',
+      sourceLabel: 'VniBB listing universe',
       derived: hasActiveFilters,
       // The listing universe exposes no source observation date, so freshness
       // stays unknown and the query receipt is reported separately.

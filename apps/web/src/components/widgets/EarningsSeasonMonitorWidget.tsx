@@ -92,7 +92,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
         empty: !hasData,
         apiGroup: '/market',
         endpoint: `/market/earnings-season?limit=24${exchange === 'ALL' ? '' : `&exchange=${exchange}`}`,
-        sourceLabel: 'VNIBB stored income statements',
+        sourceLabel: 'VniBB stored income statements',
         // Row `period` is a fiscal label and `updated_at` is a store timestamp, so there is
         // no source observation date; the max store receipt is routed to fetchedAt.
         lastDataDate: null,
@@ -102,7 +102,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
           count: filteredRows.length,
           resultCount: data?.count ?? rows.length,
           latestDate,
-          source: 'VNIBB stored income statements',
+          source: 'VniBB stored income statements',
           yoyCoverage: { available: yoyCoverage, total: rows.length },
         },
       }),

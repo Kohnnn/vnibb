@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: 'Dashboard',
   description: 'Track Vietnamese equities, financials, and market signals in one workspace.',
   openGraph: {
-    title: 'VNIBB Dashboard',
+    title: 'VniBB Dashboard',
     description: 'Track Vietnamese equities, financials, and market signals in one workspace.',
     type: 'website',
   },

@@ -161,7 +161,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             isCached={isFallback}
             isFetching={isFetching && hasData}
             note={`Annual · ${seriesValues.length} positive observations · descriptive only`}
-            sourceLabel="VNIBB ratio history"
+            sourceLabel="VniBB ratio history"
             align="right"
           />
         </div>

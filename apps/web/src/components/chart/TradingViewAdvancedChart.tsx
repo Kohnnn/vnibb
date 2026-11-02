@@ -596,7 +596,7 @@ export function TradingViewAdvancedChart({
           // long-standing "price chart blank" mystery into something we
           // can grep for in user devtools.
           console.error(
-            '[VNIBB PriceChart] series.setData failed for symbol',
+            '[VniBB PriceChart] series.setData failed for symbol',
             symbol,
             'mode',
             effectiveMode,
@@ -686,7 +686,7 @@ export function TradingViewAdvancedChart({
             // QA-v3 F4/T1: if setVisibleLogicalRange rejects the range
             // (can happen when the chart is mid-resize), fall back to
             // fitContent which always works once data is present.
-            console.warn('[VNIBB PriceChart] setVisibleLogicalRange failed, falling back to fitContent', rangeError);
+            console.warn('[VniBB PriceChart] setVisibleLogicalRange failed, falling back to fitContent', rangeError);
             chart.timeScale().fitContent();
           }
         } else {

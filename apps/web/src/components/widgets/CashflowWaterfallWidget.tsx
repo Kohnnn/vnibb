@@ -161,7 +161,7 @@ function CashflowWaterfallWidgetComponent({ id, symbol, onRemove, onDataChange }
             isFetching={isFetching && hasData}
             isCached={Boolean(error && hasData)}
             note={statementNote ?? `${latestLabel} • ${getUnitLegend(scale, unitConfig)}`}
-            sourceLabel="VNIBB cash-flow statements"
+            sourceLabel="VniBB cash-flow statements"
             align="right"
           />
         </div>

@@ -1,4 +1,4 @@
-// Refined Select components for VNIBB Design System
+// Refined Select components for VniBB Design System
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 

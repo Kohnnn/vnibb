@@ -3,7 +3,7 @@
 
 const CHANGELOG_MARKDOWN = `# Changelog
 
-All notable changes to VNIBB are documented here. The format is loosely based on
+All notable changes to VniBB are documented here. The format is loosely based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows
 semantic versioning at the user-facing dashboard level.
 
@@ -538,7 +538,7 @@ The entries below describe source changes, not supplier certification or full-po
   Appwrite population/price-mirror services and their sync hooks were deleted.
   Historical price, quote, and profile resolution now run cache -> Mongo ->
   Postgres -> provider, with no Appwrite rung in the ladder.
-- The VNIBB read-only MCP server now reads Postgres directly. Its
+- The VniBB read-only MCP server now reads Postgres directly. Its
   Appwrite-facing surface was renamed: \`get_appwrite_status\` ->
   \`get_database_status\`, \`query_appwrite_collection\` ->
   \`query_database_collection\`, the \`vnibb://appwrite/*\` resources ->

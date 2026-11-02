@@ -1,4 +1,4 @@
-// API client for VNIBB backend
+// API client for VniBB backend
 
 import { env } from './env';
 import { isSupabaseConfigured, supabase } from './supabase';

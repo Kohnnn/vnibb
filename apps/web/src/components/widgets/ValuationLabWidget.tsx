@@ -218,7 +218,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         </div>
 
         <p className="mt-3 text-[9px] leading-3 text-[var(--text-muted)]">
-          Educational model. Values are derived from your editable assumptions and VNIBB TTM data, not investment advice.
+          Educational model. Values are derived from your editable assumptions and VniBB TTM data, not investment advice.
         </p>
       </div>
 

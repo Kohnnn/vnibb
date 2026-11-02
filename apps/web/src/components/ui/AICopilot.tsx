@@ -395,20 +395,20 @@ function getProviderLabel(provider: AISettings['provider']): string {
 
 /**
  * Render a friendly, brand-aligned label for the active LLM model so end-users
- * see "VNIBB Intelligence" instead of the raw provider slug like
+ * see "VniBB Intelligence" instead of the raw provider slug like
  * `openrouter/free` or `nvidia/nemotron-3-super-128b-a12b`. Power users still
  * see the raw slug in the badge tooltip (`title=`) for debugging.
  *
  * QA-v4 VA-1: Collapse all branches to a single label so the badge does not
- * inconsistently flip between "VNIBB Intelligence" and "VNIBB Intelligence
+ * inconsistently flip between "VniBB Intelligence" and "VniBB Intelligence
  * Pro" depending on which upstream model resolved a particular response.
  * The raw slug is still surfaced in the tooltip for debugging.
  */
 function getFriendlyModelLabel(rawModel: string | null | undefined): string {
-    if (!rawModel) return 'VNIBB Intelligence';
+    if (!rawModel) return 'VniBB Intelligence';
     const slug = rawModel.toLowerCase();
     if (slug.includes('browser model not set')) return 'Local model not set';
-    return 'VNIBB Intelligence';
+    return 'VniBB Intelligence';
 }
 
 function getWidgetAwareIntro(widgetContext?: string, activeTabName?: string, symbol?: string): string {
@@ -1275,7 +1275,7 @@ export function AICopilot({
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-primary)]">
                             <Database size={11} className="text-cyan-300" />
-                            {matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VNIBB DB' : 'External-first'}
+                            {matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VniBB DB' : 'External-first'}
                         </span>
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
                             {getProviderLabel(aiSettings.provider)}
@@ -1511,9 +1511,9 @@ export function AICopilot({
                     <div className="space-y-4">
                         <div className="text-center text-[var(--text-muted)] py-8">
                             <Sparkles size={40} className="mx-auto mb-3 text-cyan-300/70" />
-                            <div className="text-sm font-semibold text-[var(--text-primary)]">{matrixSelection ? 'Review your Matrix draft, then Send' : 'Start with evidence from the VNIBB database'}</div>
+                            <div className="text-sm font-semibold text-[var(--text-primary)]">{matrixSelection ? 'Review your Matrix draft, then Send' : 'Start with evidence from the VniBB database'}</div>
                             <p className="mx-auto mt-2 max-w-[26rem] text-xs leading-5">
-                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB database, attached documents, and the active workspace context before external sources.`}
+                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VniBB database, attached documents, and the active workspace context before external sources.`}
                             </p>
                         </div>
 
@@ -1707,7 +1707,7 @@ export function AICopilot({
                     </button>
                     <div className="hidden md:flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
                         <Globe size={11} />
-                        <span>{matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VNIBB database' : 'external-first'}</span>
+                        <span>{matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VniBB database' : 'external-first'}</span>
                         {!matrixSelection && aiSettings.webSearch ? <span>· web</span> : null}
                     </div>
                     <input

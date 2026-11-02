@@ -200,7 +200,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
             </div>
 
             <WidgetMeta
-              sourceLabel={exchange || 'VNIBB'}
+              sourceLabel={exchange || 'VniBB'}
               note={`${selectedTimeframe} lightweight chart`}
               updatedAt={null}
               fetchedAt={metricsUpdatedAt}
@@ -220,7 +220,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
             height={220}
           />
           <div className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-[var(--text-muted)]">
-            Lightweight TradingView-style chart using live VNIBB data without local chart caching
+            Lightweight TradingView-style chart using live VniBB data without local chart caching
           </div>
         </div>
 

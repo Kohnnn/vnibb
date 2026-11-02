@@ -1,4 +1,4 @@
-// Button component for VNIBB Design System
+// Button component for VniBB Design System
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {

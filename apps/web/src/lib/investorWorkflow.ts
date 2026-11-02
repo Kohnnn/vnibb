@@ -185,7 +185,7 @@ export function companyEventToInvestorEvent(event: CompanyEventData): InvestorCa
         effectiveDate,
         label: event.event_name || event.action_subtype || event.event_type || eventClass,
         source: 'Company events endpoint',
-        provider: 'VNIBB company events',
+        provider: 'VniBB company events',
         detail: event.description || undefined,
     };
 }

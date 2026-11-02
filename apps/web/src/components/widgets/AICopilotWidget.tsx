@@ -175,7 +175,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
             empty: responseCount === 0,
             apiGroup: '/copilot',
             endpoint: '/api/v1/copilot/chat/stream',
-            sourceLabel: 'VNIBB copilot stream',
+            sourceLabel: 'VniBB copilot stream',
             derived: true,
             extra: { messages: messages.length, responses: responseCount, streaming: isLoading },
         }))

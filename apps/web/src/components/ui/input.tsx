@@ -1,4 +1,4 @@
-// Input component for VNIBB Design System
+// Input component for VniBB Design System
 import React from 'react';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> { }

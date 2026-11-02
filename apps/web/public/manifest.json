@@ -1,7 +1,7 @@
 {
-    "name": "VNIBB - Vietnam Stock Dashboard",
-    "short_name": "VNIBB",
-    "description": "Professional stock market dashboard for Vietnamese equities",
+    "name": "VniBB — Research cockpit for Vietnamese equities",
+    "short_name": "VniBB",
+    "description": "Research cockpit for Vietnamese equities",
     "start_url": "/dashboard",
     "display": "standalone",
     "background_color": "#0a1628",
