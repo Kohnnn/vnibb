@@ -13,7 +13,8 @@
 }
 
 .price-flat,
-.price-neutral {
+.price-neutral,
+.price-missing {
   color: var(--color-neutral);
 }
 
