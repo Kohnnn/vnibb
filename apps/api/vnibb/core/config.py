@@ -200,6 +200,12 @@ class Settings(BaseSettings):
     intraday_break_end: Optional[str] = "13:00"
     orderflow_at_close_only: bool = True
     orderbook_at_close_only: bool = True
+    # Price depth (order book) is a paid VCI entitlement. On the free tier the
+    # provider answers every symbol with "Price depth is unavailable in free
+    # VCI", which is a capability that is absent, not a run that failed. Left
+    # True, that response is scored as an error for every symbol and the whole
+    # daily trading job is marked failed. Set False while running free.
+    orderbook_enabled: bool = True
     store_intraday_trades: bool = False
     progress_checkpoint_every: int = 50
     cache_chunk_size: int = 200

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from vnibb.core.config import settings
+from vnibb.providers.errors import ProviderError
 from vnibb.providers.vnstock.price_depth import PriceDepthData, VnstockPriceDepthFetcher
 from vnibb.services import data_pipeline, mongo_market_data_service
 
@@ -115,7 +116,7 @@ async def test_live_depth_bypasses_close_only_but_keeps_market_gate(depth_stores
 @pytest.mark.asyncio
 async def test_depth_fetch_failure_is_not_a_persistence_success(depth_stores):
     session, collection, fetch, cache = depth_stores
-    fetch.side_effect = RuntimeError("Depth unavailable in free VCI")
+    fetch.side_effect = RuntimeError("connection reset by peer")
     progress = {}
     assert await data_pipeline.data_pipeline.sync_orderbook_snapshots(symbols=["FPT"], progress=progress) == 0
     outcomes = progress["acquisition_outcomes"]["FPT"]
@@ -184,3 +185,63 @@ async def test_depth_upsert_preserves_colliding_observation(depth_stores, datase
     assert receipt["raw"] == {}
     assert receipt["rowCount"] == 1
     assert fetch.return_value.model_dump(mode="json") == original_payload
+
+
+@pytest.mark.asyncio
+async def test_disabled_entitlement_skips_stage_without_error(depth_stores, monkeypatch):
+    session, collection, fetch, cache = depth_stores
+    monkeypatch.setattr(settings, "orderbook_enabled", False)
+    progress = {}
+    count = await data_pipeline.data_pipeline.sync_orderbook_snapshots(
+        symbols=["FPT"], progress=progress,
+    )
+    assert count == 0
+    assert fetch.await_count == 0
+    assert collection.bulk_write.call_count == 0
+    assert cache.await_count == 0
+    stats = progress["stage_stats"]["orderbook_snapshots"]
+    assert stats == {"success": 0, "errors": 0, "total": 0, "skipped": True,
+                    "reason": "price_depth_not_entitled"}
+    assert "error_count" not in progress
+
+
+@pytest.mark.asyncio
+async def test_free_tier_unavailability_is_not_a_stage_error(depth_stores, monkeypatch):
+    session, collection, fetch, cache = depth_stores
+    fetch.side_effect = ProviderError(
+        "Failed to fetch price depth for FPT: Price depth is unavailable in free VCI",
+        "vnstock",
+    )
+    progress = {}
+    count = await data_pipeline.data_pipeline.sync_orderbook_snapshots(
+        symbols=["FPT"], progress=progress,
+    )
+    assert count == 0
+    stats = progress["stage_stats"]["orderbook_snapshots"]
+    assert stats["errors"] == 0
+    assert stats["skipped"] == 1
+    assert "error_count" not in progress
+    coverage = progress["acquisition_outcomes"]["FPT"]
+    assert coverage["current_depth"]["status"] == "unavailable"
+    assert coverage["sql_depth"]["status"] == "skipped"
+    assert coverage["mongo_depth"]["status"] == "skipped"
+    assert cache.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_genuine_depth_failure_still_counts(depth_stores, monkeypatch):
+    session, collection, fetch, cache = depth_stores
+    fetch.side_effect = ProviderError(
+        "Failed to fetch price depth for FPT: read timeout", "vnstock",
+    )
+    progress = {}
+    await data_pipeline.data_pipeline.sync_orderbook_snapshots(
+        symbols=["FPT"], progress=progress,
+    )
+    stats = progress["stage_stats"]["orderbook_snapshots"]
+    assert stats["errors"] == 1
+    assert "skipped" not in stats
+    assert progress["error_count"] == 1
+    coverage = progress["acquisition_outcomes"]["FPT"]
+    assert coverage["current_depth"]["error"] == "ProviderError"
+    assert coverage["sql_depth"]["status"] == "failed"

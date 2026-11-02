@@ -6462,6 +6462,28 @@ class DataPipeline:
         from vnibb.services.trading_acquisition import persist_trade_stores
         from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
+        if not settings.orderbook_enabled:
+            logger.info("Orderbook snapshot skipped (price depth entitlement is off)")
+            if progress is not None:
+                progress.setdefault("stage_stats", {})
+                progress["stage"] = "orderbook_snapshots"
+                progress["stage_index"] = DAILY_TRADING_STAGES.index("orderbook_snapshots")
+                progress["stage_stats"]["orderbook_snapshots"] = {
+                    "success": 0,
+                    "errors": 0,
+                    "total": 0,
+                    "skipped": True,
+                    "reason": "price_depth_not_entitled",
+                }
+                if sync_id is not None:
+                    await self._checkpoint(
+                        progress,
+                        sync_id,
+                        key=DAILY_TRADING_PROGRESS_KEY,
+                        ttl=DAILY_TRADING_PROGRESS_TTL,
+                    )
+            return 0
+
         if not live_session and settings.orderbook_at_close_only and not self._is_after_market_close():
             logger.info("Orderbook snapshot skipped before market close")
             if progress is not None:
@@ -6722,15 +6744,34 @@ class DataPipeline:
                     stage_counter = "errors" if failed else "success"
                     progress["stage_stats"]["orderbook_snapshots"][stage_counter] += 1
             except Exception as exc:
-                logger.warning(f"Orderbook snapshot failed for {symbol}: {exc}")
+                # A free-tier "Price depth is unavailable in free VCI" reply
+                # means the entitlement is absent, not that the run broke.
+                # Counting it as an error fails the whole daily trading job on
+                # a capability the account never had. The absence is recorded
+                # in coverage so it stays visible without failing the stage.
+                unentitled = "price depth is unavailable in free" in str(exc).casefold()
+                if unentitled:
+                    logger.info(f"Orderbook snapshot unavailable for {symbol}: {exc}")
+                else:
+                    logger.warning(f"Orderbook snapshot failed for {symbol}: {exc}")
                 for store in ("sql_depth", "mongo_depth"):
                     if coverage[store]["status"] == "not_attempted":
-                        coverage[store] = {"status": "failed", "rows": 0, "error": type(exc).__name__}
+                        coverage[store] = {
+                            "status": "skipped" if unentitled else "failed",
+                            "rows": 0,
+                            "error": None if unentitled else type(exc).__name__,
+                        }
                 if coverage["current_depth"]["status"] == "unknown":
-                    coverage["current_depth"]["error"] = type(exc).__name__
+                    coverage["current_depth"]["status"] = "unavailable"
+                    coverage["current_depth"]["error"] = None if unentitled else type(exc).__name__
                 if progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1
+                    if unentitled:
+                        progress["stage_stats"]["orderbook_snapshots"]["skipped"] = (
+                            progress["stage_stats"]["orderbook_snapshots"].get("skipped", 0) + 1
+                        )
+                    else:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1
 
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol
