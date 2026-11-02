@@ -51,7 +51,7 @@ export function DerivativesContractsBoardWidget({
       empty: !hasData,
       apiGroup: '/derivatives',
       endpoint: '/api/v1/derivatives/contracts',
-      sourceLabel: 'VNIBB derivatives contracts',
+      sourceLabel: 'VniBB derivatives contracts',
       lastDataDate: null,
       fetchedAt: contractsQuery.dataUpdatedAt,
       extra: { count: contractsQuery.data?.count ?? contracts.length },

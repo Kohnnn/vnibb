@@ -38,6 +38,7 @@ import { SettingsModal } from '@/components/settings/SettingsModal';
 import { CURRENT_RELEASE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
 import { WorkspaceBackupModal } from '@/components/modals/WorkspaceBackupModal';
 import { ResearchBundleModal } from '@/components/modals/ResearchBundleModal';
+import { VNIBB_BRAND_NAME, VniBBLogo } from '@/components/brand/VniBBLogo';
 
 const COLLAPSED_SIDEBAR_WIDTH = 56;
 
@@ -750,16 +751,15 @@ export function Sidebar({
                 `}
             >
 
-                {/* Logo */}
-                <div className="h-10 flex items-center justify-between px-3 border-b border-[var(--border-color)] shrink-0">
+                {/* Brand */}
+                <div className="h-10 flex items-center justify-between gap-2 px-3 border-b border-[var(--border-color)] shrink-0">
                     {!collapsed && (
-                        <Link href="/" className="flex items-center gap-2">
-                            <span
-                                className="text-lg font-bold bg-clip-text text-transparent"
-                                style={{ backgroundImage: 'var(--sidebar-brand-gradient)' }}
-                            >
-                                VNIBB
-                            </span>
+                        <Link
+                            href="/"
+                            aria-label={`${VNIBB_BRAND_NAME} home`}
+                            className="flex min-w-0 items-center rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                        >
+                            <VniBBLogo width={mobileMode ? 96 : 112} label={null} />
                         </Link>
                     )}
                     {!mobileMode && (

@@ -1,4 +1,4 @@
-// API Client - Core fetch functionality for VNIBB backend
+// API Client - Core fetch functionality for VniBB backend
 
 // Re-export error classes
 export { APIError, RateLimitError } from './errors';

@@ -3,6 +3,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
+import Link from 'next/link'
 import {
   Command,
   LogOut,
@@ -15,6 +16,7 @@ import {
   Sparkles,
   Unlock,
 } from 'lucide-react'
+import { VNIBB_BRAND_NAME, VniBBLogo } from '@/components/brand/VniBBLogo'
 import { AlertNotificationPanel } from '../widgets/AlertNotificationPanel'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAuth, type AuthUser } from '@/contexts/AuthContext'
@@ -332,6 +334,14 @@ export function Header({
       />
       <div className="px-4 py-2 pl-14 lg:pl-4">
         <div data-tour="header-bar" className="flex min-h-[2.75rem] flex-wrap items-center gap-2">
+          {/* Below lg the sidebar is off-canvas, so the wordmark lives here. */}
+          <Link
+            href="/"
+            aria-label={`${VNIBB_BRAND_NAME} home`}
+            className="flex shrink-0 items-center rounded-sm lg:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+          >
+            <VniBBLogo width={88} label={null} />
+          </Link>
           <div className="hidden min-w-0 shrink-0 items-center gap-2 xl:flex">
             <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
               <div className="min-w-0">

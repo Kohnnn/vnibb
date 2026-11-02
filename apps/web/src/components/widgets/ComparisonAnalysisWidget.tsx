@@ -349,7 +349,7 @@ function ComparisonAnalysisWidgetComponent({
       empty: !hasData,
       apiGroup: '/comparison',
       endpoint: '/api/v1/comparison/stocks + /api/v1/comparison/performance + /api/v1/equity/ratios/:symbol',
-      sourceLabel: 'VNIBB comparison analysis',
+      sourceLabel: 'VniBB comparison analysis',
       lastDataDate: null,
       fetchedAt: comparisonQuery.dataUpdatedAt || null,
       derived: true,

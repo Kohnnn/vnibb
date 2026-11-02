@@ -1,5 +1,5 @@
 /**
- * Shared utility functions for VNIBB widgets.
+ * Shared utility functions for VniBB widgets.
  *
  * These functions address widespread duplication across widget components:
  * - toPositiveNumber / toNumber: parse unknown values to finite numbers

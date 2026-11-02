@@ -60,7 +60,7 @@ export function DerivativesPriceHistoryWidget({
       empty: chartData.length === 0,
       apiGroup: '/derivatives',
       endpoint: `/api/v1/derivatives/history/${symbol || ':symbol'}`,
-      sourceLabel: 'VNIBB derivatives history',
+      sourceLabel: 'VniBB derivatives history',
       lastDataDate: latest?.time ?? null,
       fetchedAt: historyQuery.dataUpdatedAt,
       extra: { symbol: symbol || null, count: historyQuery.data?.count ?? chartData.length },

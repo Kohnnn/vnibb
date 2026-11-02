@@ -1,4 +1,4 @@
-// Refined Popover components for VNIBB Design System
+// Refined Popover components for VniBB Design System
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 

@@ -489,7 +489,7 @@ function TradingViewNativeWidget({
         <div ref={hostRef} className="tradingview-widget-container min-h-0 w-full flex-1" />
         {metadata.format === 'iframe' ? (
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--border-default)] px-3 py-2 text-[11px] text-[var(--text-muted)]">
-            <span>Third-party content · VNIBB cannot verify this embed. If blank or blocked, open the provider.</span>
+            <span>Third-party content · VniBB cannot verify this embed. If blank or blocked, open the provider.</span>
             <a
               href={resolvedSymbol ? `https://www.tradingview.com/symbols/${encodeURIComponent(resolvedSymbol.replace(':', '-'))}/` : 'https://www.tradingview.com/'}
               target="_blank"

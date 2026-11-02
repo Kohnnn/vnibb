@@ -249,7 +249,7 @@ function DashboardContent() {
         // version you see" when users report stale-bundle issues.
         if (typeof window !== 'undefined' && !(window as { __VNIBB_BOOTED__?: boolean }).__VNIBB_BOOTED__) {
             (window as { __VNIBB_BOOTED__?: boolean }).__VNIBB_BOOTED__ = true;
-            console.info(`[VNIBB ${CURRENT_RELEASE}] dashboard booted at ${new Date().toISOString()}`);
+            console.info(`[VniBB ${CURRENT_RELEASE}] dashboard booted at ${new Date().toISOString()}`);
         }
 
         if (typeof window !== 'undefined') {
@@ -1164,7 +1164,7 @@ function DashboardContent() {
         { type: 'tradingview_ticker_tape', label: 'Ticker Tape' },
         { type: 'tradingview_technical_analysis', label: 'TV Technicals' },
         { type: 'key_metrics', label: 'Key Metrics' },
-        { type: 'screener', label: 'VNIBB Screener' },
+        { type: 'screener', label: 'VniBB Screener' },
     ];
 
     const handleQuickAddWidget = useCallback((type: WidgetType) => {

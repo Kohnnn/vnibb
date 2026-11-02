@@ -1,10 +1,10 @@
-# VNIBB
+# VniBB
 
 <div align="center">
 
-![VNIBB Logo](./logo.svg)
+<img src="./apps/web/public/brand/vnibb-wordmark-master.svg" alt="VniBB" width="224">
 
-**Vietnam-first financial analytics workspace for serious equity research, market scanning, and agent-assisted workflows**
+**Research cockpit for Vietnamese equities**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/node-20%20CI-339933.svg)](https://nodejs.org/)
@@ -31,17 +31,17 @@
 
 ## Product Introduction
 
-VNIBB is a dashboard-driven research platform for Vietnamese equities.
+VniBB is a dashboard-driven research platform for Vietnamese equities.
 
 It combines:
 
 - a high-density widget workspace for fundamentals, technicals, quant, sector rotation, and company intelligence
 - a FastAPI backend that normalizes messy local-market data into product-ready responses
-- a dedicated `vnibb-mcp` sidecar so VniAgent and other trusted clients can read VNIBB data through a curated MCP surface
+- a dedicated `vnibb-mcp` sidecar so VniAgent and other trusted clients can read VniBB data through a curated MCP surface
 - bank-aware analytics, market-structure tools, and Vietnam-specific workflows that generic global terminals usually miss
 - a repo structure and documentation style that make it practical for AI agents to continue development, debugging, and deployment work
 
-The goal is not to be just another screener or charting page. VNIBB is meant to feel like a serious research cockpit for Vietnam-focused investors, builders, and agents.
+The goal is not to be just another screener or charting page. VniBB is meant to feel like a serious research cockpit for Vietnam-focused investors, builders, and agents.
 
 ## What Makes It Different
 
@@ -95,7 +95,7 @@ VNIBB_MCP_URL=http://127.0.0.1:8001/mcp
 ## Quick handoff prompt
 
 ```
-You are working on VNIBB, a Vietnam-first financial analytics monorepo.
+You are working on VniBB, a Vietnam-first financial analytics monorepo.
 
 Start here:
 1. Read `AGENTS.md`
@@ -200,7 +200,7 @@ MIT. See `LICENSE`.
 
 ## System Overview
 
-VNIBB is a monorepo with a frontend, a backend, and a dedicated read-only MCP sidecar for agent-facing data access:
+VniBB is a monorepo with a frontend, a backend, and a dedicated read-only MCP sidecar for agent-facing data access:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -497,7 +497,7 @@ If `vnibb-mcp` is unavailable, the backend falls back to direct database-stack c
 
 ## Database Schema
 
-VNIBB uses a self-hosted database stack as its system of record with 26 collections.
+VniBB uses a self-hosted database stack as its system of record with 26 collections.
 
 ![Collections and Database Schema](docs/VniBB_DataSchema.png)
 

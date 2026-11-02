@@ -27,11 +27,13 @@ const plexMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "VNIBB",
-  description: "Vietnam stock market analytics dashboard",
+  title: "VniBB | Research cockpit for Vietnamese equities",
+  description:
+    "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.",
   openGraph: {
-    title: "VNIBB",
-    description: "Vietnam stock market analytics dashboard",
+    title: "VniBB | Research cockpit for Vietnamese equities",
+    description:
+      "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.",
     type: "website",
   },
 };
@@ -82,17 +84,6 @@ export default function RootLayout({
     >
       <head>
         <ThemeUiScripts />
-        <title>VNIBB | Vietnam Stock Market Analytics</title>
-        <meta
-          name="description"
-          content="Vietnam-first stock market analytics dashboard with financial statements, ratios, charts, and market intelligence."
-        />
-        <meta property="og:title" content="VNIBB | Vietnam Stock Market Analytics" />
-        <meta
-          property="og:description"
-          content="Vietnam-first stock market analytics dashboard with financial statements, ratios, charts, and market intelligence."
-        />
-        <meta property="og:type" content="website" />
       </head>
       <body
         className="antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]"

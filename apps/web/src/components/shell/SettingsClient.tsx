@@ -69,7 +69,7 @@ export default function SettingsPage() {
                   <RotateCcw size={16} className="text-blue-500" />
                   Walkthrough
                 </h2>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">Replay the quick VNIBB tour from the dashboard.</p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">Replay the quick VniBB tour from the dashboard.</p>
               </div>
               <Button type="button" onClick={handleRestartWalkthrough} className="gap-2 bg-blue-600 text-white hover:bg-blue-500">
                 <RotateCcw size={16} />
