@@ -27,59 +27,29 @@ describe('widget inventory', () => {
   });
 });
 
-// Registry-only IDs are resolvable but absent from the library catalog. Each is
-// dispositioned explicitly so adding or dropping one is a deliberate change.
-// `library-hidden`: section override exists but the catalog does not list it.
-// `tradingview-catalog`: TradingView embeds surfaced through other entry points.
-const REGISTRY_ONLY_DISPOSITIONS: Record<string, 'library-hidden' | 'tradingview-catalog'> = {
-  market_heatmap: 'library-hidden',
-  portfolio_tracker: 'library-hidden',
-  dividend_ladder: 'library-hidden',
-  ai_copilot: 'library-hidden',
-  rs_ranking: 'library-hidden',
-  positioning_dashboard: 'library-hidden',
-  tradingview_chart: 'tradingview-catalog',
-  tradingview_symbol_overview: 'tradingview-catalog',
-  tradingview_mini_chart: 'tradingview-catalog',
-  tradingview_market_summary: 'tradingview-catalog',
-  tradingview_market_overview: 'tradingview-catalog',
-  tradingview_stock_market: 'tradingview-catalog',
-  tradingview_market_data: 'tradingview-catalog',
-  tradingview_ticker_tape: 'tradingview-catalog',
-  tradingview_ticker_tag: 'tradingview-catalog',
-  tradingview_single_ticker: 'tradingview-catalog',
-  tradingview_ticker: 'tradingview-catalog',
-  tradingview_stock_heatmap: 'tradingview-catalog',
-  tradingview_crypto_heatmap: 'tradingview-catalog',
-  tradingview_forex_cross_rates: 'tradingview-catalog',
-  tradingview_etf_heatmap: 'tradingview-catalog',
-  tradingview_forex_heatmap: 'tradingview-catalog',
-  tradingview_screener: 'tradingview-catalog',
-  tradingview_crypto_market: 'tradingview-catalog',
-  tradingview_symbol_info: 'tradingview-catalog',
-  tradingview_technical_analysis: 'tradingview-catalog',
-  tradingview_fundamental_data: 'tradingview-catalog',
-  tradingview_company_profile: 'tradingview-catalog',
-  tradingview_top_stories: 'tradingview-catalog',
-  tradingview_economic_calendar: 'tradingview-catalog',
-  tradingview_economic_map: 'tradingview-catalog',
+// Registered IDs the library catalog deliberately does not offer. The catalog is
+// the real `widgetDefinitions` list (it spreads the TradingView entries in), so
+// an ID listed here that the catalog does contain is a stale disposition.
+const REGISTRY_ONLY: Record<string, string> = {
+  market_heatmap: 'superseded by market_overview heatmap mode',
+  dividend_ladder: 'superseded by dividend history in the fundamentals tab',
+  ai_copilot: 'opened from the shell, not inserted as a tile',
+  rs_ranking: 'superseded by the quant ranking widget',
+  positioning_dashboard: 'superseded by the quant positioning widget',
 };
 
 describe('widget inventory dispositions', () => {
-  test('every registry-only ID has a recorded disposition', () => {
-    const catalog = new Set(widgetDefinitions.map((widget) => widget.type as string));
-    const registryOnly = getRegisteredWidgetIds().filter((type) => !catalog.has(type)).sort();
-    // A registry-only ID without a disposition is an unreviewed surface.
-    expect(registryOnly.filter((type) => !(type in REGISTRY_ONLY_DISPOSITIONS))).toEqual([]);
+  const catalog = new Set(widgetDefinitions.map((widget) => widget.type as string));
+
+  test('every registered ID is either catalogued or explicitly dispositioned', () => {
+    const undispositioned = getRegisteredWidgetIds().filter(
+      (type) => !catalog.has(type) && !(type in REGISTRY_ONLY),
+    );
+    expect(undispositioned).toEqual([]);
   });
 
-  test('no disposition names an unregistered widget', () => {
-    const registered = new Set(getRegisteredWidgetIds());
-    expect(Object.keys(REGISTRY_ONLY_DISPOSITIONS).filter((type) => !registered.has(type))).toEqual([]);
-  });
-
-  test('every recorded disposition is a known kind', () => {
-    const kinds = new Set(Object.values(REGISTRY_ONLY_DISPOSITIONS));
-    expect([...kinds].sort()).toEqual(['library-hidden', 'tradingview-catalog']);
+  test('no disposition outlives its registry-only status', () => {
+    expect(Object.keys(REGISTRY_ONLY).filter((type) => catalog.has(type))).toEqual([]);
+    expect(Object.values(REGISTRY_ONLY).every((reason) => reason.length > 0)).toBe(true);
   });
 });
