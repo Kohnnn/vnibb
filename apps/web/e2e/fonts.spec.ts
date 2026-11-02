@@ -62,13 +62,18 @@ test('root font tokens resolve to Inter / IBM Plex Mono and survive a missing va
 })
 
 test('tabular numerals align in a real financial table', async ({ page }) => {
-  // A rendered DenseFinancialTable (the app's financial statement table).
+  test.setTimeout(180_000)
+  // The dashboard's default Discovery tab has no table widgets, so this checks
+  // the real DenseFinancialTable component through the app's own fixture route
+  // (dev-only; 404s in production builds).
   await page.goto('/zz-font-fixture')
-  await page.waitForSelector('td[data-type="number"] span.block', { timeout: 120_000 })
+  await page.locator('td[data-type="number"] span.block').first().waitFor({ timeout: 60_000 })
 
   const columns = await page.evaluate(() => {
+    const table = document.querySelector('table')
+    if (!table) return []
     const byColumn: Record<number, { text: string; right: number; font: string; variant: string }[]> = {}
-    for (const cell of document.querySelectorAll<HTMLTableCellElement>('td[data-type="number"]')) {
+    for (const cell of table.querySelectorAll<HTMLTableCellElement>('td[data-type="number"]')) {
       const span = cell.querySelector('span.block')
       if (!span) continue
       const style = getComputedStyle(span)
@@ -85,9 +90,8 @@ test('tabular numerals align in a real financial table', async ({ page }) => {
   expect(columns.length).toBeGreaterThan(0)
   for (const rows of columns) {
     const digitRows = rows.filter((row) => /\d/.test(row.text))
-    if (digitRows.length < 2) continue
-    const edges = new Set(digitRows.map((row) => row.right.toFixed(2)))
     expect(digitRows.length, 'rows with digits').toBeGreaterThanOrEqual(3)
+    const edges = new Set(digitRows.map((row) => row.right.toFixed(2)))
     expect(edges.size, `right edges of ${digitRows.map((r) => r.text).join(' | ')}`).toBe(1)
     expect(digitRows[0].variant).toContain('tabular-nums')
     expect(digitRows[0].font).toMatch(/inter/i)
