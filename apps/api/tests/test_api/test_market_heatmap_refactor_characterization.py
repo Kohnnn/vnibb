@@ -611,8 +611,8 @@ async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monk
 
 @pytest.mark.asyncio
 async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(client, monkeypatch):
+    import concurrent.futures
     from concurrent.futures import Future, ThreadPoolExecutor
-    from types import SimpleNamespace
 
     import pandas as pd
     from vnibb.api.v1 import market
@@ -654,10 +654,19 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
                 "symbol": ["VNM", "FPT"], "exchange": "HOSE", "type": "STOCK",
             })
 
+    def expire_batch(futures, timeout=None):
+        # The first batch deadline fires while VNM still runs; the cleanup wait
+        # must then block on that running work instead of abandoning it.
+        if len(batches) > 1:
+            return real_as_completed(futures, timeout=timeout)
+        raise concurrent.futures.TimeoutError()
+
     # A shared provider job from an earlier test would serve this request without
     # ever reaching the controlled executor.
     monkeypatch.setattr(market, "_market_provider_jobs", {})
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
+    real_as_completed = concurrent.futures.as_completed
+    monkeypatch.setattr(concurrent.futures, "as_completed", expire_batch)
     monkeypatch.setattr(asyncio.get_running_loop(), "run_in_executor", run_coordinator)
     monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: object)
@@ -676,6 +685,7 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
         assert len(batches) == 1
         assert children == ["VNM", "FPT"]
         assert queued.cancelled()
+        assert not completions[0].done()
         running.set_result(None)
         await asyncio.wrap_future(completions[0])
         await asyncio.sleep(0)
