@@ -1,6 +1,6 @@
 import { Area, AreaChart, Tooltip } from 'recharts'
 import { priceColorClass } from '@/lib/priceColor'
-import { formatPercent } from '@/lib/units'
+import { calculatePercentChange, formatPercent } from '@/lib/units'
 
 interface SparklineProps {
   data: number[];
@@ -40,14 +40,16 @@ export function Sparkline({
     if (!active || !payload || payload.length === 0) return null;
     const value = payload[0]?.value ?? 0;
     const delta = value - startValue;
-    const deltaPct = startValue ? (delta / startValue) * 100 : 0;
-    const isUp = delta >= 0;
+    // Absolute denominator, matching the project's growth convention: a swing
+    // from a negative base to a positive one reads as a gain.
+    const signedDelta = `${delta > 0 ? '+' : ''}${formatValue(delta)}`;
+    const deltaPct = calculatePercentChange(value, startValue);
 
     return (
       <div className="rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">
         <div className="font-semibold">{formatValue(value)}</div>
-        <div className={isUp ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}>
-          {isUp ? '+' : ''}{formatValue(delta)} ({isUp ? '+' : ''}{deltaPct.toFixed(2)}%)
+        <div className={priceColorClass(delta)}>
+          {`${signedDelta} (${formatPercent(deltaPct, { decimals: 2, input: 'percent', signed: true })})`}
         </div>
       </div>
     );
