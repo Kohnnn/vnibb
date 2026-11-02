@@ -442,6 +442,7 @@ async def test_daily_owner_rejects_incomplete_board_input(test_engine, monkeypat
     from vnibb.providers.vnstock import runtime
     from vnibb.services import data_pipeline as pipeline_module
     from vnibb.services import market_session
+    from vnibb.services import sync_all_data as sync_module
     from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
     from vnibb.services.vietcap_client import VietcapClient
 
@@ -540,7 +541,6 @@ async def test_daily_owner_rejects_incomplete_board_input(test_engine, monkeypat
 
     # Patch the singleton the daily owner actually holds; a fresh DataPipeline()
     # would leave sync_all_data.data_pipeline untouched.
-    from vnibb.services import sync_all_data as sync_module
     pipeline = sync_module.data_pipeline
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", lambda *a, **k: asyncio.sleep(0))
     monkeypatch.setattr(pipeline, "_cache_set_json", lambda *a, **k: asyncio.sleep(0))
