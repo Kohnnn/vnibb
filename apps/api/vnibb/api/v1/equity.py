@@ -94,7 +94,6 @@ from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import (
     CACHE_TTL_ORDERBOOK,
     CACHE_TTL_ORDERBOOK_DAILY,
-    financial_metric_columns,
 )
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
@@ -329,22 +328,29 @@ def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restor
                       _STATEMENT_SQL_COLUMNS.get(name, name))
         stored_value = getattr(row, column, None)
         if not isinstance(stored_value, (int, float)):
+            # No stored value: the canonical is the only copy and is served as
+            # it is, which is what enriches a row that predates a metric.
             continue
-        # The sync dumps every field, so a spelling may be null. Every non-null
-        # spelling must state the same value and match the stored column; any
-        # disagreement is withheld rather than resolved by iteration order.
-        stated = sorted({getattr(restored, field, None) for field in family
-                         if getattr(restored, field, None) is not None})
-        if stated != [stored_value]:
+        stated_fields = [field for field in family if field in restored.model_fields_set]
+        stated = sorted({value for field in stated_fields
+                         if isinstance(value := getattr(restored, field, None), (int, float))})
+        # Only a field the canonical actually states can disagree. The sync dumps
+        # every field, but a partial canonical may omit a metric entirely; that
+        # says nothing about the column, so the stored value is served as it is.
+        # A stated null is an explicit no-value and disagrees; an omitted metric
+        # says nothing and leaves the stored observation served.
+        disagrees = stated != [stored_value] if stated_fields else False
+        if disagrees:
             for field in family:
                 cleared[field] = None
+                unavailable[field] = {
+                    **unavailable.get(field, {}),
+                    "unavailable_reason": "stored_statement_disagrees_with_lineage",
+                }
             withheld[column] = stored_value
-            unavailable[name] = {
-                **unavailable.get(name, {}),
-                "unavailable_reason": "stored_statement_disagrees_with_lineage",
-            }
-        elif stated:
-            # Serve the agreed value under every spelling the canonical may use.
+        else:
+            # Stated-and-agreeing, or omitted: serve the stored observation under
+            # every spelling the canonical may be read by.
             for field in family:
                 cleared[field] = stored_value
     if cleared:
@@ -1276,10 +1282,18 @@ async def _cross_fill_income_statement_rows(
         if item.consolidation_basis is None or (item.source, item.consolidation_basis, item.flow_basis) != (
             cashflow_row.source, cashflow_row.consolidation_basis, cashflow_row.flow_basis):
             continue
-        if item.depreciation is None:
-            item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
-            item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
-            item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
+        depreciation_rejected = bool(
+            (item.unit_metadata.get("depreciation") or {}).get("unavailable_reason")
+        )
+        if item.depreciation is None and not depreciation_rejected:
+            filled = _coerce_optional_float(cashflow_row.depreciation)
+            if filled is not None:
+                # Only an admitted cashflow number counts as a fill; taking its
+                # (empty) metadata anyway would erase the income row's own
+                # evidence for a value this branch never supplied.
+                item.depreciation = filled
+                item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
+                item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
         if (
             item.ebitda is None
             and (item.unit_metadata.get("ebitda") or {}).get("unavailable_reason") is None

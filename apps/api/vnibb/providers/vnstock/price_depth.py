@@ -184,8 +184,19 @@ class VnstockPriceDepthFetcher:
 
         except Exception as e:
             logger.error(f"Price depth fetch failed for {symbol}: {e}")
+            # Only the order_book boundary signals an absent capability: the
+            # method is missing, or the runtime refuses it with a tier message.
+            # Any other AttributeError/NotImplementedError is a genuine SDK,
+            # auth or dataframe failure and must stay a real failure.
+            message = str(e).casefold()
+            unentitled = (
+                "order_book" in message
+                and ("attribute" in message or "unavailable" in message or "not implemented" in message)
+            ) or "unavailable in free" in message
             raise ProviderError(
                 message=f"Failed to fetch price depth for {symbol}: {e}",
                 provider="vnstock",
+                cause=e,
+                capability="price_depth_unavailable" if unentitled else None,
                 details={"symbol": symbol},
-            )
+            ) from e

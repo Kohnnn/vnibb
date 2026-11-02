@@ -88,7 +88,7 @@ jobs:
         run: python -m pytest apps/api/tests/test_contract -q
 
   chromium-release-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       NEXT_PUBLIC_WS_URL: ws://127.0.0.1:8000/api/v1/ws/prices

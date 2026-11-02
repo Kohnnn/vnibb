@@ -149,6 +149,20 @@ def financial_metric_columns(model) -> set[str]:
     return {column.name for column in model.__table__.columns} - _FINANCIAL_ROW_COLUMNS
 
 
+
+# SQL column -> every canonical field name that can describe it. `canonical_data`
+# is a `model_dump` of the provider model, whose field names differ from the SQL
+# columns for a few metrics.
+_CANONICAL_SPELLINGS = {
+    "income_before_tax": ("income_before_tax", "pre_tax_profit", "profit_before_tax"),
+    "income_tax": ("income_tax", "tax_expense"),
+    "non_current_liabilities": ("non_current_liabilities", "long_term_liabilities"),
+    "capital_expenditure": ("capital_expenditure", "capex"),
+    "cash_and_equivalents": ("cash_and_equivalents", "cash"),
+    "total_equity": ("total_equity", "equity"),
+    "net_change_in_cash": ("net_change_in_cash", "net_cash_flow"),
+}
+
 def get_upsert_stmt(
     model,
     index_elements,
@@ -3764,20 +3778,31 @@ class DataPipeline:
                                     == str(canonical.get("value_unit") or "")
                                 )
                                 for key in financial_metric_columns(model):
-                                    if canonical.get(key) is not None or prior_canonical.get(key) is None:
+                                    spellings = _CANONICAL_SPELLINGS.get(key, (key,))
+                                    if any(canonical.get(name) is not None for name in spellings):
                                         continue
-                                    if compatible and key in prior_metadata:
-                                        canonical[key] = prior_canonical[key]
-                                        canonical.setdefault("unit_metadata", {})[key] = prior_metadata[key]
+                                    held = next((name for name in spellings
+                                                 if prior_canonical.get(name) is not None), None)
+                                    if held is None:
+                                        continue
+                                    if compatible and held in prior_metadata:
+                                        canonical[held] = prior_canonical[held]
+                                        canonical.setdefault("unit_metadata", {})[held] = prior_metadata[held]
                                         retained.add(key)
                             # Anything the upsert keeps but `canonical_data` does not
                             # describe has no recoverable provenance. Derive that set
                             # from the stored columns: a legacy row retains values
                             # without ever entering the merge loop above.
+                            # A column and its canonical field may differ in name
+                            # (`income_before_tax` vs `pre_tax_profit`); check every
+                            # spelling before calling a retained value unprovenanced.
                             unprovenanced = sorted(
                                 key for key in financial_metric_columns(model)
-                                if canonical.get(key) is None
-                                and getattr(existing_row, key, None) is not None
+                                if getattr(existing_row, key, None) is not None
+                                and all(
+                                    canonical.get(spelling) is None
+                                    for spelling in _CANONICAL_SPELLINGS.get(key, (key,))
+                                )
                             )
                             raw_payload["_financial_lineage"]["canonical_data"] = canonical
                             raw_payload["_financial_lineage"]["retained_metrics"] = sorted(retained)
@@ -6437,6 +6462,31 @@ class DataPipeline:
         from vnibb.services.trading_acquisition import persist_trade_stores
         from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
+        if not settings.orderbook_enabled:
+            logger.info("Orderbook snapshot skipped (price depth entitlement is off)")
+            if progress is not None:
+                progress.setdefault("stage_stats", {})
+                progress["stage"] = "orderbook_snapshots"
+                progress["stage_index"] = DAILY_TRADING_STAGES.index("orderbook_snapshots")
+                progress["stage_stats"]["orderbook_snapshots"] = {
+                    "success": 0,
+                    "errors": 0,
+                    "total": 0,
+                    "skipped": True,
+                    "reason": "price_depth_not_entitled",
+                }
+                # Nothing acquired and nothing broken: the cycle must keep the
+                # symbol pending instead of certifying or failing it.
+                progress["capability_skipped"] = "price_depth_not_entitled"
+                if sync_id is not None:
+                    await self._checkpoint(
+                        progress,
+                        sync_id,
+                        key=DAILY_TRADING_PROGRESS_KEY,
+                        ttl=DAILY_TRADING_PROGRESS_TTL,
+                    )
+            return 0
+
         if not live_session and settings.orderbook_at_close_only and not self._is_after_market_close():
             logger.info("Orderbook snapshot skipped before market close")
             if progress is not None:
@@ -6450,6 +6500,7 @@ class DataPipeline:
                     "skipped": True,
                     "reason": "before_market_close",
                 }
+                progress["capability_skipped"] = "before_market_close"
                 if sync_id is not None:
                     await self._checkpoint(
                         progress,
@@ -6473,6 +6524,7 @@ class DataPipeline:
                         "skipped": True,
                         "reason": "outside_market_hours",
                     }
+                    progress["capability_skipped"] = "outside_market_hours"
                     if sync_id is not None:
                         await self._checkpoint(
                             progress,
@@ -6697,15 +6749,38 @@ class DataPipeline:
                     stage_counter = "errors" if failed else "success"
                     progress["stage_stats"]["orderbook_snapshots"][stage_counter] += 1
             except Exception as exc:
-                logger.warning(f"Orderbook snapshot failed for {symbol}: {exc}")
+                # A free-tier refusal means the entitlement is absent, not that
+                # the run broke. Counting it as an error fails the whole daily
+                # trading job on a capability the account never had. The absence
+                # stays visible in coverage.
+                unentitled = getattr(exc, "capability", None) == "price_depth_unavailable"
+                if unentitled:
+                    logger.info(f"Orderbook snapshot unavailable for {symbol}: {exc}")
+                else:
+                    logger.warning(f"Orderbook snapshot failed for {symbol}: {exc}")
                 for store in ("sql_depth", "mongo_depth"):
                     if coverage[store]["status"] == "not_attempted":
-                        coverage[store] = {"status": "failed", "rows": 0, "error": type(exc).__name__}
+                        coverage[store] = {
+                            "status": "skipped" if unentitled else "failed",
+                            "rows": 0,
+                            "error": None if unentitled else type(exc).__name__,
+                        }
                 if coverage["current_depth"]["status"] == "unknown":
-                    coverage["current_depth"]["error"] = type(exc).__name__
+                    coverage["current_depth"]["status"] = "unavailable"
+                    coverage["current_depth"]["error"] = None if unentitled else type(exc).__name__
                 if progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1
+                    if unentitled:
+                        # Not an error and not an empty acquisition: the
+                        # capability is absent, so the symbol stays pending and
+                        # the cycle cannot certify it. `empty_count` here would
+                        # let run_maintenance_cycle mark it acquired.
+                        progress["stage_stats"]["orderbook_snapshots"]["skipped"] = (
+                            progress["stage_stats"]["orderbook_snapshots"].get("skipped", 0) + 1
+                        )
+                        progress["capability_skipped"] = "price_depth_unavailable"
+                    else:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1
 
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = symbol

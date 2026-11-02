@@ -417,3 +417,57 @@ async def test_upsert_lineage_keeps_metrics_the_upsert_retains(financial_sync):
     # `values` is built before the lineage merge, so the SQL column keeps the
     # value the upsert preserves; only the lineage is normalized here.
     assert canonical["gross_profit"] == 100e9
+
+
+@pytest.mark.asyncio
+async def test_lineage_does_not_flag_an_aliased_column_the_canonical_describes(financial_sync):
+    """`income_before_tax` is a SQL column; the canonical names it `pre_tax_profit`.
+
+    Building `unprovenanced_metrics` from raw column names flagged the value the
+    incoming canonical agreed with, and MCP withheld a column a later reader
+    would have served. The spelling must be resolved before deciding.
+    """
+    income = statement(
+        "income",
+        pre_tax_profit=444e9,
+        income_before_tax=444e9,
+        unit_metadata={"pre_tax_profit": {"source_unit": "VND", "value_unit": "VND"}},
+    )
+    financial_sync.prior_rows[:] = [SimpleNamespace(
+        income_before_tax=444e9,
+        raw_data={"_financial_lineage": {"canonical_data": {
+            "source": "KBS", "consolidation_basis": "consolidated",
+            "flow_basis": "single_quarter", "value_unit": "VND",
+            "pre_tax_profit": 444e9,
+            "unit_metadata": {"pre_tax_profit": {"source_unit": "VND", "value_unit": "VND"}},
+        }}},
+    )]
+
+    persisted, _ = await financial_sync([income])
+
+    lineage = persisted[0]["raw_data"]["_financial_lineage"]
+    assert lineage["canonical_data"]["pre_tax_profit"] == 444e9
+    assert "income_before_tax" not in lineage["unprovenanced_metrics"]
+
+
+@pytest.mark.parametrize(
+    "statement_type,column,alias",
+    [
+        ("balance", "cash_and_equivalents", "cash"),
+        ("balance", "total_equity", "equity"),
+        ("cashflow", "net_change_in_cash", "net_cash_flow"),
+    ],
+)
+def test_every_aliased_column_resolves_to_its_canonical_spelling(statement_type, column, alias):
+    """The spelling map must cover every column the sync writes from an alias.
+
+    A family missing from the map flags a valid retained value as
+    unprovenanced on the next sync, so MCP withholds a column REST serves.
+    """
+    from vnibb.services.data_pipeline import _CANONICAL_SPELLINGS
+
+    spellings = _CANONICAL_SPELLINGS[column]
+    assert alias in spellings and column in spellings
+    # The alias alone describes the column: nothing here is unprovenanced.
+    canonical = {alias: 123e9}
+    assert all(canonical.get(name) is None for name in spellings) is False
