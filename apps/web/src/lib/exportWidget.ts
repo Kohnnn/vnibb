@@ -255,7 +255,7 @@ export function exportToMarkdown(body: string, filename: string, provenance?: Ex
  * their own background on an ancestor, so a transparent canvas would render a
  * dark image of a light page (and vice versa).
  */
-function resolveSurfaceColor(element: HTMLElement): string | null {
+function resolveSurfaceColor(element: HTMLElement): string | undefined {
   let node: HTMLElement | null = element;
   while (node) {
     const color = getComputedStyle(node).backgroundColor;
@@ -263,7 +263,7 @@ function resolveSurfaceColor(element: HTMLElement): string | null {
     node = node.parentElement;
   }
   const themed = getComputedStyle(document.documentElement).getPropertyValue('--color-bg-primary').trim();
-  return themed || null;
+  return themed || undefined;
 }
 
 /** The provenance facts a bitmap can carry without a sidecar file. */
@@ -289,24 +289,24 @@ export async function exportToPNG(target: string | HTMLElement, filename: string
 
   const footerText = provenanceFooterText(provenance);
   try {
-    const canvas = await html2canvas(element, {
-      backgroundColor: resolveSurfaceColor(element),
-      useCORS: true,
-      onclone: footerText
-        ? (doc: Document, cloned: HTMLElement) => {
-            const footer = doc.createElement('div');
-            footer.textContent = footerText;
-            footer.setAttribute('data-export-provenance', '');
-            footer.style.cssText =
-              'position:absolute;left:0;right:0;bottom:0;padding:3px 8px;text-align:right;' +
-              'font:10px/1.4 ui-monospace,monospace;color:#94a3b8;background:transparent;';
-            if (doc.defaultView?.getComputedStyle(cloned).position === 'static') {
-              cloned.style.position = 'relative';
-            }
-            cloned.appendChild(footer);
-          }
-        : undefined,
-    });
+   const canvas = await html2canvas(element, {
+     background: resolveSurfaceColor(element),
+     useCORS: true,
+     onclone: footerText
+       ? (doc: Document, cloned: HTMLElement) => {
+           const footer = doc.createElement('div');
+           footer.textContent = footerText;
+           footer.setAttribute('data-export-provenance', '');
+           footer.style.cssText =
+             'position:absolute;left:0;right:0;bottom:0;padding:3px 8px;text-align:right;' +
+             'font:10px/1.4 ui-monospace,monospace;color:#94a3b8;background:transparent;';
+           if (doc.defaultView?.getComputedStyle(cloned).position === 'static') {
+             cloned.style.position = 'relative';
+           }
+           cloned.appendChild(footer);
+         }
+       : undefined,
+   } as Parameters<typeof html2canvas>[1]);
 
     canvas.toBlob((blob) => {
       if (blob) downloadBlob(blob, `${filename}.png`);

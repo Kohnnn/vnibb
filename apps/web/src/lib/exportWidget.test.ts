@@ -230,7 +230,7 @@ describe('exportToPNG', () => {
       });
 
       expect(captures).toHaveLength(1);
-      expect(captures[0].options.backgroundColor).toBe('rgb(255, 255, 255)');
+      expect(captures[0].options.background).toBe('rgb(255, 255, 255)');
       const stamped = captures[0].cloned.querySelector('[data-export-provenance]');
       expect(stamped?.textContent).toContain('source: Market heatmap');
       expect(stamped?.textContent).toContain('source_as_of: 2026-11-03T00:00:00.000Z');

@@ -132,14 +132,14 @@ describe('DashboardPage unsupported saved widget', () => {
     // Not in widgetDefinitions, not registered: the state a retired or
     // ahead-of-build widget ID leaves in a saved workspace.
     const widget = {
-      id: 'retired-widget', type: 'retired_widget' as const, tabId: 'saved-tab',
+      id: 'retired-widget', type: 'retired_widget', tabId: 'saved-tab',
       config: { symbol: 'FPT', savedFlag: true },
       layout: { i: 'retired-widget', x: 0, y: 0, w: 8, h: 6 },
-    };
+    } as unknown as DashboardTab['widgets'][number];
     mockActiveTab = { id: 'saved-tab', name: 'Saved', order: 0, widgets: [widget] };
     mockActiveDashboard = {
       id: 'saved-dashboard', name: 'Saved workspace', order: 0, isDefault: false,
-      isEditable: true, showGroupLabels: true, tabs: [mockActiveTab], syncGroups: [],
+      isEditable: true, showGroupLabels: true, tabs: [mockActiveTab!], syncGroups: [],
       createdAt: '2026-10-21T00:00:00.000Z', updatedAt: '2026-10-21T00:00:00.000Z',
     };
 
