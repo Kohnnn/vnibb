@@ -44,7 +44,9 @@ const STAGE_GAP = 18;
 
 function formatDelta(changePct: number | null | undefined): string {
   // formatPercent owns missing (`n/a`), non-meaningful (`n/m`) and the sign.
-  return formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
+  const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
+  // An empty delta must not leave stray whitespace in the node label.
+  return formatted === 'n/a' || formatted === 'n/m' ? '' : `  ${formatted}`;
 }
 
 export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps) {
@@ -162,7 +164,7 @@ export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps
                   fontSize="12"
                 >
                   {formatValue(node.value)}
-                  {delta ? `  ${delta}` : ''}
+                  {delta}
                 </text>
               </g>
             );
