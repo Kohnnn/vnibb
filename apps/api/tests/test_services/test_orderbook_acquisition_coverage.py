@@ -203,9 +203,10 @@ async def test_disabled_entitlement_skips_stage_without_error(depth_stores, monk
     assert stats == {"success": 0, "errors": 0, "total": 0, "skipped": True,
                     "reason": "price_depth_not_entitled"}
     assert "error_count" not in progress
-    # run_maintenance_cycle treats a zero row count as failure unless the
-    # cycle was told the emptiness was intentional.
-    assert progress["empty_count"] == 1
+    # A capability-disabled stage acquired nothing. Marking it empty would let
+    # run_maintenance_cycle certify full coverage; it must stay pending.
+    assert "empty_count" not in progress
+    assert progress["capability_skipped"] == "price_depth_not_entitled"
 
 
 @pytest.mark.asyncio
@@ -213,7 +214,7 @@ async def test_free_tier_unavailability_is_not_a_stage_error(depth_stores, monke
     session, collection, fetch, cache = depth_stores
     fetch.side_effect = ProviderError(
         "Failed to fetch price depth for FPT: Price depth is unavailable in free VCI",
-        "vnstock",
+        "vnstock", capability="price_depth_unavailable",
     )
     progress = {}
     count = await data_pipeline.data_pipeline.sync_orderbook_snapshots(
@@ -224,7 +225,8 @@ async def test_free_tier_unavailability_is_not_a_stage_error(depth_stores, monke
     assert stats["errors"] == 0
     assert stats["skipped"] == 1
     assert "error_count" not in progress
-    assert progress["empty_count"] == 1
+    assert "empty_count" not in progress
+    assert progress["capability_skipped"] == "price_depth_unavailable"
     coverage = progress["acquisition_outcomes"]["FPT"]
     assert coverage["current_depth"]["status"] == "unavailable"
     assert coverage["sql_depth"]["status"] == "skipped"

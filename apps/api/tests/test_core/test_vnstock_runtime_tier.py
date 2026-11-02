@@ -267,9 +267,57 @@ async def test_unsupported_free_capabilities_raise_provider_error(monkeypatch, k
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     fetcher = VnstockPriceDepthFetcher if kind == "depth" else VnstockInsiderDealsFetcher
-    with pytest.raises(ProviderError, match="[Uu]navailable in free VCI|order_book"):
+    with pytest.raises(ProviderError, match="[Uu]navailable in free VCI|order_book") as raised:
         await fetcher.fetch("vnm")
     assert calls == [("VNM", "VCI")]
+    # Depth refusal is a typed absent entitlement, not a message to re-parse.
+    if kind == "depth":
+        assert raised.value.capability == "price_depth_unavailable"
+        assert isinstance(raised.value.cause, Exception)
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["dataframe_attribute", "auth", "not_implemented_other"])
+async def test_depth_genuine_failures_are_not_absent_capability(monkeypatch, failure):
+    """Only the order_book boundary is an absent capability.
+
+    An AttributeError from dataframe processing, an auth error, or an unrelated
+    NotImplementedError is a real provider failure and must not be tagged as an
+    absent entitlement (which would keep the symbol silently pending).
+    """
+    from vnibb.core.config import settings
+    from vnibb.core.exceptions import ProviderError
+    from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
+
+    class BrokenFrame:
+        attrs = property(lambda self: (_ for _ in ()).throw(
+            AttributeError("'NoneType' object has no attribute 'attrs'")))
+
+        def __len__(self):
+            return 1
+
+    class Market:
+        def equity(self, symbol):
+            return self
+
+        def order_book(self, **kwargs):
+            if failure == "dataframe_attribute":
+                return BrokenFrame()
+            if failure == "auth":
+                raise PermissionError("Golden account required for order_book")
+            raise NotImplementedError("order_book requires a paid plan")
+
+    community = types.ModuleType("vnstock")
+    community.Market = Market
+    community.status = lambda: {"authenticated": False, "tier": "guest"}
+    monkeypatch.setitem(sys.modules, "vnstock", community)
+    monkeypatch.setattr(settings, "vnstock_source", "VCI")
+
+    with pytest.raises(ProviderError) as raised:
+        await VnstockPriceDepthFetcher.fetch("vnm")
+    assert raised.value.capability is None
+    assert isinstance(raised.value.cause, Exception)
 
 
 def _run_entrypoint(

@@ -94,7 +94,6 @@ from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import (
     CACHE_TTL_ORDERBOOK,
     CACHE_TTL_ORDERBOOK_DAILY,
-    financial_metric_columns,
 )
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period

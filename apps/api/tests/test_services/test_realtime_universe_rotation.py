@@ -131,81 +131,6 @@ async def test_default_polling_uses_universe_rotation_not_quote_board(monkeypatc
 
     rotation.assert_awaited_once_with(symbols=None)
     assert pipeline.get_status()["coverage"]["scope"] == "full_universe_rotation"
-
-
-@pytest.mark.asyncio
-async def test_unentitled_depth_does_not_fail_rotation(monkeypatch):
-    """A free-tier account has no price depth; that is not a rotation failure."""
-    records = []
-    symbols = ["AAA", "BBB"]
-
-    class Session:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_):
-            return False
-
-        async def scalars(self, _):
-            rotations = [r for r in records if r.sync_type == "intraday_universe_rotation"]
-            return SimpleNamespace(first=lambda: rotations[-1] if rotations else None)
-
-    async def create(sync_type, *_):
-        record = SimpleNamespace(id=len(records) + 1, sync_type=sync_type,
-                                 additional_data={}, status="running", completed_at=None)
-        records.append(record)
-        return record.id
-
-    async def update(sync_id, **kwargs):
-        record = records[sync_id - 1]
-        for key, value in kwargs.items():
-            setattr(record, key, deepcopy(value))
-
-    async def ticks(*, symbols, progress, live_session, retain_ticks):
-        return 1
-
-    async def depth(*, symbols, progress, live_session):
-        # Mirrors the real skip path: zero rows, no error, explicit emptiness.
-        progress.setdefault("stage_stats", {})["orderbook_snapshots"] = {
-            "success": 0, "errors": 0, "total": 0, "skipped": 1,
-            "reason": "price_depth_not_entitled",
-        }
-        progress["empty_count"] = progress.get("empty_count", 0) + 1
-        return 0
-
-    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
-    monkeypatch.setattr(realtime_pipeline, "DistributedJobLock", lambda *_: Lease())
-    monkeypatch.setattr(sync_all_data.FullMarketSync, "_get_seeded_symbols",
-                        AsyncMock(return_value=list(symbols)))
-    monkeypatch.setattr(sync_all_data, "async_session_maker", Session)
-    monkeypatch.setattr(sync_all_data.data_pipeline, "_create_sync_record", create)
-    monkeypatch.setattr(sync_all_data.data_pipeline, "_update_sync_record", update)
-    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_intraday_trades", ticks)
-    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_orderbook_snapshots", depth)
-    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=1))
-    from vnibb.providers.vnstock import runtime
-    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
-
-    await realtime_pipeline.run_intraday_sync()
-
-    metadata = next(r.additional_data for r in reversed(records)
-                    if r.sync_type == "intraday_universe_rotation")
-    orderbook = metadata["stages"]["orderbook_snapshots"]
-    assert orderbook["failed_symbols"] == []
-    assert orderbook["acquired_symbols"] == symbols
-
-
-@pytest.mark.asyncio
-async def test_polling_status_reports_rotation_coverage(monkeypatch):
-    pipeline = realtime_pipeline.RealtimePipeline()
-    pipeline.is_running = True
-    rotation = AsyncMock(return_value=SimpleNamespace(complete=False, pending_count=2))
-    monkeypatch.setattr(realtime_pipeline, "run_intraday_sync", rotation)
-    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
-    monkeypatch.setattr(realtime_pipeline.asyncio, "sleep", AsyncMock(side_effect=lambda _: setattr(pipeline, "is_running", False)))
-
-    await pipeline._polling_fallback(None)
-
     assert pipeline.get_status()["coverage"]["complete"] is False
     assert pipeline.get_status()["coverage"]["completion_basis"] == "symbol_dataset_acquisition_cycle"
     assert pipeline.get_status()["coverage"]["tick_session_totals_verified"] is False
@@ -295,3 +220,81 @@ async def test_requested_subset_reports_its_own_scope_and_never_completes_full_c
     assert coverage["scope"] == "explicit_subset_rotation"
     assert coverage["complete"] is False
     assert coverage["completion_basis"] == "symbol_dataset_acquisition_cycle"
+
+
+@pytest.mark.asyncio
+async def test_capability_skip_cannot_certify_rotation_coverage(monkeypatch):
+    """Real sync_orderbook_snapshots through run_intraday_sync into the cycle.
+
+    An absent price-depth entitlement acquired nothing, so the symbol must stay
+    pending: neither certified as covered nor recorded as a provider failure.
+    """
+    from vnibb.core.exceptions import ProviderError
+    from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
+
+    records = []
+    symbols = ["AAA", "BBB"]
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def scalars(self, _):
+            rotations = [r for r in records if r.sync_type == "intraday_universe_rotation"]
+            return SimpleNamespace(first=lambda: rotations[-1] if rotations else None)
+
+    async def create(sync_type, *_):
+        record = SimpleNamespace(id=len(records) + 1, sync_type=sync_type,
+                                 additional_data={}, status="running", completed_at=None)
+        records.append(record)
+        return record.id
+
+    async def update(sync_id, **kwargs):
+        record = records[sync_id - 1]
+        for key, value in kwargs.items():
+            setattr(record, key, deepcopy(value))
+
+    async def ticks(*, symbols, progress, live_session, retain_ticks):
+        progress["success_count"] = progress.get("success_count", 0) + 1
+        progress.setdefault("stage_stats", {})["intraday_trades"] = {"success": 1, "errors": 0, "total": 1}
+        return 1
+
+    async def depth(*, symbol, source="VCI"):
+        raise ProviderError(
+            f"Failed to fetch price depth for {symbol}: Price depth is unavailable in free VCI",
+            "vnstock", capability="price_depth_unavailable",
+        )
+
+    monkeypatch.setattr(realtime_pipeline, "is_vietnam_market_open", lambda: True)
+    monkeypatch.setattr(realtime_pipeline, "DistributedJobLock", lambda *_: Lease())
+    monkeypatch.setattr(sync_all_data.FullMarketSync, "_get_seeded_symbols", AsyncMock(return_value=list(symbols)))
+    monkeypatch.setattr(sync_all_data, "async_session_maker", Session)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_create_sync_record", create)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_update_sync_record", update)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_intraday_trades", ticks)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_is_market_hours", lambda: True)
+    monkeypatch.setattr(VnstockPriceDepthFetcher, "fetch", depth)
+    monkeypatch.setattr(settings, "orderbook_enabled", True)
+    monkeypatch.setattr(settings, "intraday_require_market_hours", False)
+    monkeypatch.setattr(settings, "orderbook_at_close_only", False)
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_wait_for_rate_limit", AsyncMock())
+    monkeypatch.setattr(sync_all_data.data_pipeline, "_cache_set_json", AsyncMock())
+    monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=0))
+    from vnibb.providers.vnstock import runtime
+    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
+
+    await realtime_pipeline.run_intraday_sync()
+
+    metadata = next(r.additional_data for r in reversed(records)
+                    if r.sync_type == "intraday_universe_rotation")
+    orderbook = metadata["stages"]["orderbook_snapshots"]
+    # Not acquired, not failed, not empty: still pending, never certified.
+    assert orderbook["acquired_symbols"] == []
+    assert orderbook["failed_symbols"] == []
+    assert orderbook["pending_count"] == len(symbols)
+    assert metadata["complete"] is False
+    assert {receipt["outcome"] for receipt in orderbook["receipts"].values()} == {"deferred"}
+    assert {receipt["skipped_reason"] for receipt in orderbook["receipts"].values()} == {"price_depth_unavailable"}

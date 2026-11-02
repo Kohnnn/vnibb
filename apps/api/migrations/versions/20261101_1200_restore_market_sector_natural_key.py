@@ -15,7 +15,6 @@ Idempotent and lossless. Production measured zero duplicate and zero null
 codes across 24 rows on 2026-11-01, so no data is discarded there.
 """
 
-import sqlalchemy as sa
 from alembic import op
 
 revision = "b8f2c5d91e40"

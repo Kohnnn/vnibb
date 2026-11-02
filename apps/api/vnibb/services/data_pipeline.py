@@ -6475,9 +6475,9 @@ class DataPipeline:
                     "skipped": True,
                     "reason": "price_depth_not_entitled",
                 }
-                # run_maintenance_cycle reads the absence of rows as failure
-                # unless the cycle was told the emptiness was intentional.
-                progress["empty_count"] = progress.get("empty_count", 0) + 1
+                # Nothing acquired and nothing broken: the cycle must keep the
+                # symbol pending instead of certifying or failing it.
+                progress["capability_skipped"] = "price_depth_not_entitled"
                 if sync_id is not None:
                     await self._checkpoint(
                         progress,
@@ -6500,7 +6500,7 @@ class DataPipeline:
                     "skipped": True,
                     "reason": "before_market_close",
                 }
-                progress["empty_count"] = progress.get("empty_count", 0) + 1
+                progress["capability_skipped"] = "before_market_close"
                 if sync_id is not None:
                     await self._checkpoint(
                         progress,
@@ -6524,7 +6524,7 @@ class DataPipeline:
                         "skipped": True,
                         "reason": "outside_market_hours",
                     }
-                    progress["empty_count"] = progress.get("empty_count", 0) + 1
+                    progress["capability_skipped"] = "outside_market_hours"
                     if sync_id is not None:
                         await self._checkpoint(
                             progress,
@@ -6749,12 +6749,11 @@ class DataPipeline:
                     stage_counter = "errors" if failed else "success"
                     progress["stage_stats"]["orderbook_snapshots"][stage_counter] += 1
             except Exception as exc:
-                # A free-tier "Price depth is unavailable in free VCI" reply
-                # means the entitlement is absent, not that the run broke.
-                # Counting it as an error fails the whole daily trading job on
-                # a capability the account never had. The absence is recorded
-                # in coverage so it stays visible without failing the stage.
-                unentitled = "price depth is unavailable in free" in str(exc).casefold()
+                # A free-tier refusal means the entitlement is absent, not that
+                # the run broke. Counting it as an error fails the whole daily
+                # trading job on a capability the account never had. The absence
+                # stays visible in coverage.
+                unentitled = getattr(exc, "capability", None) == "price_depth_unavailable"
                 if unentitled:
                     logger.info(f"Orderbook snapshot unavailable for {symbol}: {exc}")
                 else:
@@ -6771,13 +6770,14 @@ class DataPipeline:
                     coverage["current_depth"]["error"] = None if unentitled else type(exc).__name__
                 if progress is not None:
                     if unentitled:
-                        # Not an error: the account has no price-depth
-                        # entitlement. Mark the cycle empty so realtime
-                        # rotation does not read the absence as a failure.
+                        # Not an error and not an empty acquisition: the
+                        # capability is absent, so the symbol stays pending and
+                        # the cycle cannot certify it. `empty_count` here would
+                        # let run_maintenance_cycle mark it acquired.
                         progress["stage_stats"]["orderbook_snapshots"]["skipped"] = (
                             progress["stage_stats"]["orderbook_snapshots"].get("skipped", 0) + 1
                         )
-                        progress["empty_count"] = progress.get("empty_count", 0) + 1
+                        progress["capability_skipped"] = "price_depth_unavailable"
                     else:
                         progress["error_count"] = progress.get("error_count", 0) + 1
                         progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1

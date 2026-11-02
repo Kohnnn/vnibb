@@ -4957,7 +4957,7 @@ async def test_depreciation_crossfill_only_replaces_evidence_when_it_fills(
     from vnibb.api.v1 import equity
 
     def statement(**overrides):
-        fields = {name: None for name in FinancialStatementData.model_fields}
+        fields = dict.fromkeys(FinancialStatementData.model_fields)
         fields.update({
             "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
             "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",

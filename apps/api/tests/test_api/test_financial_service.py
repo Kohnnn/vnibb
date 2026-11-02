@@ -669,7 +669,7 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     from vnibb.models.financials import IncomeStatement
 
     # `model_dump` shape: every field present, unstated metrics explicit `None`.
-    canonical = {field: None for field in FinancialStatementData.model_fields}
+    canonical = dict.fromkeys(FinancialStatementData.model_fields)
     canonical.update({
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
         "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
@@ -807,7 +807,7 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import CashFlow
 
-    canonical = {field: None for field in FinancialStatementData.model_fields}
+    canonical = dict.fromkeys(FinancialStatementData.model_fields)
     canonical.update({
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
         "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "cashflow",
@@ -838,7 +838,7 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(
 def _admission_canonical(statement_type, **values):
     from vnibb.providers.vnstock.financials import FinancialStatementData
 
-    canonical = {name: None for name in FinancialStatementData.model_fields}
+    canonical = dict.fromkeys(FinancialStatementData.model_fields)
     canonical.update({
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
         "source": "VCI", "currency": "VND", "value_unit": "VND",
