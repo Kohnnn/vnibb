@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, AlertCircle, RefreshCw, Database, Server } from 'lucide-react';
-import { formatAbsoluteTimestamp } from '@/lib/format';
+import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 
 interface HealthData {
   status: string;

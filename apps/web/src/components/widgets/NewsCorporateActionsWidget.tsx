@@ -7,7 +7,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 import { normalizeInsiderAction } from '@/lib/insiderActions';

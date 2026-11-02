@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
-import { formatAbsoluteTimestamp } from '@/lib/format';
+import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ScreenerResponse } from '@/types/screener';
 import { useScreenerData } from '@/lib/queries';

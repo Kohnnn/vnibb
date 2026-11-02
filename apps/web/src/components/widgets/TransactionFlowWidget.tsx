@@ -59,7 +59,7 @@ function formatFlowValue(
   mode: FlowMode,
   unitConfig: UnitConfig
 ) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
   const abs = Math.abs(value);
   if (mode === 'value') {
     return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 2 });
@@ -159,7 +159,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
     // QA-v4 Transaction Flow: when the latest row's bucket is null
     // (e.g. weekend/post-close where the foreign feed lags one session),
     // walk back through `rows` to surface the most recent non-null value
-    // instead of rendering "N/A". Track which row was used so the UI can
+    // instead of rendering "n/a". Track which row was used so the UI can
     // optionally annotate "as of <date>" if needed.
     const lastNonNull = (s: FlowScope): { value: number | null; date: string | null } => {
       for (let i = rows.length - 1; i >= 0; i -= 1) {
@@ -299,11 +299,11 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                 {latestIsFullSession ? 'Session coverage' : 'Observed sample'} · {completeness}
               </div>
               <dl className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div><dt>Observed trades</dt><dd>{coverage?.observed_trade_count ?? 'N/A'}</dd></div>
-                <div><dt>Observed window (source time)</dt><dd>{coverage?.observed_window_start ?? 'N/A'} – {coverage?.observed_window_end ?? 'N/A'}</dd></div>
-                <div><dt>Source session / requested session</dt><dd>{coverage?.session_date ?? 'N/A'} / {coverage?.requested_session_date ?? 'N/A'}</dd></div>
+                <div><dt>Observed trades</dt><dd>{coverage?.observed_trade_count ?? 'n/a'}</dd></div>
+                <div><dt>Observed window (source time)</dt><dd>{coverage?.observed_window_start ?? 'n/a'} – {coverage?.observed_window_end ?? 'n/a'}</dd></div>
+                <div><dt>Source session / requested session</dt><dd>{coverage?.session_date ?? 'n/a'} / {coverage?.requested_session_date ?? 'n/a'}</dd></div>
                 <div><dt>Source / status</dt><dd>{coverage?.provider ?? 'Unknown'} / {coverage?.status ?? 'Unknown'}</dd></div>
-                <div><dt>Session trade count / coverage</dt><dd>{latestIsFullSession ? coverage?.denominator_trade_count ?? 'N/A' : 'N/A'} / {latestIsFullSession && coverage?.session_fraction != null ? `${formatNumber(coverage.session_fraction * 100, { decimals: 1 })}%` : 'Unknown'}</dd></div>
+                <div><dt>Session trade count / coverage</dt><dd>{latestIsFullSession ? coverage?.denominator_trade_count ?? 'n/a' : 'n/a'} / {latestIsFullSession && coverage?.session_fraction != null ? `${formatNumber(coverage.session_fraction * 100, { decimals: 1 })}%` : 'Unknown'}</dd></div>
                 <div><dt>Stored flow / SQL ticks / Mongo ticks</dt><dd>{coverage?.sql_flows?.status ?? 'Unknown'} / {coverage?.sql_ticks?.status ?? 'Unknown'} / {coverage?.mongo_ticks?.status ?? 'Unknown'}</dd></div>
               </dl>
               {!latestIsFullSession ? (
@@ -487,7 +487,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                 <div className="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2 xl:grid-cols-5">
                   <div>
                     <div className="text-[var(--text-muted)]">Date</div>
-                    <div className="font-medium text-[var(--text-primary)]">{latest?.date ?? 'N/A'}</div>
+                    <div className="font-medium text-[var(--text-primary)]">{latest?.date ?? 'n/a'}</div>
                   </div>
                   <div>
                     <div className="text-[var(--text-muted)]">Price</div>
@@ -504,13 +504,13 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                   <div>
                     <div className="text-[var(--text-muted)]">{latestIsFullSession ? 'Big Orders' : 'Observed Big Orders'}</div>
                     <div className="font-medium text-[var(--text-primary)]">
-                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.big_order_count ?? 'N/A' : 'N/A'}
+                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.big_order_count ?? 'n/a' : 'n/a'}
                     </div>
                   </div>
                   <div>
                     <div className="text-[var(--text-muted)]">{latestIsFullSession ? 'Block Trades' : 'Observed Block Trades'}</div>
                     <div className="font-medium text-[var(--text-primary)]">
-                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.block_trade_count ?? 'N/A' : 'N/A'}
+                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.block_trade_count ?? 'n/a' : 'n/a'}
                     </div>
                   </div>
                 </div>

@@ -5,10 +5,11 @@
 import { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Globe, Building2 } from 'lucide-react';
 import { useBlockTrades } from '@/lib/queries';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { priceColorClass } from '@/lib/priceColor';
 
 interface BlockTradeWidgetProps {
   symbol?: string;
@@ -18,7 +19,8 @@ interface BlockTradeWidgetProps {
 }
 
 function formatCurrency(value: number | null | undefined): string {
-  if (!value) return '-';
+  // Zero is a measured value (a VND0 print), not a missing one.
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
   if (value >= 1e9) return `VND${(value / 1e9).toFixed(1)}bn`;
   if (value >= 1e6) return `VND${(value / 1e6).toFixed(1)}mn`;
   if (value >= 1e3) return `VND${(value / 1e3).toFixed(1)}k`;
@@ -42,7 +44,7 @@ function getNetBlockTradeLabel(value: number): string {
 }
 
 function formatNetBlockTradeValue(value: number): string {
-  return value === 0 ? 'VND0' : formatCurrency(Math.abs(value));
+  return formatCurrency(Math.abs(value));
 }
 
 export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps) {
@@ -154,16 +156,16 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
           <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Buy</div>
-              <div className="text-green-400 font-medium">{formatCurrency(totalBuyValue)}</div>
+              <div className={`${priceColorClass(1)} font-medium`}>{formatCurrency(totalBuyValue)}</div>
             </div>
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Sell</div>
-              <div className="text-red-400 font-medium">{formatCurrency(totalSellValue)}</div>
+              <div className={`${priceColorClass(-1)} font-medium`}>{formatCurrency(totalSellValue)}</div>
             </div>
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Net</div>
-              <div className={`font-medium ${netValue > 0 ? 'text-green-400' : netValue < 0 ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
-                {getNetBlockTradeLabel(netValue)} {netValue > 0 ? '+' : ''}{formatNetBlockTradeValue(netValue)}
+              <div className={`font-medium ${priceColorClass(netValue)}`}>
+                {getNetBlockTradeLabel(netValue)} {netValue > 0 ? '+' : netValue < 0 ? '-' : ''}{formatNetBlockTradeValue(netValue)}
               </div>
             </div>
           </div>
@@ -191,8 +193,10 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
               const isSell = trade.side === 'SELL';
               const SideIcon = isBuy ? TrendingUp : isSell ? TrendingDown : AlertTriangle;
               const sideLabel = isBuy ? 'Buy block' : isSell ? 'Sell block' : 'Unknown side';
-              const sideColor = isBuy ? 'text-green-400' : isSell ? 'text-red-400' : 'text-yellow-400';
-              const bgColor = isBuy ? 'bg-green-500/5' : isSell ? 'bg-red-500/5' : 'bg-yellow-500/5';
+              // Direction tokens follow colour-vision mode; the Buy/Sell label
+              // and arrow icon carry the reading without relying on hue.
+              const sideColor = isBuy ? priceColorClass(1) : isSell ? priceColorClass(-1) : 'text-[var(--text-muted)]';
+              const bgColor = isBuy ? 'bg-price-up' : isSell ? 'bg-price-down' : 'bg-[var(--bg-secondary)]';
 
               return (
                 <div

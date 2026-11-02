@@ -135,7 +135,7 @@ describe('FinancialsWidget', () => {
     expect(mockUseFinancialRatios).toHaveBeenCalledWith('FPT', expect.objectContaining({ period: 'FY', enabled: true }));
   });
 
-  test.each([['percent', '0.25%'], ['unknown', '—']])('preserves declared dividend percent and withholds %s units', async (unit, expected) => {
+  test.each([['percent', '0.25%'], ['unknown', 'n/a']])('preserves declared dividend percent and withholds %s units', async (unit, expected) => {
     // The existing query fixture supplies the settled fields consumed by this widget.
     const result = makeQueryResult({ data: [{ period: '2025', pe: 14.64,
       dividend_yield: 0.25, ratio_units: { dividend_yield: unit } }] }) as unknown as UseQueryResult<FinancialRatiosResponse, Error>;

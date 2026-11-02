@@ -8,7 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useDividends } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { formatDividendPayout, formatDividendYield } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 

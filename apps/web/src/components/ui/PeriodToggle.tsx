@@ -42,7 +42,7 @@ function PeriodToggleComponent({ value, onChange, compact = false, options = EXT
             "shrink-0 rounded font-bold transition-all uppercase focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-1",
             compact ? "px-1.5 py-0.5 text-[9px]" : "px-2.5 py-1 text-[10px]",
             value === period
-              ? "bg-blue-600 text-white shadow-sm"
+              ? "bg-[var(--color-accent-primary)] text-[var(--color-on-accent)] shadow-sm"
               : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
           )}
         >

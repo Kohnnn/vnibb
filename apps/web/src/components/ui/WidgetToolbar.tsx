@@ -173,7 +173,7 @@ export function WidgetToolbar({
   const refresh = onRefresh && command('Refresh widget', onRefresh, <RefreshCw size={12} />);
   const agent = onCopilot && command('Open VniAgent', onCopilot, <Sparkles size={12} />);
   const settings = onSettings && (
-    <button type="button" onClick={() => { if (isCompact) compactTriggerRef.current?.focus(); setIsPanelOpen(false); onSettings(); }} data-tour="widget-settings-trigger" title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'} aria-label="Widget settings" className={shouldHighlightSettings ? `${controlClass} border border-blue-500/30 bg-blue-500/12 text-blue-300` : controlClass}>
+    <button type="button" onClick={() => { if (isCompact) compactTriggerRef.current?.focus(); setIsPanelOpen(false); onSettings(); }} data-tour="widget-settings-trigger" title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'} aria-label="Widget settings" className={shouldHighlightSettings ? `${controlClass} border border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]` : controlClass}>
       <Settings size={12} />
     </button>
   );

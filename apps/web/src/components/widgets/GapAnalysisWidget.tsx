@@ -22,7 +22,11 @@ interface GapAnalysisWidgetProps {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-const formatPercent = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : 'N/A'
+const formatPercent = (value: unknown, options: { signed?: boolean; decimals?: number; input?: string } = {}) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a'
+    const sign = options.signed && value > 0 ? '+' : ''
+    return `${sign}${value.toFixed(options.decimals ?? 2)}%`
+}
 
 type GapRow = {
   date: string
@@ -213,7 +217,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                       </td>
                       <td className="py-1 text-right font-mono">{formatPercent(row.gap_pct)}</td>
                       <td className={`py-1 text-right font-mono ${typeof row.next_day_return_pct !== 'number' || !Number.isFinite(row.next_day_return_pct) ? 'text-[var(--text-muted)]' : row.next_day_return_pct >= 0 ? 'price-up' : 'price-down'}`}>
-                        {formatPercent(row.next_day_return_pct)}
+                        {formatPercent(row.next_day_return_pct, { decimals: 2, input: 'percent', signed: true })}
                       </td>
                       <td className={`py-1 text-center ${statusClass}`} title={ageDays !== null ? `${ageDays}d since gap` : undefined}>
                         {statusLabel}

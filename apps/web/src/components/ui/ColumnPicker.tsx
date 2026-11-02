@@ -37,7 +37,7 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
             "flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase rounded transition-colors",
-            isOpen ? "bg-blue-600 text-white" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            isOpen ? "bg-[var(--color-accent-primary)] text-[var(--color-on-accent)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
         )}
         title="Customize columns"
       >
@@ -72,17 +72,17 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
                       className={cn(
                         "w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs transition-all",
                         selectedColumns.includes(column.id)
-                          ? "bg-blue-600/10 text-blue-400 font-medium"
+                          ? "bg-[var(--color-accent-primary)]/10 text-[var(--color-accent-primary)] font-medium"
                           : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       )}
                     >
                       <div className={cn(
                         "w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors",
                         selectedColumns.includes(column.id)
-                          ? "bg-blue-600 border-blue-600"
+                          ? "bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)]"
                           : "border-[var(--border-default)] bg-[var(--bg-secondary)]"
                       )}>
-                        {selectedColumns.includes(column.id) && <Check className="w-2.5 h-2.5 text-white" />}
+                        {selectedColumns.includes(column.id) && <Check className="w-2.5 h-2.5 text-[var(--color-on-accent)]" />}
                       </div>
                       {column.label}
                     </button>
@@ -101,7 +101,7 @@ export function ColumnPicker({ selectedColumns, onColumnsChange }: ColumnPickerP
             </button>
             <button
               onClick={() => setIsOpen(false)}
-              className="px-4 py-1 text-[10px] font-black uppercase bg-blue-600 text-white rounded hover:bg-blue-500 transition-colors"
+              className="px-4 py-1 text-[10px] font-black uppercase bg-[var(--color-accent-primary)] text-[var(--color-on-accent)] rounded hover:bg-[var(--color-accent-hover)] transition-colors"
             >
               Done
             </button>

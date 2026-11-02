@@ -60,7 +60,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       fetchedAt: payload?.computed_at || dataUpdatedAt || null,
       derived: true,
       stale: Boolean(error && hasData),
-      extra: { grade: payload?.grade || 'N/A' },
+      extra: { grade: payload?.grade || 'n/a' },
     }))
   }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, upperSymbol])
 
@@ -94,7 +94,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
         <>
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
             <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Quality Grade</div>
-            <div className={`text-lg font-semibold ${gradeTone(payload?.grade || 'N/A')}`}>{payload?.grade || 'N/A'}</div>
+            <div className={`text-lg font-semibold ${gradeTone(payload?.grade || 'n/a')}`}>{payload?.grade || 'n/a'}</div>
             <div className="text-[10px] text-[var(--text-secondary)]">Quality Score: {score(payload?.quality_score)} / 100</div>
           </div>
 

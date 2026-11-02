@@ -1090,6 +1090,7 @@ html[data-theme="light"] .index-card:hover {
 .price-up { color: var(--color-positive); }
 .price-down { color: var(--color-negative); }
 .price-flat { color: var(--color-neutral); }
+.price-missing { color: var(--color-text-muted); }
 .bg-price-up { background-color: var(--color-positive-bg); }
 .bg-price-down { background-color: var(--color-negative-bg); }
 

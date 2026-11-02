@@ -65,7 +65,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                     symbol: stock.symbol,
                     label: stock.symbol,
                     description: `${stock.name} · ${stock.industry}`,
-                    icon: <TrendingUp size={16} className="text-blue-400" />,
+                    icon: <TrendingUp size={16} className="text-[var(--color-accent-primary)]" />,
                 });
             });
             return results;
@@ -82,7 +82,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                 symbol: stock.symbol,
                 label: stock.symbol,
                 description: `${stock.name} · ${stock.industry}`,
-                icon: <TrendingUp size={16} className="text-blue-400" />,
+                icon: <TrendingUp size={16} className="text-[var(--color-accent-primary)]" />,
             });
         });
 
@@ -219,7 +219,7 @@ export function CommandPalette({ isOpen, onClose, onSymbolSelect, onNavigate }: 
                                             onClose();
                                         }}
                                         className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${index === selectedIndex
-                                                ? 'bg-blue-600/20 text-white'
+                                                ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]'
                                                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                             }`}
                                     >

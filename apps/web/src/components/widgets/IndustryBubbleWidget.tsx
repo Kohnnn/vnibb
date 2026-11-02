@@ -58,7 +58,7 @@ function metricLabel(metric: string) {
 }
 
 function formatBubbleMetric(metric: string, value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
   if (metric.includes('growth') || metric === 'roe' || metric === 'roa' || metric === 'roic') {
     return formatPercent(value, { input: 'percent', decimals: 2 });
   }

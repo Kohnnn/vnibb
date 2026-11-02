@@ -1,4 +1,6 @@
 import { Area, AreaChart, Tooltip } from 'recharts'
+import { priceColorClass } from '@/lib/priceColor'
+import { formatPercent } from '@/lib/units'
 
 interface SparklineProps {
   data: number[];
@@ -17,10 +19,12 @@ export function Sparkline({
 }: SparklineProps) {
   const chartData = data.map((value, index) => ({ value, index }));
   const startValue = data[0] ?? 0;
+  // Direction colours come from the shared tokens (theme + colour-vision
+  // aware) instead of raw hex.
   const colorMap = {
-    green: '#22c55e',
-    red: '#ef4444', 
-    blue: '#3b82f6'
+    green: 'var(--color-positive)',
+    red: 'var(--color-negative)',
+    blue: 'var(--color-accent-primary)',
   };
   
   const isPositive = data.length > 1 ? data[data.length - 1] > data[0] : true;
@@ -42,8 +46,8 @@ export function Sparkline({
     return (
       <div className="rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">
         <div className="font-semibold">{formatValue(value)}</div>
-        <div className={isUp ? 'text-emerald-400' : 'text-red-400'}>
-          {isUp ? '+' : ''}{formatValue(delta)} ({isUp ? '+' : ''}{deltaPct.toFixed(2)}%)
+        <div className={priceColorClass(delta)}>
+          {isUp ? '+' : ''}{formatValue(delta)} ({formatPercent(deltaPct, { decimals: 2, input: 'percent', signed: true })})
         </div>
       </div>
     );
@@ -57,7 +61,7 @@ export function Sparkline({
           type="monotone"
           dataKey="value"
           stroke={fillColor}
-          fill={showArea ? `${fillColor}20` : 'transparent'}
+          fill={showArea ? `color-mix(in srgb, ${fillColor} 13%, transparent)` : 'transparent'}
           strokeWidth={2}
           dot={false}
           isAnimationActive={false}

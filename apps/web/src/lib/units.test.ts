@@ -1,4 +1,4 @@
-import { convertFinancialValueForUnit, DEFAULT_UNIT_CONFIG, readCanonicalStatementValue } from './units'
+import { convertFinancialValueForUnit, DEFAULT_UNIT_CONFIG, forecastLabel, formatPercent, readCanonicalStatementValue } from './units'
 
 const certifiedRow = {
   period: '2025', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual',
@@ -61,5 +61,32 @@ describe('canonical statement value admission', () => {
 
   test('admits balance snapshots without inventing a flow basis', () => {
     expect(readCanonicalStatementValue({ ...certifiedRow, flow_basis: undefined }, 'revenue', false)).toBe(certifiedRow.revenue)
+  })
+})
+
+describe('signed-change formatting golden cases', () => {
+  test.each([
+    ['positive change', 1.25, { input: 'percent', decimals: 1, signed: true }, '+1.3%'],
+    ['negative change', -1.25, { input: 'percent', decimals: 1, signed: true }, '-1.3%'],
+    ['true zero keeps no sign', 0, { input: 'percent', decimals: 1, signed: true }, '0.0%'],
+    ['negative zero keeps no sign', -0, { input: 'percent', decimals: 1, signed: true }, '0.0%'],
+    ['missing value', null, { input: 'percent', decimals: 1, signed: true }, 'n/a'],
+    ['undefined value', undefined, { input: 'percent', decimals: 1, signed: true }, 'n/a'],
+    ['non-finite value', Number.NaN, { input: 'percent', decimals: 1, signed: true }, 'n/a'],
+    ['non-meaningful ratio', 2500, { input: 'percent', decimals: 1, signed: true, clamp: 'margin' }, 'n/m'],
+    ['non-meaningful ratio via auto scaling', 250, { decimals: 1, signed: true, clamp: 'margin' }, 'n/m'],
+    ['margin delta in pp', 0.3, { input: 'percent', decimals: 1, signed: true, unit: 'pp' }, '+0.3 pp'],
+    ['margin delta without sign', 0.3, { input: 'percent', decimals: 1, unit: 'pp' }, '0.3 pp'],
+    ['margin delta below rounding', 0.04, { input: 'percent', decimals: 1, signed: true, unit: 'pp' }, '0.0 pp'],
+    ['unsigned positive keeps no plus', 1.25, { input: 'percent', decimals: 1 }, '1.3%'],
+  ] as const)('%s formats as %s', (_label, value, options, expected) => {
+    expect(formatPercent(value as number | null | undefined, options)).toBe(expected)
+  })
+
+  test('forecast labels are emitted only for a real forecast, never for a measured value', () => {
+    expect(forecastLabel({ kind: 'forecast', period: '2026E' })).toBe('2026E · forecast')
+    expect(forecastLabel({ kind: 'estimate', period: '2026E' })).toBe('2026E · forecast')
+    expect(forecastLabel({ kind: 'actual', period: '2025' })).toBe('2025')
+    expect(forecastLabel({ kind: 'actual', period: null })).toBe('n/a')
   })
 })

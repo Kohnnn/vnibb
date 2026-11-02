@@ -138,7 +138,7 @@ export function WidgetHeader({
               trackWidgetAction('close')
               onClose()
             }}
-            className="p-1.5 text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
+            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
             title="Remove widget"
           >
             <X className="w-3.5 h-3.5" />

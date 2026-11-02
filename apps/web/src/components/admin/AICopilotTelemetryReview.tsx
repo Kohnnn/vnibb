@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Database, MessageSquareWarning, RefreshCw, ThumbsDown, ThumbsUp } from 'lucide-react';
 
 import { getAdminAITelemetry, type AdminAITelemetryRecord } from '@/lib/api';
-import { formatAbsoluteTimestamp } from '@/lib/format';
+import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 
 interface AICopilotTelemetryReviewProps {
   enabled: boolean;

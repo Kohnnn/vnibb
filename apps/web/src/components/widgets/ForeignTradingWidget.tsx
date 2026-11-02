@@ -9,7 +9,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 import { getMarketState } from '@/lib/marketHours';
 import { memo, useEffect, useMemo, useState } from 'react';
 import type { WidgetHealthState } from '@/lib/widgetHealth';

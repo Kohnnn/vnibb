@@ -8,7 +8,7 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useDerivativesContracts } from '@/lib/queries';
-import { formatDate } from '@/lib/format';
+import { formatDate } from '@/lib/formatDate';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface DerivativesContractsBoardWidgetProps {
