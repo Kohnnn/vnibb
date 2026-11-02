@@ -160,3 +160,36 @@ describe('exportToJSON', () => {
     }
   });
 });
+
+describe('exportToCSV provenance', () => {
+  it('guards and quotes provenance values like any other cell', async () => {
+    const captured: Array<{ blob: Blob; filename: string }> = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = ((blob: Blob) => {
+      captured.push({ blob, filename: '' });
+      return 'blob:test';
+    }) as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = jest.fn();
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      captured[captured.length - 1].filename = this.download;
+    });
+
+    try {
+      const { exportToCSV } = await import('./exportWidget');
+      exportToCSV([{ symbol: 'FPT', revenue: 63000 }], 'fpt', {
+        sourceLabel: 'VniBB API, financials',
+        warnings: ['=HYPERLINK("http://evil")'],
+      });
+
+      const text = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(captured[0].blob); });
+      expect(text).toContain('# source,"VniBB API, financials"');
+      expect(text).toContain('# warnings,"\'=HYPERLINK(""http://evil"")"');
+      expect(text).toContain('symbol,revenue\nFPT,63000');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+      click.mockRestore();
+    }
+  });
+});

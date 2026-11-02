@@ -144,7 +144,9 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
   if (!rows.length) return;
   
   const csv = rowsToCSV(rows);
-  const prefixLines = provenanceLines(provenance).map(([key, value]) => `# ${key},${value}`);
+  // Provenance is data too: a warning or source label can contain commas or a
+  // formula, so every value goes through the same guard and quoting as rows.
+  const prefixLines = provenanceLines(provenance).map(([key, value]) => `# ${key},${serializeCSVCell(value)}`);
 
   const body = prefixLines.length ? `${prefixLines.join('\n')}\n${csv}` : csv;
   const blob = new Blob([body], { type: 'text/csv' });
