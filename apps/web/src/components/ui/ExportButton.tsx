@@ -101,7 +101,7 @@ export function ExportButton({
         title="Export data"
         aria-label="Export data"
       >
-        {exported ? <Check className="w-3 h-3 text-green-500" /> : <Download className="w-3 h-3" />}
+        {exported ? <Check className="w-3 h-3 text-[var(--color-success)]" /> : <Download className="w-3 h-3" />}
         <span>Export</span>
         <ChevronDown className="w-2 h-2 opacity-50" />
       </button>

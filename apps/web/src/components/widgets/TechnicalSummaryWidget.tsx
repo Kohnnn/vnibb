@@ -254,7 +254,7 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                         <div className="mt-2 flex items-center gap-2 text-[9px]">
                             <span className="text-[var(--text-muted)]">Trend Strength: </span>
                             <span className={`${getTrendColor(signals?.trend_strength || '')} font-bold capitalize`}>
-                                {(signals?.trend_strength || 'N/A').replace('_', ' ')}
+                                {(signals?.trend_strength || 'n/a').replace('_', ' ')}
                             </span>
                             <span className="text-[var(--text-muted)]">| Bias:</span>
                             <span className={signalBias >= 0 ? 'font-bold text-emerald-400' : 'font-bold text-rose-400'}>

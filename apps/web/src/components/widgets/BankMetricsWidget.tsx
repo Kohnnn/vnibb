@@ -66,9 +66,9 @@ const METRIC_GROUPS = [
 ] as const;
 
 function formatMetricValue(metricKey: string, value: number | string | null | undefined) {
-  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return 'N/A';
+  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return 'n/a';
   const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return 'N/A';
+  if (!Number.isFinite(numeric)) return 'n/a';
   if (PERCENT_KEYS.has(metricKey)) return formatPercent(numeric, { decimals: 2, input: 'percent' });
   if (RATIO_KEYS.has(metricKey)) return formatNumber(numeric, { decimals: 2 });
   return formatNumber(numeric, { decimals: 2 });

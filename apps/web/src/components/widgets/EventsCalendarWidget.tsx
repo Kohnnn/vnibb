@@ -10,7 +10,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 
 interface EventsCalendarWidgetProps {
     symbol: string;

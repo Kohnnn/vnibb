@@ -478,7 +478,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                         screener cohort, but this widget only renders the symbols
                                         the user loaded, so the column is labelled for what it
                                         actually averages (issue #106). */}
-                                    <span className="text-[8px] font-normal opacity-60" title="Arithmetic mean of the peers loaded in this widget, excluding values reported as N/A">
+                                    <span className="text-[8px] font-normal opacity-60" title="Arithmetic mean of the peers loaded in this widget, excluding values reported as n/a">
                                         Loaded peers only
                                     </span>
                                 </div>

@@ -523,11 +523,11 @@ export function Sidebar({
                         group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer
                         transition-colors text-xs
                         ${isActive
-                            ? 'bg-blue-500/15 text-blue-400 border-l-2 border-blue-500'
+                            ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border-l-2 border-[var(--color-accent-primary)]'
                             : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60'
                         }
                         ${isDragging ? 'opacity-50' : ''}
-                        ${isDragOver ? 'border-t border-blue-500' : ''}
+                        ${isDragOver ? 'border-t border-[var(--color-accent-primary)]' : ''}
                     `}
                     style={{ paddingLeft: `${6 + indent * 12}px` }}
                     onContextMenu={(e) => {
@@ -548,7 +548,7 @@ export function Sidebar({
                                     if (e.key === 'Enter') submitRename();
                                     if (e.key === 'Escape') setEditingId(null);
                                 }}
-                                className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
+                                className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--color-accent-primary)]"
                                 autoFocus
                                 onClick={(e) => e.stopPropagation()}
                             />
@@ -557,7 +557,7 @@ export function Sidebar({
                         <>
                             <button
                                 type="button"
-                                className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                                className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)]"
                                 onClick={() => setActiveDashboard(dashboard.id)}
                                 onDoubleClick={() => {
                                     if (!isEditableDashboard) return;
@@ -571,7 +571,7 @@ export function Sidebar({
                             {(isEditableDashboard || isDeletableDashboard) && (
                                 <button
                                     type="button"
-                                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-blue-400 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
                                     aria-label={`Workspace actions for ${dashboard.name}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -600,7 +600,7 @@ export function Sidebar({
                                         group/tab w-full flex items-center gap-2 rounded-r px-2 py-1 text-[11px]
                                         transition-colors text-left -ml-px
                                         ${isTabActive
-                                            ? 'text-blue-300 bg-blue-500/10 border-l-2 border-blue-400 font-medium'
+                                            ? 'text-[var(--color-accent-secondary)] bg-[var(--color-state-bg)] border-l-2 border-[var(--color-accent-primary)] font-medium'
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/40 border-l-2 border-transparent'
                                         }
                                     `}
@@ -611,12 +611,12 @@ export function Sidebar({
                                         size={10}
                                         className={cn(
                                             'shrink-0 transition-transform',
-                                            isTabActive ? 'rotate-90 text-blue-400' : 'text-[var(--text-muted)]/60'
+                                            isTabActive ? 'rotate-90 text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)]/60'
                                         )}
                                     />
                                     <span className="truncate flex-1">{tab.name}</span>
                                     {isTabActive && (
-                                        <span className="text-[8px] uppercase tracking-wider text-blue-400/70 font-bold">
+                                        <span className="text-[8px] uppercase tracking-wider text-[var(--color-accent-secondary)] font-bold">
                                             active
                                         </span>
                                     )}
@@ -641,7 +641,7 @@ export function Sidebar({
                         className={`
                         group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer 
                         text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs
-                        ${isDragOver ? 'bg-[var(--bg-tertiary)] ring-1 ring-blue-500' : ''}
+                        ${isDragOver ? 'bg-[var(--bg-tertiary)] ring-1 ring-[var(--color-accent-primary)]' : ''}
                     `}
                     role="button"
                     tabIndex={0}
@@ -662,9 +662,9 @@ export function Sidebar({
                     onDrop={(e) => handleDropOnFolder(e, folder.id)}
                 >
                     {folder.isExpanded ? (
-                        <FolderOpen size={14} className="shrink-0 text-yellow-500/80" />
+                        <FolderOpen size={14} className="shrink-0 text-[var(--text-muted)]" />
                     ) : (
-                        <Folder size={14} className="shrink-0 text-yellow-500/80" />
+                        <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />
                     )}
                     {isEditing ? (
                         <input
@@ -677,7 +677,7 @@ export function Sidebar({
                                 if (e.key === 'Enter') submitRename();
                                 if (e.key === 'Escape') setEditingId(null);
                             }}
-                            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
+                            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-[var(--color-accent-primary)]"
                             autoFocus
                             onClick={(e) => e.stopPropagation()}
                         />
@@ -686,7 +686,7 @@ export function Sidebar({
                             <span className="flex-1 truncate">{folder.name}</span>
                             {lockedFolder && (
                                 <span
-                                    className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300"
+                                    className="inline-flex items-center rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-warning)]"
                                     title="System-managed workspaces (Fundamental, Technical, Quant, Global Markets) — not editable or deletable."
                                 >
                                     <Lock size={9} className="mr-1" />
@@ -792,36 +792,36 @@ export function Sidebar({
                                     <div className="grid grid-cols-2 gap-1">
                                         <button
                                             onClick={onOpenTemplateSelector}
-                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-blue-500/10 hover:text-blue-300 transition-colors"
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-secondary)] transition-colors"
                                             title="Browse dashboard templates"
                                         >
-                                            <AppWindow size={13} className="shrink-0 text-blue-400/70 group-hover/btn:text-blue-300" />
+                                            <AppWindow size={13} className="shrink-0 text-[var(--color-accent-secondary)] group-hover/btn:text-[var(--color-accent-secondary)]" />
                                             <span className="truncate">Templates</span>
                                         </button>
                                         <button
                                             onClick={onOpenWidgetLibrary}
-                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--color-accent-secondary)] transition-colors"
                                             title="Browse widget library"
                                         >
-                                            <Grid3X3 size={13} className="shrink-0 text-emerald-400/70 group-hover/btn:text-emerald-300" />
+                                            <Grid3X3 size={13} className="shrink-0 text-[var(--color-accent-secondary)] group-hover/btn:text-[var(--color-accent-secondary)]" />
                                             <span className="truncate">Widgets</span>
                                         </button>
                                         {onOpenAppsLibrary ? (
                                             <button
                                                 onClick={onOpenAppsLibrary}
-                                                className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-fuchsia-500/10 hover:text-fuchsia-300 transition-colors"
+                                                className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--color-accent-secondary)] transition-colors"
                                                 title="Browse apps library"
                                             >
-                                                <Layers size={13} className="shrink-0 text-fuchsia-400/70 group-hover/btn:text-fuchsia-300" />
+                                                <Layers size={13} className="shrink-0 text-[var(--color-accent-secondary)] group-hover/btn:text-[var(--color-accent-secondary)]" />
                                                 <span className="truncate">Apps</span>
                                             </button>
                                         ) : null}
                                         <button
                                             onClick={onOpenPromptsLibrary}
-                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-warning)] transition-colors"
                                             title="Browse VniAgent prompts"
                                         >
-                                            <MessageSquareText size={13} className="shrink-0 text-amber-400/70 group-hover/btn:text-amber-300" />
+                                            <MessageSquareText size={13} className="shrink-0 text-[var(--color-warning)] group-hover/btn:text-[var(--color-warning)]" />
                                             <span className="truncate">Prompts</span>
                                         </button>
                                     </div>
@@ -842,7 +842,7 @@ export function Sidebar({
                                             aria-label="Create workspace or folder"
                                             aria-expanded={showCreateMenu}
                                             onClick={() => setShowCreateMenu(!showCreateMenu)}
-                                            className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors focus-visible:ring-2 focus-visible:ring-blue-400"
+                                            className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)]"
                                         >
                                             <Plus size={14} aria-hidden="true" />
                                         </button>
@@ -877,7 +877,7 @@ export function Sidebar({
                                             <button
                                                 type="button"
                                                 onClick={onOpenTemplateSelector}
-                                                className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300 hover:bg-blue-500/20"
+                                                className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-secondary)] hover:bg-[var(--bg-hover)]"
                                             >
                                                 Browse templates
                                             </button>
@@ -1114,7 +1114,7 @@ export function Sidebar({
                                                     onClick={() => handleMoveToFolder(folder.id)}
                                                     className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                                                 >
-                                                    <Folder size={12} className="text-yellow-500/80" />
+                                                    <Folder size={12} className="text-[var(--text-muted)]" />
                                                     <span className="truncate">{folder.name}</span>
                                                 </button>
                                             ))}
@@ -1128,7 +1128,7 @@ export function Sidebar({
                             role="menuitem"
                             onClick={handleDelete}
                             disabled={contextMenu.type === 'dashboard' ? !contextDashboardDeletable : !contextFolderEditable}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-500 hover:bg-[var(--bg-tertiary)] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--color-error)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--color-error)] disabled:cursor-not-allowed disabled:opacity-40"
                         >
                             <Trash2 size={12} />
                             <span>Delete</span>

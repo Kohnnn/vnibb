@@ -14,10 +14,12 @@ interface FilterChipProps {
   className?: string;
 }
 
+// `green`/`red` are financial direction (gain/loss) and use the shared
+// direction tokens so colour-vision mode applies; chips also carry a label.
 const COLORS = {
-  blue: 'bg-blue-600/10 text-blue-400 border-blue-500/20 hover:border-blue-500/50',
-  green: 'bg-green-600/10 text-green-400 border-green-500/20 hover:border-green-500/50',
-  red: 'bg-red-600/10 text-red-400 border-red-500/20 hover:border-red-500/50',
+  blue: 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border-[var(--color-state-border)] hover:border-[var(--color-accent-primary)]',
+  green: 'bg-price-up text-[var(--color-positive)] border-[var(--color-positive)] hover:border-[var(--color-positive)]',
+  red: 'bg-price-down text-[var(--color-negative)] border-[var(--color-negative)] hover:border-[var(--color-negative)]',
   gray: 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-default)]',
 };
 

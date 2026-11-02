@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Waves } from 'lucide-react'
 import { useBlockTrades } from '@/lib/queries'
-import { formatTimestamp } from '@/lib/format'
+import { formatTimestamp } from '@/lib/formatDate'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'

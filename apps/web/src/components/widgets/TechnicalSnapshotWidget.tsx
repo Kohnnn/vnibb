@@ -8,7 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useFullTechnicalAnalysis } from '@/lib/queries';
-import { formatNumber } from '@/lib/format';
+import { formatNumber } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface TechnicalSnapshotWidgetProps {
@@ -130,11 +130,11 @@ export function TechnicalSnapshotWidget({ id, symbol, onRemove, onDataChange }: 
 
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: 'RSI (14)', value: rsi ? formatNumber(rsi, 2) : '-' },
-                  { label: 'MACD Hist', value: macd ? formatNumber(macd, 2) : '-' },
-                  { label: 'ADX', value: adx ? formatNumber(adx, 1) : '-' },
-                  { label: 'Support', value: support ? formatNumber(support, 0) : '-' },
-                  { label: 'Resistance', value: resistance ? formatNumber(resistance, 0) : '-' },
+                  { label: 'RSI (14)', value: formatNumber(rsi, { decimals: 2 }) },
+                  { label: 'MACD Hist', value: formatNumber(macd, { decimals: 2 }) },
+                  { label: 'ADX', value: formatNumber(adx, { decimals: 1 }) },
+                  { label: 'Support', value: formatNumber(support, { decimals: 0 }) },
+                  { label: 'Resistance', value: formatNumber(resistance, { decimals: 0 }) },
                   { label: 'Trend', value: data?.signals?.trend_strength || '-' },
                 ].map((item) => (
                   <div

@@ -10,7 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useDerivativesContracts, useDerivativesHistory } from '@/lib/queries';
-import { formatDate } from '@/lib/format';
+import { formatDate } from '@/lib/formatDate';
 import { formatAxisValue, formatNumber } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 

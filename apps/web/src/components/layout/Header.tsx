@@ -23,7 +23,8 @@ import { useAuth, type AuthUser } from '@/contexts/AuthContext'
 import { env } from '@/lib/env'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
 import { probeBackendReadiness } from '@/lib/backendHealth'
-import type { UnitDisplay } from '@/lib/units'
+import { formatPercent, type UnitDisplay } from '@/lib/units'
+import { priceArrow, priceColorClass } from '@/lib/priceColor'
 import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
@@ -45,7 +46,6 @@ const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
 const MARKET_TIMEZONE = 'Asia/Ho_Chi_Minh'
 
 type ConnectionState = 'checking' | 'online' | 'offline' | 'degraded'
-type MovementDirection = 'up' | 'down' | 'flat' | 'unknown'
 
 function getShortcutModifierLabel(): string {
   if (typeof navigator === 'undefined') return 'Ctrl'
@@ -53,28 +53,19 @@ function getShortcutModifierLabel(): string {
 }
 
 function formatHeaderPrice(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '--'
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a'
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function formatHeaderPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
-  const sign = value > 0 ? '+' : ''
-  return `${sign}${value.toFixed(2)}%`
-}
-
-function getMovementDirection(value: number | null | undefined): MovementDirection {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'unknown'
-  if (value > 0) return 'up'
-  if (value < 0) return 'down'
-  return 'flat'
-}
-
+/**
+ * Arrow + signed percent. Shape (arrow) and sign carry direction so the
+ * reading survives colour-vision mode; a measured zero stays `0.00%`.
+ */
 function formatHeaderMovement(value: number | null | undefined): string {
-  const direction = getMovementDirection(value)
-  if (direction === 'unknown') return '--'
-  const label = direction === 'up' ? 'Up' : direction === 'down' ? 'Down' : 'Flat'
-  return `${label} ${formatHeaderPercent(value)}`
+  const arrow = priceArrow(value)
+  const percent = formatPercent(value, { decimals: 2, input: 'percent', signed: true })
+  if (!arrow) return percent
+  return `${arrow} ${percent}`
 }
 
 function normalizeIndexName(value: string | null | undefined): string {
@@ -195,24 +186,15 @@ export function Header({
     return ((latest - previous) / previous) * 100
   }, [historyQuery.data?.data, historyQuery.data?.meta?.unit_status, quote?.changePct])
 
-  const quoteDirection = getMovementDirection(displayQuoteChangePct)
   // Token-backed price-direction classes (see lib/priceColor.ts + globals.css).
-  // These adapt to light theme and colorblind mode automatically.
-  const quoteChangeClass =
-    quoteDirection === 'unknown' || quoteDirection === 'flat'
-      ? 'text-[var(--text-muted)]'
-      : quoteDirection === 'up'
-        ? 'price-up'
-        : 'price-down'
+  // These adapt to light theme and colorblind mode automatically; the arrow
+  // glyph and sign carry direction when hue is unavailable.
+  const quoteChangeClass = priceColorClass(displayQuoteChangePct)
   const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
-  const getIndexChangeClass = useCallback((changePct: number | null | undefined) => {
-    const direction = getMovementDirection(changePct)
-    return direction === 'unknown' || direction === 'flat'
-      ? 'text-[var(--text-muted)]'
-      : direction === 'up'
-        ? 'price-up'
-        : 'price-down'
-  }, [])
+  const getIndexChangeClass = useCallback(
+    (changePct: number | null | undefined) => priceColorClass(changePct),
+    [],
+  )
   const marketChips = useMemo(() => {
     const rows = marketOverviewQuery.data?.data || []
     const findIndex = (aliases: string[]) => rows.find((item) => aliases.includes(normalizeIndexName(item.index_name))) || null
@@ -271,12 +253,11 @@ export function Header({
 
     return {
       className: cn(
-        'border-slate-500/25 bg-slate-500/10',
-        resolvedTheme === 'light' ? 'text-slate-700' : 'text-slate-300'
+        'border-[var(--border-default)] bg-[var(--bg-hover)] text-[var(--text-secondary)]'
       ),
-      dotClassName: resolvedTheme === 'light' ? 'bg-slate-500' : 'bg-slate-400',
+      dotClassName: 'bg-[var(--text-muted)]',
     }
-  }, [healthBadge, marketStatus.isOpen, resolvedTheme])
+  }, [healthBadge, marketStatus.isOpen])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -392,7 +373,7 @@ export function Header({
               type="button"
               aria-label="Open symbol search and command palette"
               onClick={openHeaderSearch}
-              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-left text-xs text-[var(--text-primary)] transition-all hover:border-blue-500/40 hover:bg-[var(--bg-hover)] focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/10"
+              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-left text-xs text-[var(--text-primary)] transition-all hover:border-[var(--color-state-border)] hover:bg-[var(--bg-hover)] focus:border-[var(--color-state-border)] focus:outline-none focus:ring-1 focus:ring-[var(--color-state-border)]"
             >
               <Search
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
@@ -428,7 +409,7 @@ export function Header({
               className={cn(
                 'flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                 isAIOpen
-                  ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
+                  ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                   : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               )}
               title="Open VniAgent"
@@ -458,7 +439,7 @@ export function Header({
                   onClick={() => setTheme(option)}
                   className={cn(
                     'text-xs capitalize',
-                    theme === option ? 'text-blue-300' : 'text-[var(--text-secondary)]'
+                    theme === option ? 'text-[var(--color-accent-secondary)]' : 'text-[var(--text-secondary)]'
                   )}
                 >
                   {option}
@@ -480,7 +461,7 @@ export function Header({
                       className={cn(
                         'text-xs',
                         unitDisplay === option.value
-                          ? 'text-blue-300'
+                          ? 'text-[var(--color-accent-secondary)]'
                           : 'text-[var(--text-secondary)]'
                       )}
                     >
@@ -498,7 +479,7 @@ export function Header({
                 <button
                   type="button"
                   onClick={onAutoFitLayout}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-400/40 bg-gradient-to-r from-sky-500/18 to-cyan-500/12 px-3 py-1.5 text-[11px] font-semibold text-sky-100 transition-colors hover:from-sky-500/28 hover:to-cyan-500/18"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-primary)] transition-colors"
                   title="Automatically arrange widgets to fill gaps"
                   aria-label="Auto-fit layout"
                 >
@@ -514,8 +495,8 @@ export function Header({
                   className={cn(
                     'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors',
                     isEditing
-                      ? 'border-amber-300/60 bg-gradient-to-r from-amber-500/22 to-orange-500/16 text-amber-50 shadow-[0_0_0_1px_rgba(251,191,36,0.22)]'
-                      : 'border-slate-400/20 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                      ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
+                      : 'border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   )}
                   title="Lock or unlock dashboard layout for editing"
                   aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
@@ -587,7 +568,7 @@ export function Header({
                  title="Account menu"
                  aria-label="Open account menu"
                >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/15 text-[10px] font-black uppercase text-blue-200">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-state-bg)] text-[10px] font-black uppercase text-[var(--color-accent-secondary)]">
                   {authLoading ? <User size={13} /> : userInitials}
                 </span>
                 <span className="hidden max-w-[8rem] truncate text-[10px] font-semibold uppercase tracking-[0.12em] lg:inline">
@@ -617,7 +598,7 @@ export function Header({
               {user ? (
                 <DropdownMenuItem
                   onClick={() => { void signOut() }}
-                  className="text-xs text-rose-300"
+                  className="text-xs text-[var(--color-error)]"
                 >
                   <LogOut size={13} />
                   Sign out

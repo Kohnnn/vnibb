@@ -11,7 +11,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { addNotebookItem } from '@/lib/researchNotebook';
 import { newsObservationProvenance } from '@/lib/newsTime';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import {
   getWorldNews,
   getWorldNewsSources,

@@ -11,7 +11,7 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 export function WidgetLoading({ message = 'Loading data...' }: { message?: string }) {
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[120px] p-4 text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--color-accent-primary)] mb-3" />
             <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest animate-pulse">
                 {message}
             </p>
@@ -94,7 +94,7 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
             {onRetry && (
                 <button
                     onClick={onRetry}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 rounded-md transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-accent-primary)] bg-[var(--color-state-bg)] hover:bg-[var(--color-accent-primary)]/20 rounded-md transition-colors"
                 >
                     <RefreshCw size={12} />
                     {isTimeout ? 'Retry' : 'Try Again'}
@@ -143,7 +143,7 @@ export function WidgetEmpty({
     return (
         <div className={`flex flex-col items-center justify-center h-full p-4 text-center ${size === 'compact' ? 'min-h-[72px]' : 'min-h-[120px]'}`}>
             {health?.label && (
-                <div className="mb-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                <div className="mb-2 rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-warning)]">
                     {health.label}
                 </div>
             )}
@@ -157,7 +157,7 @@ export function WidgetEmpty({
             {action && (
                 <button
                     onClick={action.onClick}
-                    className="px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded transition-colors"
+                    className="px-3 py-1.5 text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)] hover:bg-[var(--color-state-bg)] rounded transition-colors"
                 >
                     {action.label}
                 </button>
@@ -171,7 +171,7 @@ export function WidgetEmpty({
  */
 export function CompactError({ message = 'Error', onRetry }: { message?: string; onRetry?: () => void }) {
     return (
-        <div className="flex items-center justify-center gap-2 p-3 text-amber-400">
+        <div className="flex items-center justify-center gap-2 p-3 text-[var(--color-warning)]">
             <AlertTriangle size={14} />
             <span className="text-xs">{message}</span>
             {onRetry && (

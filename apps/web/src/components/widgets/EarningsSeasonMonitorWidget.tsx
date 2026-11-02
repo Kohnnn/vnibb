@@ -9,9 +9,9 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useEarningsSeason } from '@/lib/queries';
-import { formatCompact } from '@/lib/format';
-import { formatNumber, formatPercent } from '@/lib/units';
-import { formatRelativeTime } from '@/lib/format';
+
+import { formatLargeNumber, formatNumber, formatPercent } from '@/lib/units';
+import { formatRelativeTime } from '@/lib/formatDate';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
 
@@ -235,17 +235,17 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
-                    <Metric label="Revenue YoY" value={formatPercent(row.revenue_yoy, { decimals: 1, input: 'percent', clamp: 'yoy_change' })} />
-                    <Metric label="Earnings YoY" value={formatPercent(row.earnings_yoy, { decimals: 1, input: 'percent', clamp: 'yoy_change' })} />
+                    <Metric label="Revenue YoY" value={formatPercent(row.revenue_yoy, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} />
+                    <Metric label="Earnings YoY" value={formatPercent(row.earnings_yoy, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} />
                     <Metric label="Gross Margin" value={formatPercent(row.gross_margin, { decimals: 1, input: 'percent', clamp: 'margin' })} />
-                    <Metric label="Margin Delta" value={formatPercent(row.gross_margin_delta, { decimals: 1, input: 'percent', clamp: 'margin' })} />
+                    <Metric label="Margin Delta" value={formatPercent(row.gross_margin_delta, { decimals: 1, input: 'percent', signed: true, unit: 'pp', clamp: 'margin' })} />
                     <Metric label="EPS" value={formatNumber(row.eps, { decimals: 2 })} />
                   </div>
 
                   <div className="mt-3 flex items-center justify-between text-[10px] text-[var(--text-muted)]">
                     <div className="flex items-center gap-3">
-                      <span>Revenue {formatCompact(row.revenue, 1)}</span>
-                      <span>Net Income {formatCompact(row.net_income, 1)}</span>
+                      <span>Revenue {formatLargeNumber(row.revenue, { decimals: 1 })}</span>
+                      <span>Net Income {formatLargeNumber(row.net_income, { decimals: 1 })}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {typeof row.score === 'number' ? <span>Score {row.score.toFixed(1)}</span> : null}

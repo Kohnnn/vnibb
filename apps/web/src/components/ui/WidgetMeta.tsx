@@ -2,7 +2,7 @@
 
 import { Clock, RefreshCw, Database, AlertTriangle, ShieldAlert, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatAbsoluteTimestamp, formatTime } from '@/lib/format';
+import { formatAbsoluteTimestamp, formatTime } from '@/lib/formatDate';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 const fetchingBadgeStyle = {

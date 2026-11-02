@@ -30,8 +30,8 @@ describe('BankMetricsWidget missing values', () => {
 
     const casaRow = screen.getByRole('row', { name: /CASA Ratio/i });
     const creditCostRow = screen.getByRole('row', { name: /Credit Cost/i });
-    expect(within(casaRow).getByText('N/A')).toBeInTheDocument();
-    expect(within(creditCostRow).getByText('N/A')).toBeInTheDocument();
+    expect(within(casaRow).getByText('n/a')).toBeInTheDocument();
+    expect(within(creditCostRow).getByText('n/a')).toBeInTheDocument();
     expect(within(casaRow).queryByText('0.00%')).not.toBeInTheDocument();
     expect(within(creditCostRow).queryByText('0.00%')).not.toBeInTheDocument();
   });

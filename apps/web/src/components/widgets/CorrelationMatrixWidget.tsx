@@ -351,7 +351,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
                                         : getCellColor(value),
                                     !isDiagonal && !isMutedLowerTriangle && isHighlighted && 'ring-1 ring-inset ring-white/20'
                                   )}
-                                  title={`${rowTicker} vs ${colTicker}: ${value == null ? 'N/A' : value.toFixed(4)}`}
+                                  title={`${rowTicker} vs ${colTicker}: ${value == null ? 'n/a' : value.toFixed(4)}`}
                                 >
                                   {isDiagonal ? '1.00' : isMutedLowerTriangle ? '·' : formatCorrelation(value)}
                                 </td>

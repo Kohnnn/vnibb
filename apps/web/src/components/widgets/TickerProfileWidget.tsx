@@ -10,7 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
 import { formatLargeNumber } from '@/lib/units';
 import { normalizeInsiderAction } from '@/lib/insiderActions';

@@ -2,7 +2,7 @@
 
 import { Clock, Database, AlertTriangle, ShieldAlert, Activity } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { formatAbsoluteTimestamp, formatTime } from '@/lib/format';
+import { formatAbsoluteTimestamp, formatTime } from '@/lib/formatDate';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 const warningBadgeStyle = {
@@ -96,60 +96,60 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
       >
         <div className="mb-2 flex items-center gap-1.5 border-b border-[var(--border-subtle)] pb-2">
           <Icon size={12} />
-          <span className="text-[11px] font-semibold text-slate-100">{health.label}</span>
+          <span className="text-[11px] font-semibold text-[var(--text-primary)]">{health.label}</span>
         </div>
         {health.detail && (
-          <p className="mb-2 text-[11px] leading-4 text-slate-300/85">{health.detail}</p>
+          <p className="mb-2 text-[11px] leading-4 text-[var(--text-secondary)]">{health.detail}</p>
         )}
-        <div className="space-y-1 text-[10px] text-slate-300/80">
+        <div className="space-y-1 text-[10px] text-[var(--text-secondary)]">
           {details?.sourceLabel && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Source</span>
-              <span className="text-right text-slate-100/90">{details.sourceLabel}</span>
+              <span className="text-[var(--text-muted)]">Source</span>
+              <span className="text-right text-[var(--text-primary)]">{details.sourceLabel}</span>
             </div>
           )}
           {details?.apiGroup && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">API group</span>
-              <span className="text-right text-slate-100/90">{details.apiGroup}</span>
+              <span className="text-[var(--text-muted)]">API group</span>
+              <span className="text-right text-[var(--text-primary)]">{details.apiGroup}</span>
             </div>
           )}
           {details?.endpoint && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Endpoint</span>
-              <span className="text-right font-mono text-[9px] text-slate-100/90">{details.endpoint}</span>
+              <span className="text-[var(--text-muted)]">Endpoint</span>
+              <span className="text-right font-mono text-[9px] text-[var(--text-primary)]">{details.endpoint}</span>
             </div>
           )}
           <div className="flex justify-between gap-2">
-            <span className="text-slate-400">Source as of</span>
-            <span className="text-right text-slate-100/90" suppressHydrationWarning title={updatedDate ? formatTime(updatedDate, true) : undefined}>
+            <span className="text-[var(--text-muted)]">Source as of</span>
+            <span className="text-right text-[var(--text-primary)]" suppressHydrationWarning title={updatedDate ? formatTime(updatedDate, true) : undefined}>
               {updatedDate ? formatAbsoluteTimestamp(updatedDate) : 'Unknown'}
             </span>
           </div>
           {fetchedDate && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Fetched at</span>
-              <span className="text-right text-slate-100/90" suppressHydrationWarning title={formatTime(fetchedDate, true)}>
+              <span className="text-[var(--text-muted)]">Fetched at</span>
+              <span className="text-right text-[var(--text-primary)]" suppressHydrationWarning title={formatTime(fetchedDate, true)}>
                 {formatAbsoluteTimestamp(fetchedDate)}
               </span>
             </div>
           )}
           {details?.cached !== undefined && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Delivery</span>
+              <span className="text-[var(--text-muted)]">Delivery</span>
               <span>{details.cached ? 'Cached snapshot' : 'Not marked cached'}</span>
             </div>
           )}
           {details?.coverage && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Coverage</span>
+              <span className="text-[var(--text-muted)]">Coverage</span>
               <span>{details.coverage}</span>
             </div>
           )}
           {details?.adjustmentMode && (
             <div className="flex justify-between gap-2">
-              <span className="text-slate-400">Adjustment</span>
-              <span className="text-right text-slate-100/90">{details.adjustmentMode}</span>
+              <span className="text-[var(--text-muted)]">Adjustment</span>
+              <span className="text-right text-[var(--text-primary)]">{details.adjustmentMode}</span>
             </div>
           )}
         </div>

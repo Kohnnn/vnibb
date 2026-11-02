@@ -13,7 +13,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import * as api from '@/lib/api';
 import { queryKeys, useDerivativesContracts } from '@/lib/queries';
 import { buildDerivativesCurveRows, classifyDerivativesCurve } from '@/lib/derivativesAnalytics';
-import { formatDate } from '@/lib/format';
+import { formatDate } from '@/lib/formatDate';
 import { formatNumber, formatPercent } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
@@ -144,7 +144,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
           <div className="flex h-full flex-col gap-3">
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
               <MetricCard label="Front Contract" value={front?.symbol || '—'} tone="text-[var(--text-primary)]" />
-              <MetricCard label="Front 20D Return" value={formatPercent(front?.return20dPct, { decimals: 1, input: 'percent', clamp: 'yoy_change' })} tone={front?.return20dPct != null && front.return20dPct >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
+              <MetricCard label="Front 20D Return" value={formatPercent(front?.return20dPct, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} tone={front?.return20dPct != null && front.return20dPct >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
               <MetricCard label="Front Vol 20D" value={formatPercent(front?.realizedVol20dPct, { decimals: 1, input: 'percent', clamp: 'margin' })} tone="text-cyan-300" />
               <MetricCard label="Avg Vol 20D" value={formatCompact(front?.avgVolume20d)} tone="text-[var(--text-primary)]" />
             </div>
@@ -179,7 +179,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
                       </div>
                       <div className="text-right text-[10px] text-[var(--text-secondary)]">
                         <div>Close {formatNumber(row.latestClose, { decimals: 2 })}</div>
-                        <div>Spread {formatPercent(row.spreadToFrontPct, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}</div>
+                        <div>Spread {formatPercent(row.spreadToFrontPct, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}</div>
                       </div>
                     </div>
                   </div>

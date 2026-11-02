@@ -362,7 +362,7 @@ export function TabBar(_props: TabBarProps) {
                                             : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'
                                         }
                                         ${isDragging ? 'opacity-50' : ''}
-                                        ${isDragOver ? 'ring-2 ring-blue-500 ring-inset' : ''}
+                                        ${isDragOver ? 'ring-2 ring-[var(--color-accent-primary)] ring-inset' : ''}
                                     `}
                                     role="button"
                                     tabIndex={0}
@@ -401,7 +401,7 @@ export function TabBar(_props: TabBarProps) {
                                             onBlur={handleRenameConfirm}
                                             onKeyDown={handleRenameKeyDown}
                                             onClick={(e) => e.stopPropagation()}
-                                            className="w-20 bg-[var(--bg-secondary)] border border-blue-500 rounded px-1 py-0.5 text-xs text-[var(--text-primary)] focus:outline-none"
+                                            className="w-20 bg-[var(--bg-secondary)] border border-[var(--color-accent-primary)] rounded px-1 py-0.5 text-xs text-[var(--text-primary)] focus:outline-none"
                                         />
                                     ) : (
                                         <span className="flex items-center gap-1 px-1">
@@ -422,7 +422,7 @@ export function TabBar(_props: TabBarProps) {
                                             className={`
                                                 p-0.5 rounded transition-colors
                                                 ${isDeleteConfirm
-                                                    ? 'text-red-400 bg-red-500/20 hover:bg-red-500/30 opacity-100'
+                                                    ? 'text-[var(--color-error)] bg-[var(--color-state-bg)] hover:bg-[var(--bg-hover)] opacity-100'
                                                     : `text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/70 ${isActive ? 'opacity-60' : 'opacity-0'} group-hover:opacity-100`
                                                 }
                                             `}
@@ -476,7 +476,7 @@ export function TabBar(_props: TabBarProps) {
                     <div className="mr-2 hidden shrink-0 items-center gap-2 text-[10px] text-[var(--text-muted)] xl:flex">
                         <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">{shortcutModifier}1-9</span>
                         <span>quick switch</span>
-                        {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
+                        {reachedTabLimit && <span className="text-[var(--color-warning)]">max {MAX_TABS} tabs</span>}
                     </div>
                 </div>
             </div>

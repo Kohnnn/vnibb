@@ -18,7 +18,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { formatCompactValueForUnit } from '@/lib/units';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 import { cn } from '@/lib/utils';
 
 interface MarketHeatmapWidgetProps {

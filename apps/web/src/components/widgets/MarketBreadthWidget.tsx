@@ -9,7 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketBreadth } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatNumber } from '@/lib/format';
+import { formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 interface MarketBreadthWidgetProps {
@@ -121,7 +121,7 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
                   >
                     <div className="flex items-center justify-between">
                       <div className="text-xs font-semibold text-[var(--text-primary)]">{row.exchange}</div>
-                      <div className="text-[10px] text-[var(--text-muted)]">{formatNumber(row.total)}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">{formatNumber(row.total, { decimals: 0 })}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
                       <div className="text-emerald-400">▲ {row.advancers}</div>

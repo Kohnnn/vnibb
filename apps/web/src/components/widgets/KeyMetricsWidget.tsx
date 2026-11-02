@@ -80,8 +80,8 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
 import { resolveMetric } from './utils';
 
 function formatRatioPercent(value: number | null | undefined): string {
-    if (value === null || value === undefined || !Number.isFinite(value)) return '-';
-    return `${value >= 0 ? '+' : ''}${formatPercent(value, { input: 'percent' })}`;
+    // Signed formatter: measured zero stays `0.00%`, missing stays `n/a`.
+    return formatPercent(value, { input: 'percent', signed: true });
 }
 
 export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChange }: KeyMetricsWidgetProps) {

@@ -8,6 +8,8 @@ import * as api from '@/lib/api';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { useMemo, useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { formatPercent } from '@/lib/units';
+import { priceColorClass } from '@/lib/priceColor';
 
 interface IndexData {
     symbol: string;
@@ -27,8 +29,8 @@ function IndexTicker({ symbol, price, change, change_pct, direction }: IndexData
     return (
         <div className={cn(
             "flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-500",
-            direction === 'up' ? "bg-green-500/20 border-green-500/40 scale-[1.02]" : 
-            direction === 'down' ? "bg-red-500/20 border-red-500/40 scale-[1.02]" :
+            direction === 'up' ? "bg-price-up border-[var(--color-positive)] scale-[1.02]" :
+            direction === 'down' ? "bg-price-down border-[var(--color-negative)] scale-[1.02]" :
             "bg-[var(--bg-secondary)]/70 border-[var(--border-default)]"
         )}>
             <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">{symbol}</span>
@@ -37,11 +39,11 @@ function IndexTicker({ symbol, price, change, change_pct, direction }: IndexData
             </span>
             <div className={cn(
                 "flex items-center gap-1 text-[10px] font-bold",
-                isPositive ? 'text-green-400' : 'text-red-400'
+                priceColorClass(change)
             )}>
                 {isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
                 <span>{isPositive ? '+' : ''}{formatNumber(change)}</span>
-                <span className="opacity-80">({isPositive ? '+' : ''}{change_pct?.toFixed(2) || '0.00'}%)</span>
+                <span className="opacity-80">({formatPercent(change_pct, { decimals: 2, input: 'percent', signed: true })})</span>
             </div>
         </div>
     );
@@ -127,12 +129,12 @@ export function MarketRibbon() {
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
                         {isConnected ? (
-                            <div className="flex items-center gap-1 text-[10px] font-black text-green-500 uppercase tracking-widest">
+                            <div className="flex items-center gap-1 text-[10px] font-black text-[var(--color-success)] uppercase tracking-widest">
                                 <Wifi size={12} className="animate-pulse" />
                                 <span>Live</span>
                             </div>
                         ) : (
-                            <div className="flex items-center gap-1 text-[10px] font-black text-red-500 uppercase tracking-widest opacity-50">
+                            <div className="flex items-center gap-1 text-[10px] font-black text-[var(--color-error)] uppercase tracking-widest opacity-50">
                                 <WifiOff size={12} />
                                 <span>Delayed</span>
                             </div>

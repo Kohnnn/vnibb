@@ -102,7 +102,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
                 {canSort && (
                     <div className="flex flex-col opacity-30">
                         {isSorted ? (
-                            sortOrder === 'asc' ? <ArrowUp size={10} className="text-blue-500" /> : <ArrowDown size={10} className="text-blue-500" />
+                            sortOrder === 'asc' ? <ArrowUp size={10} className="text-[var(--color-accent-primary)]" /> : <ArrowDown size={10} className="text-[var(--color-accent-primary)]" />
                         ) : (
                             <ArrowUpDown size={10} />
                         )}
@@ -138,7 +138,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
                 className={cn(
                     "absolute left-0 top-0 flex w-full items-center border-b border-[var(--border-subtle)] transition-colors",
                     isClickable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)]' : '',
-                    isClickable && !interactiveCells ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
+                    isClickable && !interactiveCells ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)]/30' : '',
                     virtualItem.index % 2 ? 'bg-[var(--bg-secondary)]/40' : 'bg-transparent'
                 )}
                 style={{

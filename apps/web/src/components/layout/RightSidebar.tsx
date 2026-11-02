@@ -41,7 +41,7 @@ export function RightSidebar({
         >
             {/* Header */}
             <div className="h-10 flex items-center justify-between px-4 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)]/70">
-                <div className="flex items-center gap-2 text-blue-400">
+                <div className="flex items-center gap-2 text-[var(--color-accent-primary)]">
                     <MessageSquare size={16} />
                     <span className="font-semibold text-sm">VniAgent</span>
                 </div>
@@ -74,7 +74,7 @@ export function SidebarTrigger({ isOpen, onClick }: { isOpen: boolean; onClick: 
     return (
         <button
             onClick={onClick}
-            className="p-2 text-[var(--text-secondary)] transition-colors hover:text-blue-400"
+            className="p-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--color-accent-primary)]"
             title="Open VniAgent"
             aria-label="Open VniAgent"
         >

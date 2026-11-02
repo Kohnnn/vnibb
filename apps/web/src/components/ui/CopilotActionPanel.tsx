@@ -102,7 +102,7 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
   return (
     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-3">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-primary)]">
-        <Sparkles size={12} className="text-cyan-400" />
+        <Sparkles size={12} className="text-[var(--color-info)]" />
         Suggested Actions
       </div>
       <div className="mt-3 space-y-2">
@@ -121,16 +121,16 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
                     <div className="mt-1 text-[11px] text-[var(--text-muted)]">{action.description}</div>
                   )}
                   {action.sourceIds?.length ? (
-                    <div className="mt-1 text-[10px] text-blue-300">{action.sourceIds.length} evidence refs</div>
+                    <div className="mt-1 text-[10px] text-[var(--color-accent-secondary)]">{action.sourceIds.length} evidence refs</div>
                   ) : null}
                   {executedMessage && (
-                    <div className="mt-2 flex items-center gap-1 text-[10px] text-emerald-300">
+                    <div className="mt-2 flex items-center gap-1 text-[10px] text-[var(--color-success)]">
                       <Check size={10} />
                       {executedMessage}
                     </div>
                   )}
                   {disabled && !executedMessage && (
-                    <div className="mt-2 text-[10px] text-amber-300">
+                    <div className="mt-2 text-[10px] text-[var(--color-warning)]">
                       Widget actions require an editable dashboard and active tab.
                     </div>
                   )}
@@ -139,7 +139,7 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
                   type="button"
                   disabled={disabled || Boolean(executedMessage)}
                   onClick={() => setPendingActionId(pending ? null : action.id)}
-                  className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-info)] transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {action.type === 'add_widget' ? <Plus size={11} /> : <RotateCcw size={11} />}
                   {pending ? 'Cancel' : 'Apply'}
@@ -147,7 +147,7 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
               </div>
 
               {pending && !executedMessage && (
-                <div className="mt-3 rounded border border-cyan-500/20 bg-cyan-500/5 p-2 text-[11px] text-[var(--text-secondary)]">
+                <div className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[11px] text-[var(--text-secondary)]">
                   <div>{action.confirmText || 'Apply this suggested action?'}</div>
                   <div className="mt-2 flex gap-2">
                     <button
@@ -155,7 +155,7 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
                       onClick={() => {
                         void executeAction(action)
                       }}
-                      className="inline-flex items-center gap-1 rounded-md bg-cyan-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-cyan-500"
+                      className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-2 py-1 text-[10px] font-semibold text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                     >
                       <Check size={10} />
                       Confirm

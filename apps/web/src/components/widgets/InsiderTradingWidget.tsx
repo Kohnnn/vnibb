@@ -11,7 +11,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
 
 interface InsiderTradingWidgetProps {
@@ -280,7 +280,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)]">
                     <span className="break-words whitespace-normal" title={deal.insider_position || ''}>
-                      {deal.insider_position || 'N/A'}
+                      {deal.insider_position || 'n/a'}
                     </span>
                     <span>{formatDate(deal.announce_date)}</span>
                   </div>

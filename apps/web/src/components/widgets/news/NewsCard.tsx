@@ -3,7 +3,7 @@
 import { memo } from 'react';
 import { ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
 
 interface NewsCardProps {

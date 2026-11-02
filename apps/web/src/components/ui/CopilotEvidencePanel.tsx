@@ -147,7 +147,7 @@ export function CopilotEvidencePanel({
         className="flex min-h-11 w-full items-center justify-between px-3 py-2 text-left text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
       >
         <span className="flex items-center gap-2">
-          <Database size={12} className="text-blue-400" />
+          <Database size={12} className="text-[var(--color-accent-primary)]" />
           <span className="font-semibold uppercase tracking-wide">Evidence</span>
           <span className="text-[10px] text-[var(--text-muted)]">{orderedSources.length} validated sources</span>
         </span>
@@ -165,7 +165,7 @@ export function CopilotEvidencePanel({
                 className={cn(
                   'min-h-9 rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors',
                   source.id === selectedSource.id
-                    ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]'
                     : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 )}
               >
@@ -176,7 +176,7 @@ export function CopilotEvidencePanel({
 
           <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs text-[var(--text-secondary)]">
             <div className="font-semibold text-[var(--text-primary)]">{selectedSource.label || selectedSource.kind || selectedSource.id}</div>
-            <div className="mt-1 font-mono text-[10px] text-blue-300">[{selectedSource.id}]</div>
+            <div className="mt-1 font-mono text-[10px] text-[var(--color-accent-secondary)]">[{selectedSource.id}]</div>
             {formatSourceMeta(selectedSource) && (
               <div className="mt-2 text-[11px] text-[var(--text-muted)]">{formatSourceMeta(selectedSource)}</div>
             )}
@@ -188,7 +188,7 @@ export function CopilotEvidencePanel({
                 href={sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-3 inline-flex min-h-9 items-center gap-1 text-blue-400 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
+                className="mt-3 inline-flex min-h-9 items-center gap-1 text-[var(--color-accent-primary)] underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-400"
               >
                 <ExternalLink size={11} aria-hidden="true" />
                 Open source: {selectedSource.label || selectedSource.kind || selectedSource.id}
@@ -200,7 +200,7 @@ export function CopilotEvidencePanel({
                   <button
                     type="button"
                     onClick={() => { void handleJumpToWidget() }}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-info)] hover:bg-[var(--bg-hover)]"
                   >
                     <ExternalLink size={11} />
                     Jump to widget
@@ -210,7 +210,7 @@ export function CopilotEvidencePanel({
                   <button
                     type="button"
                     onClick={() => { void handleAddWidget() }}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-secondary)] hover:bg-[var(--color-accent-primary)]/20"
                   >
                     <Plus size={11} />
                     Add widget

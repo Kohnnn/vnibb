@@ -3,8 +3,10 @@
  *
  * This is the single authoritative token file. Values reflect the *effective*
  * rendered palette (the historical cascade of design-tokens.css overridden by
- * variables.css). `styles/variables.css` is now a thin compat shim and
- * `styles/tokens.css` has been removed (it was never imported).
+ * variables.css). `styles/variables.css` is now a thin compat shim; the
+ * TypeScript token modules (`lib/design.ts`, `styles/tokens.ts`) were deleted
+ * in #198 — CSS is the only colour source, `lib/priceColor.ts` the only
+ * direction helper.
  *
  * Layering:
  *   1. This file defines `--color-*`, fonts, spacing, radius, semantic, and
@@ -45,6 +47,8 @@
   --color-accent-primary: #3B82F6;
   --color-accent-secondary: #60A5FA;
   --color-accent-hover: #2563EB;
+  /* Text/icon on a filled accent surface (#198). */
+  --color-on-accent: #ffffff;
 
   /* ---- System states (saved / loading / warning / failed) ----
      Never red or green: those are reserved for financial direction.
@@ -196,6 +200,7 @@ html[data-theme="light"],
   --color-accent-primary: #0B3D91;
   --color-accent-secondary: #1A56B8;
   --color-accent-hover: #082E6E;
+  --color-on-accent: #ffffff;
 
   /* System states: neutral/blue only. */
   --color-success: var(--color-accent-primary);

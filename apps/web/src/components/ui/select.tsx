@@ -80,7 +80,7 @@ export const SelectItem = ({ children, value, className = '' }: any) => {
                 context.onValueChange?.(value);
                 context.setIsOpen(false);
             }}
-            className={`relative flex w-full cursor-pointer select-none items-center rounded-md py-2 px-3 text-xs outline-none transition-colors duration-150 ${isSelected ? 'bg-blue-600/20 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            className={`relative flex w-full cursor-pointer select-none items-center rounded-md py-2 px-3 text-xs outline-none transition-colors duration-150 ${isSelected ? 'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 } ${className}`}
         >
             <span className="flex-1">{children}</span>
