@@ -25,6 +25,16 @@ interface CopilotEvidencePanelProps {
   className?: string;
 }
 
+function isResolvableReference(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function formatSourceMeta(source: CopilotSourceRef): string {
   const parts: string[] = [];
   parts.push(getCopilotSourceLabel(source.source));
@@ -50,6 +60,13 @@ export function CopilotEvidencePanel({
     () => [...sources].sort((left, right) => (left.priority ?? 999) - (right.priority ?? 999)),
     [sources],
   );
+  // "Source reference checked" is claimed only for sources the server actually
+  // resolved in this response (`referenceChecked`). A syntactically valid URL is
+  // not proof of a check; sources without the flag are listed, not verified.
+  const checkedReferenceCount = useMemo(
+    () => orderedSources.filter((source) => source.referenceChecked === true).length,
+    [orderedSources],
+  );
   const [isOpen, setIsOpen] = useState(false);
   const panelId = useId();
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(orderedSources[0]?.id ?? null);
@@ -67,13 +84,8 @@ export function CopilotEvidencePanel({
   const selectedSource = orderedSources.find((source) => source.id === selectedSourceId) ?? orderedSources[0] ?? null;
   const intent = useMemo(() => (selectedSource ? getIntentFromSource(selectedSource) : null), [selectedSource]);
   const sourceUrl = useMemo(() => {
-    if (!selectedSource?.url) return null;
-    try {
-      const url = new URL(selectedSource.url.trim());
-      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
-    } catch {
-      return null;
-    }
+    if (!isResolvableReference(selectedSource?.url)) return null;
+    return new URL(selectedSource!.url!.trim()).href;
   }, [selectedSource?.url]);
   const existingTarget = useMemo(
     () => (intent ? findMatchingWidgetTarget(state, intent) : null),
@@ -148,8 +160,15 @@ export function CopilotEvidencePanel({
       >
         <span className="flex items-center gap-2">
           <Database size={12} className="text-[var(--color-accent-primary)]" />
-          <span className="font-semibold uppercase tracking-wide">Evidence</span>
-          <span className="text-[10px] text-[var(--text-muted)]">{orderedSources.length} validated sources</span>
+          {/* Wording reflects the actual check result, never the presence of a URL. */}
+          <span className="font-semibold uppercase tracking-wide">
+            {checkedReferenceCount > 0 ? 'Source reference checked' : 'Sources'}
+          </span>
+          <span className="text-[10px] text-[var(--text-muted)]">
+            {checkedReferenceCount > 0
+              ? `${checkedReferenceCount} of ${orderedSources.length} checked`
+              : `${orderedSources.length} listed`}
+          </span>
         </span>
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>

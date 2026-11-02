@@ -2856,6 +2856,8 @@ export interface CopilotSourceRef {
     asOf?: string;
     url?: string;
     priority?: number;
+    /** True only when the server actually resolved this reference. */
+    referenceChecked?: boolean;
     widgetTarget?: CopilotWidgetTarget;
 }
 
@@ -3077,6 +3079,7 @@ interface RawCopilotSourceRef {
     url?: string;
     source_url?: string;
     priority?: number;
+    reference_checked?: boolean;
     widget_target?: CopilotWidgetTarget;
 }
 
@@ -3218,6 +3221,7 @@ function normalizeCopilotStreamEvent(rawEvent: unknown): CopilotStreamEvent {
             asOf: typeof source.as_of === 'string' ? source.as_of : undefined,
             url: typeof source.url === 'string' ? source.url : typeof source.source_url === 'string' ? source.source_url : undefined,
             priority: typeof source.priority === 'number' ? source.priority : undefined,
+            referenceChecked: source.reference_checked === true,
             widgetTarget: normalizeWidgetTarget(source.widget_target),
         })).filter((source) => Boolean(source.id)),
         artifacts: rawArtifacts.map((artifact) => {

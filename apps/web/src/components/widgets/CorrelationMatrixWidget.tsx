@@ -205,12 +205,12 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
           ) : (
             <div className="space-y-3">
               {isStaleData ? (
-                <div className="rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-200">
+                <div className="rounded-[var(--widget-radius)] border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-5 text-[var(--text-secondary)]">
                   Stale data: {upperSymbol} latest return row is {Math.floor(staleAgeDays!)} days old. Operator should trigger a price-sync backfill.
                 </div>
               ) : null}
               {isPartialCoverage ? (
-                <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
+                <div className="rounded-[var(--widget-radius)] border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-5 text-[var(--text-secondary)]">
                   Partial window: {upperSymbol} has {returnsCount} return observations. Each peer shows its own overlap; correlations need {minOverlapDays} overlapping rows.
                 </div>
               ) : null}
