@@ -255,7 +255,7 @@ function WorldNewsSourcesWidgetComponent({
             <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Tier 1</div>
           </div>
           <div className="border-l border-[var(--border-subtle)] px-2 py-2">
-            <div className="text-lg font-black leading-none text-amber-300">{failedFeeds.length}</div>
+            <div className="text-lg font-black leading-none text-[var(--color-warning)]">{failedFeeds.length}</div>
             <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Failed</div>
           </div>
         </div>
@@ -295,7 +295,7 @@ function WorldNewsSourcesWidgetComponent({
                           {source.language}
                         </span>
                         {sourceFailedFeeds.length > 0 ? (
-                          <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-200">
+                          <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[var(--text-secondary)]">
                             {sourceFailedFeeds.length} failed
                           </span>
                         ) : null}
@@ -335,7 +335,7 @@ function WorldNewsSourcesWidgetComponent({
                         rel="noopener noreferrer"
                         title={failedFeed ? `${failedFeed.reason} at ${formatFailedFeedTime(failedFeed.failed_at)}` : undefined}
                         className={failedFeed
-                          ? 'inline-flex max-w-full items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200 hover:border-amber-300/50'
+                          ? 'inline-flex max-w-full items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)] hover:border-amber-300/50'
                           : 'inline-flex max-w-full items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-200 hover:border-emerald-300/50'}
                       >
                         <Radio className="h-2.5 w-2.5" />

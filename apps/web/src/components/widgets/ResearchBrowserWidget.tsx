@@ -723,7 +723,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                     ) : rssQuery.error ? (
                       <WidgetError error={rssQuery.error as Error} onRetry={() => rssQuery.refetch()} />
                     ) : rssQuery.data?.error ? (
-                      <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      <div className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                         RSS feed temporarily unavailable for {rssSource}. You can still open the source directly.
                       </div>
                     ) : !rssQuery.data || rssQuery.data.count === 0 ? (

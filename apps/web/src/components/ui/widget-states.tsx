@@ -143,7 +143,7 @@ export function WidgetEmpty({
     return (
         <div className={`flex flex-col items-center justify-center h-full p-4 text-center ${size === 'compact' ? 'min-h-[72px]' : 'min-h-[120px]'}`}>
             {health?.label && (
-                <div className="mb-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                <div className="mb-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                     {health.label}
                 </div>
             )}

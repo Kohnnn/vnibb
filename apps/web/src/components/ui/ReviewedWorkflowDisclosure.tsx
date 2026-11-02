@@ -22,7 +22,7 @@ export function ReviewedWorkflowDisclosure({ workflow, symbol, prompt, matrixSel
       <p>Reviewed workflow {workflow.id}@{workflow.revision} · Scope: {scope || 'unknown'} · Current symbol: {symbol || workflow.symbol || 'not selected'}</p>
       <p>Requires: {requirements?.join(', ') || 'refresh the prompt library to review evidence requirements'}</p>
       {limits?.map((limit) => <p key={limit}>{limit}</p>)}
-      {scope === 'matrix' && !matrixSelectionAvailable ? <p className="text-amber-300">Missing requirement: attach an authorized frozen Matrix selection before sending this workflow.</p> : null}
+      {scope === 'matrix' && !matrixSelectionAvailable ? <p className="text-[var(--color-warning)]">Missing requirement: attach an authorized frozen Matrix selection before sending this workflow.</p> : null}
       <p>Evidence availability is checked by the server after context creation. Missing evidence is reported as a limitation, not invented.</p>
     </div>
   );

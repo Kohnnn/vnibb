@@ -122,7 +122,7 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                         <span>{annualLabel}</span>
                         <span className={row.annual !== null && row.annual >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
                           {formatPercent(row.annual, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
-                          {row.annualLabel && <span className="ml-1 text-[10px] text-amber-300">({row.annualLabel})</span>}
+                          {row.annualLabel && <span className="ml-1 text-[10px] text-[var(--color-warning)]">({row.annualLabel})</span>}
                         </span>
                       </div>
                     </div>
@@ -136,9 +136,9 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                       />
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
                         <span>{quarterLabel}</span>
-                        <span className={row.quarter !== null && row.quarter >= 0 ? 'text-cyan-300' : 'text-amber-300'}>
+                        <span className={row.quarter !== null && row.quarter >= 0 ? 'text-cyan-300' : 'text-[var(--color-warning)]'}>
                           {formatPercent(row.quarter, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
-                          {row.quarterLabel && <span className="ml-1 text-[10px] text-amber-300">({row.quarterLabel})</span>}
+                          {row.quarterLabel && <span className="ml-1 text-[10px] text-[var(--color-warning)]">({row.quarterLabel})</span>}
                         </span>
                       </div>
                     </div>

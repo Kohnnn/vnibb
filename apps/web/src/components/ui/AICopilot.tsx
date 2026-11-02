@@ -1327,8 +1327,8 @@ export function AICopilot({
                     </span>
                 </div>
                 {aiSettings.mode === 'browser_key' ? (
-                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100/85">
-                        <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300" />
+                    <div className="flex items-start gap-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-5 text-amber-100/85">
+                        <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
                         <span>
                             Browser Key mode uses a localStorage credential in this browser profile. Avoid shared devices and prefer restricted provider keys.
                         </span>
@@ -1729,7 +1729,7 @@ export function AICopilot({
                         <Send size={18} />
                     </button>
                 </div>
-                {matrixInputError && <p role="alert" className="mt-2 text-xs text-amber-300">{matrixInputError}</p>}
+                {matrixInputError && <p role="alert" className="mt-2 text-xs text-[var(--color-warning)]">{matrixInputError}</p>}
                 {isComposerToolsOpen && (
                     <div className="mt-2 flex justify-start">
                         <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-lg">

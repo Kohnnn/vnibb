@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="og-title">
+  <title id="og-title">VniBB — Research cockpit for Vietnamese equities</title>
+  <!--
+    Social/OG card. White field, unchanged black wordmark (native 2048×446 ratio,
+    scaled to 760 px wide), one descriptor, fine rules. No invented metrics,
+    coverage claims or partnerships. Favicon/app-icon artwork is separate and
+    still awaiting approval.
+  -->
+  <rect width="1200" height="630" fill="#FFFFFF"/>
+  <rect x="0" y="0" width="1200" height="8" fill="#0A0A0A"/>
+
+  <image href="/brand/vnibb-wordmark-master.svg" x="80" y="96" width="760" height="165.5" preserveAspectRatio="xMinYMin meet"/>
+
+  <line x1="80" y1="330" x2="1120" y2="330" stroke="#D8DCE2" stroke-width="1"/>
+
+  <text x="80" y="392" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="600" fill="#0A0A0A">Research cockpit for Vietnamese equities</text>
+  <text x="80" y="440" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="400" fill="#4A5568">Financial statements, ratios, charts and market intelligence in one modular workspace.</text>
+
+  <text x="80" y="556" font-family="'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace" font-size="18" fill="#4A5568">web.vnibb.xyz</text>
+  <text x="1120" y="556" text-anchor="end" font-family="'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace" font-size="18" fill="#4A5568">github.com/Kohnnn/vnibb</text>
+</svg>

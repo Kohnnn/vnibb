@@ -194,7 +194,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                     return Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24));
                   })();
                   let statusLabel = 'Pending';
-                  let statusClass = 'text-amber-300';
+                  let statusClass = 'text-[var(--color-warning)]';
                   if (row.filled) {
                     statusLabel = 'Filled';
                     statusClass = 'text-emerald-300';
@@ -203,7 +203,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                     statusClass = 'text-red-300';
                   } else if (ageDays !== null && ageDays > 5) {
                     statusLabel = 'Pending (>5d)';
-                    statusClass = 'text-amber-300';
+                    statusClass = 'text-[var(--color-warning)]';
                   }
                   return (
                     <tr key={`${row.date}-${row.type}-${row.gap_pct}`} className="border-b border-[var(--border-subtle)] text-[var(--text-secondary)]">

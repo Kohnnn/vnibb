@@ -52,17 +52,17 @@ export function ConnectionStatus() {
   return (
     <div className="flex items-center gap-3 text-[10px] font-medium">
       {status === 'checking' ? (
-        <div className="flex items-center gap-1.5 text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-[var(--text-muted)]">
           <Loader2 size={10} className="animate-spin" />
           <span className="hidden sm:inline">Status: Checking</span>
         </div>
       ) : status === 'online' ? (
-        <div className="flex items-center gap-1.5 text-emerald-500/80">
-          <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+        <div className="flex items-center gap-1.5 text-[var(--text-secondary)]">
+          <div className="h-1.5 w-1.5 rounded-full bg-[var(--color-info)]" />
           <span className="hidden sm:inline">Status: Online</span>
         </div>
       ) : status === 'degraded' ? (
-        <div className="flex items-center gap-2 text-amber-400/90">
+        <div className="flex items-center gap-2 text-[var(--color-warning)]">
           <div className="flex items-center gap-1">
             <AlertTriangle size={12} />
             <span className="hidden sm:inline">Status: Degraded</span>
@@ -70,21 +70,21 @@ export function ConnectionStatus() {
           <button
             onClick={() => checkConnection()}
             disabled={isChecking}
-            className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/25 rounded text-amber-200/90 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+            className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
           >
             {isChecking ? 'Checking...' : 'Retry'}
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-2 text-amber-300/90">
+        <div className="flex items-center gap-2 text-[var(--color-error)]">
           <div className="flex items-center gap-1">
             <WifiOff size={12} className="opacity-80" />
-            <span className="hidden sm:inline">Status: Degraded</span>
+            <span className="hidden sm:inline">Status: Offline</span>
           </div>
           <button
             onClick={() => checkConnection()}
             disabled={isChecking}
-            className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/25 rounded text-amber-200/90 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+            className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-50"
           >
             {isChecking ? 'Checking...' : 'Retry'}
           </button>

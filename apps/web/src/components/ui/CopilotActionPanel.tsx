@@ -130,7 +130,7 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
                     </div>
                   )}
                   {disabled && !executedMessage && (
-                    <div className="mt-2 text-[10px] text-amber-300">
+                    <div className="mt-2 text-[10px] text-[var(--color-warning)]">
                       Widget actions require an editable dashboard and active tab.
                     </div>
                   )}

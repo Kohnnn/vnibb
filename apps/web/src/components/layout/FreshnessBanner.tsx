@@ -107,7 +107,7 @@ export function FreshnessBanner() {
           ? 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
           : isCritical
             ? 'border-rose-500/30 bg-rose-500/10 text-rose-100'
-            : 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+            : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-amber-100',
       )}
     >
       {showWarning && (
@@ -115,7 +115,7 @@ export function FreshnessBanner() {
           size={14}
           className={cn(
             'mt-0.5 shrink-0',
-            isCritical ? 'text-rose-300' : 'text-amber-300',
+            isCritical ? 'text-rose-300' : 'text-[var(--color-warning)]',
           )}
         />
       )}

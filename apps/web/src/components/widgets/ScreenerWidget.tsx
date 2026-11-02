@@ -857,7 +857,7 @@ export function ScreenerWidget({
                             className={cn(
                                 'flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] font-bold uppercase transition-all',
                                 activeScreenAlertEnabled
-                                    ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
+                                    ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]'
                                     : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
                                 !activeSavedScreenIsCurrent && 'cursor-not-allowed opacity-40',
                             )}

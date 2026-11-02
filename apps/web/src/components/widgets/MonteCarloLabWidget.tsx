@@ -160,7 +160,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
                 <tr className="font-mono">
                   <td className="px-1 py-1 text-emerald-300">{fmtPct(stats.maxDrawdownPct.p5)}</td>
                   <td className="px-1 py-1 text-[var(--text-primary)]">{fmtPct(stats.maxDrawdownPct.p25)}</td>
-                  <td className="px-1 py-1 font-semibold text-amber-300">{fmtPct(stats.maxDrawdownPct.p50)}</td>
+                  <td className="px-1 py-1 font-semibold text-[var(--color-warning)]">{fmtPct(stats.maxDrawdownPct.p50)}</td>
                   <td className="px-1 py-1 text-[var(--text-primary)]">{fmtPct(stats.maxDrawdownPct.p75)}</td>
                   <td className="px-1 py-1 text-rose-300">{fmtPct(stats.maxDrawdownPct.p95)}</td>
                 </tr>

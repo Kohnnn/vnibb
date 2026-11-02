@@ -246,7 +246,7 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Spread Z</div>
-              <div className={`font-mono ${Math.abs(stats?.currentSpreadZ ?? 0) >= 2 ? 'text-amber-300' : 'text-[var(--text-primary)]'}`}>{fmt(stats?.currentSpreadZ)}</div>
+              <div className={`font-mono ${Math.abs(stats?.currentSpreadZ ?? 0) >= 2 ? 'text-[var(--color-warning)]' : 'text-[var(--text-primary)]'}`}>{fmt(stats?.currentSpreadZ)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Half-Life</div>
@@ -344,7 +344,7 @@ function PairBackendPanel({
 }) {
   if (notDeployed) {
     return (
-      <div className="mx-1 mb-2 rounded border border-amber-500/25 bg-amber-500/5 px-2 py-1 text-[9px] leading-3 text-amber-200/90">
+      <div className="mx-1 mb-2 rounded border border-amber-500/25 bg-amber-500/5 px-2 py-1 text-[9px] leading-3 text-[var(--text-secondary)]/90">
         OLS hedge-ratio diagnostics aren&apos;t available yet — the backend endpoint hasn&apos;t been deployed.
         Showing the client 1:1 spread below. Switch back to 1:1 to hide this notice.
       </div>

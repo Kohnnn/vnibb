@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useComparison, usePeers } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
-import { exportPeers } from '@/lib/api';
+import { exportToCSV, type ExportProvenance } from '@/lib/exportWidget';
 import { EMPTY_VALUE, formatCompactValueForUnit, formatNumber, formatPercent, type UnitConfig } from '@/lib/units';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -469,7 +469,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             ))}
                             <th className="text-right py-2 px-2 font-medium min-w-[84px] text-amber-400/80 border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
-                                    <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-amber-300">
+                                    <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-[var(--color-warning)]">
                                     <span>Peer Avg</span>
                                         {sortIndicator('sector')}
                                     </button>
@@ -785,7 +785,32 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                         <RefreshCw size={14} />
                     </button>
-                    <ExportButton onExport={async (f) => exportPeers(peers, { format: f })} variant="ghost" className="h-8 w-8 p-0" />
+                    <ExportButton
+                        onExport={async () => {
+                            const rows = peers.map((sym) => ({
+                                symbol: sym,
+                                period,
+                                name: comparisonData[sym]?.name ?? null,
+                                ...(comparisonData[sym]?.metrics ?? {}),
+                            }));
+                            const provenance: ExportProvenance = {
+                                widgetType: 'peer_comparison',
+                                widgetTitle: 'Peer Comparison',
+                                symbol,
+                                sourceLabel: 'VniBB comparison API',
+                                apiGroup: '/comparison',
+                                endpoint: '/api/v1/comparison/stocks',
+                                updatedAt: dataUpdatedAt ? new Date(dataUpdatedAt) : null,
+                                coverage: peers.every((sym) => comparisonData[sym]) ? 'complete' : 'partial',
+                                warnings: [
+                                    'Metrics are provider-reported; market-cap conflicts are flagged in the widget, not resolved here.',
+                                ],
+                            };
+                            exportToCSV(rows, `peers_${peers.join('-')}_${period}`, provenance);
+                        }}
+                        variant="ghost"
+                        className="h-8 w-8 p-0"
+                    />
                 </div>
             </div>
 

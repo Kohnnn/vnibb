@@ -68,7 +68,14 @@ export function QuantRunHistoryPanel({
 
   const handleExport = () => {
     if (!runs.length) return
-    exportToCSV(runsToRows(runs), `quant-runs-${widget}`)
+    exportToCSV(runsToRows(runs), `quant-runs-${widget}`, {
+      widgetType: widget,
+      widgetTitle: `Quant runs · ${widget}`,
+      sourceLabel: 'Browser-local run history',
+      apiGroup: 'local',
+      endpoint: 'local:quant-runs',
+      localOnly: true,
+    })
   }
 
   const compareRuns = compare
@@ -129,7 +136,7 @@ export function QuantRunHistoryPanel({
                     type="button"
                     onClick={() => togglePin(run.id)}
                     title={run.pinned ? 'Unpin' : 'Pin'}
-                    className={run.pinned ? 'text-amber-300' : 'text-[var(--text-muted)] hover:text-amber-300'}
+                    className={run.pinned ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)] hover:text-[var(--color-warning)]'}
                   >
                     {run.pinned ? <Pin size={10} /> : <PinOff size={10} />}
                   </button>

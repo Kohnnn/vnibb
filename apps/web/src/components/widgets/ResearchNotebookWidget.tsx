@@ -63,7 +63,15 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
   const handleExport = () => {
     if (!items.length) return;
     const markdown = notebookToMarkdown(items);
-    exportToMarkdown(markdown, `vnibb-research-notebook-${new Date().toISOString().slice(0, 10)}`);
+    exportToMarkdown(markdown, `vnibb-research-notebook-${new Date().toISOString().slice(0, 10)}`, {
+      widgetType: 'research_notebook',
+      widgetTitle: 'Research Notebook',
+      sourceLabel: 'Browser-local research notebook',
+      apiGroup: 'local',
+      endpoint: 'local:research-notebook',
+      localOnly: true,
+      warnings: ['Author-entered notes. Provider originals and citations are not attached.'],
+    });
   };
 
   const handleClear = () => {

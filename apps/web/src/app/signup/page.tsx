@@ -94,28 +94,28 @@ export default function SignupPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-black">
-            <div className="max-w-md w-full space-y-8 p-8 bg-zinc-900 rounded-lg border border-zinc-800">
+        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4 py-8">
+            <div className="w-full max-w-md space-y-8 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6 sm:p-8">
                 <div>
                     <div className="flex justify-center">
                         <VniBBLogo width={144} />
                     </div>
-                    <h2 className="mt-4 text-3xl font-bold text-center text-white">
+                    <h2 className="mt-4 text-center text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">
                         Create your {VNIBB_BRAND_NAME} account
                     </h2>
-                    <p className="mt-2 text-center text-sm text-zinc-400">
+                    <p className="mt-2 text-center text-sm text-[var(--text-secondary)]">
                         {VNIBB_BRAND_DESCRIPTOR}
                     </p>
                 </div>
 
                 {error && (
-                    <div className="bg-red-500/10 border border-red-500/50 text-red-500 px-4 py-3 rounded">
+                    <div className="rounded border border-[var(--color-error)]/40 bg-[var(--color-state-bg)] px-4 py-3 text-sm text-[var(--color-error)]">
                         {error}
                     </div>
                 )}
 
                 {success && (
-                    <div className="bg-green-500/10 border border-green-500/50 text-green-500 px-4 py-3 rounded">
+                    <div className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-4 py-3 text-sm text-[var(--text-primary)]">
                         Account created successfully! Redirecting...
                     </div>
                 )}
@@ -123,7 +123,7 @@ export default function SignupPage() {
                 <form onSubmit={handleSignup} className="mt-8 space-y-6">
                     <div className="space-y-4">
                         <div>
-                            <label htmlFor="email" className="block text-sm font-medium text-zinc-300">
+                            <label htmlFor="email" className="block text-sm font-medium text-[var(--text-secondary)]">
                                 Email address
                             </label>
                             <input
@@ -134,13 +134,13 @@ export default function SignupPage() {
                                 required
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="mt-1 block w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
                                 placeholder="you@example.com"
                             />
                         </div>
 
                         <div>
-                            <label htmlFor="password" className="block text-sm font-medium text-zinc-300">
+                            <label htmlFor="password" className="block text-sm font-medium text-[var(--text-secondary)]">
                                 Password
                             </label>
                             <input
@@ -151,13 +151,13 @@ export default function SignupPage() {
                                 required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="mt-1 block w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
                                 placeholder="••••••••"
                             />
                         </div>
 
                         <div>
-                            <label htmlFor="confirmPassword" className="block text-sm font-medium text-zinc-300">
+                            <label htmlFor="confirmPassword" className="block text-sm font-medium text-[var(--text-secondary)]">
                                 Confirm Password
                             </label>
                             <input
@@ -168,7 +168,7 @@ export default function SignupPage() {
                                 required
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
-                                className="mt-1 block w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
                                 placeholder="••••••••"
                             />
                         </div>
@@ -177,7 +177,7 @@ export default function SignupPage() {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex w-full justify-center rounded-md bg-[var(--accent-blue)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {loading ? 'Creating account...' : 'Sign up'}
                     </button>
@@ -186,10 +186,10 @@ export default function SignupPage() {
                 <div className="mt-6">
                     <div className="relative">
                         <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-zinc-700"></div>
+                            <div className="w-full border-t border-[var(--border-subtle)]"></div>
                         </div>
                         <div className="relative flex justify-center text-sm">
-                            <span className="px-2 bg-zinc-900 text-zinc-400">Or continue with</span>
+                            <span className="bg-[var(--bg-secondary)] px-2 text-[var(--text-muted)]">Or continue with</span>
                         </div>
                     </div>
 
@@ -197,7 +197,7 @@ export default function SignupPage() {
                         <button
                             onClick={handleGoogleSignup}
                             disabled={loading}
-                            className="w-full flex items-center justify-center gap-3 py-2 px-4 border border-zinc-700 rounded-md shadow-sm text-sm font-medium text-white bg-zinc-800 hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="flex w-full items-center justify-center gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <svg className="w-5 h-5" viewBox="0 0 24 24">
                                 <path
@@ -222,9 +222,9 @@ export default function SignupPage() {
                     </div>
                 </div>
 
-                <p className="mt-6 text-center text-sm text-zinc-400">
+                <p className="mt-6 text-center text-sm text-[var(--text-secondary)]">
                     Already have an account?{' '}
-                    <Link href="/login" className="font-medium text-blue-400 hover:text-blue-300">
+                    <Link href="/login" className="font-medium text-[var(--accent-blue)] hover:underline">
                         Sign in
                     </Link>
                 </p>

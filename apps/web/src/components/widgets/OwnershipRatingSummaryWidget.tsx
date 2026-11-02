@@ -50,7 +50,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
   const error = shareholderError || foreignQuery.error || insiderQuery.error
   const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
-  const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-amber-300' : summary.grade === 'D' ? 'text-rose-300' : 'text-[var(--text-muted)]'
+  const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-[var(--color-warning)]' : summary.grade === 'D' ? 'text-rose-300' : 'text-[var(--text-muted)]'
   const warnings = useMemo(() => {
     const inputs = [
       ['Shareholders', { ...shareholdersQuery, error: shareholderError }, summary.holderCount !== null && summary.holderCount > 0],

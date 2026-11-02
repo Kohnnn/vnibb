@@ -3690,18 +3690,6 @@ export async function exportHistorical(
     window.open(url, '_blank');
 }
 
-export async function exportPeers(
-    symbols: string[],
-    options: { format?: 'csv' | 'excel' } = {}
-): Promise<void> {
-    const url = getExportUrl('/export/peers', {
-        symbols: symbols.join(','),
-        format: options.format || 'excel'
-    });
-    window.open(url, '_blank');
-}
-
-
 // ============ Analysis / Technical API ============
 
 export async function getTechnicalIndicators(

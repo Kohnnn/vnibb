@@ -159,7 +159,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Decay</div>
-              <div className="font-mono text-amber-300">{stats.decayFromPeakPct === null ? '—' : `${fmt(stats.decayFromPeakPct, 1)}%`}</div>
+              <div className="font-mono text-[var(--color-warning)]">{stats.decayFromPeakPct === null ? '—' : `${fmt(stats.decayFromPeakPct, 1)}%`}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Since Peak</div>

@@ -33,7 +33,7 @@ type SortMode = 'newest' | 'score' | 'revenue' | 'earnings';
 function signalTone(signal: string): string {
   if (signal === 'High Conviction') return 'text-emerald-300 border-emerald-500/20 bg-emerald-500/10';
   if (signal === 'Watch') return 'text-cyan-300 border-cyan-500/20 bg-cyan-500/10';
-  if (signal === 'Mixed') return 'text-amber-300 border-amber-500/20 bg-amber-500/10';
+  if (signal === 'Mixed') return 'text-[var(--color-warning)] border-[var(--color-state-border)] bg-[var(--color-state-bg)]';
   return 'text-rose-300 border-rose-500/20 bg-rose-500/10';
 }
 
@@ -186,13 +186,13 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
             </label>
           </div>
 
-          {sourceError ? <div className="mt-2 text-[10px] text-amber-300">Source warning: {sourceError}</div> : null}
+          {sourceError ? <div className="mt-2 text-[10px] text-[var(--color-warning)]">Source warning: {sourceError}</div> : null}
           {hasData ? <div className="mt-2 text-[10px] text-[var(--text-muted)]">YoY available for {yoyCoverage} of {rows.length} results. Missing fields are unavailable from stored comparable statements.</div> : null}
 
           <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
             <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-cyan-300" />
             <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-emerald-300" />
-            <SummaryCard label="High Conviction" value={summary.highConviction} tone="text-amber-300" />
+            <SummaryCard label="High Conviction" value={summary.highConviction} tone="text-[var(--color-warning)]" />
           </div>
         </div>
 

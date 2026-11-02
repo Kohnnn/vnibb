@@ -335,7 +335,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                             healthRow?.status === 'synced'
                                 ? 'text-emerald-400'
                                 : healthRow?.status === 'stale'
-                                    ? 'text-amber-300'
+                                    ? 'text-[var(--color-warning)]'
                                     : undefined
                         }
                     >

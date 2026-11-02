@@ -410,7 +410,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">VaR 95 (period)</div>
-                      <div className="mt-1 text-amber-300">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
+                      <div className="mt-1 text-[var(--color-warning)]">{formatSigned(benchmarkRisk?.var_95_1d_pct, '%')}</div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95 (period)</div>

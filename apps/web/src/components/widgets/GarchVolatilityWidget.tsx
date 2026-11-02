@@ -138,11 +138,11 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Beta</div>
-              <div className="font-mono text-amber-300">{formatNumber(metric?.beta)}</div>
+              <div className="font-mono text-[var(--color-warning)]">{formatNumber(metric?.beta)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Persistence</div>
-              <div className="font-mono text-amber-300">{formatNumber(metric?.persistence)}</div>
+              <div className="font-mono text-[var(--color-warning)]">{formatNumber(metric?.persistence)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Conditional Vol</div>

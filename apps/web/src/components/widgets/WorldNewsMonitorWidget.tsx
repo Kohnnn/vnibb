@@ -100,7 +100,7 @@ function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[]
   if (failedFeeds.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[10px] text-amber-100/85">
+    <div className="mt-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-amber-100/85">
       <div className="font-black uppercase tracking-[0.14em] text-amber-200">
         {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
       </div>
@@ -520,7 +520,7 @@ function WorldNewsMonitorWidgetComponent({
                       type="button"
                       onClick={() => handlePinArticle(article)}
                       disabled={pinnedIds[article.id]}
-                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-amber-400/50 hover:text-amber-300 disabled:cursor-default disabled:border-emerald-400/40 disabled:text-emerald-300"
+                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-amber-400/50 hover:text-[var(--color-warning)] disabled:cursor-default disabled:border-emerald-400/40 disabled:text-emerald-300"
                       title={pinnedIds[article.id] ? 'Pinned to research notebook' : 'Pin to research notebook'}
                     >
                       {pinnedIds[article.id] ? <Check className="h-2.5 w-2.5" /> : <BookmarkPlus className="h-2.5 w-2.5" />}

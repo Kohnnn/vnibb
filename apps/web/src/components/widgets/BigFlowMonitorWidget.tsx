@@ -175,7 +175,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
         </div>
       </div>
 
-      {error && <div role="alert" className="px-1 text-[10px] text-amber-300">Latest block-trade tape unavailable; showing previously received trades. <button type="button" onClick={() => refetch()}>Retry</button></div>}
+      {error && <div role="alert" className="px-1 text-[10px] text-[var(--color-warning)]">Latest block-trade tape unavailable; showing previously received trades. <button type="button" onClick={() => refetch()}>Retry</button></div>}
       {isLoading && !hasData ? (
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
@@ -224,7 +224,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
                         <span className="rounded border border-blue-500/25 bg-blue-500/10 px-1 text-[9px] font-bold uppercase text-blue-300">F</span>
                       )}
                       {trade.is_proprietary && (
-                        <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1 text-[9px] font-bold uppercase text-amber-300">P</span>
+                        <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1 text-[9px] font-bold uppercase text-[var(--color-warning)]">P</span>
                       )}
                     </span>
                   </td>

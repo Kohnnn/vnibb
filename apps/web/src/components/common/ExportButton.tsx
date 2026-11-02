@@ -1,7 +1,11 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Download, ChevronDown } from 'lucide-react';
 
+/**
+ * Backend export trigger (CSV / Excel). The server renders the file, so this
+ * button only forwards the format; `lib/exportWidget.ts` provenance applies to
+ * the client-side exporters, not here.
+ */
 interface ExportButtonProps {
     onExport: (format: 'csv' | 'excel') => Promise<void>;
     isLoading?: boolean;
@@ -18,6 +22,7 @@ export function ExportButton({
     size = 'sm'
 }: ExportButtonProps) {
     const [isOpen, setIsOpen] = useState(false);
+    const [failed, setFailed] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     // Close dropdown when clicking outside
@@ -35,11 +40,12 @@ export function ExportButton({
 
     const handleExport = async (format: 'csv' | 'excel') => {
         setIsOpen(false);
+        setFailed(false);
         try {
             await onExport(format);
         } catch (error) {
             console.error('Export failed:', error);
-            alert('Export failed. Please check console for details.');
+            setFailed(true);
         }
     };
 
@@ -48,20 +54,18 @@ export function ExportButton({
 
     // Variants
     const variants = {
-        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
-        destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
-        outline: "border border-input bg-transparent shadow-sm hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        outline: "border border-[var(--border-color)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]",
+        default: "border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]",
+        ghost: "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]",
+        secondary: "border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]",
     };
 
     // Sizes
     const sizes = {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-8",
-        icon: "h-9 w-9",
+        default: "h-9 px-4 text-sm",
+        sm: "h-8 px-3 text-xs",
+        lg: "h-10 px-6 text-sm",
+        icon: "h-8 w-8 p-0",
     };
 
     // Resolve styles (fallback to simple tailwind if vars not defined)
@@ -84,9 +88,11 @@ export function ExportButton({
                 className={`${baseStyles} ${variantClass} ${sizeClass} ${className}`}
                 type="button"
                 aria-label="Export options"
+                aria-expanded={isOpen}
             >
                 <Download className="mr-2 h-4 w-4" />
                 Export
+                <ChevronDown className="ml-1 h-3 w-3 opacity-60" />
             </button>
 
             {isOpen && (
@@ -106,6 +112,12 @@ export function ExportButton({
                         </button>
                     </div>
                 </div>
+            )}
+
+            {failed && (
+                <p role="alert" className="mt-1 text-[10px] text-[var(--color-error)]">
+                    Export failed. Try again.
+                </p>
             )}
         </div>
     );

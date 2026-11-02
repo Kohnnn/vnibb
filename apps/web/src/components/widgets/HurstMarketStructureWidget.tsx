@@ -103,7 +103,7 @@ function classifyHurst(hurst: number | null): { label: string; className: string
     return { label: 'Trending', className: 'text-emerald-300', note: 'Momentum persistence likely' }
   }
   if (hurst < 0.45) {
-    return { label: 'Mean-Reverting', className: 'text-amber-300', note: 'Fade extreme moves' }
+    return { label: 'Mean-Reverting', className: 'text-[var(--color-warning)]', note: 'Fade extreme moves' }
   }
   return { label: 'Random Walk', className: 'text-cyan-300', note: 'Range/event edge preferred' }
 }

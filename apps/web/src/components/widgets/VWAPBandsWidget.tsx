@@ -111,7 +111,7 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Lower 1σ</div>
-          <div className="font-mono text-amber-300">{formatPrice(latest?.lower1)}</div>
+          <div className="font-mono text-[var(--color-warning)]">{formatPrice(latest?.lower1)}</div>
         </div>
       </div>
 

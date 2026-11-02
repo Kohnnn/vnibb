@@ -163,7 +163,7 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Width</div>
-              <div className="font-mono text-amber-300">{bbWidth.toFixed(3)}%</div>
+              <div className="font-mono text-[var(--color-warning)]">{bbWidth.toFixed(3)}%</div>
             </div>
           </div>
 
@@ -234,7 +234,7 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
                       <td className="px-1 py-1 font-semibold text-[var(--text-secondary)]">
                         {row.label}{row.isBackendDefault ? ' ·' : ''}
                       </td>
-                      <td className="px-1 py-1 text-right font-mono text-amber-300">{row.threshold.toFixed(3)}%</td>
+                      <td className="px-1 py-1 text-right font-mono text-[var(--color-warning)]">{row.threshold.toFixed(3)}%</td>
                       <td className="px-1 py-1 text-right font-mono text-[var(--text-primary)]">{row.pctDaysIn.toFixed(1)}%</td>
                       <td className={`px-1 py-1 text-right font-semibold ${row.activeNow ? 'text-emerald-300' : 'text-[var(--text-muted)]'}`}>
                         {row.activeNow ? 'IN' : 'OUT'}
