@@ -523,11 +523,11 @@ export function Sidebar({
                         group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer
                         transition-colors text-xs
                         ${isActive
-                            ? 'bg-blue-500/15 text-blue-400 border-l-2 border-blue-500'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60'
+                            ? 'border-l-2 border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] font-semibold text-[var(--text-primary)]'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                         }
                         ${isDragging ? 'opacity-50' : ''}
-                        ${isDragOver ? 'border-t border-blue-500' : ''}
+                        ${isDragOver ? 'border-t border-[var(--color-accent-primary)]' : ''}
                     `}
                     style={{ paddingLeft: `${6 + indent * 12}px` }}
                     onContextMenu={(e) => {
@@ -548,7 +548,7 @@ export function Sidebar({
                                     if (e.key === 'Enter') submitRename();
                                     if (e.key === 'Escape') setEditingId(null);
                                 }}
-                                className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
+                                className="flex-1 rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-1 py-0.5 text-sm text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 autoFocus
                                 onClick={(e) => e.stopPropagation()}
                             />
@@ -557,7 +557,7 @@ export function Sidebar({
                         <>
                             <button
                                 type="button"
-                                className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                                className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 onClick={() => setActiveDashboard(dashboard.id)}
                                 onDoubleClick={() => {
                                     if (!isEditableDashboard) return;
@@ -571,7 +571,7 @@ export function Sidebar({
                             {(isEditableDashboard || isDeletableDashboard) && (
                                 <button
                                     type="button"
-                                    className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-blue-400 p-0.5 hover:bg-[var(--bg-tertiary)] rounded transition-opacity"
+                                    className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--bg-hover)] focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] group-hover:opacity-100 group-focus-within:opacity-100"
                                     aria-label={`Workspace actions for ${dashboard.name}`}
                                     onClick={(e) => {
                                         e.stopPropagation();
@@ -600,8 +600,8 @@ export function Sidebar({
                                         group/tab w-full flex items-center gap-2 rounded-r px-2 py-1 text-[11px]
                                         transition-colors text-left -ml-px
                                         ${isTabActive
-                                            ? 'text-blue-300 bg-blue-500/10 border-l-2 border-blue-400 font-medium'
-                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/40 border-l-2 border-transparent'
+                                            ? 'border-l-2 border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] font-medium text-[var(--text-primary)]'
+                                            : 'border-l-2 border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                         }
                                     `}
                                     style={{ paddingLeft: `${10 + indent * 12}px` }}
@@ -611,12 +611,12 @@ export function Sidebar({
                                         size={10}
                                         className={cn(
                                             'shrink-0 transition-transform',
-                                            isTabActive ? 'rotate-90 text-blue-400' : 'text-[var(--text-muted)]/60'
+                                            isTabActive ? 'rotate-90 text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)]'
                                         )}
                                     />
                                     <span className="truncate flex-1">{tab.name}</span>
                                     {isTabActive && (
-                                        <span className="text-[8px] uppercase tracking-wider text-blue-400/70 font-bold">
+                                        <span className="text-[8px] font-bold uppercase tracking-wider text-[var(--color-accent-primary)]">
                                             active
                                         </span>
                                     )}
@@ -639,9 +639,9 @@ export function Sidebar({
             <div key={folder.id}>
                 <div
                         className={`
-                        group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer 
-                        text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60 transition-colors text-xs
-                        ${isDragOver ? 'bg-[var(--bg-tertiary)] ring-1 ring-blue-500' : ''}
+                        group flex items-center gap-1.5 rounded px-2 py-1 cursor-pointer 
+                        text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors text-xs
+                        ${isDragOver ? 'bg-[var(--bg-tertiary)] ring-1 ring-[var(--focus-ring-color)]' : ''}
                     `}
                     role="button"
                     tabIndex={0}
@@ -662,9 +662,9 @@ export function Sidebar({
                     onDrop={(e) => handleDropOnFolder(e, folder.id)}
                 >
                     {folder.isExpanded ? (
-                        <FolderOpen size={14} className="shrink-0 text-yellow-500/80" />
+                        <FolderOpen size={14} className="shrink-0 text-[var(--text-muted)]" />
                     ) : (
-                        <Folder size={14} className="shrink-0 text-yellow-500/80" />
+                        <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />
                     )}
                     {isEditing ? (
                         <input
@@ -677,7 +677,7 @@ export function Sidebar({
                                 if (e.key === 'Enter') submitRename();
                                 if (e.key === 'Escape') setEditingId(null);
                             }}
-                            className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded px-1 py-0.5 text-[var(--text-primary)] text-sm focus:outline-none focus:border-blue-500"
+                            className="flex-1 rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-1 py-0.5 text-sm text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             autoFocus
                             onClick={(e) => e.stopPropagation()}
                         />
@@ -686,7 +686,7 @@ export function Sidebar({
                             <span className="flex-1 truncate">{folder.name}</span>
                             {lockedFolder && (
                                 <span
-                                    className="inline-flex items-center rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-300"
+                                    className="inline-flex items-center rounded border border-[var(--border-strong)] bg-[var(--bg-tertiary)] px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]"
                                     title="System-managed workspaces (Fundamental, Technical, Quant, Global Markets) — not editable or deletable."
                                 >
                                     <Lock size={9} className="mr-1" />
@@ -757,7 +757,7 @@ export function Sidebar({
                         <Link
                             href="/"
                             aria-label={`${VNIBB_BRAND_NAME} home`}
-                            className="flex min-w-0 items-center rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                            className="flex min-w-0 items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         >
                             <VniBBLogo width={mobileMode ? 96 : 112} label={null} />
                         </Link>
@@ -773,7 +773,7 @@ export function Sidebar({
                                 onCollapsedChange?.(nextCollapsed);
                             }}
                             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                            className="p-1 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
                         </button>
@@ -785,43 +785,43 @@ export function Sidebar({
                     {!collapsed && (
                         <>
                             <div className="space-y-0.5" data-tour="sidebar-workspaces">
-                                <div className="mb-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 p-1.5">
+                                <div className="mb-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1.5">
                                     <div className="px-1 pb-1 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                                         Customize
                                     </div>
                                     <div className="grid grid-cols-2 gap-1">
                                         <button
                                             onClick={onOpenTemplateSelector}
-                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-blue-500/10 hover:text-blue-300 transition-colors"
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                             title="Browse dashboard templates"
                                         >
-                                            <AppWindow size={13} className="shrink-0 text-blue-400/70 group-hover/btn:text-blue-300" />
+                                            <AppWindow size={13} className="shrink-0 text-[var(--text-muted)] group-hover/btn:text-[var(--color-accent-primary)]" />
                                             <span className="truncate">Templates</span>
                                         </button>
                                         <button
                                             onClick={onOpenWidgetLibrary}
-                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-emerald-500/10 hover:text-emerald-300 transition-colors"
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                             title="Browse widget library"
                                         >
-                                            <Grid3X3 size={13} className="shrink-0 text-emerald-400/70 group-hover/btn:text-emerald-300" />
+                                            <Grid3X3 size={13} className="shrink-0 text-[var(--text-muted)] group-hover/btn:text-[var(--color-accent-primary)]" />
                                             <span className="truncate">Widgets</span>
                                         </button>
                                         {onOpenAppsLibrary ? (
                                             <button
                                                 onClick={onOpenAppsLibrary}
-                                                className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-fuchsia-500/10 hover:text-fuchsia-300 transition-colors"
+                                                className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                                 title="Browse apps library"
                                             >
-                                                <Layers size={13} className="shrink-0 text-fuchsia-400/70 group-hover/btn:text-fuchsia-300" />
+                                                <Layers size={13} className="shrink-0 text-[var(--text-muted)] group-hover/btn:text-[var(--color-accent-primary)]" />
                                                 <span className="truncate">Apps</span>
                                             </button>
                                         ) : null}
                                         <button
                                             onClick={onOpenPromptsLibrary}
-                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
+                                            className="group/btn flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                             title="Browse VniAgent prompts"
                                         >
-                                            <MessageSquareText size={13} className="shrink-0 text-amber-400/70 group-hover/btn:text-amber-300" />
+                                            <MessageSquareText size={13} className="shrink-0 text-[var(--text-muted)] group-hover/btn:text-[var(--color-accent-primary)]" />
                                             <span className="truncate">Prompts</span>
                                         </button>
                                     </div>
@@ -842,22 +842,22 @@ export function Sidebar({
                                             aria-label="Create workspace or folder"
                                             aria-expanded={showCreateMenu}
                                             onClick={() => setShowCreateMenu(!showCreateMenu)}
-                                            className="p-0.5 rounded hover:bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors focus-visible:ring-2 focus-visible:ring-blue-400"
+                                            className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                         >
                                             <Plus size={14} aria-hidden="true" />
                                         </button>
                                         {showCreateMenu && (
-                                            <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-elevated)] py-1 shadow-xl">
+                                            <div className="absolute right-0 top-full z-50 mt-1 w-44 rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-1 shadow-lg">
                                                 <button
                                                     onClick={() => handleCreateDashboard()}
-                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                                 >
                                                     <LayoutDashboard size={14} />
                                                     <span>Create Dashboard</span>
                                                 </button>
                                                 <button
                                                     onClick={handleCreateFolder}
-                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                                 >
                                                     <Folder size={14} />
                                                     <span>New Folder</span>
@@ -870,21 +870,21 @@ export function Sidebar({
                                 {customFolders.map(renderFolderItem)}
                                 {rootDashboards.map(d => renderDashboardItem(d))}
                                 {customFolders.length === 0 && rootDashboards.length === 0 ? (
-                                    <div className="mt-2 rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 px-3 py-3 text-[11px] leading-5 text-[var(--text-muted)]">
+                                    <div className="mt-2 rounded-md border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-3 text-[11px] leading-5 text-[var(--text-muted)]">
                                         <div className="font-semibold text-[var(--text-secondary)]">No custom workspaces yet</div>
                                         <p className="mt-1">Build your own layout by starting from a template, adding individual widgets, or creating a blank dashboard.</p>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                             <button
                                                 type="button"
                                                 onClick={onOpenTemplateSelector}
-                                                className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-blue-300 hover:bg-blue-500/20"
+                                                className="rounded border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                             >
                                                 Browse templates
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={() => handleCreateDashboard()}
-                                                className="rounded border border-[var(--border-default)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-accent)]"
+                                                className="rounded border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
                                             >
                                                 Blank workspace
                                             </button>
@@ -905,7 +905,7 @@ export function Sidebar({
                                     });
                                     onCollapsedChange?.(false);
                                 }}
-                                className="w-full flex justify-center p-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 transition-colors"
+                                className="flex w-full justify-center rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                 title="Dashboards"
                             >
                                 <Layers size={18} />
@@ -917,21 +917,21 @@ export function Sidebar({
                 {/* Footer with Settings and Version */}
                 <div className="px-2 py-1 border-t border-[var(--border-color)] shrink-0">
                     <button type="button" onClick={() => setWorkspaceBackupOpen(true)} title="Backup and restore workspaces"
-                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]">
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
                         <Archive size={14} className="shrink-0" />
                         {!collapsed && <span>Backup workspaces</span>}
                     </button>
                     <button type="button" onClick={() => setResearchBundleOpen(true)} title="Transfer thesis and evidence"
-                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-primary)]">
+                        className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
                         <FileText size={14} className="shrink-0" />
                         {!collapsed && <span>Transfer thesis &amp; evidence</span>}
                     </button>
                     <button
                         onClick={() => setSettingsOpen(true)}
                         className={`
-                            flex items-center gap-2 px-2 py-1 rounded w-full
-                            text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60
-                            transition-colors text-xs
+                            flex w-full items-center gap-2 rounded px-2 py-1
+                            text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]
+                            transition-colors
                         `}
                     >
                         <Settings size={14} className="shrink-0" />
@@ -985,7 +985,7 @@ export function Sidebar({
                     />
                     <div
                         ref={contextMenuRef}
-                        className="fixed z-[70] min-w-[140px] rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl"
+                        className="fixed z-[70] min-w-[140px] rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-0.5 shadow-lg"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                         role="menu"
                         aria-label={contextMenu.type === 'dashboard' ? 'Workspace actions' : 'Folder actions'}
@@ -1020,7 +1020,7 @@ export function Sidebar({
                             role="menuitem"
                             onClick={handleRename}
                             disabled={contextMenu.type === 'dashboard' ? !contextDashboardEditable : !contextFolderEditable}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         >
                             <Edit2 size={12} />
                             <span>Rename</span>
@@ -1031,7 +1031,7 @@ export function Sidebar({
                                     role="menuitem"
                                     onClick={handleDuplicate}
                                     disabled={!contextDashboardEditable}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 >
                                     <Copy size={12} />
                                     <span>Duplicate</span>
@@ -1041,7 +1041,7 @@ export function Sidebar({
                                     onClick={() => handleMoveDashboardOrder('up')}
                                     disabled={!canMoveDashboardUp}
                                     aria-disabled={!canMoveDashboardUp}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 >
                                     <ChevronUp size={12} />
                                     <span>Move up</span>
@@ -1051,7 +1051,7 @@ export function Sidebar({
                                     onClick={() => handleMoveDashboardOrder('down')}
                                     disabled={!canMoveDashboardDown}
                                     aria-disabled={!canMoveDashboardDown}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 >
                                     <ChevronDown size={12} />
                                     <span>Move down</span>
@@ -1066,7 +1066,7 @@ export function Sidebar({
                                         setContextMenu(null);
                                     }}
                                     disabled={!contextDashboardEditable}
-                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                 >
                                     {state.dashboards.find(d => d.id === contextMenu.id)?.showGroupLabels !== false ? (
                                         <>
@@ -1087,7 +1087,7 @@ export function Sidebar({
                                         aria-expanded={showMoveSubmenu}
                                         onClick={() => setShowMoveSubmenu(!showMoveSubmenu)}
                                         disabled={!contextDashboardEditable}
-                                        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                     >
                                         <FolderInput size={12} />
                                         <span>Move to Folder</span>
@@ -1095,14 +1095,14 @@ export function Sidebar({
                                     </button>
                                     {showMoveSubmenu && (
                                         <div
-                                            className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] py-0.5 shadow-xl"
+                                            className="absolute left-full top-0 z-[80] ml-1 w-40 rounded border border-[var(--border-strong)] bg-[var(--bg-elevated)] py-0.5 shadow-lg"
                                             role="menu"
                                             aria-label="Move to folder"
                                         >
                                             <button
                                                 role="menuitem"
                                                 onClick={() => handleMoveToFolder(undefined)}
-                                                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                             >
                                                 <FolderX size={12} />
                                                 <span>No Folder (Root)</span>
@@ -1112,9 +1112,9 @@ export function Sidebar({
                                                     key={folder.id}
                                                     role="menuitem"
                                                     onClick={() => handleMoveToFolder(folder.id)}
-                                                    className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                                                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                                 >
-                                                    <Folder size={12} className="text-yellow-500/80" />
+                                                    <Folder size={12} className="text-[var(--text-muted)]" />
                                                     <span className="truncate">{folder.name}</span>
                                                 </button>
                                             ))}
@@ -1123,12 +1123,12 @@ export function Sidebar({
                                 </div>
                             </>
                         )}
-                        <div className="my-0.5 border-t border-[var(--border-color)]" />
+                        <div className="my-0.5 border-t border-[var(--border-subtle)]" />
                         <button
                             role="menuitem"
                             onClick={handleDelete}
                             disabled={contextMenu.type === 'dashboard' ? !contextDashboardDeletable : !contextFolderEditable}
-                            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-red-500 hover:bg-[var(--bg-tertiary)] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         >
                             <Trash2 size={12} />
                             <span>Delete</span>

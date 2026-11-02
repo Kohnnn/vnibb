@@ -17,13 +17,12 @@ export function AppToaster() {
     <SonnerToaster
       theme={resolvedTheme === 'light' ? 'light' : 'dark'}
       position="bottom-center"
-      richColors
       closeButton
       toastOptions={{
         style: {
           background: 'var(--bg-elevated)',
           color: 'var(--text-primary)',
-          border: '1px solid var(--border-default)',
+          border: '1px solid var(--border-strong)',
         },
       }}
     />

@@ -311,7 +311,7 @@ export function DenseFinancialTable({
     <div className={cn('min-w-0 w-full', className)}>
       <div
         ref={scrollRef}
-        className="overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400"
+        className="overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         role="region"
         aria-label="Financial statement periods; scroll horizontally for all columns"
         tabIndex={0}
@@ -335,8 +335,8 @@ export function DenseFinancialTable({
                     'px-2 py-1 font-bold',
                     column.align === 'left' ? 'text-left' : 'text-right',
                     sortable ? 'cursor-pointer select-none hover:text-[var(--text-primary)]' : '',
-                    chartable && isSelectedColumn ? 'text-blue-400' : '',
-                    sortable || chartable ? 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-400' : ''
+                    chartable && isSelectedColumn ? 'text-[var(--color-accent-primary)]' : '',
+                    sortable || chartable ? 'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]' : ''
                   )}
                   style={{ ...(column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }), scrollMarginLeft: metricColumnWidth }}
                   aria-sort={isActiveSort ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
@@ -382,7 +382,7 @@ export function DenseFinancialTable({
                     rowIndex % 2 === 1 && !row.isGroup ? 'bg-[var(--bg-secondary)]/25' : '',
                     row.isGroup ? 'section-header-row bg-[var(--bg-surface)] font-semibold' : '',
                     isEmphasisRow(row) && !row.isGroup ? 'border-t border-[var(--border-default)] bg-[var(--bg-surface)]/55 font-semibold' : '',
-                    row.selected ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-400/60' : ''
+                    row.selected ? 'bg-[var(--color-state-bg)] ring-1 ring-inset ring-[var(--color-accent-primary)]' : ''
                   )}
                 >
                   <td
@@ -482,7 +482,7 @@ export function DenseFinancialTable({
                         className={cn(
                           'px-2 py-1 tabular-nums text-[var(--text-primary)]',
                           row.isGroup ? 'cursor-default' : 'cursor-copy',
-                          copiedCellKey === `${row.id}:${column.key}` ? 'ring-1 ring-inset ring-blue-400/80' : '',
+                          copiedCellKey === `${row.id}:${column.key}` ? 'ring-1 ring-inset ring-[var(--color-accent-primary)]' : '',
                           column.align === 'left' ? 'text-left' : 'text-right'
                         )}
                         style={column.width ? { minWidth: column.width, width: column.width } : { minWidth: `${yearColumnWidth}px`, width: `${yearColumnWidth}px` }}
@@ -499,14 +499,14 @@ export function DenseFinancialTable({
                             className={cn(
                               'inline-flex rounded px-1 py-0.5 text-[9px] font-semibold leading-none',
                               growthDetail.basis === 'change'
-                                ? 'bg-slate-500/15 text-slate-300'
+                                ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                                 : growthDetail.hasNegativeBase
-                                ? 'bg-amber-500/15 text-amber-400'
+                                ? 'bg-[var(--color-state-bg)] text-[var(--color-warning)]'
                                 : growthPct === 0
-                                ? 'bg-slate-500/15 text-slate-300'
+                                ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                                 : growthPct >= 0
-                                ? 'bg-emerald-500/15 text-emerald-500'
-                                : 'bg-rose-500/15 text-rose-500'
+                                ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
+                                : 'bg-[var(--color-negative-bg)] text-[var(--color-negative)]'
                             )}
                             title={describePercentChange(growthDetail)}
                           >

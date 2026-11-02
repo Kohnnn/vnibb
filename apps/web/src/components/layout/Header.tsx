@@ -271,12 +271,12 @@ export function Header({
 
     return {
       className: cn(
-        'border-slate-500/25 bg-slate-500/10',
-        resolvedTheme === 'light' ? 'text-slate-700' : 'text-slate-300'
+        'border-[var(--border-strong)] bg-[var(--bg-secondary)]',
+        'text-[var(--text-secondary)]'
       ),
-      dotClassName: resolvedTheme === 'light' ? 'bg-slate-500' : 'bg-slate-400',
+      dotClassName: 'bg-[var(--text-muted)]',
     }
-  }, [healthBadge, marketStatus.isOpen, resolvedTheme])
+  }, [healthBadge, marketStatus.isOpen])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -325,30 +325,26 @@ export function Header({
 
   return (
     <header className="relative z-30 border-b border-[var(--border-subtle)] bg-[var(--dashboard-shell-bg)]/95 isolate-auto">
-      {/* The blurred background lives in a sibling absolutely-positioned layer
-          so the header element itself does NOT establish a stacking context.
-          Putting `backdrop-filter` on the header trapped any z-50 dropdown
-          (Display Settings, AlertNotificationPanel) inside the header's
-          paint order, leaving the panels invisible behind sticky elements
-          even when their state was correctly open. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 backdrop-blur supports-[backdrop-filter]:bg-[var(--dashboard-shell-bg)]/85"
-      />
+      {/* Solid surface in a sibling absolutely-positioned layer so the header
+          element itself does NOT establish a stacking context. A
+          `backdrop-filter` here trapped any z-50 dropdown (Display Settings,
+          AlertNotificationPanel) inside the header's paint order; the blur was
+          retired in #199 (glass). */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[var(--dashboard-shell-bg)]" />
       <div className="px-4 py-2 pl-14 lg:pl-4">
         <div data-tour="header-bar" className="flex min-h-[2.75rem] flex-wrap items-center gap-2">
           {/* Below lg the sidebar is off-canvas, so the wordmark lives here. */}
           <Link
             href="/"
             aria-label={`${VNIBB_BRAND_NAME} home`}
-            className="flex shrink-0 items-center rounded-sm lg:hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+            className="flex shrink-0 items-center rounded-sm lg:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
           >
             <VniBBLogo width={88} label={null} />
           </Link>
           <div className="hidden min-w-0 shrink-0 items-center gap-2 xl:flex">
-            <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
+            <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
               <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--text-muted)]">
                   {currentSymbol}
                 </div>
                 <div className="flex items-center gap-2">
@@ -362,9 +358,9 @@ export function Header({
               </div>
             </div>
             {marketChips.map((chip) => (
-              <div key={chip.label} className="inline-flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
+              <div key={chip.label} className="inline-flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
                 <div className="min-w-0">
-                  <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--text-muted)]">
                     {chip.label}
                   </div>
                   {showIndexSkeletons ? (
@@ -392,7 +388,7 @@ export function Header({
               type="button"
               aria-label="Open symbol search and command palette"
               onClick={openHeaderSearch}
-              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-left text-xs text-[var(--text-primary)] transition-all hover:border-blue-500/40 hover:bg-[var(--bg-hover)] focus:border-blue-500/40 focus:outline-none focus:ring-1 focus:ring-blue-500/10"
+              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
             >
               <Search
                 className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
@@ -413,7 +409,7 @@ export function Header({
               onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
                 detail: { source: 'header_button' },
               }))}
-              className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="flex items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
               title={`Open command palette (${shortcutModifier}+K)`}
               aria-label="Open command palette"
             >
@@ -428,8 +424,8 @@ export function Header({
               className={cn(
                 'flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                 isAIOpen
-                  ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
-                  : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                  ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
+                  : 'border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               )}
               title="Open VniAgent"
               aria-label={isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}
@@ -442,7 +438,7 @@ export function Header({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                className="flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 title="Display settings"
               >
                 <Settings2 size={14} />
@@ -458,7 +454,7 @@ export function Header({
                   onClick={() => setTheme(option)}
                   className={cn(
                     'text-xs capitalize',
-                    theme === option ? 'text-blue-300' : 'text-[var(--text-secondary)]'
+                    theme === option ? 'font-semibold text-[var(--color-info)]' : 'text-[var(--text-secondary)]'
                   )}
                 >
                   {option}
@@ -480,7 +476,7 @@ export function Header({
                       className={cn(
                         'text-xs',
                         unitDisplay === option.value
-                          ? 'text-blue-300'
+                          ? 'font-semibold text-[var(--color-info)]'
                           : 'text-[var(--text-secondary)]'
                       )}
                     >
@@ -493,12 +489,12 @@ export function Header({
           </DropdownMenu>
 
           {(onAutoFitLayout || onEditToggle) && (
-            <div className="inline-flex items-center gap-1 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/95 p-1 shadow-[0_10px_24px_rgba(2,6,23,0.18)]">
+            <div className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-1">
               {onAutoFitLayout && (
                 <button
                   type="button"
                   onClick={onAutoFitLayout}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-400/40 bg-gradient-to-r from-sky-500/18 to-cyan-500/12 px-3 py-1.5 text-[11px] font-semibold text-sky-100 transition-colors hover:from-sky-500/28 hover:to-cyan-500/18"
+                  className="inline-flex items-center gap-1.5 rounded border border-[var(--border-strong)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                   title="Automatically arrange widgets to fill gaps"
                   aria-label="Auto-fit layout"
                 >
@@ -512,10 +508,10 @@ export function Header({
                   type="button"
                   onClick={onEditToggle}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition-colors',
+                    'inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-[11px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]',
                     isEditing
-                      ? 'border-amber-300/60 bg-gradient-to-r from-amber-500/22 to-orange-500/16 text-amber-50 shadow-[0_0_0_1px_rgba(251,191,36,0.22)]'
-                      : 'border-slate-400/20 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                      ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
+                      : 'border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   )}
                   title="Lock or unlock dashboard layout for editing"
                   aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
@@ -531,7 +527,7 @@ export function Header({
            <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <button
-                  className="flex items-center rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                  className="flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   title="Dashboard actions"
                 >
                   <MoreHorizontal size={14} />
@@ -583,11 +579,11 @@ export function Header({
              <DropdownMenuTrigger asChild>
                <button
                  type="button"
-                 className="flex items-center gap-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                 className="flex items-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                  title="Account menu"
                  aria-label="Open account menu"
                >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500/15 text-[10px] font-black uppercase text-blue-200">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[10px] font-bold uppercase text-[var(--text-primary)]">
                   {authLoading ? <User size={13} /> : userInitials}
                 </span>
                 <span className="hidden max-w-[8rem] truncate text-[10px] font-semibold uppercase tracking-[0.12em] lg:inline">
@@ -617,7 +613,7 @@ export function Header({
               {user ? (
                 <DropdownMenuItem
                   onClick={() => { void signOut() }}
-                  className="text-xs text-rose-300"
+                  className="text-xs text-[var(--text-secondary)]"
                 >
                   <LogOut size={13} />
                   Sign out

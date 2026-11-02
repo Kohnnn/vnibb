@@ -22,16 +22,16 @@ export function RateLimitAlert({ retryAfter, onRetry, onDismiss }: RateLimitAler
   }, [remaining, onRetry]);
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-      <Clock className="w-5 h-5 text-amber-400 animate-pulse" />
+    <div className="flex items-center gap-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-3">
+      <Clock className="h-5 w-5 animate-pulse text-[var(--color-warning)]" />
       <div className="flex-1">
-        <p className="text-amber-400 text-sm font-medium">Rate Limited</p>
-        <p className="text-amber-400/70 text-xs">
+        <p className="text-sm font-medium text-[var(--color-warning)]">Rate Limited</p>
+        <p className="text-xs text-[var(--text-secondary)]">
           Auto-retry in {remaining}s
         </p>
       </div>
       {onDismiss && (
-        <button onClick={onDismiss} className="text-amber-400/50 hover:text-amber-400 transition-colors">
+        <button onClick={onDismiss} className="rounded p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">
           ✕
         </button>
       )}

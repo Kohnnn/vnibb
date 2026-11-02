@@ -42,7 +42,7 @@ export function Sparkline({
     return (
       <div className="rounded border border-[var(--border-color)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">
         <div className="font-semibold">{formatValue(value)}</div>
-        <div className={isUp ? 'text-emerald-400' : 'text-red-400'}>
+        <div className={isUp ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}>
           {isUp ? '+' : ''}{formatValue(delta)} ({isUp ? '+' : ''}{deltaPct.toFixed(2)}%)
         </div>
       </div>

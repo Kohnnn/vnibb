@@ -68,7 +68,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
   }
 
   return (
-    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-bold text-[var(--text-primary)]">VniAgent Telemetry Review</div>
@@ -80,7 +80,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
           type="button"
           onClick={() => void fetchTelemetry()}
           disabled={loading}
-          className="rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md border border-[var(--border-default)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="inline-flex items-center gap-1">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -90,30 +90,30 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
       </div>
 
       {error && (
-        <div className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+        <div className="mt-4 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-error)]">
           {error}
         </div>
       )}
 
       {summary && (
         <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Responses</div>
             <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.total}</div>
           </div>
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Feedback</div>
             <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.feedback_total}</div>
           </div>
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Acceptance</div>
-            <div className="mt-1 text-lg font-semibold text-emerald-300">{summary.acceptance_rate ?? '—'}{summary.acceptance_rate !== null && summary.acceptance_rate !== undefined ? '%' : ''}</div>
+            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.acceptance_rate ?? '—'}{summary.acceptance_rate !== null && summary.acceptance_rate !== undefined ? '%' : ''}</div>
           </div>
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Avg latency</div>
             <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.average_latency_ms ?? '—'}</div>
           </div>
-          <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+          <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Artifact ratings</div>
             <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">👍 {summary.artifact_ratings?.liked || 0} / 👎 {summary.artifact_ratings?.disliked || 0}</div>
           </div>
@@ -125,24 +125,24 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
           value={providerFilter}
           onChange={(event) => setProviderFilter(event.target.value)}
           placeholder="Provider"
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         />
         <input
           value={modelFilter}
           onChange={(event) => setModelFilter(event.target.value)}
           placeholder="Model"
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         />
         <input
           value={symbolFilter}
           onChange={(event) => setSymbolFilter(event.target.value.toUpperCase())}
           placeholder="Symbol"
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         />
         <select
           value={voteFilter}
           onChange={(event) => setVoteFilter(event.target.value)}
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         >
           <option value="">All votes</option>
           <option value="up">Helpful</option>
@@ -152,21 +152,21 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
           value={searchFilter}
           onChange={(event) => setSearchFilter(event.target.value)}
           placeholder="Search prompt or notes"
-          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-cyan-500"
+          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
         />
       </div>
 
       {!loading && !error && records.length === 0 && (
-        <div className="mt-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3 text-xs text-[var(--text-muted)]">
+        <div className="mt-4 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3 text-xs text-[var(--text-muted)]">
           No AI telemetry records captured yet in this process.
         </div>
       )}
 
       <div className="mt-4 space-y-3">
         {records.map((record) => (
-          <div key={record.response_id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+          <div key={record.response_id} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
-              <span className="font-mono text-cyan-300">{record.response_id}</span>
+              <span className="font-mono text-[var(--text-secondary)]">{record.response_id}</span>
               <span>·</span>
               <span>{record.provider}</span>
               <span>·</span>
@@ -182,7 +182,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
             </div>
 
             <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-[var(--text-secondary)]">
-              {record.current_symbol ? <span className="rounded-full border border-blue-500/20 px-2 py-1 text-blue-300">{record.current_symbol}</span> : null}
+              {record.current_symbol ? <span className="rounded-full border border-[var(--border-strong)] px-2 py-1 text-[var(--text-secondary)]">{record.current_symbol}</span> : null}
               <span className="rounded-full border border-[var(--border-default)] px-2 py-1">
                 {record.used_source_ids.length} sources
               </span>
@@ -200,7 +200,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
             {record.feedback && (
               <div className="mt-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                 <div className="flex items-center gap-2 text-[var(--text-primary)]">
-                  {record.feedback.vote === 'up' ? <ThumbsUp size={12} className="text-emerald-300" /> : <ThumbsDown size={12} className="text-rose-300" />}
+                  {record.feedback.vote === 'up' ? <ThumbsUp size={12} className="text-[var(--color-info)]" /> : <ThumbsDown size={12} className="text-[var(--color-warning)]" />}
                   <span className="font-semibold uppercase tracking-wide">Feedback</span>
                   <span className="text-[10px] text-[var(--text-muted)]">{record.feedback.surface}</span>
                 </div>
@@ -210,7 +210,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
                 {record.feedback.reasons?.length ? (
                   <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
                     {record.feedback.reasons.map((reason) => (
-                      <span key={`${record.response_id}-${reason}`} className="rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-rose-200">
+                      <span key={`${record.response_id}-${reason}`} className="rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--color-warning)]">
                         {reason}
                       </span>
                     ))}
@@ -222,7 +222,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
             {record.outcomes?.length ? (
               <div className="mt-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                 <div className="flex items-center gap-2 text-[var(--text-primary)]">
-                  <Database size={12} className="text-cyan-300" />
+                  <Database size={12} className="text-[var(--text-muted)]" />
                   <span className="font-semibold uppercase tracking-wide">Outcomes</span>
                 </div>
                 <div className="mt-2 space-y-2">
@@ -230,7 +230,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
                     <div key={`${record.response_id}-${outcome.kind}-${outcome.item_id}-${index}`} className="rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="flex flex-wrap items-center gap-2 text-[10px]">
                         <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 uppercase tracking-wide">{outcome.kind}</span>
-                        <span className="font-mono text-cyan-300">{outcome.item_id}</span>
+                        <span className="font-mono text-[var(--text-secondary)]">{outcome.item_id}</span>
                         <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5">{outcome.status}</span>
                         <span className="text-[var(--text-muted)]">{outcome.surface}</span>
                       </div>

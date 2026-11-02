@@ -29,22 +29,22 @@ function StatusPill({ status, scope }: { status: DataSourceEntry['status']; scop
   > = {
     fresh: {
       label: 'Fresh',
-      className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+      className: 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-primary)]',
       Icon: CheckCircle2,
     },
     stale: {
       label: 'Stale',
-      className: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+      className: 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]',
       Icon: AlertTriangle,
     },
     critical: {
       label: 'Critical',
-      className: 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+      className: 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]',
       Icon: AlertCircle,
     },
     unknown: {
       label: 'Unknown',
-      className: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
+      className: 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)]',
       Icon: HelpCircle,
     },
   };
@@ -86,7 +86,7 @@ export function DataSourcesHealthPanel() {
   const { data, isLoading, error, refetch, isFetching } = useDataSourcesFreshness();
 
   return (
-    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm font-bold text-[var(--text-primary)]">
@@ -112,7 +112,7 @@ export function DataSourcesHealthPanel() {
       {isLoading ? (
         <div className="mt-3 text-xs text-[var(--text-muted)]">Loading freshness data…</div>
       ) : error ? (
-        <div className="mt-3 rounded border border-rose-500/30 bg-rose-500/5 px-3 py-2 text-xs text-rose-300">
+        <div className="mt-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-info)]">
           Could not load freshness: {(error as Error).message}
         </div>
       ) : !data ? null : (

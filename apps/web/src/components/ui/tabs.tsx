@@ -54,7 +54,7 @@ const TabsList = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
         <div
             ref={ref}
             className={cn(
-                "inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground",
+                "inline-flex h-[var(--control-height)] items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-1 text-[var(--text-secondary)]",
                 className
             )}
             {...props}
@@ -80,8 +80,8 @@ const TabsTrigger = React.forwardRef<HTMLButtonElement, TabsTriggerProps>(
                 aria-selected={isSelected}
                 data-state={isSelected ? "active" : "inactive"}
                 className={cn(
-                    "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
-                    isSelected && "bg-background text-foreground shadow-sm",
+                    "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-colors hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] disabled:pointer-events-none disabled:opacity-50",
+                    isSelected && "bg-[var(--bg-primary)] font-semibold text-[var(--text-primary)] shadow-sm ring-1 ring-inset ring-[var(--border-strong)]",
                     className
                 )}
                 onClick={() => onValueChange(value)}
@@ -110,7 +110,7 @@ const TabsContent = React.forwardRef<HTMLDivElement, TabsContentProps>(
                 role="tabpanel"
                 data-state={selectedValue === value ? "active" : "inactive"}
                 className={cn(
-                    "mt-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                    "mt-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
                     className
                 )}
                 {...props}

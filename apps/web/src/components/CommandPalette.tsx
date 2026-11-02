@@ -60,25 +60,27 @@ function getShortcutModifierLabel(): string {
 
 function getTickerIcon(type: SearchTickerResult['type']): ReactNode {
   switch (type) {
+    // Decorative per-type colours were retired (#199): one neutral icon tone.
     case 'vn_stock':
-      return <span className="text-[11px] font-black uppercase tracking-widest text-sky-300">VN</span>;
+      return <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-secondary)]">VN</span>;
     case 'crypto':
-      return <Bitcoin className="h-4 w-4 text-amber-300" />;
+      return <Bitcoin className="h-4 w-4 text-[var(--text-secondary)]" />;
     case 'index':
-      return <Globe2 className="h-4 w-4 text-cyan-300" />;
+      return <Globe2 className="h-4 w-4 text-[var(--text-secondary)]" />;
     case 'us_stock':
-      return <TrendingUp className="h-4 w-4 text-emerald-300" />;
+      return <TrendingUp className="h-4 w-4 text-[var(--text-secondary)]" />;
     default:
       return <Search className="h-4 w-4" />;
   }
 }
 
 function getCommandIcon(item: CommandPaletteActionItem): ReactNode {
-  if (item.type === 'workspace') return <LayoutGrid className="h-4 w-4 text-cyan-300" />;
-  if (item.id.includes('settings')) return <Settings className="h-4 w-4 text-amber-300" />;
-  if (item.id.includes('market-news')) return <Newspaper className="h-4 w-4 text-emerald-300" />;
-  if (item.id.includes('tradingview')) return <ChartCandlestick className="h-4 w-4 text-violet-300" />;
-  if (item.id.includes('quant')) return <Sparkles className="h-4 w-4 text-indigo-300" />;
+  const iconTone = 'h-4 w-4 text-[var(--text-secondary)]';
+  if (item.type === 'workspace') return <LayoutGrid className={iconTone} />;
+  if (item.id.includes('settings')) return <Settings className={iconTone} />;
+  if (item.id.includes('market-news')) return <Newspaper className={iconTone} />;
+  if (item.id.includes('tradingview')) return <ChartCandlestick className={iconTone} />;
+  if (item.id.includes('quant')) return <Sparkles className={iconTone} />;
   return <ArrowRightLeft className="h-4 w-4 text-[var(--text-muted)]" />;
 }
 
@@ -91,7 +93,7 @@ function highlightMatch(text: string, query: string): Array<string | ReactNode> 
 
   return text.split(regex).filter(Boolean).map((part, index) => (
     part.toLowerCase() === trimmed.toLowerCase()
-      ? <mark key={`${part}-${index}`} className="rounded bg-blue-500/20 px-0.5 text-blue-100">{part}</mark>
+      ? <mark key={`${part}-${index}`} className="rounded bg-[var(--color-state-bg)] px-0.5 text-[var(--text-primary)] ring-1 ring-inset ring-[var(--color-state-border)]">{part}</mark>
       : part
   ));
 }
@@ -603,7 +605,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-[rgba(2,6,23,0.72)] p-4 pt-[12vh]">
+    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-[rgb(2_6_23_/_0.72)] p-4 pt-[12vh]">
       <button
         type="button"
         aria-label="Close command palette backdrop"
@@ -612,7 +614,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         onClick={() => onOpenChange(false)}
       />
 
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Command palette" tabIndex={-1} className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-2xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Command palette" tabIndex={-1} className="relative w-full max-w-2xl overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-lg">
         <div className="flex items-center gap-3 border-b border-[var(--border-default)] px-4 py-3">
           <CommandIcon className="h-5 w-5 text-[var(--text-muted)]" />
           <input
@@ -634,7 +636,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+            className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
             aria-label="Close command palette"
           >
             <X size={16} />
@@ -669,7 +671,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-4 py-2 text-[10px] text-[var(--text-muted)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-4 py-2 text-[10px] text-[var(--text-muted)]">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <ShortcutPill label={`${shortcutModifier}+K`} hint="Open" />
             <ShortcutPill label="↑↓" hint="Navigate" />
@@ -686,17 +688,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       </div>
 
       {showShortcutHelp ? (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-[rgba(2,6,23,0.64)] p-4">
-          <div ref={shortcutsDialogRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex={-1} className="w-full max-w-md rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 shadow-2xl">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-[rgb(2_6_23_/_0.72)] p-4">
+          <div ref={shortcutsDialogRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex={-1} className="w-full max-w-md rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-4 shadow-lg">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-bold text-[var(--text-primary)]">
-                <HelpCircle className="h-4 w-4 text-sky-300" />
+                <HelpCircle className="h-4 w-4 text-[var(--color-accent-primary)]" />
                 Keyboard Shortcuts
               </div>
               <button
                 type="button"
                 onClick={() => setShowShortcutHelp(false)}
-                className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                 aria-label="Close keyboard shortcuts"
               >
                 <X size={16} />
@@ -712,8 +714,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 ['Enter', 'Select highlighted command'],
                 ['Esc', 'Close palette or dialogs'],
               ].map(([keys, label]) => (
-                <div key={keys} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
-                  <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-xs font-semibold text-[var(--text-primary)]">{keys}</kbd>
+                <div key={keys} className="flex items-center justify-between gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+                  <kbd className="rounded border border-[var(--border-strong)] bg-[var(--bg-primary)] px-2 py-1 text-xs font-semibold text-[var(--text-primary)]">{keys}</kbd>
                   <span className="text-xs text-[var(--text-secondary)]">{label}</span>
                 </div>
               ))}
@@ -768,13 +770,13 @@ function PaletteSection({
             onMouseEnter={() => flatIndex >= 0 && onHover(flatIndex)}
             onClick={() => onSelect(item as RenderItem)}
             className={cn(
-              'group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors',
+              'group flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors',
               active
-                ? 'bg-blue-600/10 text-blue-300'
-                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50 hover:text-[var(--text-primary)]',
+                ? 'bg-[var(--color-state-bg)] text-[var(--text-primary)] ring-1 ring-inset ring-[var(--color-state-border)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]',
             )}
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+            <div className="flex h-9 w-9 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)]">
               {icon}
             </div>
             <div className="min-w-0 flex-1">
@@ -788,7 +790,7 @@ function PaletteSection({
               ) : null}
             </div>
             {item.exchange ? (
-              <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--text-muted)]">
+              <span className="rounded-full border border-[var(--border-strong)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[var(--text-muted)]">
                 {item.exchange}
               </span>
             ) : null}
@@ -805,7 +807,7 @@ function PaletteSection({
 function ShortcutPill({ label, hint }: { label: string; hint: string }) {
   return (
     <div className="flex items-center gap-1">
-      <kbd className="rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1 py-0.5">{label}</kbd>
+      <kbd className="rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-1 py-0.5">{label}</kbd>
       <span>{hint}</span>
     </div>
   );

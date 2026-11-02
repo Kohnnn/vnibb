@@ -22,9 +22,9 @@ import {
 } from '@/lib/mcpToolCatalog';
 
 const PERMISSION_STYLE: Record<McpPermissionClass, string> = {
-  read_only: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
-  authenticated_read: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
-  confirm_action: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  read_only: 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-primary)]',
+  authenticated_read: 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]',
+  confirm_action: 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]',
 };
 
 const SOURCE_LABEL: Record<McpToolSource, string> = {
@@ -57,13 +57,13 @@ export function McpToolCatalogPanel() {
   );
 
   return (
-    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Server size={14} className="text-[var(--accent-blue)]" />
           <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent tools (read-only MCP)</h4>
         </div>
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-emerald-300">
+        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]">
           <ShieldCheck size={11} />
           Read-only
         </span>
@@ -82,7 +82,7 @@ export function McpToolCatalogPanel() {
             className={cn(
               'rounded-md border px-2 py-1 text-[10px] font-semibold transition-colors',
               sourceFilter === value
-                ? 'border-blue-500 bg-blue-600/20 text-blue-300'
+                ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                 : 'border-[var(--border-default)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
             )}
           >
@@ -115,8 +115,8 @@ export function McpToolCatalogPanel() {
         ))}
       </div>
 
-      <div className="mt-3 rounded-md border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-        <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-300/90">
+      <div className="mt-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2">
+        <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-warning)]">
           <Lock size={10} />
           Intentionally not exposed
         </div>

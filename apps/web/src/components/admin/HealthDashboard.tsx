@@ -45,23 +45,23 @@ export function HealthDashboard() {
   }, []);
 
   const StatusIcon = ({ status }: { status: string }) => {
-    if (status === 'healthy') return <CheckCircle className="w-5 h-5 text-green-400" />;
-    if (status === 'unhealthy') return <XCircle className="w-5 h-5 text-red-400" />;
-    return <AlertCircle className="w-5 h-5 text-yellow-400" />;
+    if (status === 'healthy') return <CheckCircle className="h-5 w-5 text-[var(--color-info)]" />;
+    if (status === 'unhealthy') return <XCircle className="h-5 w-5 text-[var(--color-error)]" />;
+    return <AlertCircle className="h-5 w-5 text-[var(--color-warning)]" />;
   };
 
   const statusClass =
     health?.status === 'healthy'
-      ? 'bg-green-500/10 border-green-500/30'
+      ? 'border-[var(--border-strong)] bg-[var(--bg-secondary)]'
       : health?.status === 'degraded'
-        ? 'bg-yellow-500/10 border-yellow-500/30'
-        : 'bg-red-500/10 border-red-500/30';
+        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]'
+        : 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)]';
 
   return (
-    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6">
+    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-6">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
-          <Server className="w-6 h-6 text-blue-400" />
+          <Server className="h-6 w-6 text-[var(--color-accent-primary)]" />
           <h2 className="text-xl font-bold text-[var(--text-primary)]">System Health</h2>
         </div>
         <button 
@@ -73,7 +73,7 @@ export function HealthDashboard() {
             }
           }}
           disabled={loading}
-          className="rounded-lg p-2 transition-colors hover:bg-[var(--bg-tertiary)]"
+          className="rounded-md p-2 transition-colors hover:bg-[var(--bg-hover)]"
           aria-label="Refresh health status"
         >
           <RefreshCw className={`h-5 w-5 text-[var(--text-secondary)] ${loading ? 'animate-spin' : ''}`} />
@@ -81,15 +81,15 @@ export function HealthDashboard() {
       </div>
       
       {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg mb-4">
-          <p className="text-red-400 text-sm">{error}</p>
+        <div className="mb-4 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-3">
+          <p className="text-sm text-[var(--color-error)]">{error}</p>
         </div>
       )}
       
       {health && (
         <div className="space-y-4">
           {/* Overall Status */}
-          <div className={`flex items-center gap-3 p-4 rounded-lg border ${statusClass}`}>
+          <div className={`flex items-center gap-3 rounded-md border p-4 ${statusClass}`}>
             <StatusIcon status={health.status} />
             <div>
               <span className="font-medium capitalize text-[var(--text-primary)]">{health.status}</span>
@@ -101,7 +101,7 @@ export function HealthDashboard() {
           {/* Components Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Object.entries(health.components).map(([name, data]) => (
-              <div key={name} className="rounded-lg bg-[var(--bg-tertiary)] p-4">
+              <div key={name} className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <StatusIcon status={data.status} />
                   <span className="font-medium capitalize text-[var(--text-primary)]">{name}</span>

@@ -216,7 +216,7 @@ export function WhatsNewPanel() {
           animate={{ opacity: 1, x: 0, y: 0 }}
           exit={{ opacity: 0, x: 24, y: 24 }}
           transition={{ duration: 0.25 }}
-          className={`fixed bottom-5 right-5 z-[90] ${showFullLog ? 'w-[480px]' : 'w-[360px]'} max-w-[calc(100vw-40px)] rounded-2xl border border-blue-500/30 bg-[var(--bg-elevated)] shadow-[0_24px_60px_rgba(59,130,246,0.25)]`}
+          className={`fixed bottom-5 right-5 z-[90] ${showFullLog ? 'w-[480px]' : 'w-[360px]'} max-w-[calc(100vw-40px)] rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-lg`}
           onMouseEnter={handlePauseAutoDismiss}
           onMouseLeave={handleResumeAutoDismiss}
           onFocusCapture={handlePauseAutoDismiss}
@@ -226,12 +226,12 @@ export function WhatsNewPanel() {
         >
           <div className="flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-3">
             <div className="flex items-center gap-2">
-              <div className="rounded-lg bg-blue-500/15 p-1.5 text-blue-300">
+              <div className="rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-1.5 text-[var(--color-accent-primary)]">
                 <Sparkles size={14} />
               </div>
               <div>
-                <div className="text-[9px] font-black uppercase tracking-[0.2em] text-blue-300">{CURRENT_RELEASE_NOTES.version}</div>
-                <h3 className="text-sm font-black text-[var(--text-primary)]">{CURRENT_RELEASE_NOTES.title}</h3>
+                <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-[var(--text-secondary)]">{CURRENT_RELEASE_NOTES.version}</div>
+                <h3 className="text-sm font-bold text-[var(--text-primary)]">{CURRENT_RELEASE_NOTES.title}</h3>
               </div>
             </div>
             <button
@@ -246,7 +246,7 @@ export function WhatsNewPanel() {
           <ul className="space-y-2.5 p-3 text-[12px]">
             {CURRENT_RELEASE_NOTES.highlights.map((item) => (
               <li key={item.label} className="flex gap-2">
-                <ChevronRight size={12} className="mt-1 shrink-0 text-blue-300" />
+                <ChevronRight size={12} className="mt-1 shrink-0 text-[var(--color-accent-primary)]" />
                 <div>
                   <span className="font-bold text-[var(--text-primary)]">{item.label}.</span>{' '}
                   <span className="text-[var(--text-secondary)]">{item.detail}</span>
@@ -277,7 +277,7 @@ export function WhatsNewPanel() {
             <button
               type="button"
               onClick={handleClose}
-              className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-blue-500"
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
             >
               Got it
             </button>
