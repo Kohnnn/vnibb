@@ -284,7 +284,7 @@ async def test_daily_price_timeout_still_materializes_retained_screener(monkeypa
 
     async def screener(*, progress, enrich_ratios, acquire_sessions):
         assert enrich_ratios is False
-        progress.update(committed_count=2, base_count=2)
+        progress.update(committed_count=2, base_count=2, session_input_complete=True, cohort_published=True)
         return 2
 
     monkeypatch.setattr("vnibb.services.sync_all_data.time", SimpleNamespace(
@@ -371,6 +371,7 @@ async def test_daily_receipt_retains_active_stage_on_cancellation(monkeypatch, d
 async def test_daily_receipt_cancellation_persists_to_sql(test_engine, monkeypatch, daily_receipts, blocked_stage):
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
     from vnibb.models.sync_status import SyncStatus
 
     sessions = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -422,3 +423,171 @@ async def test_daily_receipt_cancellation_persists_to_sql(test_engine, monkeypat
         assert stage["status"] == "cancelled"
         assert stage["progress"]["last_symbol"] == "FPT"
         assert stage["synced_count"] == (20 if blocked_stage == "daily_prices" else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("damage", ["malformed", "unexpected", "universe_change"])
+async def test_daily_owner_rejects_incomplete_board_input(test_engine, monkeypatch, damage):
+    """The daily owner must fail the screener stage unless the certified cohort
+    was actually published. A malformed/unexpected board keeps the input flag
+    false; a changed active universe keeps it true but leaves the cohort
+    unpublished. Either way no completed receipt may be written."""
+    from datetime import UTC, date, datetime
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from vnibb.models.stock import Stock
+    from vnibb.models.sync_status import SyncStatus
+    from vnibb.providers.vnstock import runtime
+    from vnibb.services import data_pipeline as pipeline_module
+    from vnibb.services import market_session
+    from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+    from vnibb.services.vietcap_client import VietcapClient
+
+    session_date = date(2026, 10, 26)
+    observed = datetime(2026, 10, 26, 9, tzinfo=UTC)
+
+    def board_row(symbol):
+        return {
+            "listingInfo": {
+                "symbol": symbol, "ticker": symbol, "stockType": "STOCK", "type": "STOCK",
+                "isDelisted": 0, "tradingDate": session_date.isoformat(),
+                "receivedTime": "2026-10-26T01:44:00Z", "tradingStatus": "TRADING_ACTIVATED",
+                "tradingStatusCode": "20", "securityStatus": "N",
+            },
+            "bidAsk": {"symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z", "receivedTime": "2026-10-26T08:00:03Z"},
+            "matchPrice": {
+                "symbol": symbol, "session": "ENDED", "time": "2026-10-26T08:00:00Z",
+                "receivedTime": "2026-10-26T08:00:03Z", "openPrice": 10000,
+                "highest": 12000, "lowest": 9000, "matchPrice": 11000, "accumulatedVolume": 100,
+            },
+        }
+
+    rows = [board_row("FPT"), board_row("VNM")]
+    if damage == "unexpected":
+        rows.append(board_row("CCC"))
+    elif damage == "malformed":
+        rows.append(None)
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.sync_all_data.async_session_maker", sessions)
+    seeded = [Stock(symbol="FPT", is_active=1), Stock(symbol="VNM", is_active=1)]
+    async with sessions.begin() as session:
+        session.add_all(seeded)
+
+
+    loop = asyncio.get_running_loop()
+    activated = {"done": False}
+    if damage == "universe_change":
+        # CCC becomes active after the screener deduped its universe but before
+        # the publish-cohort re-read: admitted cohort is complete, the active
+        # universe is not, so the cohort must stay unpublished.
+        async def activate():
+            async with sessions.begin() as session:
+                session.add(Stock(symbol="CCC", is_active=1))
+
+        def request(*args, **kwargs):
+            if not activated["done"]:
+                activated["done"] = True
+                asyncio.run_coroutine_threadsafe(activate(), loop).result()
+            return deepcopy(rows)
+
+        monkeypatch.setattr(VietcapClient, "_request", request)
+    else:
+        monkeypatch.setattr(VietcapClient, "_request", lambda *args, **kwargs: deepcopy(rows))
+    # Real datetime subclass: data_pipeline does isinstance(x, datetime), so a
+    # SimpleNamespace here would break row assembly with a TypeError.
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return observed.astimezone(tz) if tz else observed.replace(tzinfo=None)
+
+        @classmethod
+        def utcnow(cls):
+            return observed.replace(tzinfo=None)
+
+    monkeypatch.setattr(pipeline_module, "datetime", FrozenDatetime)
+    monkeypatch.setattr(market_session, "expected_market_session", lambda *, now=None: session_date)
+
+    service = get_mongo_market_data_service()
+    envelopes: list[dict] = []
+    monkeypatch.setattr(service, "retain_price_board_envelope",
+                        lambda requested, raw, session, observed_at: envelopes.append(
+                            {"requested_symbols": list(requested), "raw": raw, "session_date": session.isoformat()}))
+    monkeypatch.setattr(service, "retain_market_sessions",
+                        lambda records: {record["symbol"]: record for record in records})
+    monkeypatch.setattr(service, "verified_market_sessions",
+                        lambda records, envs: set(records))
+    monkeypatch.setattr("vnibb.services.mongo_market_data_service.get_mongo_market_data_service", lambda: service)
+
+    class Listing:
+        def __init__(self, **kwargs):
+            pass
+
+        def all_symbols(self):
+            import pandas as pd
+            return pd.DataFrame()
+
+        symbols_by_exchange = all_symbols
+        symbols_by_industries = all_symbols
+
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Listing, "vnstock"))
+    monkeypatch.setattr(runtime, "validate_source", lambda source: source)
+    monkeypatch.setattr(service, "_get_collection", lambda name: SimpleNamespace(find=lambda *a, **k: iter(())))
+
+    # Patch the singleton the daily owner actually holds; a fresh DataPipeline()
+    # would leave sync_all_data.data_pipeline untouched.
+    from vnibb.services import sync_all_data as sync_module
+    pipeline = sync_module.data_pipeline
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", lambda *a, **k: asyncio.sleep(0))
+    monkeypatch.setattr(pipeline, "_cache_set_json", lambda *a, **k: asyncio.sleep(0))
+
+    async def no_prices(**kwargs):
+        return 0
+
+    async def no_stage(*args, **kwargs):
+        return make_result(0)
+
+    monkeypatch.setattr(pipeline, "sync_daily_prices", no_prices)
+    monkeypatch.setattr(FullMarketSync, "sync_all_indices", no_stage)
+    monkeypatch.setattr(FullMarketSync, "sync_all_corporate_actions", no_stage)
+    monkeypatch.setattr(FullMarketSync, "sync_daily_profiles", no_stage)
+    monkeypatch.setattr(FullMarketSync, "sync_daily_maintenance", no_stage)
+    async def no_rs(self):
+        return {"success": True, "total_stocks": 0}
+
+    monkeypatch.setattr(
+        "vnibb.services.rs_rating_service.RSRatingService.calculate_all_rs_ratings", no_rs,
+    )
+    screener_progress: dict = {}
+    real_screener = pipeline.sync_screener_data
+
+    async def spy_screener(**kwargs):
+        try:
+            return await real_screener(**kwargs)
+        finally:
+            screener_progress.update(kwargs.get("progress") or {})
+
+    monkeypatch.setattr(pipeline, "sync_screener_data", spy_screener)
+
+    results = await run_daily_market_sync()
+
+    # Both symbols were admitted with no session errors. The stage must still
+    # fail: incomplete input, or a complete input whose cohort was not published
+    # because the active universe changed, not because setup broke.
+    assert screener_progress["base_count"] == 2
+    assert screener_progress["error_count"] == 0
+    if damage == "universe_change":
+        assert screener_progress["session_input_complete"] is True
+        assert screener_progress["cohort_published"] is False
+    else:
+        assert screener_progress["session_input_complete"] is False
+        assert screener_progress["cohort_published"] is False
+    assert not results["screener"].success
+    assert not results["screener"].complete
+    async with sessions() as session:
+        assert not (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe", SyncStatus.status == "completed"))).all()

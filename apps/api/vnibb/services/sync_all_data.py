@@ -602,7 +602,19 @@ async def run_daily_market_sync(
             try:
                 count = int(await operation())
                 acquired = progress.get("base_count", count) if name == "screener" else count
-                if progress.get("error_count") or (name == "screener" and acquired != len(symbols)):
+                # A screener cycle is complete only when every active symbol is
+                # admitted, the provider board input was complete, and the
+                # certified cohort was actually published after the durable
+                # commit. Counts alone can match while a changed active universe
+                # or materialization error leaves the cohort unpublished.
+                if progress.get("error_count") or (
+                    name == "screener"
+                    and (
+                        acquired != len(symbols)
+                        or progress.get("session_input_complete") is not True
+                        or progress.get("cohort_published") is not True
+                    )
+                ):
                     raise RuntimeError(f"{name} acquisition unavailable or incomplete")
             except Exception as exc:
                 count = max(count, int(progress.get("committed_count", 0)))

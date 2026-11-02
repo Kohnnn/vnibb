@@ -2513,6 +2513,10 @@ class DataPipeline:
                 ))
             await session.commit()
             if progress is not None:
+                # Publish the certified-cohort outcome only after the durable
+                # commit, so the owner can require it instead of inferring
+                # completeness from counts alone.
+                progress["cohort_published"] = bool(publish_cohort)
                 progress["committed_count"] = count
             for item in cache_batch:
                 cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])

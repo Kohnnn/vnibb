@@ -77,7 +77,11 @@ class StockPrice(Base):
     """
     __tablename__ = "stock_prices"
     
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # SQLite only autoincrements an INTEGER PRIMARY KEY, not BIGINT; keep the
+    # production BigInteger but render Integer on SQLite so inserts work there.
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
     
     # Foreign key to stock
     stock_id: Mapped[int] = mapped_column(Integer, ForeignKey("stocks.id"), nullable=False, index=True)
