@@ -19,7 +19,7 @@
 .border-default { border-color: var(--color-border-default); }
 .border-subtle { border-color: var(--color-border-subtle); }
 
-/* Status colors */
+/* System status (saved/loading/warning/failed): neutral or blue only. */
 .text-success { color: var(--color-success); }
 .text-warning { color: var(--color-warning); }
 .text-error { color: var(--color-error); }
@@ -32,5 +32,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.cell-positive { color: var(--color-success); }
-.cell-negative { color: var(--color-error); }
+/* Financial direction (gain/loss). */
+.cell-positive { color: var(--color-positive); }
+.cell-negative { color: var(--color-negative); }

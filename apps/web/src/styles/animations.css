@@ -192,19 +192,10 @@
   border-radius: 4px;
 }
 
-/* Widget glow effect */
-@keyframes widget-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.15);
-  }
-  50% {
-    box-shadow: 0 0 40px rgba(59, 130, 246, 0.25);
-  }
-}
-
+/* Widget glow retired in #197 (no perpetual decorative pulses). The class is
+   kept as a no-op so any stale markup degrades to a static surface. */
 .widget-glow-active {
-  animation: widget-glow 2s ease-in-out infinite;
+  animation: none;
 }
 
 /* Chart loading shimmer */
