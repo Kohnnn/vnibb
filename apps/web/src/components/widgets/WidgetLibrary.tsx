@@ -50,7 +50,7 @@ interface WidgetBundle {
     tags: string[];
 }
 
-const WIDGET_BUNDLES: WidgetBundle[] = [
+export const WIDGET_BUNDLES: WidgetBundle[] = [
     {
         id: 'world-monitor-suite',
         name: 'World Monitor Suite',
@@ -61,7 +61,7 @@ const WIDGET_BUNDLES: WidgetBundle[] = [
     {
         id: 'market-pulse-pack',
         name: 'Market Pulse Pack',
-        description: 'Market overview, movers, breadth, heatmap, and news for top-down scanning.',
+        description: 'Market overview, movers, breadth, and news for top-down scanning.',
         widgetTypes: ['market_overview', 'top_movers', 'market_breadth', 'market_news'],
         tags: ['Market', 'Scanner', 'Live'],
     },

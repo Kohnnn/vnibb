@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { WidgetLibrary } from './WidgetLibrary';
+import { WidgetLibrary, WIDGET_BUNDLES } from './WidgetLibrary';
+import { getWidgetDefinition } from '@/data/widgetDefinitions';
 
 jest.mock('@/contexts/DashboardContext', () => ({
     useDashboard: () => ({
@@ -52,5 +53,16 @@ describe('WidgetLibrary drawer recovery', () => {
         expect(document.activeElement).toBe(opener);
 
         opener.remove();
+    });
+});
+
+describe('WidgetLibrary bundle integrity', () => {
+    it('advertises only resolvable widgets in the Market Pulse pack', () => {
+        const pulse = WIDGET_BUNDLES.find((b) => b.id === 'market-pulse-pack');
+        expect(pulse).toBeDefined();
+        const resolvable = pulse!.widgetTypes.filter((t) => Boolean(getWidgetDefinition(t)));
+        // A bundle must not promise a widget the catalog cannot resolve.
+        expect(resolvable).toEqual(pulse!.widgetTypes);
+        expect(pulse!.description).not.toMatch(/heatmap/i);
     });
 });
