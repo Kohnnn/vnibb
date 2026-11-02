@@ -13,9 +13,15 @@ import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getRegisteredWidgetIds } from '@/components/widgets/WidgetRegistry';
 import { WidgetPreview } from './WidgetPreview';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { WidgetType } from '@/types/dashboard';
+
+// A widget ID is only insertable when the registry can actually resolve it.
+// Catalog-only or stale saved IDs stay out of the library instead of adding a
+// dead tile.
+const REGISTERED_WIDGET_IDS = new Set<string>(getRegisteredWidgetIds());
 
 interface WidgetLibraryProps {
     isOpen: boolean;
@@ -42,7 +48,6 @@ interface WidgetBundle {
     description: string;
     widgetTypes: WidgetType[];
     tags: string[];
-    accent: string;
 }
 
 const WIDGET_BUNDLES: WidgetBundle[] = [
@@ -52,7 +57,6 @@ const WIDGET_BUNDLES: WidgetBundle[] = [
         description: 'Map and headline list for global risk monitoring.',
         widgetTypes: ['world_news_map', 'world_news_live_stream', 'world_news_monitor', 'world_news_sources'],
         tags: ['Live RSS', 'No symbol', 'Global'],
-        accent: 'from-sky-500/20 via-blue-500/10 to-emerald-500/10',
     },
     {
         id: 'market-pulse-pack',
@@ -60,7 +64,6 @@ const WIDGET_BUNDLES: WidgetBundle[] = [
         description: 'Market overview, movers, breadth, heatmap, and news for top-down scanning.',
         widgetTypes: ['market_overview', 'top_movers', 'market_breadth', 'market_heatmap', 'market_news'],
         tags: ['Market', 'Scanner', 'Live'],
-        accent: 'from-blue-500/20 via-cyan-500/10 to-emerald-500/10',
     },
     {
         id: 'fundamental-core-pack',
@@ -68,7 +71,6 @@ const WIDGET_BUNDLES: WidgetBundle[] = [
         description: 'Financial snapshot, ratios, statements, and peer context for company research.',
         widgetTypes: ['financial_snapshot', 'financial_ratios', 'income_statement', 'balance_sheet', 'peer_comparison'],
         tags: ['Research', 'Symbol', 'Statements'],
-        accent: 'from-amber-500/20 via-orange-500/10 to-blue-500/10',
     },
 ];
 
@@ -217,7 +219,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
         return widgetLibrarySections.map(cat => ({
             ...cat,
-            widgets: widgetDefinitions.filter((widget) => getWidgetLibrarySectionId(widget.type) === cat.id && matchesWidget(widget))
+            widgets: widgetDefinitions.filter((widget) => REGISTERED_WIDGET_IDS.has(widget.type) && getWidgetLibrarySectionId(widget.type) === cat.id && matchesWidget(widget))
         })).filter(cat => cat.widgets.length > 0);
     }, [searchQuery]);
 
@@ -303,7 +305,9 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         setSelectedWidgetTypes([]);
     }, [handleAddWidgets, selectedWidgetTypes]);
 
-    const availableBundles = WIDGET_BUNDLES;
+    const availableBundles = WIDGET_BUNDLES.filter((bundle) =>
+        bundle.widgetTypes.every((type) => REGISTERED_WIDGET_IDS.has(type))
+    );
 
     return (
         <AnimatePresence>
@@ -374,10 +378,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                         {availableBundles.map((bundle) => (
                                             <div
                                                 key={bundle.id}
-                                                className={cn(
-                                                    'overflow-hidden rounded-xl border border-[var(--border-default)] bg-gradient-to-br p-3 transition-all hover:border-blue-500/35',
-                                                    bundle.accent
-                                                )}
+                                                className="overflow-hidden rounded-[var(--widget-radius)] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 transition-colors hover:border-[var(--border-strong)]"
                                             >
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div className="min-w-0">
@@ -423,7 +424,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                     <div className="p-2 grid grid-cols-2 gap-2">
                                         {recentWidgetTypes.map(type => {
                                             const widget = widgetDefinitions.find(w => w.type === type);
-                                            if (!widget) return null;
+                                            if (!widget || !REGISTERED_WIDGET_IDS.has(type)) return null;
                                             return (
                                                 <button
                                                     key={type}
@@ -564,9 +565,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         </div>
 
                                                         {/* Enhanced Preview Thumbnail */}
-                                                        <div className="mt-3 h-20 bg-[var(--bg-primary)] rounded-xl border border-[var(--border-subtle)] relative overflow-hidden group-hover:border-blue-500/30 transition-all">
+                                                        <div className="mt-3 h-20 bg-[var(--bg-primary)] rounded-[var(--widget-radius)] border border-[var(--border-subtle)] relative overflow-hidden group-hover:border-[var(--border-strong)] transition-colors">
                                                             <WidgetPreview type={widget.type} />
-                                                            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[rgba(0,0,0,0.2)] via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                                                             <div className="absolute bottom-1.5 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
                                                                 <span className="text-[7px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface)] px-1 rounded">
                                                                     {libraryLayout.w}×{libraryLayout.h}

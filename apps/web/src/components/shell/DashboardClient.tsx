@@ -1568,7 +1568,17 @@ function DashboardContent() {
                                                             />
                                                         </Suspense>
                                                     ) : (
-                                                        <div className="p-4 text-[var(--text-muted)]">Widget not found: {widgetType}</div>
+                                                        <div
+                                                            role="status"
+                                                            className="flex h-full flex-col items-start gap-1 p-4 text-xs text-[var(--text-secondary)]"
+                                                        >
+                                                            <span className="font-semibold text-[var(--text-primary)]">
+                                                                {widgetTitle} is not available in this build
+                                                            </span>
+                                                            <span>
+                                                                Saved layout kept. Widget ID: <span className="font-mono">{widgetType}</span>
+                                                            </span>
+                                                        </div>
                                                     )}
                                                 </WidgetWrapper>
                                             </div>
