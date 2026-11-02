@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useComparison, usePeers } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
-import { exportToCSV, type ExportProvenance } from '@/lib/exportWidget';
+import { exportToCSV, exportToXLSX, type ExportProvenance } from '@/lib/exportWidget';
 import { EMPTY_VALUE, formatCompactValueForUnit, formatNumber, formatPercent, type UnitConfig } from '@/lib/units';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -786,13 +786,15 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                         <RefreshCw size={14} />
                     </button>
                     <ExportButton
-                        onExport={async () => {
+                        onExport={async (format) => {
                             const rows = peers.map((sym) => ({
                                 symbol: sym,
                                 period,
                                 name: comparisonData[sym]?.name ?? null,
                                 ...(comparisonData[sym]?.metrics ?? {}),
                             }));
+                            // `dataUpdatedAt` is React Query's fetch time, not the
+                            // source's observation date: it may only fill fetchedAt.
                             const provenance: ExportProvenance = {
                                 widgetType: 'peer_comparison',
                                 widgetTitle: 'Peer Comparison',
@@ -800,13 +802,18 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                 sourceLabel: 'VniBB comparison API',
                                 apiGroup: '/comparison',
                                 endpoint: '/api/v1/comparison/stocks',
-                                updatedAt: dataUpdatedAt ? new Date(dataUpdatedAt) : null,
+                                fetchedAt: dataUpdatedAt ? new Date(dataUpdatedAt) : null,
                                 coverage: peers.every((sym) => comparisonData[sym]) ? 'complete' : 'partial',
                                 warnings: [
                                     'Metrics are provider-reported; market-cap conflicts are flagged in the widget, not resolved here.',
                                 ],
                             };
-                            exportToCSV(rows, `peers_${peers.join('-')}_${period}`, provenance);
+                            const filename = `peers_${peers.join('-')}_${period}`;
+                            if (format === 'excel') {
+                                exportToXLSX(rows, filename, provenance);
+                            } else {
+                                exportToCSV(rows, filename, provenance);
+                            }
                         }}
                         variant="ghost"
                         className="h-8 w-8 p-0"

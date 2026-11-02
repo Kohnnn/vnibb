@@ -108,7 +108,7 @@ export function ExportButton({
                             onClick={() => handleExport('excel')}
                             className="block w-full px-4 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                         >
-                            Export as Excel
+                            Export as spreadsheet (.xls)
                         </button>
                     </div>
                 </div>

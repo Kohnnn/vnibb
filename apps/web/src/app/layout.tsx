@@ -31,7 +31,7 @@ const plexMono = localFont({
  * themselves as canonical, so only the production host is pinned; every other
  * environment keeps Next's per-request origin.
  */
-export const VNIBB_CANONICAL_ORIGIN = "https://web.vnibb.xyz";
+const VNIBB_CANONICAL_ORIGIN = "https://web.vnibb.xyz";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || VNIBB_CANONICAL_ORIGIN;
 
 const SITE_DESCRIPTION =
