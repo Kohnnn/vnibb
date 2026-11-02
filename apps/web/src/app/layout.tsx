@@ -4,18 +4,26 @@ import { Suspense } from "react";
 import { AppProviders } from "@/contexts/AppProviders";
 import "./globals.css";
 
-const geistSans = localFont({
-  src: "./fonts/Geist-Variable.ttf",
-  variable: "--font-geist-sans",
+/* Self-hosted brand fonts (OFL; licenses beside the files). Variables mount on
+   <html> so the :root tokens in design-tokens.css can resolve them. */
+const inter = localFont({
+  src: [
+    { path: "./fonts/Inter-Regular.ttf", weight: "400", style: "normal" },
+    { path: "./fonts/Inter-Medium.ttf", weight: "500", style: "normal" },
+    { path: "./fonts/Inter-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "./fonts/Inter-Bold.ttf", weight: "700", style: "normal" },
+  ],
+  variable: "--font-inter",
   display: "swap",
-  weight: "100 900",
+  fallback: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
 });
 
-const geistMono = localFont({
-  src: "./fonts/GeistMono-Variable.ttf",
-  variable: "--font-geist-mono",
+const plexMono = localFont({
+  src: "./fonts/IBMPlexMono-Regular.ttf",
+  variable: "--font-plex-mono",
   display: "swap",
-  weight: "100 900",
+  weight: "400",
+  fallback: ["monospace"],
 });
 
 export const metadata: Metadata = {
@@ -67,7 +75,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${inter.variable} ${plexMono.variable}`}
+    >
       <head>
         <ThemeUiScripts />
         <title>VNIBB | Vietnam Stock Market Analytics</title>
@@ -83,7 +95,7 @@ export default function RootLayout({
         <meta property="og:type" content="website" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]`}
+        className="antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]"
         suppressHydrationWarning
       >
         <a

@@ -29,7 +29,7 @@
   font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   text-align: right;
-  tabular-nums: true;
+  font-variant-numeric: tabular-nums;
 }
 
 .cell-positive { color: var(--color-success); }
