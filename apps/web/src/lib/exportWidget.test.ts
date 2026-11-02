@@ -1,4 +1,4 @@
-import { provenanceToMarkdown, rowsToCSV } from './exportWidget';
+import { exportToJSON, provenanceToMarkdown, rowsToCSV } from './exportWidget';
 import { buildWidgetRuntime, getWidgetExportData } from './widgetRuntime';
 
 describe('getWidgetExportData', () => {
@@ -116,6 +116,43 @@ describe('exportToXLSX', () => {
       expect(text).toContain('>source_as_of<');
       expect(text).toContain('>fetched_at<');
       expect(text).toContain('2026-11-02T03:00:00.000Z');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+      click.mockRestore();
+    }
+  });
+});
+
+describe('exportToJSON', () => {
+  it('wraps rows with _provenance and keeps source time distinct from fetch time', async () => {
+    const captured: Array<{ blob: Blob; filename: string }> = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = ((blob: Blob) => {
+      captured.push({ blob, filename: '' });
+      return 'blob:test';
+    }) as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = jest.fn();
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      captured[captured.length - 1].filename = this.download;
+    });
+
+    try {
+      exportToJSON(
+        [{ symbol: 'FPT', revenue: 63000 }],
+        'fpt',
+        { symbol: 'FPT', sourceLabel: 'VniBB financials API', fetchedAt: '2026-11-02T03:00:00Z' },
+      );
+
+      const { blob, filename } = captured[0];
+      const text = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(blob); });
+      const payload = JSON.parse(text);
+      expect(filename).toBe('fpt.json');
+      expect(payload.data).toEqual([{ symbol: 'FPT', revenue: 63000 }]);
+      expect(payload._provenance.fetchedAt).toBe('2026-11-02T03:00:00.000Z');
+      expect(payload._provenance.updatedAt).toBeNull();
+      expect(payload._provenance.capturedAt).toBeTruthy();
     } finally {
       URL.createObjectURL = originalCreate;
       URL.revokeObjectURL = originalRevoke;

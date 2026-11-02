@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Download, FileSpreadsheet, FileJson, FileText, Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { exportToCSV, exportToJSON, exportToXLSX, type ExportProvenance } from '@/lib/exportWidget';
 
 interface ExportButtonProps {
   data: any[] | Record<string, any>;
@@ -10,6 +11,8 @@ interface ExportButtonProps {
   formats?: ('csv' | 'xlsx' | 'json')[];
   disabled?: boolean;
   className?: string;
+  /** Source/retrieval metadata stamped into every file this button produces. */
+  provenance?: ExportProvenance;
 }
 
 export function ExportButton({ 
@@ -18,62 +21,26 @@ export function ExportButton({
   formats = ['csv', 'json'],
   disabled = false,
   className = '',
+  provenance,
 }: ExportButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [exported, setExported] = useState<string | null>(null);
 
   const exportCSV = () => {
     if (!data || (Array.isArray(data) && data.length === 0)) return;
-    
-    const items = Array.isArray(data) ? data : [data];
-    const headers = Object.keys(items[0]);
-    const csv = [
-      headers.join(','),
-      ...items.map(row => 
-        headers.map(h => {
-          const val = row[h];
-          // Escape quotes and wrap in quotes if contains comma
-          if (typeof val === 'string' && (val.includes(',') || val.includes('"'))) {
-            return `"${val.replace(/"/g, '""')}"`;
-          }
-          return val ?? '';
-        }).join(',')
-      )
-    ].join('\n');
-    
-    downloadFile(csv, `${filename}.csv`, 'text/csv');
+    exportToCSV(data, filename, provenance);
     showExported('csv');
   };
 
   const exportJSON = () => {
-    const json = JSON.stringify(data, null, 2);
-    downloadFile(json, `${filename}.json`, 'application/json');
+    exportToJSON(data, filename, provenance);
     showExported('json');
   };
 
-  const exportXLSX = async () => {
-    // Lightweight TSV approach for Excel
-    const items = Array.isArray(data) ? data : [data];
-    if (items.length === 0) return;
-    
-    const headers = Object.keys(items[0]);
-    const tsv = [
-      headers.join('\t'),
-      ...items.map(row => headers.map(h => row[h] ?? '').join('\t'))
-    ].join('\n');
-    
-    downloadFile(tsv, `${filename}.xls`, 'application/vnd.ms-excel');
+  const exportXLSX = () => {
+    if (!data || (Array.isArray(data) && data.length === 0)) return;
+    exportToXLSX(data, filename, provenance);
     showExported('xlsx');
-  };
-
-  const downloadFile = (content: string, filename: string, type: string) => {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const showExported = (format: string) => {

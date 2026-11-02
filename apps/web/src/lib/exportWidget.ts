@@ -256,7 +256,8 @@ export async function exportToPNG(elementId: string, filename: string) {
   
   try {
     const canvas = await html2canvas(element, {
-      backgroundColor: '#0a0a0a', // Match theme background
+      // Transparent so the image works on light and dark surfaces.
+      backgroundColor: null,
       useCORS: true,
     } as any);
     
