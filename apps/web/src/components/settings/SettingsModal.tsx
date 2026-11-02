@@ -762,7 +762,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        VniAgent uses a VNIBB database-first workflow. The VNIBB Postgres market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
+                        VniAgent uses a VniBB database-first workflow. The VniBB Postgres market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
                       </p>
                     </div>
                     <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
@@ -789,7 +789,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       {aiMode === 'browser_key' ? aiModelInput || 'Set model' : publicRuntimeModel || 'Admin runtime model'}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                      {aiPreferDatabaseData ? 'VNIBB DB first' : 'External-first'}
+                      {aiPreferDatabaseData ? 'VniBB DB first' : 'External-first'}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                       {aiEnableSidebarWorkflowOutputs ? 'Workflow panels on' : 'Answer-first sidebar'}
@@ -1011,7 +1011,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                    This key stays in browser localStorage. VNIBB does not persist it server-side, but scripts running in this browser profile can access localStorage.
+                    This key stays in browser localStorage. VniBB does not persist it server-side, but scripts running in this browser profile can access localStorage.
                   </p>
                 </div>
 
@@ -1043,7 +1043,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Data & Behavior</h4>
                   <p className="mb-3 text-[11px] text-[var(--text-muted)]">
-                    Control whether VniAgent stays VNIBB database-first, whether it can reach the web, and whether the sidebar keeps workflow detail panels visible.
+                    Control whether VniAgent stays VniBB database-first, whether it can reach the web, and whether the sidebar keeps workflow detail panels visible.
                   </p>
                 </div>
 
@@ -1056,8 +1056,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       className="mt-0.5 h-4 w-4 rounded"
                     />
                     <span>
-                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VNIBB database</span>
-                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the VNIBB database first and only fall back when context is missing.</span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VniBB database</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the VniBB database first and only fall back when context is missing.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
@@ -1071,7 +1071,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <span>
                       <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Allow web search</span>
                       <span className="mt-1 block text-[11px] text-[var(--text-muted)]">{aiProvider === 'openrouter'
-                        ? 'Keep this off unless you want the model to supplement VNIBB database context with external web context.'
+                        ? 'Keep this off unless you want the model to supplement VniBB database context with external web context.'
                         : 'Web search is currently available only through the OpenRouter path.'}</span>
                     </span>
                   </label>

@@ -154,7 +154,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
       empty: !operatorId || !hasTables,
       apiGroup: '/admin',
       endpoint: selectedTable ? `/api/v1/admin/database/sample/${selectedTable}` : '/api/v1/admin/database/stats',
-      sourceLabel: 'VNIBB admin database inspector',
+      sourceLabel: 'VniBB admin database inspector',
       lastDataDate: null,
       fetchedAt: operatorId ? dataUpdatedAt || stats?.last_sync || null : null,
       extra: { tables: operatorId ? stats?.tables?.length ?? 0 : 0, selected: operatorId ? selectedTable : null },

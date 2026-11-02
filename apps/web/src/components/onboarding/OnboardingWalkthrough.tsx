@@ -349,7 +349,7 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
         ? presentation?.finalTitle
         : currentStep?.title
   const description = stage === 'goal'
-    ? 'VNIBB will open the working view first, then show the two or three controls that matter for that workflow.'
+    ? 'VniBB will open the working view first, then show the two or three controls that matter for that workflow.'
     : stage === 'ticker'
       ? 'Search a popular Vietnam stock or enter its three-character symbol.'
       : isFinalStep
@@ -360,12 +360,12 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
     <div className="pointer-events-none fixed inset-0 z-[140]">
       <div className={highlightStyle ? 'pointer-events-auto fixed inset-0' : 'pointer-events-auto fixed inset-0 bg-[rgba(2,6,23,0.76)] backdrop-blur-[2px]'} />
       {highlightStyle ? <div aria-hidden="true" className="pointer-events-none fixed rounded-xl border border-sky-300/70 bg-transparent shadow-[0_0_0_9999px_rgba(2,6,23,0.74),0_0_36px_rgba(56,189,248,0.18)] transition-all duration-300" style={highlightStyle} /> : null}
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="VNIBB walkthrough" className="pointer-events-auto fixed max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-[var(--border-default)] bg-[rgba(9,14,24,0.98)] p-5 text-left text-[var(--text-primary)] shadow-[0_24px_90px_rgba(2,6,23,0.55)] animate-in fade-in zoom-in-95 duration-200" style={panelStyle}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="VniBB walkthrough" className="pointer-events-auto fixed max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-[var(--border-default)] bg-[rgba(9,14,24,0.98)] p-5 text-left text-[var(--text-primary)] shadow-[0_24px_90px_rgba(2,6,23,0.55)] animate-in fade-in zoom-in-95 duration-200" style={panelStyle}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-sky-200/80">
               <Sparkles size={12} />
-              VNIBB quick start
+              VniBB quick start
             </div>
             <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-50">{title}</h2>
           </div>

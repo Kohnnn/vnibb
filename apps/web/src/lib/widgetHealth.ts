@@ -49,7 +49,7 @@ export function deriveWidgetHealth(input: DeriveHealthInput): WidgetHealthState 
     return {
       status: 'limited',
       label: 'Local only',
-      detail: `Browser-local data, not synced to the VNIBB backend${detailSource}.`,
+      detail: `Browser-local data, not synced to the VniBB backend${detailSource}.`,
     }
   }
 

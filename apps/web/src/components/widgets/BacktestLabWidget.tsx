@@ -56,7 +56,7 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       symbol: upperSymbol,
       empty: !hasData,
       endpoint: `/quant/${upperSymbol}/backtest`,
-      sourceLabel: 'VNIBB quant backtest',
+      sourceLabel: 'VniBB quant backtest',
       response: data,
       fetchedAt: dataUpdatedAt,
       extra: hasData ? {

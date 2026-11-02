@@ -70,7 +70,7 @@ describe('CorrelationMatrixWidget', () => {
     expect(runtime.provenance).toMatchObject({
       apiGroup: '/equity',
       endpoint: '/api/v1/equity/VCI/correlation-matrix',
-      sourceLabel: 'VNIBB correlation matrix',
+      sourceLabel: 'VniBB correlation matrix',
       stale: true,
     })
     expect(runtime.provenance.localOnly).toBeUndefined()

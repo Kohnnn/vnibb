@@ -5,7 +5,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 /**
  * Shared helpers for quant widgets (Phase 1 follow-up).
  *
- * The VNIBB `/quant` endpoints already compute a `warning` (staleness /
+ * The VniBB `/quant` endpoints already compute a `warning` (staleness /
  * insufficient-history / merged-quote) and an `adjustment_mode` + `last_data_date`
  * on every response, but most quant widgets silently dropped them. These helpers
  * make it a one-liner to:

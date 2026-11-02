@@ -113,7 +113,7 @@ function getWidgetDataLabel(type: WidgetType): string {
     if (type.startsWith('world_news_')) return 'Live RSS';
     if (LIVE_WIDGETS.has(type)) return 'Live API';
     if (type === 'notes' || type === 'watchlist') return 'Local';
-    return 'VNIBB API';
+    return 'VniBB API';
 }
 
 function isWidgetType(value: string): value is WidgetType {

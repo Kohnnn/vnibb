@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import Link from 'next/link';
+import { VNIBB_BRAND_DESCRIPTOR, VNIBB_BRAND_NAME, VniBBLogo } from '@/components/brand/VniBBLogo';
 
 export default function SignupPage() {
     const router = useRouter();
@@ -96,11 +97,14 @@ export default function SignupPage() {
         <div className="min-h-screen flex items-center justify-center bg-black">
             <div className="max-w-md w-full space-y-8 p-8 bg-zinc-900 rounded-lg border border-zinc-800">
                 <div>
-                    <h2 className="text-3xl font-bold text-center text-white">
-                        Create your account
+                    <div className="flex justify-center">
+                        <VniBBLogo width={144} />
+                    </div>
+                    <h2 className="mt-4 text-3xl font-bold text-center text-white">
+                        Create your {VNIBB_BRAND_NAME} account
                     </h2>
                     <p className="mt-2 text-center text-sm text-zinc-400">
-                        Start analyzing Vietnam stock market
+                        {VNIBB_BRAND_DESCRIPTOR}
                     </p>
                 </div>
 

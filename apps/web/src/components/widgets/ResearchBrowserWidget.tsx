@@ -489,7 +489,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
       empty: activeMode === 'rss' ? !(rssQuery.data?.data?.length) : !activeUrl,
       apiGroup: activeMode === 'rss' ? '/equity' : 'local',
       endpoint: activeMode === 'rss' && rssSource ? `/api/v1/research/rss/${rssSource}` : activeUrl,
-      sourceLabel: activeMode === 'rss' ? 'VNIBB research RSS' : 'External research link',
+      sourceLabel: activeMode === 'rss' ? 'VniBB research RSS' : 'External research link',
       extra: { symbol: normalizedSymbol || null, mode: activeMode, saved: Boolean(activeSavedSite) },
     }))
   }, [activeMode, activeSavedSite, activeUrl, normalizedSymbol, onDataChange, rssQuery.data?.data?.length, rssSource])

@@ -261,7 +261,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       id: 'command:add-price-chart',
       type: 'command',
       label: 'Add Price Chart Widget',
-      description: 'Add native VNIBB charting with quick compare support',
+      description: 'Add native VniBB charting with quick compare support',
     };
     actions.set(priceChartItem.id, () => {
       if (state.activeDashboardId && state.activeTabId) {
@@ -680,7 +680,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             className="font-mono opacity-70"
             title="Type to search across symbols, widgets, workspaces, and templates."
           >
-            VNIBB Discover
+            VniBB Discover
           </span>
         </div>
       </div>

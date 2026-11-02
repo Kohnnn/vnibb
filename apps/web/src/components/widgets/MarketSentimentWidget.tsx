@@ -61,7 +61,7 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
   const awaitingNewsHealth: WidgetHealthState = {
     status: 'awaiting_update',
     label: 'Awaiting news',
-    detail: 'No classified market-news items are available in the current VNIBB sentiment snapshot.',
+    detail: 'No classified market-news items are available in the current VniBB sentiment snapshot.',
   };
   const noTrendingTopicsHealth: WidgetHealthState = {
     status: 'limited',

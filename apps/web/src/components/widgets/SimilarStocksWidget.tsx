@@ -52,7 +52,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup, onDataChange }: Simil
             empty: !hasData,
             apiGroup: '/comparison',
             endpoint: `/api/v1/comparison/peers/${upperSymbol || ':symbol'}`,
-            sourceLabel: 'VNIBB peer companies',
+            sourceLabel: 'VniBB peer companies',
             // Peer rows expose no source observation date, so freshness stays
             // unknown and the query receipt is reported separately.
             lastDataDate: null,

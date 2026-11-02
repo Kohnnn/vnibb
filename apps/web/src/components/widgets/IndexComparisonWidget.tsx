@@ -30,7 +30,7 @@ function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data
       empty: !hasData,
       apiGroup: '/equity',
       endpoint: '/api/v1/market/overview',
-      sourceLabel: 'VNIBB market overview',
+      sourceLabel: 'VniBB market overview',
       lastDataDate: sourceUpdatedAt,
       fetchedAt: dataUpdatedAt,
       extra: { count: dataList.length },

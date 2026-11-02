@@ -3,10 +3,10 @@ import SettingsClient from '@/components/shell/SettingsClient'
 
 export const metadata: Metadata = {
   title: 'Settings',
-  description: 'Configure data providers, API endpoints, and dashboard preferences for VNIBB.',
+  description: 'Configure data providers, API endpoints, and dashboard preferences for VniBB.',
   openGraph: {
-    title: 'VNIBB Settings',
-    description: 'Configure data providers, API endpoints, and dashboard preferences for VNIBB.',
+    title: 'VniBB Settings',
+    description: 'Configure data providers, API endpoints, and dashboard preferences for VniBB.',
     type: 'website',
   },
 }

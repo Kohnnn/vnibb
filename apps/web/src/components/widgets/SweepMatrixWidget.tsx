@@ -71,7 +71,7 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
       symbol: upperSymbol,
       empty: !hasData,
       endpoint: `/quant/${upperSymbol}/sweep`,
-      sourceLabel: 'VNIBB quant sweep',
+      sourceLabel: 'VniBB quant sweep',
       response: data,
       fetchedAt: dataUpdatedAt,
       extra: hasData ? {

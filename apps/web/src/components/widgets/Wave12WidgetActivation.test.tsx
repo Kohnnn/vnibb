@@ -206,7 +206,7 @@ describe('Wave 12 widget truth states', () => {
     render(<TechnicalSummaryWidget id="technical-2" symbol="FPT" />);
 
     expect(screen.getByText(/Daily · 42 bars · degraded · aggregated indicators, not advice/i)).toBeInTheDocument();
-    expect(screen.getByText('VNIBB technical analysis')).toBeInTheDocument();
+    expect(screen.getByText('VniBB technical analysis')).toBeInTheDocument();
     expect(screen.getByText('Sparse history')).toBeInTheDocument();
     expect(screen.getAllByText('--').length).toBeGreaterThan(0);
   });

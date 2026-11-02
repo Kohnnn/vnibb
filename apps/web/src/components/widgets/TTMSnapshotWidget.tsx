@@ -33,7 +33,7 @@ export function TTMSnapshotWidget({ id, symbol, onRemove, onDataChange }: TTMSna
     ? {
         status: 'coverage_gap',
         label: 'Coverage gap',
-        detail: `${upperSymbol} does not have enough trailing income, cash-flow, or balance-sheet rows in the current VNIBB database snapshot.`,
+        detail: `${upperSymbol} does not have enough trailing income, cash-flow, or balance-sheet rows in the current VniBB database snapshot.`,
       }
     : hasData && cards.length < expectedCardCount
       ? {

@@ -193,7 +193,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
             fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasBankData}
             note={note}
-            sourceLabel="VNIBB ratio feed"
+            sourceLabel="VniBB ratio feed"
             align="right"
           />
         </div>

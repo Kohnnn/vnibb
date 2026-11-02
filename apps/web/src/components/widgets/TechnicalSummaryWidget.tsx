@@ -212,7 +212,7 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={`${timeframeLabel} · ${finite(ta?.data_quality?.bars) ?? 'unknown'} bars · ${ta?.data_quality?.status ?? 'quality not reported'} · aggregated indicators, not advice`}
-                        sourceLabel="VNIBB technical analysis"
+                        sourceLabel="VniBB technical analysis"
                         align="right"
                     />
 

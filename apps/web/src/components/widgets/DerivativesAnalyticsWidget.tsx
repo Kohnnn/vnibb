@@ -71,7 +71,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
         status: 'coverage_gap',
         label: sortedContracts.length === 0 ? 'No contracts' : 'No curve prices',
         detail: sortedContracts.length === 0
-          ? 'No active derivatives contracts are available in the current VNIBB database snapshot.'
+          ? 'No active derivatives contracts are available in the current VniBB database snapshot.'
           : 'Contracts loaded, but recent settlement history is unavailable for the front curve.',
       }
     : hasData && pricedContracts < curveRows.length
@@ -93,7 +93,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
       empty: !hasData,
       apiGroup: '/derivatives',
       endpoint: '/api/v1/derivatives/contracts + /api/v1/derivatives/history/:symbol',
-      sourceLabel: 'VNIBB derivatives analytics',
+      sourceLabel: 'VniBB derivatives analytics',
       lastDataDate: sourceUpdatedAt,
       fetchedAt,
       derived: true,

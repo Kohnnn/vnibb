@@ -120,7 +120,7 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
       empty: !hasData,
       apiGroup: '/equity',
       endpoint: `/api/v1/equity/${upperSymbol || ':symbol'}/correlation-matrix`,
-      sourceLabel: 'VNIBB correlation matrix',
+      sourceLabel: 'VniBB correlation matrix',
       lastDataDate: lastDataDateStr,
       fetchedAt: dataUpdatedAt,
       stale: isStaleData,

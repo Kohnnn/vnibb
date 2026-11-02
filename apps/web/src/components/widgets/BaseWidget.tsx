@@ -1,5 +1,5 @@
 /**
- * BaseWidget — shared infrastructure for VNIBB dashboard widgets.
+ * BaseWidget — shared infrastructure for VniBB dashboard widgets.
  *
  * Provides three composable hooks:
  *
