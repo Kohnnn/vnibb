@@ -31,11 +31,15 @@ describe('widget inventory', () => {
 // the real `widgetDefinitions` list (it spreads the TradingView entries in), so
 // an ID listed here that the catalog does contain is a stale disposition.
 const REGISTRY_ONLY: Record<string, string> = {
-  market_heatmap: 'superseded by market_overview heatmap mode',
-  dividend_ladder: 'superseded by dividend history in the fundamentals tab',
-  ai_copilot: 'opened from the shell, not inserted as a tile',
-  rs_ranking: 'superseded by the quant ranking widget',
-  positioning_dashboard: 'superseded by the quant positioning widget',
+  // Live in built-in dashboards/templates, deliberately not offered as library
+  // tiles. Verified against systemDashboards.ts and dashboard-templates.ts.
+  market_heatmap: 'active in the built-in market dashboard; not a library tile',
+  dividend_ladder: 'active in the Income Investor template; not a library tile',
+  rs_ranking: 'active in the research templates; not a library tile',
+  // Rendered by the shell copilot panel, never inserted as a tile.
+  ai_copilot: 'rendered by the shell copilot panel; not inserted as a tile',
+  // Deliberately withheld until its request-admission gate passes.
+  positioning_dashboard: 'withheld until its request-admission gate passes',
 };
 
 describe('widget inventory dispositions', () => {

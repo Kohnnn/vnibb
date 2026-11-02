@@ -94,6 +94,7 @@ test('tabular numerals align in a real financial table', async ({ page }) => {
     const edges = new Set(digitRows.map((row) => row.right.toFixed(2)))
     expect(edges.size, `right edges of ${digitRows.map((r) => r.text).join(' | ')}`).toBe(1)
     expect(digitRows[0].variant).toContain('tabular-nums')
-    expect(digitRows[0].font).toMatch(/inter/i)
+    // Brand pack: figures use the mono face; the label column stays sans.
+    expect(digitRows[0].font).toMatch(/plexMono|IBM Plex Mono/i)
   }
 })

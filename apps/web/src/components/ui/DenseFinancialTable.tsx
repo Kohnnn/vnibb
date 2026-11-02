@@ -493,7 +493,7 @@ export function DenseFinancialTable({
                         }}
                       >
                         <div className="flex min-h-[28px] flex-col items-end justify-center gap-0.5">
-                          <span className="block leading-4">{displayValue}</span>
+                          <span className="block font-mono leading-4">{displayValue}</span>
                         {growthPct !== null && growthDetail ? (
                           <span
                             className={cn(
