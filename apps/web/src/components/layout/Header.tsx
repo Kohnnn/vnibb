@@ -229,36 +229,39 @@ export function Header({
   const userInitials = getUserInitials(userDisplayName)
   const userRoleLabel = isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
 
+  // Backend connection state is a system state (saved/loading/warning/failed):
+  // neutral/blue with a text label, never red/green — those mean financial
+  // direction (#197). The dot only reinforces the label.
   const healthBadge = useMemo(() => {
     if (connectionStatus === 'online') {
       return {
         label: 'Healthy',
         className: cn(
-          'border-emerald-500/25 bg-emerald-500/10',
-          resolvedTheme === 'light' ? 'text-emerald-700' : 'text-emerald-300'
+          'border-[var(--color-state-border)] bg-[var(--color-state-bg)]',
+          'text-[var(--color-text-secondary)]'
         ),
-        dotClassName: resolvedTheme === 'light' ? 'bg-emerald-600' : 'bg-emerald-400',
+        dotClassName: 'bg-[var(--color-info)]',
       }
     }
     if (connectionStatus === 'degraded' || connectionStatus === 'checking') {
       return {
         label: connectionStatus === 'checking' ? 'Checking' : 'Degraded',
         className: cn(
-          'border-amber-500/30 bg-amber-500/10',
-          resolvedTheme === 'light' ? 'text-amber-800' : 'text-amber-200'
+          'border-[var(--color-state-border)] bg-[var(--color-state-bg)]',
+          'text-[var(--color-warning)]'
         ),
-        dotClassName: resolvedTheme === 'light' ? 'bg-amber-600' : 'bg-amber-400',
+        dotClassName: 'bg-[var(--color-warning)]',
       }
     }
     return {
       label: 'Offline',
       className: cn(
-        'border-rose-500/30 bg-rose-500/10',
-        resolvedTheme === 'light' ? 'text-rose-700' : 'text-rose-300'
+        'border-[var(--color-state-border)] bg-[var(--color-state-bg)]',
+        'text-[var(--color-error)]'
       ),
-      dotClassName: resolvedTheme === 'light' ? 'bg-rose-600' : 'bg-rose-400',
+      dotClassName: 'bg-[var(--color-error)]',
     }
-  }, [connectionStatus, resolvedTheme])
+  }, [connectionStatus])
 
   const healthTitle = `${marketStatus.label} • Backend ${healthBadge.label}`
   const marketBadge = useMemo(() => {

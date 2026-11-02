@@ -119,7 +119,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                         <div className="break-words whitespace-normal text-[10px] font-bold uppercase text-[var(--text-secondary)]">
                                             {name}
                                         </div>
-                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : change >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
                                             {change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
                                         </div>
                                         <div className="text-[9px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>

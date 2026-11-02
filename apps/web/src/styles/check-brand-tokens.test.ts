@@ -66,7 +66,10 @@ describe("brand light palette", () => {
   });
 
   it("defines the light palette once (globals only re-aliases)", () => {
-    expect(globals).not.toMatch(/^\s*--color-(text|bg|border|accent|positive|negative)-[a-z]+:\s*#/m);
+    // The colorblind remap is a direction-colour mode, not a second light
+    // palette; its values are contrast-checked in their own block below.
+    const paletteOnly = globals.slice(0, globals.indexOf(":root[data-color-mode='colorblind']"));
+    expect(paletteOnly).not.toMatch(/^\s*--color-(text|bg|border|accent|positive|negative)-[a-z]+:\s*#/m);
   });
 });
 
@@ -90,6 +93,9 @@ describe("retired decoration", () => {
     expect(tokens).toMatch(/--widget-radius:\s*4px/);
     expect(globals).not.toContain("border-radius: 16px");
     expect(globals).not.toContain("@keyframes widget-glow");
+    // The class and its alias were deleted in #197; nothing may reintroduce them.
+    expect(all).not.toContain("--glass-widget-bg");
+    expect(all).not.toContain(".glass-widget");
   });
 
   it("keeps the reduce-effects escape hatch on the html root", () => {
@@ -110,5 +116,49 @@ describe("controls and focus", () => {
     expect(tokenValue(tokens, "--focus-ring-width")).toBe("2PX");
     expect(tokenValue(tokens, "--focus-ring-offset")).toBe("2PX");
     expect(accessibility).toMatch(/:focus-visible\s*\{[^}]*outline:\s*var\(--focus-ring-width/);
+  });
+});
+
+describe("colorblind direction colours (#197 a11y)", () => {
+  // Contrast is computed from the declared values, not trusted to comments.
+  const luminance = (hex: string) => {
+    const c = [1, 3, 5].map((i) => {
+      const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const block = (selector: string) => {
+    const start = globals.indexOf(selector);
+    const open = globals.indexOf("{", start);
+    return globals.slice(open, globals.indexOf("\n}", open));
+  };
+  const darkCb = block(":root[data-color-mode='colorblind'] {");
+  const lightCb = block(":root[data-color-mode='colorblind'][data-theme='light']");
+
+  it("meets 4.5:1 in dark and light, on every surface of that theme", () => {
+    const cases: Array<[string, string[], string[]]> = [
+      [darkCb, ["#0A0E17", "#111827", "#12121A"], ["--color-positive", "--color-negative"]],
+      [lightCb, ["#FFFFFF", "#F2F4F7", "#E8ECF1"], ["--color-positive", "--color-negative"]],
+    ];
+    for (const [cb, surfaces, names] of cases) {
+      for (const name of names) {
+        const value = tokenValue(cb, name);
+        expect(value).toMatch(/^#[0-9A-F]{6}$/);
+        for (const surface of surfaces) {
+          expect(contrast(value, surface)).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
+  it("keeps the light override scoped to light selectors only", () => {
+    // Guard against the pre-#197 bug where a `:root.light[...]` variant never matched.
+    expect(globals).toMatch(/:root\[data-color-mode='colorblind'\]\.light/);
+    expect(globals).toMatch(/html\[data-color-mode='colorblind'\]\[data-theme='light'\]/);
   });
 });

@@ -67,21 +67,19 @@
   stroke: var(--color-negative);
 }
 
-/* Colorblind-safe alternative palette */
-[data-color-mode="colorblind"] .price-positive {
-  color: #0077bb;
-}
-
-[data-color-mode="colorblind"] .price-negative {
-  color: #ee7733;
-}
-
+/* Colorblind direction colours come from the theme-specific tokens in
+   globals.css (#197) so they meet 4.5:1 on both themes. Hardcoding a hex here
+   would bypass that. */
+[data-color-mode="colorblind"] .price-positive,
 [data-color-mode="colorblind"] .price-up::before {
-  border-bottom-color: #0077bb;
+  color: var(--color-positive);
+  border-bottom-color: var(--color-positive);
 }
 
+[data-color-mode="colorblind"] .price-negative,
 [data-color-mode="colorblind"] .price-down::before {
-  border-top-color: #ee7733;
+  color: var(--color-negative);
+  border-top-color: var(--color-negative);
 }
 
 /* Candlestick colors */
@@ -177,4 +175,36 @@
 .trend-flat {
   stroke: var(--color-neutral);
   fill: none;
+}
+
+/* ============================================================
+   Interactive control boundaries (#197)
+   WCAG 1.4.11 needs 3:1 for the boundary of an essential control.
+   Most of the component layer paints controls with
+   `border-[var(--border-color)]`, which aliases the decorative Rule colour
+   (1.36:1 on Paper). Rather than touching ~180 component files, interactive
+   elements that carry a `--border-color` / `--border-default` border get the
+   strong boundary token here. Decorations (dividers, table rules, widget
+   frames) keep Rule. Components that opt into `.control-border` get the same
+   treatment even when they set the border some other way.
+   ============================================================ */
+button.control-border,
+input.control-border,
+select.control-border,
+textarea.control-border,
+[role="button"].control-border {
+  border-color: var(--color-border-strong);
+}
+
+button.border-\[var\(--border-color\)\],
+input.border-\[var\(--border-color\)\],
+select.border-\[var\(--border-color\)\],
+textarea.border-\[var\(--border-color\)\],
+[role="button"].border-\[var\(--border-color\)\],
+button.border-\[var\(--border-default\)\],
+input.border-\[var\(--border-default\)\],
+select.border-\[var\(--border-default\)\],
+textarea.border-\[var\(--border-default\)\],
+[role="button"].border-\[var\(--border-default\)\] {
+  border-color: var(--color-border-strong);
 }

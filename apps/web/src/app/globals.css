@@ -72,7 +72,6 @@ body {
   --table-sticky-cell-bg: color-mix(in srgb, var(--bg-secondary) 92%, black 8%);
   --table-sticky-cell-alt-bg: color-mix(in srgb, var(--bg-secondary) 86%, black 14%);
   --table-sticky-cell-hover-bg: color-mix(in srgb, var(--bg-hover) 86%, black 14%);
-  --glass-widget-bg: var(--widget-bg-solid);
   --sidebar-brand-gradient: linear-gradient(120deg, #60a5fa 0%, #22d3ee 100%);
 
   /* Dashboard layout constants */
@@ -418,12 +417,6 @@ html[data-theme="light"],
 /* Tab animations */
 .tab-indicator {
   transition: all 0.2s ease-in-out;
-}
-
-/* Widget surface (formerly glassmorphism; solid since #197) */
-.glass-widget {
-  background: var(--glass-widget-bg);
-  border: 1px solid var(--border-color);
 }
 
 /* Gradient accents */
@@ -791,15 +784,14 @@ body {
   color: var(--text-primary);
 }
 
-/* Data value styling */
+/* Data value styling — direction comes from the gain/loss tokens so light
+   theme and colorblind mode apply (#197). */
 .data-value-up {
-  color: #22c55e;
-  text-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+  color: var(--color-positive);
 }
 
 .data-value-down {
-  color: #ef4444;
-  text-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+  color: var(--color-negative);
 }
 
 .data-value-neutral {
@@ -822,11 +814,11 @@ body {
 }
 
 .sparkline-bar.up {
-  background: linear-gradient(to top, rgba(34, 197, 94, 0.6), rgba(34, 197, 94, 0.2));
+  background: linear-gradient(to top, var(--color-positive), var(--color-positive-bg));
 }
 
 .sparkline-bar.down {
-  background: linear-gradient(to top, rgba(239, 68, 68, 0.6), rgba(239, 68, 68, 0.2));
+  background: linear-gradient(to top, var(--color-negative), var(--color-negative-bg));
 }
 
 /* Widget content area */
@@ -878,13 +870,13 @@ body {
 }
 
 .index-card.up {
-  border-color: rgba(34, 197, 94, 0.2);
-  background: rgba(34, 197, 94, 0.05);
+  border-color: var(--color-positive);
+  background: var(--color-positive-bg);
 }
 
 .index-card.down {
-  border-color: rgba(239, 68, 68, 0.2);
-  background: rgba(239, 68, 68, 0.05);
+  border-color: var(--color-negative);
+  background: var(--color-negative-bg);
 }
 
 .index-card__name {
@@ -1104,11 +1096,16 @@ html[data-theme="light"] .index-card:hover {
 /* Light-theme direction colours live in design-tokens.css (Gain #1E7B4F,
    Loss #B3261E) so there is one palette source. */
 
+/* Colorblind (Okabe–Ito) direction colours, theme-specific so both themes keep
+   >=4.5:1 on their own surfaces. The single shared pair (#0072b2/#d55e00) failed
+   in each theme (3.72:1 on dark, 3.87:1 on Paper), so dark and light get their
+   own tints of the same blue/orange hue pair. Direction is still conveyed by
+   the +/- sign and arrow glyphs (lib/priceColor.ts), never hue alone. */
 :root[data-color-mode='colorblind'] {
-  --color-positive: #0072b2;
+  --color-positive: #6CB6F0;
   --color-positive-muted: color-mix(in srgb, var(--color-positive) 65%, white);
   --color-positive-bg: color-mix(in srgb, var(--color-positive) 16%, transparent);
-  --color-negative: #d55e00;
+  --color-negative: #F0A35E;
   --color-negative-muted: color-mix(in srgb, var(--color-negative) 65%, white);
   --color-negative-bg: color-mix(in srgb, var(--color-negative) 16%, transparent);
   --color-warning: var(--color-accent-primary);
@@ -1116,15 +1113,25 @@ html[data-theme="light"] .index-card:hover {
   --chart-red: var(--color-negative);
 }
 
+/* Light surfaces: darker tints of the same hues (Accent blue / burnt orange). */
+:root[data-color-mode='colorblind'].light,
+:root[data-color-mode='colorblind'][data-theme='light'],
+html[data-color-mode='colorblind'][data-theme='light'] {
+  --color-positive: #0B3D91;
+  --color-positive-muted: #0B3D91;
+  --color-positive-bg: color-mix(in srgb, #0B3D91 10%, transparent);
+  --color-negative: #9C3F00;
+  --color-negative-muted: #9C3F00;
+  --color-negative-bg: color-mix(in srgb, #9C3F00 10%, transparent);
+}
+
 /* Reduce visual effects: drop expensive backdrop blur (perf + the documented
    Header stacking-context bug) and heavy glows for a solid surface. Triggered
    by the user preference OR the OS prefers-reduced-motion / -transparency. */
 html[data-reduce-effects="true"] .widget-card-premium,
 html[data-reduce-effects="true"] .widget-card,
-html[data-reduce-effects="true"] .glass-widget,
 :root[data-reduce-effects="true"] .widget-card-premium,
-:root[data-reduce-effects="true"] .widget-card,
-:root[data-reduce-effects="true"] .glass-widget {
+:root[data-reduce-effects="true"] .widget-card {
   background: var(--bg-widget) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;

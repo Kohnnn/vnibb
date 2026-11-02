@@ -129,9 +129,9 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
                       {!hasTrend ? (
                         <Activity size={14} className="text-[var(--text-muted)]" />
                       ) : isUp ? (
-                        <TrendingUp size={14} className="text-green-600" />
+                        <TrendingUp size={14} className="text-[var(--color-positive)]" />
                       ) : (
-                        <TrendingDown size={14} className="text-red-600" />
+                        <TrendingDown size={14} className="text-[var(--color-negative)]" />
                       )}
                     </div>
 

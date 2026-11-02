@@ -112,11 +112,14 @@ export function TopMoversWidget({
       <div className="h-full flex flex-col">
         <div className="flex items-center justify-center px-3 py-2 border-b border-[var(--border-subtle)]">
           <div className="flex bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg p-0.5 text-[10px]">
+            {/* Mode is a control state, not a price direction: neutral/blue
+                selection with the up/down glyph carrying direction (#197). */}
             <button
               onClick={() => setMode('gainer')}
+              aria-pressed={mode === 'gainer'}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'gainer'
-                  ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
+                  ? 'bg-[var(--color-accent-primary)] text-white'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
@@ -124,9 +127,10 @@ export function TopMoversWidget({
             </button>
             <button
               onClick={() => setMode('loser')}
+              aria-pressed={mode === 'loser'}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'loser'
-                  ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                  ? 'bg-[var(--color-accent-primary)] text-white'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
@@ -185,10 +189,12 @@ export function TopMoversWidget({
                 const changeLabel = hasChangePct
                   ? `${isUp ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`
                   : '--';
+                // Direction uses the gain/loss tokens (theme + colorblind aware)
+                // and always carries the +/- sign, never colour alone (#197).
                 const rowHoverClass = hasChangePct
                   ? isUp
-                    ? 'hover:bg-green-500/10 hover:border-green-500/20'
-                    : 'hover:bg-red-500/10 hover:border-red-500/20'
+                    ? 'hover:bg-[var(--color-positive-bg)] hover:border-[var(--color-positive)]'
+                    : 'hover:bg-[var(--color-negative-bg)] hover:border-[var(--color-negative)]'
                   : 'hover:bg-[var(--bg-secondary)]/70 hover:border-[var(--border-subtle)]';
                 return (
                   <button
@@ -205,12 +211,12 @@ export function TopMoversWidget({
                   >
                     <div className="flex items-center gap-2.5">
                       <span
-                        className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded ${
+                        className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded border ${
                           index < 3
                             ? isUp
-                              ? 'bg-green-600/20 text-green-600'
-                              : 'bg-red-600/20 text-red-600'
-                            : 'bg-[var(--bg-secondary)] text-[var(--text-muted)]'
+                              ? 'bg-[var(--color-positive-bg)] border-[var(--color-positive)] text-[var(--color-positive)]'
+                              : 'bg-[var(--color-negative-bg)] border-[var(--color-negative)] text-[var(--color-negative)]'
+                            : 'bg-[var(--bg-secondary)] border-transparent text-[var(--text-muted)]'
                         }`}
                       >
                         {index + 1}
@@ -228,8 +234,8 @@ export function TopMoversWidget({
                         className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${
                           hasChangePct
                             ? isUp
-                              ? 'text-green-600 bg-green-500/10'
-                              : 'text-red-600 bg-red-500/10'
+                              ? 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]'
+                              : 'text-[var(--color-negative)] bg-[var(--color-negative-bg)]'
                             : 'text-[var(--text-muted)] bg-[var(--bg-secondary)]'
                         }`}
                       >

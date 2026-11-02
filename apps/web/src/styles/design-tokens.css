@@ -32,7 +32,10 @@
 
   --color-border-default: #2A2A30;
   --color-border-subtle: #212126;
-  --color-border-strong: #3A3A42;
+  /* Essential control boundary (#197): >=3:1 on every dark surface
+     (#0A0E17 4.45, #111827 4.09, #1F2937 3.38, #212126 3.69), still
+     subordinate to --color-text-secondary #9CA3AF. */
+  --color-border-strong: #707A8A;
 
   --color-text-primary: #f9fafb;
   --color-text-secondary: #9ca3af;
@@ -224,17 +227,6 @@ html[data-theme="light"],
   --chart-blue: #0B3D91;
 }
 
-/* Touch pointers get 44 px controls (brand pack: 36 px desktop, 44 px touch). */
-@media (pointer: coarse) {
-  :root,
-  html.light,
-  html[data-theme="light"] {
-    --control-height: 44px;
-    --control-height-sm: 36px;
-    --control-height-lg: 48px;
-  }
-}
-
 /* Density scales control height only; colours and radii stay fixed. */
 html[data-density="compact"] {
   --control-height: 28px;
@@ -248,4 +240,19 @@ html[data-density="spacious"] {
   --control-height-sm: 36px;
   --control-height-lg: 48px;
   --widget-padding: 16px;
+}
+
+/* Touch pointers get 44 px controls (brand pack: 36 px desktop, 44 px touch).
+   Declared AFTER the density rules so a saved compact density can never shrink
+   a touch target below 44 px (#197). */
+@media (pointer: coarse) {
+  :root,
+  html.light,
+  html[data-theme="light"],
+  html[data-density="compact"],
+  html[data-density="spacious"] {
+    --control-height: 44px;
+    --control-height-sm: 36px;
+    --control-height-lg: 48px;
+  }
 }
