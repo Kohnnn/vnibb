@@ -8,10 +8,18 @@
  *
  * Layering:
  *   1. This file defines `--color-*`, fonts, spacing, radius, semantic, and
- *      premium widget tokens for the DARK theme (the default).
- *   2. `globals.css` re-aliases these into the stable `--bg-*` / `--text-*`
- *      public API that components consume, and defines LIGHT overrides plus
- *      colorblind (`[data-color-mode='colorblind']`) remaps.
+ *      widget tokens for the DARK theme (the default).
+ *   2. The light brand palette (VniBB v1.1: Ink / Paper / Slate / Rule /
+ *      Accent blue) lives HERE in the `html[data-theme="light"]` / `.light`
+ *      block — the selectors the pre-hydration script in `app/layout.tsx`
+ *      already sets, so there is no second brand layer.
+ *   3. `globals.css` re-aliases these into the stable `--bg-*` / `--text-*`
+ *      public API that components consume, plus colorblind
+ *      (`[data-color-mode='colorblind']`) remaps.
+ *
+ * Radius: widgets use 4 px corners (brand pack §"Rules and corners"). The
+ * 16 px widget radius, glass backgrounds and glow shadows were retired in
+ * ticket #197; do not reintroduce them.
  */
 
 :root {
@@ -28,22 +36,29 @@
 
   --color-text-primary: #f9fafb;
   --color-text-secondary: #9ca3af;
-  --color-text-tertiary: #6B7280;
+  --color-text-tertiary: #929aa8;
   --color-text-muted: #929aa8;
 
   --color-accent-primary: #3B82F6;
   --color-accent-secondary: #60A5FA;
   --color-accent-hover: #2563EB;
 
-  --color-success: #22c55e;
-  --color-warning: #F59E0B;
-  --color-error: #EF4444;
+  /* ---- System states (saved / loading / warning / failed) ----
+     Never red or green: those are reserved for financial direction.
+     `--color-info` is the neutral/blue system accent; warning sits on the
+     accent ramp so it reads as "attention", not "loss". */
+  --color-success: var(--color-accent-primary);
+  --color-warning: var(--color-accent-secondary);
+  --color-error: var(--color-accent-primary);
+  --color-info: var(--color-accent-primary);
+  --color-state-bg: color-mix(in srgb, var(--color-accent-primary) 16%, transparent);
+  --color-state-border: color-mix(in srgb, var(--color-accent-primary) 45%, transparent);
 
   /* ---- Semantic up/down (financial direction) ---- */
   /* Single source for gain/loss coloring. Consume via lib/priceColor.ts or the
      var(--color-positive)/var(--color-negative) tokens. Brightened for strong
-     visibility against the dark background; light-theme overrides live in
-     globals.css. */
+     visibility against the dark background; light-theme overrides live in the
+     light block below. */
   --color-positive: #2ee06a;
   --color-positive-muted: #6ee79a;
   --color-positive-bg: rgba(46, 224, 106, 0.16);
@@ -53,11 +68,9 @@
   --color-neutral: #aab4c2;
 
   /* ---- Typography ---- */
-  /* Self-hosted brand fonts (next/font/local in app/layout.tsx). The variables
-     are mounted on <html>, so they resolve here on :root. A missing custom
-     property is guaranteed-invalid at computed-value time and voids the WHOLE
-     declaration, so the entire fallback stack is the var() argument; nothing
-     may follow the closing paren. */
+  /* Real loaded fonts are Inter / IBM Plex Mono (next/font local, mounted on
+     <html>). The next/font vars are attached to <html> so these :root tokens
+     resolve; the fallback stack MUST stay inside var() (see #195). */
   --font-family: var(--font-inter, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
   --font-mono: var(--font-plex-mono, 'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', monospace);
   /* Back-compat alias (was defined in variables.css). */
@@ -89,6 +102,17 @@
   --radius-lg: 8px;
   --radius-xl: 12px;
 
+  /* ---- Controls & focus ----
+     36 px desktop control height, 44 px on touch pointers. Focus is a 2 px
+     ring with 2 px offset (brand pack §"Keyboard focus"). */
+  --control-height: 36px;
+  --control-height-sm: 28px;
+  --control-height-lg: 44px;
+  --touch-target-size: 44px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--color-accent-primary);
+
   /* ---- Shadows ---- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
@@ -106,23 +130,122 @@
   --chart-cyan: #06b6d4;
   --chart-orange: #f97316;
 
-  /* ---- Premium Widget Tokens ---- */
+  /* ---- Widget Tokens (solid surfaces; no glass, no glow) ---- */
   --widget-bg-solid: #12121a;
-  --widget-bg-glass: rgba(18, 18, 26, 0.95);
-  --widget-border-default: rgba(255, 255, 255, 0.06);
-  --widget-border-hover: rgba(59, 130, 246, 0.25);
-  --widget-border-active: rgba(59, 130, 246, 0.5);
+  --widget-border-default: #2A2A30;
+  --widget-border-hover: color-mix(in srgb, var(--color-accent-primary) 45%, transparent);
+  --widget-border-active: var(--color-accent-primary);
 
-  --widget-shadow-default: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --widget-shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --widget-shadow-glow: 0 0 40px rgba(59, 130, 246, 0.15);
+  --widget-shadow-default: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --widget-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.45);
 
-  --widget-radius: 16px;
-  --widget-radius-inner: 12px;
+  --widget-radius: 4px;
+  --widget-radius-inner: 4px;
 
   /* ---- Animation Tokens ---- */
   --ease-premium: cubic-bezier(0.4, 0, 0.2, 1);
   --duration-fast: 150ms;
   --duration-normal: 250ms;
   --duration-slow: 400ms;
+}
+
+/* ============================================================
+   LIGHT THEME — VniBB brand pack v1.1
+   Ink #0A0A0A · Paper #FFFFFF · Slate #5B6573 · Rule #D9DDE3
+   Accent #0B3D91 · Gain #1E7B4F · Loss #B3261E
+
+   Contrast on Paper (sRGB relative luminance, measured):
+     Ink 19.80:1 · Slate 5.91:1 · Accent 10.04:1 · Gain 5.25:1 · Loss 6.54:1
+   Rule is 1.36:1 — decorative only. Essential control boundaries use Slate
+   (--color-border-strong), which is ≥3:1 on every light surface.
+   ============================================================ */
+html.light,
+html[data-theme="light"],
+:root.light,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Brand primitives (light only; dark keeps its runtime palette). */
+  --color-ink: #0A0A0A;
+  --color-paper: #FFFFFF;
+  --color-slate: #5B6573;
+  --color-rule: #D9DDE3;
+  --color-accent-brand: #0B3D91;
+
+  /* Surfaces: Paper, with a faint neutral tint for recessed rows/headers. */
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #FFFFFF;
+  --color-bg-tertiary: #F2F4F7;
+  --color-bg-elevated: #FFFFFF;
+
+  /* Borders: Rule is decorative; Slate marks essential control boundaries. */
+  --color-border-default: #D9DDE3;
+  --color-border-subtle: #E8ECF1;
+  --color-border-strong: #5B6573;
+
+  /* Text: Ink primary, Slate secondary/muted (5.91:1 and 5.36:1 on #F2F4F7). */
+  --color-text-primary: #0A0A0A;
+  --color-text-secondary: #5B6573;
+  --color-text-tertiary: #5B6573;
+  --color-text-muted: #5B6573;
+
+  /* Interaction: brand blue. Hover darkens; secondary is a lighter tint. */
+  --color-accent-primary: #0B3D91;
+  --color-accent-secondary: #1A56B8;
+  --color-accent-hover: #082E6E;
+
+  /* System states: neutral/blue only. */
+  --color-success: var(--color-accent-primary);
+  --color-warning: var(--color-accent-primary);
+  --color-error: var(--color-accent-primary);
+  --color-info: var(--color-accent-primary);
+  --color-state-bg: color-mix(in srgb, var(--color-accent-primary) 8%, transparent);
+  --color-state-border: color-mix(in srgb, var(--color-accent-primary) 40%, transparent);
+
+  /* Financial direction. */
+  --color-positive: #1E7B4F;
+  --color-positive-muted: #1E7B4F;
+  --color-positive-bg: color-mix(in srgb, #1E7B4F 10%, transparent);
+  --color-negative: #B3261E;
+  --color-negative-muted: #B3261E;
+  --color-negative-bg: color-mix(in srgb, #B3261E 10%, transparent);
+  --color-neutral: #0A0A0A;
+
+  --focus-ring-color: #0B3D91;
+
+  /* Widget surfaces: solid Paper with Rule hairlines. */
+  --widget-bg-solid: #FFFFFF;
+  --widget-border-default: #D9DDE3;
+  --widget-border-hover: #5B6573;
+  --widget-border-active: #0B3D91;
+  --widget-shadow-default: 0 1px 2px rgba(10, 10, 10, 0.06);
+  --widget-shadow-hover: 0 4px 12px rgba(10, 10, 10, 0.10);
+
+  --chart-blue: #0B3D91;
+}
+
+/* Touch pointers get 44 px controls (brand pack: 36 px desktop, 44 px touch). */
+@media (pointer: coarse) {
+  :root,
+  html.light,
+  html[data-theme="light"] {
+    --control-height: 44px;
+    --control-height-sm: 36px;
+    --control-height-lg: 48px;
+  }
+}
+
+/* Density scales control height only; colours and radii stay fixed. */
+html[data-density="compact"] {
+  --control-height: 28px;
+  --control-height-sm: 24px;
+  --control-height-lg: 36px;
+  --widget-padding: 8px;
+}
+
+html[data-density="spacious"] {
+  --control-height: 44px;
+  --control-height-sm: 36px;
+  --control-height-lg: 48px;
+  --widget-padding: 16px;
 }

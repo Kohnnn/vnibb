@@ -59,6 +59,14 @@ function ThemeUiScripts() {
                 if (chartStyle) {
                   document.documentElement.setAttribute('data-chart-style', chartStyle);
                 }
+                // Color-vision and reduce-effects must apply before first paint,
+                // otherwise the initial frame shows the default palette.
+                if (localStorage.getItem('vnibb-colorblind-mode') === 'true') {
+                  document.documentElement.setAttribute('data-color-mode', 'colorblind');
+                }
+                if (localStorage.getItem('vnibb-reduce-effects') === 'true') {
+                  document.documentElement.setAttribute('data-reduce-effects', 'true');
+                }
               } catch (e) {}
             })();
           `
