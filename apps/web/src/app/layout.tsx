@@ -38,12 +38,13 @@ const SITE_DESCRIPTION =
   "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.";
 
 export const metadata: Metadata = {
+  // No root-level canonical: a layout-level canonical would make every page
+  // (login, dashboard, shares) claim the site root. Pages that need one set it.
   metadataBase: new URL(SITE_URL),
   title: "VniBB | Research cockpit for Vietnamese equities",
   description: SITE_DESCRIPTION,
   applicationName: "VniBB",
   manifest: "/manifest.json",
-  alternates: { canonical: "/" },
   openGraph: {
     title: "VniBB | Research cockpit for Vietnamese equities",
     description: SITE_DESCRIPTION,
