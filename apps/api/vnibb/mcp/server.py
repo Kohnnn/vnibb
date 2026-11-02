@@ -811,6 +811,8 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     aliases = {
         "income_before_tax": "pre_tax_profit", "income_tax": "tax_expense",
         "non_current_liabilities": "long_term_liabilities",
+        "cash_and_equivalents": "cash", "total_equity": "equity",
+        "net_change_in_cash": "net_cash_flow",
     }
     monetary = {
         column.name: aliases.get(column.name, column.name)
@@ -818,19 +820,121 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
     }
     values = {name: payload.get(name) for name in ("symbol", "period", "fiscal_year", "fiscal_quarter", "source")}
     units = dict(metadata.get("unit_metadata") or {})
+    # Mirrors `equity._STATEMENT_CANONICAL_ALIASES`; a canonical may carry a
+    # metric under an equivalent name, which still describes the column.
+    _CANONICAL_ALIASES = {
+        "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
+        "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
+        "equity": "total_equity", "total_equity": "equity",
+        "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
+        "capital_expenditure": "capex", "capex": "capital_expenditure",
+    }
+    _CANONICAL_ALIASES_NAMES: dict[str, list[str]] = {}
+    for _alias, _target in _CANONICAL_ALIASES.items():
+        _CANONICAL_ALIASES_NAMES.setdefault(_target, []).append(_alias)
     # A metric the sync retained keeps its stored value but may no longer carry
     # the source and unit it was stored under. Serving it here would relabel
     # older, differently-sourced data as freshly verified, so it is withheld.
-    unprovenanced = set(lineage.get("unprovenanced_metrics") or ()) - set(units)
+    # `unprovenanced_metrics` names columns; `unit_metadata` names canonical
+    # fields, so a metric with a valid unit under any spelling is provenanced.
+    unprovenanced = {
+        column for column in (lineage.get("unprovenanced_metrics") or ())
+        if not any(
+            spelling in units
+            for spelling in (
+                column, monetary.get(column, column),
+                *_CANONICAL_ALIASES_NAMES.get(monetary.get(column, column), ()),
+            )
+        )
+    }
+    withheld = {}
+    # A stored metric whose value disagrees with `canonical_data` is not backed
+    # by this lineage, so it is withheld and disclosed raw. The statement stays
+    # served: the canonical still describes every metric that agrees, and only
+    # the disagreeing cells lose their provenance.
+
+    _CONFLICT = object()
+    _UNSTATED = object()
+
+    def _canonical_value(field: str) -> Any:
+        """Return the canonical value for `field`, or a sentinel.
+
+        `_UNSTATED` when the canonical omits the metric and all its aliases: an
+        older canonical says nothing about the column, so it stays served.
+        `_CONFLICT` when non-null spellings disagree; the column is withheld
+        rather than resolved by iteration order. A stated null disagrees with a
+        stored number.
+        """
+        spellings = [field] + [alias for alias, target in _CANONICAL_ALIASES.items()
+                               if target == field]
+        present = [spelling for spelling in spellings if spelling in canonical]
+        if not present:
+            return _UNSTATED
+        stated = {canonical[spelling] for spelling in present
+                  if canonical[spelling] is not None}
+        if len(stated) > 1:
+            return _CONFLICT
+        return next(iter(stated), None)
+    disagreeing = {
+        column for column, field in monetary.items()
+        if payload.get(column) is not None
+        and (value := _canonical_value(field)) is not _CONFLICT
+        and value is not _UNSTATED
+        and value != payload.get(column)
+    }
+    conflicting = {
+        column for column, field in monetary.items()
+        if payload.get(column) is not None and _canonical_value(field) is _CONFLICT
+    }
+    served_fields: set[str] = set()
     for column, field in monetary.items():
-        if field in FinancialStatementData.model_fields:
-            if column in unprovenanced:
-                values[field] = None
-                continue
-            values[field] = payload.get(column)
+        if field not in FinancialStatementData.model_fields:
+            continue
+        # The other spellings of this metric must carry the same decision, or
+        # one surface serves a value the other withholds. REST serves every
+        # spelling (`capex` alongside `capital_expenditure`), so MCP publishes
+        # the same set from the admitted model rather than only the column.
+        spellings = {field, *(alias for alias, target in _CANONICAL_ALIASES.items()
+                              if target == field
+                              and alias in FinancialStatementData.model_fields)}
+        served_fields.update(spellings)
+        if column in disagreeing or column in conflicting:
+            for spelling in spellings:
+                values[spelling] = None
+            withheld[column] = "stored_statement_disagrees_with_lineage"
+        elif column in unprovenanced:
+            for spelling in spellings:
+                values[spelling] = None
+        else:
+            for spelling in spellings:
+                values[spelling] = payload.get(column)
             if column in units:
                 units[field] = ({"components": [units[field], units[column]]}
                                 if field != column and field in units else units[column])
+    # Every spelling of a withheld metric shares the decision, matching the
+    # per-metric loop above: enrichment must not re-supply `capex` after
+    # `capital_expenditure` was withheld.
+    withheld_fields = {
+        spelling
+        for column, field in monetary.items() if column in disagreeing or column in conflicting
+        or column in unprovenanced
+        for spelling in (
+            field, *(alias for alias, target in _CANONICAL_ALIASES.items() if target == field)
+        )
+    }
+    # A metric the row does not store (`goodwill`, `selling_general_admin`, or a
+    # enriches those from `canonical_data`; MCP must serve the same value, or
+    # the surfaces disagree. A stored column always wins, and so does a
+    # withheld one: re-inserting the canonical number would defeat the decision
+    # the loop above just made.
+    enriched_fields: set[str] = set()
+    for name, value in canonical.items():
+        if (value is not None and name in FinancialStatementData.model_fields
+                and name not in basis_fields
+                and name not in {"statement_type", "raw_data"} and name not in withheld_fields
+                and payload.get(name) is None and values.get(name) is None):
+            values[name] = value
+            enriched_fields.add(name)
     metadata["unit_metadata"] = units
     admitted = admit_statement_rows([
         FinancialStatementData(**values, **metadata, statement_type=statement_type, raw_data=raw)
@@ -839,6 +943,7 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
         column: "retained_metric_without_provenance"
         for column in monetary if column in unprovenanced and payload.get(column) is not None
     }
+    unavailable.update(withheld)
     for column, field in monetary.items():
         if column in unavailable:
             continue
@@ -848,8 +953,24 @@ def _admit_statement_row(payload: dict[str, Any], model: Any) -> dict[str, Any]:
                 or admitted.unit_metadata.get(field, {}).get("unavailable_reason")
                 or "unverified_monetary_unit"
             )
+    # Snapshot the row as it arrived: the disclosure below must show the stored
+    # numbers, not the admitted ones.
+    observation = dict(payload)
+    # Publish the admitted value under every spelling the metric is read by, so
+    # an alias (`capex`) is present and carries the admission decision, matching
+    # what REST serves. An enriched metric has no column, so the loop above never
+    # visits it; it must still pass unit admission and disclose a rejection.
+    for name in served_fields | enriched_fields:
+        if name in enriched_fields or name in payload:
+            payload[name] = getattr(admitted, name, None)
+    for name in enriched_fields:
+        if payload[name] is None:
+            unavailable[name] = (
+                admitted.unit_metadata.get(name, {}).get("unavailable_reason")
+                or "unverified_monetary_unit"
+            )
     if unavailable or admitted.unavailable_reason:
-        payload["raw_observation"] = dict(payload)
+        payload["raw_observation"] = observation
         if admitted.unavailable_reason:
             payload["unavailable_reason"] = admitted.unavailable_reason
         payload.update(dict.fromkeys(unavailable))

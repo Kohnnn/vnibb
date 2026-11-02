@@ -56,11 +56,17 @@ High-performance REST API providing Vietnamese stock market data. Built with Fas
   tier aborts startup without disclosing the key. SDK registration verifies
   remotely and persists the credential locally. Do not commit or log it. Golden
   permits legacy sponsor packages but does not use them; neither tier installs
-  packages at runtime.
-- Free mode performs no startup account or registration check and does not
-  inspect or delete persisted SDK credentials. Use an isolated `VNSTOCK_HOME`
-  for CLI and scripts so a persisted paid account cannot be reused by accident.
-  Free still rejects discoverable legacy sponsor packages before SDK import.
+  packages at runtime. The API lifespan registers Golden, and so do the
+  scheduler worker and `scripts/backfill_prices_to_2019.py --apply`, which have
+  no lifespan; each fails closed on a failed Golden registration.
+- Free mode fails closed on a persisted paid credential: it inspects the
+  installed SDK's credential status and refuses acquisition when an
+  authenticated golden/diamond account is present, instead of silently
+  acquiring on someone else's entitlement. It never deletes the stored
+  credential. Use an isolated `VNSTOCK_HOME` for CLI and scripts so a persisted
+  paid account cannot be reused by accident. Free still rejects discoverable
+  legacy sponsor packages before SDK import. Read-only inventory commands stay
+  provider-free and never register.
 - Unsupported datasets report unavailable/provider failure; no alternate source
   or synthetic observations are substituted. Unit, reporting-basis and source
   admission remain mandatory. Entitlement does not authorize acquisition,

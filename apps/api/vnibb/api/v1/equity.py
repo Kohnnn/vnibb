@@ -91,7 +91,10 @@ from vnibb.providers.vnstock.subsidiaries import SubsidiariesQueryParams, Vnstoc
 from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
-from vnibb.services.data_pipeline import CACHE_TTL_ORDERBOOK, CACHE_TTL_ORDERBOOK_DAILY
+from vnibb.services.data_pipeline import (
+    CACHE_TTL_ORDERBOOK,
+    CACHE_TTL_ORDERBOOK_DAILY,
+)
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
 from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
@@ -275,6 +278,88 @@ async def _refresh_profile_cache(symbol: str) -> None:
             raise
         logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
 
+# Model field -> SQL column for the financial fields whose names differ. The
+# MCP reader applies the same mapping, so both readers resolve one column.
+_STATEMENT_SQL_COLUMNS = {
+    "pre_tax_profit": "income_before_tax",
+    "profit_before_tax": "income_before_tax",
+    "tax_expense": "income_tax",
+    "long_term_liabilities": "non_current_liabilities",
+}
+_STATEMENT_CANONICAL_ALIASES = {
+    "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
+    "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
+    "equity": "total_equity", "total_equity": "equity",
+    "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
+    "capital_expenditure": "capex", "capex": "capital_expenditure",
+}
+
+
+
+
+def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restored: FinancialStatementData) -> FinancialStatementData:
+    """Serve a stored row from its `canonical_data` while the two agree.
+
+    A sync can leave a canonical that no longer describes the row the upsert
+    kept. Restoring such a canonical would serve a value its lineage does not
+    back, and copying the stored column over it while keeping the canonical's
+    provenance certifies it anyway. Only the disagreeing metrics are withheld,
+    each with its own unavailable reason, so the rest of the statement stays
+    readable.
+    """
+    unavailable = dict(restored.unit_metadata)
+    cleared = {}
+    withheld = {}
+    seen: set[str] = set()
+    for name in FinancialStatementData.model_fields:
+        if name in seen or name in {"fiscal_year", "fiscal_quarter"}:
+            continue
+        # A semantic alias names the same metric (`capex` for
+        # `capital_expenditure`), so every spelling shares one decision and a
+        # withheld metric is cleared under all of its names.
+        family = {name, *(alias for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
+                          if target == name)}
+        seen |= family
+        # The SQL column may be named for any spelling in the family (`capex`
+        # has no column; `capital_expenditure` does).
+        column = next((_STATEMENT_SQL_COLUMNS.get(field, field) for field in sorted(family)
+                       if hasattr(row, _STATEMENT_SQL_COLUMNS.get(field, field))
+                       and isinstance(getattr(row, _STATEMENT_SQL_COLUMNS.get(field, field)), (int, float))),
+                      _STATEMENT_SQL_COLUMNS.get(name, name))
+        stored_value = getattr(row, column, None)
+        if not isinstance(stored_value, (int, float)):
+            # No stored value: the canonical is the only copy and is served as
+            # it is, which is what enriches a row that predates a metric.
+            continue
+        stated_fields = [field for field in family if field in restored.model_fields_set]
+        stated = sorted({value for field in stated_fields
+                         if isinstance(value := getattr(restored, field, None), (int, float))})
+        # Only a field the canonical actually states can disagree. The sync dumps
+        # every field, but a partial canonical may omit a metric entirely; that
+        # says nothing about the column, so the stored value is served as it is.
+        # A stated null is an explicit no-value and disagrees; an omitted metric
+        # says nothing and leaves the stored observation served.
+        disagrees = stated != [stored_value] if stated_fields else False
+        if disagrees:
+            for field in family:
+                cleared[field] = None
+                unavailable[field] = {
+                    **unavailable.get(field, {}),
+                    "unavailable_reason": "stored_statement_disagrees_with_lineage",
+                }
+            withheld[column] = stored_value
+        else:
+            # Stated-and-agreeing, or omitted: serve the stored observation under
+            # every spelling the canonical may be read by.
+            for field in family:
+                cleared[field] = stored_value
+    if cleared:
+        restored = restored.model_copy(update={**cleared, "unit_metadata": unavailable})
+    # The withheld column value is still a real stored observation; disclose it
+    # rather than dropping it from the response.
+    restored.raw_data = {**raw, **({"withheld_observations": withheld} if withheld else {})}
+    return restored
+
 
 async def _load_financial_statement_fallback(
     db: AsyncSession,
@@ -412,9 +497,12 @@ async def _load_financial_statement_fallback(
                 for name in FinancialStatementData.model_fields:
                     if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
                         setattr(restored, name, None)
-            restored.raw_data = raw
-            fallback_rows[index] = restored
-            statement = restored
+            # A column value is served from `canonical_data` only when the
+            # lineage still describes the row that was stored. Adopting a
+            # disagreeing column while keeping the canonical's provenance would
+            # relabel a value the lineage does not back as admitted.
+            fallback_rows[index] = _restore_lineage_statement(row, raw, model, restored)
+            statement = fallback_rows[index]
         else:
             statement.source = getattr(row, "source", None)
             statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
@@ -956,6 +1044,13 @@ def _enrich_financial_statement_rows(
         if item.unavailable_reason:
             continue
         raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
+        # A provider-rejected metric is not a missing value, so it must not feed
+        # a lookup or an accounting identity. Resolve the set before any
+        # derivation and reset those fields once, at the end.
+        rejected = {
+            metric for metric, metadata in item.unit_metadata.items()
+            if isinstance(metadata, dict) and metadata.get("unavailable_reason")
+        }
 
         if item.total_equity is None:
             item.total_equity = _pick_optional_float(
@@ -1082,8 +1177,9 @@ def _enrich_financial_statement_rows(
                 "n_3_intangible_fixed_assets",
             )
 
-        capex_value = _pick_optional_float(item.capex, item.capital_expenditure)
-        if capex_value is None:
+        capex_rejected = bool({"capex", "capital_expenditure"} & rejected)
+        capex_value = None if capex_rejected else _pick_optional_float(item.capex, item.capital_expenditure)
+        if capex_value is None and not capex_rejected:
             capex_value = _lookup_financial_metric(
                 raw_data,
                 "capex",
@@ -1095,12 +1191,12 @@ def _enrich_financial_statement_rows(
                 "mua_sam_tscd",
                 "chi_phi_dau_tu_tai_san_co_dinh",
             )
-        if item.capex is None:
+        if item.capex is None and not capex_rejected:
             item.capex = capex_value
-        if item.capital_expenditure is None:
+        if item.capital_expenditure is None and not capex_rejected:
             item.capital_expenditure = capex_value
 
-        if item.free_cash_flow is None:
+        if item.free_cash_flow is None and "free_cash_flow" not in rejected:
             item.free_cash_flow = _lookup_financial_metric(
                 raw_data,
                 "free_cash_flow",
@@ -1108,12 +1204,17 @@ def _enrich_financial_statement_rows(
             )
         if (
             item.free_cash_flow is None
+            and "free_cash_flow" not in rejected
             and item.operating_cash_flow is not None
             and capex_value is not None
         ):
             item.free_cash_flow = item.operating_cash_flow + capex_value
 
-        if item.statement_type == StatementType.INCOME.value and item.depreciation is None:
+        if (
+            item.statement_type == StatementType.INCOME.value
+            and item.depreciation is None
+            and "depreciation" not in rejected
+        ):
             cashflow_match = rows_by_period.get(str(item.period or "").upper())
             if cashflow_match is not None and cashflow_match is not item:
                 item.depreciation = _pick_optional_float(
@@ -1124,10 +1225,11 @@ def _enrich_financial_statement_rows(
                     ),
                 )
 
-        if item.ebitda is None:
+        if item.ebitda is None and "ebitda" not in rejected:
             item.ebitda = _lookup_financial_metric(raw_data, "ebitda", "ebitda_bn_vnd")
         if (
             item.ebitda is None
+            and "ebitda" not in rejected
             and item.operating_income is not None
             and item.depreciation is not None
         ):
@@ -1180,12 +1282,21 @@ async def _cross_fill_income_statement_rows(
         if item.consolidation_basis is None or (item.source, item.consolidation_basis, item.flow_basis) != (
             cashflow_row.source, cashflow_row.consolidation_basis, cashflow_row.flow_basis):
             continue
-        if item.depreciation is None:
-            item.depreciation = _pick_optional_float(item.depreciation, cashflow_row.depreciation)
-            item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
-            item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
+        depreciation_rejected = bool(
+            (item.unit_metadata.get("depreciation") or {}).get("unavailable_reason")
+        )
+        if item.depreciation is None and not depreciation_rejected:
+            filled = _coerce_optional_float(cashflow_row.depreciation)
+            if filled is not None:
+                # Only an admitted cashflow number counts as a fill; taking its
+                # (empty) metadata anyway would erase the income row's own
+                # evidence for a value this branch never supplied.
+                item.depreciation = filled
+                item.unit_metadata["depreciation"] = cashflow_row.unit_metadata.get("depreciation", {})
+                item.raw_data = {"primary": item.raw_data, "depreciation_source": cashflow_row.raw_data}
         if (
             item.ebitda is None
+            and (item.unit_metadata.get("ebitda") or {}).get("unavailable_reason") is None
             and item.operating_income is not None
             and item.depreciation is not None
         ):

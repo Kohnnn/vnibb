@@ -635,3 +635,269 @@ async def test_get_financials_with_ttm_propagates_cancellation(monkeypatch):
 
     with pytest.raises(asyncio.CancelledError):
         await get_financials_with_ttm(symbol="VNM", statement_type="income", period="TTM")
+
+
+@pytest.mark.parametrize(
+    "column_value,canonical_metric,canonical_value,expected",
+    [
+        # A canonical that states the metric under a semantic alias still
+        # describes the column, so an agreeing value is served.
+        (444.0, "profit_before_tax", 444.0, 444.0),
+        (444.0, "pre_tax_profit", 444.0, 444.0),
+        # The alias does not license a disagreement; the row is withheld.
+        (555.0, "profit_before_tax", 444.0, None),
+        (555.0, "pre_tax_profit", 444.0, None),
+        # The sync dumps every field, so a metric it holds as `None` is an
+        # explicit "no value". Over a stored number that disagrees and must be
+        # withheld on both surfaces, not read as an absent field.
+        (555.0, "pre_tax_profit", None, None),
+        (555.0, "profit_before_tax", None, None),
+    ],
+)
+def test_lineage_alias_agreement_matches_between_readers(column_value, canonical_metric, canonical_value, expected):
+    """REST and MCP resolve an aliased lineage the same way.
+
+    A canonical may carry `profit_before_tax` while the column is
+    `income_before_tax`. Both readers must agree on whether that value is
+    backed, so a disagreement cannot be served by one surface and withheld by
+    the other, and an explicit `None` must not be read as a missing field.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    # `model_dump` shape: every field present, unstated metrics explicit `None`.
+    canonical = dict.fromkeys(FinancialStatementData.model_fields)
+    canonical.update({
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        canonical_metric: canonical_value,
+        "unit_metadata": {"pre_tax_profit": {"source_unit": "VND", "value_unit": "VND"}},
+    })
+    row = SimpleNamespace(income_before_tax=column_value)
+    restored = _restore_lineage_statement(
+        row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
+        FinancialStatementData(**canonical),
+    )
+
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   income_before_tax=column_value,
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert restored.pre_tax_profit == expected
+    # MCP serves the column name; both must resolve to the same decision.
+    assert admitted.get("income_before_tax") == expected
+
+
+
+@pytest.mark.parametrize("stored,canonical_state,expected", [
+    (555.0, "omitted", 555.0),   # a partial canonical says nothing: the column stays served
+    (555.0, "null", None),       # a stated null is an explicit no-value: withheld
+    (555.0, "equal", 555.0),
+    (555.0, "different", None),
+    # The reverse direction: the row holds no value, but the canonical states
+    # one. Provenance lives in the canonical, so that number is served and the
+    # row is enriched rather than left null.
+    (None, "equal", 555.0),
+    (None, "number", 555.0),
+])
+def test_lineage_serves_what_the_canonical_proves(stored, canonical_state, expected):
+    """The row wins where it holds a value; the canonical fills where it does not.
+
+    A partial canonical omitting a metric says nothing, so the stored column
+    stays served; a stated null or different number withholds it. When the row
+    holds no value the canonical is the only provenance left, so its number is
+    served. Both readers must agree in every direction.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    canonical = {
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        "unit_metadata": {"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+    }
+    if canonical_state == "null":
+        canonical["revenue"] = None
+    elif canonical_state in ("equal", "number"):
+        canonical["revenue"] = 555.0
+    elif canonical_state == "different":
+        canonical["revenue"] = 444.0
+
+    row = SimpleNamespace(revenue=stored)
+    restored = _restore_lineage_statement(
+        row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
+        FinancialStatementData(**canonical),
+    )
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   revenue=stored, raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert restored.revenue == expected
+    assert admitted.get("revenue") == expected
+
+
+def test_lineage_serves_a_metric_that_has_no_sql_column():
+    """`selling_general_admin` exists only in the canonical, on every model.
+
+    No column can hold it, so clearing it because the row's column is null
+    would drop a value REST served before the parity fix. Both readers must
+    serve the canonical value.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    canonical = {
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "income",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        "selling_general_admin": -88e9,
+        "unit_metadata": {"selling_general_admin": {"source_unit": "VND", "value_unit": "VND"}},
+    }
+    assert "selling_general_admin" not in {c.name for c in IncomeStatement.__table__.columns}
+
+    restored = _restore_lineage_statement(
+        SimpleNamespace(), {"_financial_lineage": {"canonical_data": canonical}},
+        IncomeStatement, FinancialStatementData(**canonical),
+    )
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert restored.selling_general_admin == -88e9
+    assert admitted.get("selling_general_admin") == -88e9
+@pytest.mark.parametrize("stored,capex,capital_expenditure,expected", [
+    # `capex` and `capital_expenditure` are one metric. A canonical holding the
+    # alias while the stored column disagrees must not leak the alias.
+    (-50.0, -40.0, None, None),
+    (-50.0, None, None, None),
+    (-50.0, -50.0, None, -50.0),
+    # The two spellings disagree with each other: neither is certified, and the
+    # outcome must not depend on which spelling is visited first.
+    (-50.0, -50.0, -40.0, None),
+    (-50.0, -40.0, -50.0, None),
+])
+def test_lineage_withholds_both_spellings_of_an_aliased_metric(
+    stored, capex, capital_expenditure, expected,
+):
+    """A withheld metric is cleared under every spelling, on both readers.
+
+    `CashFlow` has a `capital_expenditure` column but no `capex` column, and
+    the canonical may state either name. Clearing only one spelling would leave
+    the other visible, and conflicting spellings must not be resolved by
+    iteration order.
+    """
+    from types import SimpleNamespace
+
+    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import CashFlow
+
+    canonical = dict.fromkeys(FinancialStatementData.model_fields)
+    canonical.update({
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND", "statement_type": "cashflow",
+        "consolidation_basis": "consolidated", "flow_basis": "annual", "source_periods": [],
+        "capex": capex, "capital_expenditure": capital_expenditure,
+        "unit_metadata": {"capital_expenditure": {"source_unit": "VND", "value_unit": "VND"}},
+    })
+    row = SimpleNamespace(**{
+        column.name: (stored if column.name == "capital_expenditure" else None)
+        for column in CashFlow.__table__.columns
+    })
+    restored = _restore_lineage_statement(
+        row, {"_financial_lineage": {"canonical_data": canonical}}, CashFlow,
+        FinancialStatementData(**canonical),
+    )
+
+    payload = {column.name: None for column in CashFlow.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   capital_expenditure=stored,
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+    admitted = _admit_statement_row(payload, CashFlow)
+
+    assert restored.capital_expenditure == expected
+    assert restored.capex == expected
+    assert admitted.get("capital_expenditure") == expected
+
+
+def _admission_canonical(statement_type, **values):
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    canonical = dict.fromkeys(FinancialStatementData.model_fields)
+    canonical.update({
+        "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND",
+        "statement_type": statement_type, "consolidation_basis": "consolidated",
+        "flow_basis": "annual", "source_periods": [], "unit_metadata": {},
+    })
+    canonical.update(values)
+    return canonical
+
+
+def test_mcp_enrichment_does_not_resupply_a_withheld_alias_spelling():
+    """Enrichment runs after withholding; it must not undo that decision.
+
+    The stored column disagrees with the canonical, so both spellings are
+    withheld. Seeding the metric from `canonical_data` afterwards re-published
+    `capex` even though `capital_expenditure` stayed null.
+    """
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import CashFlow
+
+    canonical = _admission_canonical(
+        "cashflow", capex=-40.0,
+        unit_metadata={"capex": {"source_unit": "VND", "value_unit": "VND"}},
+    )
+    payload = {column.name: None for column in CashFlow.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   capital_expenditure=-50.0,
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+
+    admitted = _admit_statement_row(payload, CashFlow)
+
+    assert admitted.get("capital_expenditure") is None
+    assert admitted.get("capex") is None
+
+
+@pytest.mark.parametrize("with_units,expected", [(False, None), (True, -88e9)])
+def test_mcp_admits_an_enriched_metric_without_a_sql_column(with_units, expected):
+    """A column-less metric still has to pass unit admission.
+
+    `selling_general_admin` has no column, so the per-column rejection loop
+    never saw it: a canonical number without unit evidence was published as if
+    verified. It is served only when the canonical carries a valid unit, and a
+    rejection is disclosed under the metric's own name.
+    """
+    from vnibb.mcp.server import _admit_statement_row
+    from vnibb.models.financials import IncomeStatement
+
+    assert "selling_general_admin" not in {c.name for c in IncomeStatement.__table__.columns}
+    canonical = _admission_canonical(
+        "income", selling_general_admin=-88e9,
+        unit_metadata={"selling_general_admin": {"source_unit": "VND", "value_unit": "VND"}}
+        if with_units else {},
+    )
+    payload = {column.name: None for column in IncomeStatement.__table__.columns}
+    payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
+                   raw_data={"_financial_lineage": {"canonical_data": canonical}})
+
+    admitted = _admit_statement_row(payload, IncomeStatement)
+
+    assert admitted.get("selling_general_admin") == expected
+    if expected is None:
+        assert admitted["unavailable_metrics"]["selling_general_admin"] == "unverified_monetary_unit"

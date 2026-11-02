@@ -290,15 +290,23 @@ class FullMarketSync:
                 try:
                     async with deadline:
                         count = await operation(symbol, progress)
-                    if progress.get("error_count", 0) or (not count and not (allow_empty and progress.get("empty_count", 0))):
+                    skipped = progress.get("capability_skipped")
+                    if skipped:
+                        # Absent capability: nothing acquired, nothing broken.
+                        # The symbol stays pending so the cycle cannot certify it.
+                        receipt.update(outcome="deferred", skipped_reason=skipped)
+                        receipt.pop("error", None)
+                        receipt.pop("errors", None)
+                    elif progress.get("error_count", 0) or (not count and not (allow_empty and progress.get("empty_count", 0))):
                         raise RuntimeError("acquisition unavailable or incomplete")
-                    receipt.update(last_succeeded_at=datetime.utcnow().isoformat(), outcome="empty" if not count else "succeeded", rows=int(count))
-                    receipt.pop("error", None)
-                    receipt.pop("errors", None)
-                    receipt.pop("revalidation_pending", None)
-                    state["acquired_symbols"].append(symbol)
-                    state["failed_symbols"] = [item for item in state["failed_symbols"] if item != symbol]
-                    acquired += 1
+                    else:
+                        receipt.update(last_succeeded_at=datetime.utcnow().isoformat(), outcome="empty" if not count else "succeeded", rows=int(count))
+                        receipt.pop("error", None)
+                        receipt.pop("errors", None)
+                        receipt.pop("revalidation_pending", None)
+                        state["acquired_symbols"].append(symbol)
+                        state["failed_symbols"] = [item for item in state["failed_symbols"] if item != symbol]
+                        acquired += 1
                 except Exception as exc:
                     provider_errors = [item["error"] for item in progress.get("errors", []) if isinstance(item, dict) and item.get("error")]
                     receipt.update(outcome="deferred" if deadline.expired() else "failed", error="; ".join(provider_errors) or f"{type(exc).__name__}: {exc}")
@@ -594,7 +602,19 @@ async def run_daily_market_sync(
             try:
                 count = int(await operation())
                 acquired = progress.get("base_count", count) if name == "screener" else count
-                if progress.get("error_count") or (name == "screener" and acquired != len(symbols)):
+                # A screener cycle is complete only when every active symbol is
+                # admitted, the provider board input was complete, and the
+                # certified cohort was actually published after the durable
+                # commit. Counts alone can match while a changed active universe
+                # or materialization error leaves the cohort unpublished.
+                if progress.get("error_count") or (
+                    name == "screener"
+                    and (
+                        acquired != len(symbols)
+                        or progress.get("session_input_complete") is not True
+                        or progress.get("cohort_published") is not True
+                    )
+                ):
                     raise RuntimeError(f"{name} acquisition unavailable or incomplete")
             except Exception as exc:
                 count = max(count, int(progress.get("committed_count", 0)))
@@ -617,8 +637,11 @@ async def run_daily_market_sync(
                 )
         await record("daily_prices", lambda: acquire("daily_prices", daily_prices, price_progress), price_progress)
         screener_progress: dict = {}
+        # Qualified provider-board sessions are the daily owner's base cohort:
+        # no_trade/suspended symbols stay active and certifiable, and a
+        # missing/rejected session stays an error instead of a silent drop.
         await record("screener", lambda: acquire("screener", lambda: data_pipeline.sync_screener_data(
-            progress=screener_progress, enrich_ratios=False,
+            progress=screener_progress, enrich_ratios=False, acquire_sessions=True,
         ), screener_progress), screener_progress)
         await record("indices", sync.sync_all_indices)
 

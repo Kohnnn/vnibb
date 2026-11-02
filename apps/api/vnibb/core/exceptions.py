@@ -41,11 +41,15 @@ class ProviderError(VniBBException):
         message: str,
         provider: str,
         cause: Optional[Exception] = None,
+        capability: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(message, code=f"PROVIDER_{provider.upper()}_ERROR", **kwargs)
         self.provider = provider
         self.cause = cause
+        # Machine-readable absent-entitlement signal, e.g. "price_depth_unavailable".
+        # Callers branch on this instead of scraping the human message.
+        self.capability = capability
 
 
 class ProviderTimeoutError(ProviderError):

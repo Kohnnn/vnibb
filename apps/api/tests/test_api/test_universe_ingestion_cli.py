@@ -4,6 +4,7 @@ import json
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -327,3 +328,75 @@ async def test_sql_inventory_reconciles_current_universe_without_mutating_cycle(
     async with cli.async_session_maker() as session:
         row = await session.get(cli.SyncStatus, sync_id)
         assert row.status == "completed" and row.additional_data == metadata
+
+
+@pytest.mark.asyncio
+async def test_apply_registers_golden_before_listing_bootstrap(cli, monkeypatch):
+    """The CLI has no API lifespan; --apply must register Golden before acquisition."""
+    from vnibb.core.config import settings
+    from vnibb.services import vnstock_registration
+
+    monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
+    order = []
+
+    async def register():
+        order.append("register")
+        return vnstock_registration.RegistrationResult(True, "registered")
+
+    async def bootstrap(args):
+        order.append("bootstrap")
+        return {"mode": "fresh"}
+
+    async def symbols(_):
+        return ["ACB"]
+
+    async def inventory(args, selected):
+        return {}
+
+    monkeypatch.setattr(cli, "ensure_vnstock_registration", register)
+    monkeypatch.setattr(cli, "bootstrap_listing", bootstrap)
+    monkeypatch.setattr(cli, "resolve_symbols", symbols)
+    monkeypatch.setattr(cli, "collect_inventory", inventory)
+    monkeypatch.setattr(cli, "apply_backfill", lambda args, selected: _noop())
+
+    assert await cli.main(["backfill", "--apply"]) == 0
+    assert order[:2] == ["register", "bootstrap"]
+
+
+@pytest.mark.asyncio
+async def test_apply_fails_closed_when_golden_registration_fails(cli, monkeypatch):
+    from vnibb.core.config import settings
+    from vnibb.services import vnstock_registration
+
+    monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
+    monkeypatch.setattr(cli, "ensure_vnstock_registration",
+                        AsyncMock(return_value=vnstock_registration.RegistrationResult(False, "no_api_key")))
+    monkeypatch.setattr(cli, "bootstrap_listing", AsyncMock(side_effect=AssertionError("must not acquire")))
+
+    with pytest.raises(RuntimeError, match="registration"):
+        await cli.main(["backfill", "--apply"])
+
+
+@pytest.mark.asyncio
+async def test_inventory_never_registers_or_acquires(cli, monkeypatch, capsys):
+    from vnibb.core.config import settings
+
+    monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
+    monkeypatch.setattr(cli, "ensure_vnstock_registration",
+                        AsyncMock(side_effect=AssertionError("inventory must stay provider-free")))
+
+    async def symbols(_):
+        return ["ACB"]
+
+    async def inventory(args, selected):
+        return {}
+
+    monkeypatch.setattr(cli, "resolve_symbols", symbols)
+    monkeypatch.setattr(cli, "collect_inventory", inventory)
+
+    assert await cli.main(["inventory"]) == 0
+    assert json.loads(capsys.readouterr().out)["mode"] == "read_only"
+
+
+async def _noop():
+    return None

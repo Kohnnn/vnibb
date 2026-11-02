@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import Select
+
 import vnibb.services.data_pipeline as module
 from vnibb.providers.vnstock.financials import FinancialStatementData, VnstockFinancialsFetcher
 from vnibb.services.data_pipeline import DataPipeline
