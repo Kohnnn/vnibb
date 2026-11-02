@@ -68,9 +68,10 @@ export const migrateLegacyWidgetTypes = (dashboards: Dashboard[]): Dashboard[] =
 
             const widgets = tab.widgets.flatMap((widget) => {
                 const normalizedType = normalizeWidgetType(widget.type);
+                // An unknown type is kept: the tile renders the unsupported
+                // state and the saved ID/config survive until it resolves again.
                 if (!normalizedType) {
-                    changed = true;
-                    return [];
+                    return [widget];
                 }
 
                 if (normalizedType === widget.type) {

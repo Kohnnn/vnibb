@@ -849,7 +849,9 @@ describe('DashboardProvider browser persistence', () => {
 
   it.each([
     ['a malformed tab', { ...customDashboard, tabs: [{ id: 'remote-tab', name: 'Remote', order: 0, widgets: 'invalid' }] }],
-    ['a malformed widget', { ...customDashboard, tabs: [{ id: 'remote-tab', name: 'Remote', order: 0, widgets: [{ id: 'widget', tabId: 'remote-tab', type: 'invalid', config: {}, layout: { i: 'widget', x: 0, y: 0, w: 1, h: 1 } }] }] }],
+    // An unknown widget type is retained (it renders the unsupported state),
+    // so the malformed case is a widget with no type at all.
+    ['a malformed widget', { ...customDashboard, tabs: [{ id: 'remote-tab', name: 'Remote', order: 0, widgets: [{ id: 'widget', tabId: 'remote-tab', type: '', config: {}, layout: { i: 'widget', x: 0, y: 0, w: 1, h: 1 } }] }] }],
     ['a malformed layout', { ...customDashboard, tabs: [{ id: 'remote-tab', name: 'Remote', order: 0, widgets: [{ id: 'widget', tabId: 'remote-tab', type: 'ticker_info', config: {}, layout: { i: 'widget', x: Number.NaN, y: 0, w: 1, h: 1 } }] }] }],
   ])('keeps current state for %s remote state', async (_scenario, remoteDashboard) => {
     renderProvider();
