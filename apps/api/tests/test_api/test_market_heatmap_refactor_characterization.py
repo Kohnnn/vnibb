@@ -613,6 +613,7 @@ async def test_heatmap_reuses_executor_work_after_provider_deadline(client, monk
 async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(client, monkeypatch):
     import concurrent.futures
     from concurrent.futures import Future, ThreadPoolExecutor
+    from threading import Event
 
     import pandas as pd
     from vnibb.api.v1 import market
@@ -625,13 +626,24 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
     batches = []
     completions = []
     children = []
+    loop = asyncio.get_running_loop()
+    cleanup_reached = asyncio.Event()
+    coordinator_started = Event()
+    coordinator_released = asyncio.Event()
+    queued.add_done_callback(lambda _future: loop.call_soon_threadsafe(cleanup_reached.set))
 
     def run_coordinator(executor, func, *args):
         assert executor is None
         batches.append(func)
-        future = pool.submit(func, *args)
+
+        def coordinate():
+            coordinator_started.wait()
+            return func(*args)
+
+        future = asyncio.wrap_future(pool.submit(coordinate))
+        future.add_done_callback(lambda _future: coordinator_released.set())
         completions.append(future)
-        return asyncio.wrap_future(future)
+        return future
 
     class ControlledExecutor:
         def submit(self, func, *args, **kwargs):
@@ -664,6 +676,7 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
     # A shared provider job from an earlier test would serve this request without
     # ever reaching the controlled executor.
     monkeypatch.setattr(market, "_market_provider_jobs", {})
+    monkeypatch.setattr(equity_screener, "_screener_jobs", {})
     monkeypatch.setattr(equity_screener, "_executor", ControlledExecutor())
     real_as_completed = concurrent.futures.as_completed
     monkeypatch.setattr(concurrent.futures, "as_completed", expire_batch)
@@ -677,25 +690,30 @@ async def test_heatmap_child_timeout_retains_batch_until_running_work_finishes(c
     monkeypatch.setattr(market, "_load_latest_price_time", lambda _s: _async(None))
     url = "/api/v1/market/heatmap?exchange=HOSE&limit=500&use_cache=false"
     try:
-        async with asyncio.timeout(0.75):
+        async with asyncio.timeout(5):
             for _ in range(3):
                 response = await client.get(url)
                 assert response.status_code == 503
-                await asyncio.sleep(0)
+        assert children == []
+        coordinator_started.set()
+        await asyncio.wait_for(cleanup_reached.wait(), timeout=5)
         assert len(batches) == 1
         assert children == ["VNM", "FPT"]
         assert queued.cancelled()
         assert not completions[0].done()
+        async with asyncio.timeout(5):
+            response = await client.get(url)
+        assert response.status_code == 503
+        assert len(batches) == 1
         running.set_result(None)
-        await asyncio.wrap_future(completions[0])
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        await asyncio.wait_for(coordinator_released.wait(), timeout=5)
         monkeypatch.setattr(market.settings, "vnstock_timeout", 6)
-        async with asyncio.timeout(0.75):
+        async with asyncio.timeout(5):
             response = await client.get(url)
         assert response.status_code == 200
         assert len(batches) == 2
     finally:
+        coordinator_started.set()
         if not running.done():
             running.set_result(None)
         pool.shutdown(wait=True)
