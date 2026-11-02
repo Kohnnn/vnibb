@@ -6475,6 +6475,9 @@ class DataPipeline:
                     "skipped": True,
                     "reason": "price_depth_not_entitled",
                 }
+                # run_maintenance_cycle reads the absence of rows as failure
+                # unless the cycle was told the emptiness was intentional.
+                progress["empty_count"] = progress.get("empty_count", 0) + 1
                 if sync_id is not None:
                     await self._checkpoint(
                         progress,
@@ -6497,6 +6500,7 @@ class DataPipeline:
                     "skipped": True,
                     "reason": "before_market_close",
                 }
+                progress["empty_count"] = progress.get("empty_count", 0) + 1
                 if sync_id is not None:
                     await self._checkpoint(
                         progress,
@@ -6520,6 +6524,7 @@ class DataPipeline:
                         "skipped": True,
                         "reason": "outside_market_hours",
                     }
+                    progress["empty_count"] = progress.get("empty_count", 0) + 1
                     if sync_id is not None:
                         await self._checkpoint(
                             progress,
@@ -6766,9 +6771,13 @@ class DataPipeline:
                     coverage["current_depth"]["error"] = None if unentitled else type(exc).__name__
                 if progress is not None:
                     if unentitled:
+                        # Not an error: the account has no price-depth
+                        # entitlement. Mark the cycle empty so realtime
+                        # rotation does not read the absence as a failure.
                         progress["stage_stats"]["orderbook_snapshots"]["skipped"] = (
                             progress["stage_stats"]["orderbook_snapshots"].get("skipped", 0) + 1
                         )
+                        progress["empty_count"] = progress.get("empty_count", 0) + 1
                     else:
                         progress["error_count"] = progress.get("error_count", 0) + 1
                         progress["stage_stats"]["orderbook_snapshots"]["errors"] += 1

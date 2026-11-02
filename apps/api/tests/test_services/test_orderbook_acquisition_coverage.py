@@ -203,6 +203,9 @@ async def test_disabled_entitlement_skips_stage_without_error(depth_stores, monk
     assert stats == {"success": 0, "errors": 0, "total": 0, "skipped": True,
                     "reason": "price_depth_not_entitled"}
     assert "error_count" not in progress
+    # run_maintenance_cycle treats a zero row count as failure unless the
+    # cycle was told the emptiness was intentional.
+    assert progress["empty_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -221,6 +224,7 @@ async def test_free_tier_unavailability_is_not_a_stage_error(depth_stores, monke
     assert stats["errors"] == 0
     assert stats["skipped"] == 1
     assert "error_count" not in progress
+    assert progress["empty_count"] == 1
     coverage = progress["acquisition_outcomes"]["FPT"]
     assert coverage["current_depth"]["status"] == "unavailable"
     assert coverage["sql_depth"]["status"] == "skipped"
