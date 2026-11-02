@@ -4,7 +4,7 @@
 import { useState, useMemo, useRef, useEffect, memo } from 'react';
 import { ChevronLeft, Download, LayoutGrid } from 'lucide-react';
 import { hierarchy, treemap } from 'd3-hierarchy';
-import html2canvas from 'html2canvas';
+import { exportToPNG, type ExportProvenance } from '@/lib/exportWidget';
 import { logClientError } from '@/lib/clientLogger';
 import { useUnit } from '@/contexts/UnitContext';
 import { useMarketHeatmap } from '@/lib/queries';
@@ -148,12 +148,22 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
 
     const handleExport = async () => {
         if (!heatmapRef.current) return;
+        // A bitmap cannot carry a sidecar, so the source and both timestamps are
+        // painted on. Brand v1.1 review found the export faked dark always.
+        const provenance: ExportProvenance = {
+            widgetType: 'market_heatmap',
+            widgetTitle: 'Market Heatmap',
+            sourceLabel: 'Market heatmap',
+            apiGroup: '/market',
+            endpoint: heatmapEndpoint,
+            updatedAt: data?.price_updated_at ?? null,
+            fetchedAt: dataUpdatedAt || null,
+            coverage: data?.partial ? 'partial' : undefined,
+            stale: isFallback || Boolean(data?.constituents_stale),
+            cached: Boolean(data?.cached) || isFallback,
+        };
         try {
-            const canvas = await html2canvas(heatmapRef.current, { background: '#000' } as any);
-            const link = document.createElement('a');
-            link.download = `market-heatmap-${exchange}-${Date.now()}.png`;
-            link.href = canvas.toDataURL();
-            link.click();
+            await exportToPNG(heatmapRef.current, `market-heatmap-${exchange}-${Date.now()}`, provenance);
         } catch (error) {
             logClientError('Heatmap export failed:', error);
         }

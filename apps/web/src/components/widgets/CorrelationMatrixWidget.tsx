@@ -124,7 +124,10 @@ function CorrelationMatrixWidgetComponent({ id, symbol, onRemove, onDataChange }
       lastDataDate: lastDataDateStr,
       fetchedAt: dataUpdatedAt,
       stale: isStaleData,
-      extra: { symbol: upperSymbol, days, topN, rows: returnsCount },
+      // Export the actual correlation cells, not the counts: a download that only
+      // says "10 tickers · 60D" cannot be audited or reused.
+      exportData: matrix,
+      extra: { symbol: upperSymbol, days, topN, returns_count: returnsCount },
     }))
   }, [days, dataUpdatedAt, hasData, isStaleData, lastDataDateStr, onDataChange, returnsCount, topN, upperSymbol])
 

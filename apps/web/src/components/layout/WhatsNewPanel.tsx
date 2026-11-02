@@ -216,7 +216,7 @@ export function WhatsNewPanel() {
           animate={{ opacity: 1, x: 0, y: 0 }}
           exit={{ opacity: 0, x: 24, y: 24 }}
           transition={{ duration: 0.25 }}
-          className={`fixed bottom-5 right-5 z-[90] ${showFullLog ? 'w-[480px]' : 'w-[360px]'} max-w-[calc(100vw-40px)] rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-lg`}
+          className={`fixed bottom-5 right-5 z-[150] ${showFullLog ? 'w-[480px]' : 'w-[360px]'} max-w-[calc(100vw-40px)] rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-lg`}
           onMouseEnter={handlePauseAutoDismiss}
           onMouseLeave={handleResumeAutoDismiss}
           onFocusCapture={handlePauseAutoDismiss}

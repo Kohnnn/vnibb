@@ -657,7 +657,7 @@ export function WidgetWrapper({
                 }
                 break;
             case 'png':
-                await exportToPNG(id, filename);
+                await exportToPNG(id, filename, provenance);
                 break;
         }
     };

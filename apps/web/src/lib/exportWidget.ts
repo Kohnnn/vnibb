@@ -24,6 +24,8 @@ export interface ExportProvenance {
   coverage?: 'complete' | 'partial' | 'unknown';
   marketClosed?: boolean;
   adjustmentMode?: string;
+  /** Reporting period the figures belong to (e.g. 'FY', 'Q2', 'TTM'). */
+  period?: string;
   localOnly?: boolean;
   capturedAt?: string;
   appVersion?: string;
@@ -57,6 +59,7 @@ export function provenanceToMarkdown(provenance?: ExportProvenance): string {
   const rows: Array<[string, unknown]> = [
     ['Widget', provenance.widgetTitle || provenance.widgetType],
     ['Symbol', provenance.symbol],
+    ['Period', provenance.period],
     ['Source', provenance.sourceLabel],
     ['API group', provenance.apiGroup],
     ['Endpoint', provenance.endpoint],
@@ -109,6 +112,7 @@ function provenanceLines(provenance?: ExportProvenance): Array<[string, string]>
   const provRows: Array<[string, unknown]> = [
     ['widget', resolved.widgetTitle || resolved.widgetType],
     ['symbol', resolved.symbol],
+    ['period', resolved.period],
     ['source', resolved.sourceLabel],
     ['api_group', resolved.apiGroup],
     ['endpoint', resolved.endpoint],
@@ -247,22 +251,63 @@ export function exportToMarkdown(body: string, filename: string, provenance?: Ex
 }
 
 /**
- * Export widget as PNG image
+ * Resolve the surface a capture must paint behind itself. Widget bodies paint
+ * their own background on an ancestor, so a transparent canvas would render a
+ * dark image of a light page (and vice versa).
  */
-export async function exportToPNG(elementId: string, filename: string) {
-  const element = document.getElementById(elementId);
+function resolveSurfaceColor(element: HTMLElement): string | null {
+  let node: HTMLElement | null = element;
+  while (node) {
+    const color = getComputedStyle(node).backgroundColor;
+    if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') return color;
+    node = node.parentElement;
+  }
+  const themed = getComputedStyle(document.documentElement).getPropertyValue('--color-bg-primary').trim();
+  return themed || null;
+}
+
+/** The provenance facts a bitmap can carry without a sidecar file. */
+function provenanceFooterText(provenance?: ExportProvenance): string {
+  const wanted = ['source', 'source_as_of', 'fetched_at', 'captured_at'];
+  return provenanceLines(provenance)
+    .filter(([key]) => wanted.includes(key))
+    .map(([key, value]) => `${key}: ${value}`)
+    .join('  ·  ');
+}
+
+/**
+ * Export a widget as a PNG. `target` is a widget id or the element itself.
+ * Provenance is painted into the image, because a bitmap cannot carry a
+ * `_provenance` key.
+ */
+export async function exportToPNG(target: string | HTMLElement, filename: string, provenance?: ExportProvenance) {
+  const element = typeof target === 'string' ? document.getElementById(target) : target;
   if (!element) {
-    logClientError(`Element with id "${elementId}" not found`);
+    logClientError(`Element with id "${String(target)}" not found`);
     return;
   }
-  
+
+  const footerText = provenanceFooterText(provenance);
   try {
     const canvas = await html2canvas(element, {
-      // Transparent so the image works on light and dark surfaces.
-      backgroundColor: null,
+      backgroundColor: resolveSurfaceColor(element),
       useCORS: true,
-    } as any);
-    
+      onclone: footerText
+        ? (doc: Document, cloned: HTMLElement) => {
+            const footer = doc.createElement('div');
+            footer.textContent = footerText;
+            footer.setAttribute('data-export-provenance', '');
+            footer.style.cssText =
+              'position:absolute;left:0;right:0;bottom:0;padding:3px 8px;text-align:right;' +
+              'font:10px/1.4 ui-monospace,monospace;color:#94a3b8;background:transparent;';
+            if (doc.defaultView?.getComputedStyle(cloned).position === 'static') {
+              cloned.style.position = 'relative';
+            }
+            cloned.appendChild(footer);
+          }
+        : undefined,
+    });
+
     canvas.toBlob((blob) => {
       if (blob) downloadBlob(blob, `${filename}.png`);
     }, 'image/png');

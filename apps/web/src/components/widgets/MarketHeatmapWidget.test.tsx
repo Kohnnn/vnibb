@@ -115,7 +115,9 @@ jest.mock('@/components/ui/ChartSizeBox', () => ({
   ),
 }));
 
-jest.mock('html2canvas', () => jest.fn());
+jest.mock('@/lib/exportWidget', () => ({
+  exportToPNG: jest.fn(() => Promise.resolve()),
+}));
 
 const mockUseMarketHeatmap = jest.mocked(useMarketHeatmap);
 type HeatmapQueryResult = UseQueryResult<HeatmapResponse, Error>;
@@ -398,5 +400,30 @@ describe('MarketHeatmapWidget', () => {
         layoutHint: expect.objectContaining({ empty:true }),
       }),
     }));
+  });
+
+  it('exports the PNG from the widget surface with source and fetch timestamps', async () => {
+    const { exportToPNG } = jest.requireMock('@/lib/exportWidget') as { exportToPNG: jest.Mock };
+    exportToPNG.mockClear();
+    mockUseMarketHeatmap.mockReturnValue({
+      ...mockHeatmapData({ price_updated_at: '2026-10-22T00:00:00', constituents_as_of: '2026-10-21' }),
+      dataUpdatedAt: 1792726551022,
+    });
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+
+    fireEvent.click(screen.getByTitle('Export Image'));
+    await waitFor(() => expect(exportToPNG).toHaveBeenCalledTimes(1));
+
+    const [target, filename, provenance] = exportToPNG.mock.calls[0];
+    expect(target).toBeInstanceOf(HTMLElement);
+    expect(target.id).not.toBe('market-heatmap');
+    expect(filename).toMatch(/^market-heatmap-HOSE-\d+$/);
+    // Bitmap carries one timestamp per meaning: observation date and receipt time.
+    expect(provenance).toMatchObject({
+      sourceLabel: 'Market heatmap',
+      apiGroup: '/market',
+      updatedAt: '2026-10-22T00:00:00',
+      fetchedAt: 1792726551022,
+    });
   });
 });

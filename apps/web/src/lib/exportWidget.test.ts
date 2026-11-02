@@ -193,3 +193,82 @@ describe('exportToCSV provenance', () => {
     }
   });
 });
+
+describe('exportToPNG', () => {
+  afterEach(() => jest.resetModules());
+
+  it('paints the surrounding surface and stamps source + both timestamps into the image', async () => {
+    const captures: Array<{ options: Record<string, unknown>; cloned: HTMLElement }> = [];
+    // Dynamic import is required: the module graph must be rebuilt so the html2canvas
+    // mock below replaces the static import resolved at the top of this file.
+    jest.resetModules();
+    jest.doMock('html2canvas', () => ({
+      __esModule: true,
+      default: (element: HTMLElement, options: Record<string, unknown>) => {
+        const onclone = options.onclone as ((doc: Document, cloned: HTMLElement) => void) | undefined;
+        const cloned = document.createElement('div');
+        if (onclone) onclone(document, cloned);
+        captures.push({ options, cloned });
+        return Promise.resolve({ toBlob: (callback: (blob: null) => void) => callback(null) });
+      },
+    }));
+
+    document.documentElement.style.setProperty('--color-bg-primary', '#ffffff');
+    const host = document.createElement('div');
+    host.style.backgroundColor = 'rgb(255, 255, 255)';
+    const widget = document.createElement('div');
+    widget.id = 'png-widget';
+    host.appendChild(widget);
+    document.body.appendChild(host);
+
+    try {
+      const { exportToPNG } = await import('./exportWidget');
+      await exportToPNG('png-widget', 'heatmap', {
+        sourceLabel: 'Market heatmap',
+        updatedAt: '2026-11-03',
+        fetchedAt: 1762000000000,
+      });
+
+      expect(captures).toHaveLength(1);
+      expect(captures[0].options.backgroundColor).toBe('rgb(255, 255, 255)');
+      const stamped = captures[0].cloned.querySelector('[data-export-provenance]');
+      expect(stamped?.textContent).toContain('source: Market heatmap');
+      expect(stamped?.textContent).toContain('source_as_of: 2026-11-03T00:00:00.000Z');
+      expect(stamped?.textContent).toContain('fetched_at:');
+      expect(stamped?.textContent).not.toContain('1762000000000');
+    } finally {
+      host.remove();
+      document.documentElement.style.removeProperty('--color-bg-primary');
+    }
+  });
+});
+
+describe('exportToCSV matrix export', () => {
+  it('emits one row per correlation cell so counts never replace the matrix', async () => {
+    const captured: Blob[] = [];
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = ((blob: Blob) => {
+      captured.push(blob);
+      return 'blob:test';
+    }) as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = jest.fn();
+    const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    try {
+      const { exportToCSV } = await import('./exportWidget');
+      exportToCSV([
+        { x: 'VCI', y: 'VCI', value: 1 },
+        { x: 'VCI', y: 'SSI', value: 0.7 },
+      ], 'correlation_matrix_VCI', { symbol: 'VCI', period: '60D' });
+
+      const text = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.readAsText(captured[0]); });
+      expect(text).toContain('# period,60D');
+      expect(text).toContain('x,y,value\nVCI,VCI,1\nVCI,SSI,0.7');
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+      click.mockRestore();
+    }
+  });
+});

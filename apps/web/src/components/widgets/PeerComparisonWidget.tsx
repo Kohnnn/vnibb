@@ -300,6 +300,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
             sourceLabel: 'VniBB peer comparison',
             lastDataDate: null,
             fetchedAt: dataUpdatedAt || null,
+            period,
             derived: true,
             extra: { symbols: peers.length, period, metrics: normalizedMetrics.length, marketCaps: Object.fromEntries(Object.entries(comparisonData).map(([symbol, stock]) => [symbol, stock.marketCap])) },
         }))
@@ -787,25 +788,44 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                     </button>
                     <ExportButton
                         onExport={async (format) => {
-                            const rows = peers.map((sym) => ({
-                                symbol: sym,
-                                period,
-                                name: comparisonData[sym]?.name ?? null,
-                                ...(comparisonData[sym]?.metrics ?? {}),
-                            }));
+                            const rows = peers.map((sym) => {
+                                const stock = comparisonData[sym];
+                                const cap = stock?.marketCap;
+                                const certified = cap?.inputs.find((input) => input.provenance?.status === 'available')?.provenance;
+                                // Flatten to one typed column per metric; anything that is
+                                // not a finite number stays null rather than becoming text
+                                // that a spreadsheet would sort as a string.
+                                const metrics: Record<string, number | null> = {};
+                                Object.entries(stock?.metrics ?? {}).forEach(([key, value]) => {
+                                    metrics[key] = typeof value === 'number' && Number.isFinite(value) ? value : null;
+                                });
+                                return {
+                                    symbol: sym,
+                                    period,
+                                    name: stock?.name ?? null,
+                                    ...metrics,
+                                    market_cap_status: cap?.status ?? null,
+                                    market_cap_reason: cap?.reason ?? null,
+                                    market_cap_source: certified?.source ?? null,
+                                    market_cap_as_of: certified?.as_of ?? null,
+                                };
+                            });
+                            const capConflicts = peers.filter((sym) => comparisonData[sym]?.marketCap.status === 'conflict');
                             // `dataUpdatedAt` is React Query's fetch time, not the
                             // source's observation date: it may only fill fetchedAt.
                             const provenance: ExportProvenance = {
                                 widgetType: 'peer_comparison',
                                 widgetTitle: 'Peer Comparison',
                                 symbol,
+                                period,
                                 sourceLabel: 'VniBB comparison API',
                                 apiGroup: '/comparison',
-                                endpoint: '/api/v1/comparison/stocks',
+                                endpoint: `/api/v1/comparison?symbols=${encodeURIComponent(peers.join(','))}&period=${encodeURIComponent(period)}`,
                                 fetchedAt: dataUpdatedAt ? new Date(dataUpdatedAt) : null,
                                 coverage: peers.every((sym) => comparisonData[sym]) ? 'complete' : 'partial',
                                 warnings: [
                                     'Metrics are provider-reported; market-cap conflicts are flagged in the widget, not resolved here.',
+                                    ...capConflicts.map((sym) => `${sym}: market cap sources conflict (no value exported).`),
                                 ],
                             };
                             const filename = `peers_${peers.join('-')}_${period}`;

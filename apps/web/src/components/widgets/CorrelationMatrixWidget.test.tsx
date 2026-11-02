@@ -124,4 +124,34 @@ describe('CorrelationMatrixWidget', () => {
     expect(screen.getByText(/No peer correlation data available for VCI/)).toBeInTheDocument()
     expect(screen.getByText(/No overlapping daily price history found/)).toBeInTheDocument()
   })
+
+  it('exports the raw matrix cells so downloads are auditable', async () => {
+    const matrix = [
+      { x: 'VCI', y: 'VCI', value: 1 },
+      { x: 'VCI', y: 'SSI', value: 0.7 },
+      { x: 'SSI', y: 'VCI', value: 0.7 },
+      { x: 'SSI', y: 'SSI', value: 1 },
+    ]
+    mockUseCorrelationMatrix.mockReturnValue({
+      ...query,
+      data: {
+        data: {
+          symbol: 'VCI',
+          days: 60,
+          symbols: ['VCI', 'SSI'],
+          matrix,
+          returns_count: 5,
+        },
+        meta: { last_data_date: '2026-10-20' },
+      },
+    } as unknown as ReturnType<typeof useCorrelationMatrix>)
+    const onDataChange = jest.fn()
+
+    render(<CorrelationMatrixWidget id="correlation" symbol="VCI" onDataChange={onDataChange} />)
+
+    await waitFor(() => expect(onDataChange).toHaveBeenCalled())
+    const runtime = onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime
+    expect(runtime.exportData).toEqual(matrix)
+    expect(runtime.provenance.endpoint).toBe('/api/v1/equity/VCI/correlation-matrix')
+  })
 })

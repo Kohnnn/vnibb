@@ -30,8 +30,9 @@ export interface WidgetRuntimeInput {
   fetchedAt?: number | string | Date | null
   coverage?: 'complete' | 'partial' | 'unknown'
   marketClosed?: boolean
-  /** Adjustment mode when relevant (e.g. 'adjusted' | 'raw'). */
   adjustmentMode?: string
+  /** Reporting period the figures belong to (e.g. 'FY', 'Q2', 'TTM'). */
+  period?: string
   /** True when the widget computes its values client-side. */
   derived?: boolean
   /** Whether the served data is cached / stale (optional badges). */
@@ -73,6 +74,7 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     apiGroup: input.apiGroup,
     endpoint: input.endpoint,
     adjustmentMode: input.adjustmentMode,
+    period: input.period,
     updatedAt: input.lastDataDate ?? null,
     fetchedAt: input.fetchedAt,
     coverage: input.coverage,

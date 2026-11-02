@@ -750,6 +750,42 @@ describe('DashboardProvider browser persistence', () => {
     expect(screen.getByTestId('widget-types')).toHaveTextContent('rs_ranking,market_heatmap,dividend_ladder,ai_copilot');
   });
 
+  it.each([
+    ['the v6 widget-type migration', '6'],
+    ['the current storage version', String(CURRENT_MIGRATION_VERSION)],
+  ])('retains an unresolvable saved widget through %s and a reload', async (_label, migrationVersion) => {
+    // Neither catalogued nor registered: the ID a retired or ahead-of-build
+    // widget leaves behind. Dropping it would silently delete saved work, so
+    // type, config and authored geometry must survive hydration and remount.
+    const savedWidget = {
+      id: 'retired-widget',
+      tabId: 'retired-tab',
+      type: 'retired_widget',
+      config: { symbol: 'FPT', savedFlag: true },
+      layout: { i: 'retired-widget-layout', x: 3, y: 17, w: 9, h: 7 },
+    };
+    const dashboard = {
+      ...customDashboard,
+      id: 'retired-widget-dashboard',
+      tabs: [{ id: 'retired-tab', name: 'Saved', order: 0, widgets: [savedWidget] }],
+    } as unknown as Dashboard;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify([dashboard]));
+    window.localStorage.setItem(LAST_VIEW_STATE_KEY, JSON.stringify({ activeDashboardId: dashboard.id, lastActiveTabIdByDashboard: { [dashboard.id]: 'retired-tab' } }));
+    window.localStorage.setItem(MIGRATION_VERSION_KEY, migrationVersion);
+
+    const view = render(<DashboardProvider><DashboardStateProbe /></DashboardProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('widget-types')).toHaveTextContent('retired_widget'));
+    expect(storedDashboards().find((item) => item.id === dashboard.id)?.tabs[0].widgets).toEqual([savedWidget]);
+    expect(screen.getByTestId('storage-notice')).not.toHaveTextContent('Dashboard storage was corrupted');
+
+    view.unmount();
+    render(<DashboardProvider><DashboardStateProbe /></DashboardProvider>);
+
+    await waitFor(() => expect(screen.getByTestId('widget-types')).toHaveTextContent('retired_widget'));
+    expect(storedDashboards().find((item) => item.id === dashboard.id)?.tabs[0].widgets).toEqual([savedWidget]);
+  });
+
   it('restores the four activated research widgets without migration or dropping their configuration', async () => {
     const widgetTypes = ['bank_metrics', 'valuation_band', 'cashflow_waterfall', 'technical_summary'] as const;
     const widgets = widgetTypes.map((type, index) => ({

@@ -50,7 +50,7 @@ interface WidgetBundle {
     tags: string[];
 }
 
-export const WIDGET_BUNDLES: WidgetBundle[] = [
+const WIDGET_BUNDLES: WidgetBundle[] = [
     {
         id: 'world-monitor-suite',
         name: 'World Monitor Suite',
