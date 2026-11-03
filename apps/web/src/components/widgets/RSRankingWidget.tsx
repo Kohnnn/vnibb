@@ -28,14 +28,22 @@ type TabType = 'leaders' | 'laggards' | 'gainers';
 // single-hue sequential ramp: one accent, strength rising with the score. A
 // five-hue rainbow (green/cyan/yellow/orange/red) read as bullish/bearish data
 // that the number does not contain, and red at the bottom implied a loss.
-export function getRSColor(rating: number): string {
-    if (rating >= 60) return 'text-[var(--color-accent-primary)]';
-    return 'text-[var(--text-secondary)]';
+// The badge is a score label, not a filled gauge: the tint stays low and the
+// number uses the primary ink. Accent-on-accent-tint cannot clear AA at any
+// useful strength (accent text on a 60% accent tint measured 1.75:1), and a
+// solid fill with accent text hid a perfect score at 1:1.
+const RS_MAX_TINT = 45;
+
+export function getRSColor(): string {
+    // One legible foreground for the whole ramp: ink clears AA on every tint of
+    // the accent (worst case measured 8.96:1), so the score never has to trade
+    // readability for its own strength encoding.
+    return 'text-[var(--text-primary)]';
 }
 
 export function getRSBg(rating: number): { background: string } {
-    const strength = Math.max(0, Math.min(100, rating));
-    return { background: `color-mix(in srgb, var(--color-accent-primary) ${strength}%, transparent)` };
+    const score = Math.max(0, Math.min(100, rating));
+    return { background: `color-mix(in srgb, var(--color-accent-primary) ${Math.round((score / 100) * RS_MAX_TINT)}%, transparent)` };
 }
 
 export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetProps) {
@@ -133,7 +141,7 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                 <div className="flex flex-col items-end">
                                     <Badge
                                         variant="outline"
-                                        className={`text-xs font-bold border-none ${getRSColor(stock.rs_rating)}`}
+                                        className={`text-xs font-bold border-none ${getRSColor()}`}
                                         style={getRSBg(stock.rs_rating)}
                                     >
                                         {stock.rs_rating}
