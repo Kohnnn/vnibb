@@ -162,3 +162,21 @@ describe("colorblind direction colours (#197 a11y)", () => {
     expect(globals).toMatch(/html\[data-color-mode='colorblind'\]\[data-theme='light'\]/);
   });
 });
+
+describe("probability-band and loss-mode remap (brand §13)", () => {
+  it("defines every --cb-* token the prediction UI consumes", () => {
+    // Regression: `var(--cb-positive, #34d399)` fallbacks always won because
+    // the custom properties were referenced but never declared.
+    for (const name of ["--cb-positive", "--cb-warning", "--cb-negative"]) {
+      expect(tokenValue(tokens, name)).not.toBe("");
+    }
+  });
+
+  it("remaps loss colours, not only gains", () => {
+    // Regression: only emerald-* was remapped, so color-vision mode left every
+    // red/rose loss colour untouched.
+    expect(globals).toMatch(/colorblind'\] \.text-red-400[\s\S]{0,200}--color-negative/);
+    expect(globals).toMatch(/colorblind'\] \.text-rose-400[\s\S]{0,200}--color-negative/);
+    expect(globals).toMatch(/colorblind'\] \.text-green-500[\s\S]{0,200}--color-positive/);
+  });
+});

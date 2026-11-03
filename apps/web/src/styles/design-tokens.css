@@ -73,6 +73,13 @@
   --color-negative-muted: #ff8a8a;
   --color-negative-bg: rgba(255, 90, 90, 0.16);
   --color-neutral: #aab4c2;
+  /* Probability-band tones. These were referenced as `var(--cb-*, #hex)` in
+     prediction-market-ui without ever being defined, so the hardcoded hex
+     always won and color-vision mode could not reach them. Tone here means a
+     band, not a direction: warning stays neutral/blue per brand §13. */
+  --cb-positive: var(--color-positive);
+  --cb-warning: var(--color-accent-primary);
+  --cb-negative: var(--color-negative);
 
   /* ---- Typography ---- */
   /* Real loaded fonts are Inter / IBM Plex Mono (next/font local, mounted on
@@ -227,6 +234,9 @@ html[data-theme="light"],
   --color-negative-muted: #B3261E;
   --color-negative-bg: color-mix(in srgb, #B3261E 10%, transparent);
   --color-neutral: #0A0A0A;
+  --cb-positive: var(--color-positive);
+  --cb-warning: var(--color-accent-primary);
+  --cb-negative: var(--color-negative);
 
   --focus-ring-color: #0B3D91;
 

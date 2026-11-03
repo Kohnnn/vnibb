@@ -1582,13 +1582,20 @@ export async function getBlockTrades(
 export async function getInsiderAlerts(
     options?: { userId?: number; unreadOnly?: boolean; limit?: number }
 ): Promise<InsiderAlert[]> {
-    return fetchAPI<InsiderAlert[]>('/alerts/insider', {
+    const response = await fetchAPI<InsiderAlert[] | { data?: InsiderAlert[] }>('/alerts/insider', {
         params: {
             user_id: options?.userId,
             unread_only: options?.unreadOnly,
             limit: options?.limit,
         },
     });
+    // Trust boundary. The bell panel iterates this synchronously, so a malformed
+    // body must not reach it — but it must also not masquerade as a healthy empty
+    // feed ("No alert activity"). Rejecting routes it to the panel's existing
+    // error path, which is the truthful state.
+    if (Array.isArray(response)) return response;
+    if (Array.isArray(response?.data)) return response.data;
+    throw new Error('Unexpected alerts payload');
 }
 
 export async function markAlertRead(alertId: number): Promise<InsiderAlert> {

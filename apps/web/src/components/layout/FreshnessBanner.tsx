@@ -57,9 +57,12 @@ export function FreshnessBanner() {
     }
   }, []);
 
+  // A payload without `buckets` is a degraded response, not a crash: accessing
+  // `.filter` on undefined took the whole /dashboard route down through the
+  // error boundary.
   const affectedBuckets = useMemo(() => {
     if (!data) return null;
-    return data.buckets.filter((bucket) => bucket.status !== 'fresh');
+    return (data.buckets ?? []).filter((bucket) => bucket.status !== 'fresh');
   }, [data]);
 
   const isCritical = affectedBuckets?.some((bucket) => bucket.status === 'critical') ?? false;
@@ -71,7 +74,7 @@ export function FreshnessBanner() {
   }`;
 
   const currentHash = useMemo(
-    () => (data ? buildStatusHash(data.overall, data.buckets) : null),
+    () => (data ? buildStatusHash(data.overall, data.buckets ?? []) : null),
     [data],
   );
 
@@ -89,7 +92,7 @@ export function FreshnessBanner() {
   const showWarning = !isLoading && hasWarnings && currentHash !== dismissedHash;
   const neutralMessage = isLoading
     ? 'Checking data freshness…'
-    : isError || !data || data.buckets.length === 0
+    : isError || !data || (data.buckets ?? []).length === 0
       ? 'Freshness status unavailable.'
       : hasWarnings
         ? 'Freshness warning dismissed for this session.'
