@@ -27,12 +27,14 @@ function quadrantTone(quadrant: string): string {
   return 'text-[var(--text-secondary)]'
 }
 
+// Quadrants are direction-specific, so gain/loss is the honest pairing here;
+// the two weaker quadrants use the focal and comparison series instead.
 function quadrantFill(quadrant: string): string {
-  if (quadrant === 'Leading') return '#4ade80'
-  if (quadrant === 'Improving') return '#22d3ee'
-  if (quadrant === 'Weakening') return '#f59e0b'
-  if (quadrant === 'Lagging') return '#f87171'
-  return '#94a3b8'
+  if (quadrant === 'Leading') return 'var(--color-positive)'
+  if (quadrant === 'Improving') return 'var(--chart-blue)'
+  if (quadrant === 'Weakening') return 'var(--chart-slate)'
+  if (quadrant === 'Lagging') return 'var(--color-negative)'
+  return 'var(--text-muted)'
 }
 
 function buildDomain(values: number[]): [number, number] {
@@ -164,7 +166,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
         symbol: upperSymbol,
         rsRatio: Number(point.rs_ratio),
         rsMomentum: Number(point.rs_momentum),
-        color: '#38bdf8',
+        color: 'var(--chart-blue)',
         opacity: 0.3 + (index / Math.max(trail.length, 1)) * 0.55,
         radius: index === trail.length - 1 ? 4 : 2.5,
       }))
@@ -335,7 +337,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
                       ]}
                     />
                     {trailPoints.length > 1 ? (
-                      <Scatter data={trailPoints} line={{ stroke: '#38bdf8', strokeWidth: 1.5 }} shape={<RotationDot />} />
+                      <Scatter data={trailPoints} line={{ stroke: 'var(--chart-blue)', strokeWidth: 1.5 }} shape={<RotationDot />} />
                     ) : null}
                     {peerPoints.length ? (
                       <Scatter data={peerPoints} shape={<RotationDot />} />

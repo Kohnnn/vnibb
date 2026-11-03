@@ -225,9 +225,9 @@ export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
                     connectNulls
                     isAnimationActive={false}
                   />
-                  <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} connectNulls />
-                  <Line type="monotone" dataKey="tenkan_sen" stroke="#38bdf8" strokeWidth={1.5} dot={false} connectNulls />
-                  <Line type="monotone" dataKey="kijun_sen" stroke="#f97316" strokeWidth={1.5} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="close" stroke="var(--text-primary)" strokeWidth={2} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="tenkan_sen" stroke="var(--chart-blue)" strokeWidth={1.5} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="kijun_sen" stroke="var(--chart-slate)" strokeWidth={1.5} dot={false} strokeDasharray="5 3" connectNulls />
                 </ComposedChart>
               )}
             </ChartSizeBox>

@@ -194,8 +194,8 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
                         return [`${Number(value).toFixed(3)}${withPercent ? '%' : ''}`, label]
                       }}
                     />
-                    <ReferenceLine y={threshold} stroke="#22c55e" strokeDasharray="4 3" ifOverflow="extendDomain" label={{ value: 'Squeeze Threshold', fill: '#22c55e', fontSize: 10, position: 'insideTopRight' }} />
-                    <Line type="monotone" dataKey="bbWidth" name="BB Width %" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                    <ReferenceLine y={threshold} stroke="var(--chart-slate)" strokeDasharray="4 3" ifOverflow="extendDomain" label={{ value: 'Squeeze Threshold', fill: 'var(--chart-slate)', fontSize: 10, position: 'insideTopRight' }} />
+                    <Line type="monotone" dataKey="bbWidth" name="BB Width %" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </ChartMountGuard>

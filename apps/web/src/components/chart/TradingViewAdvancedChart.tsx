@@ -463,6 +463,11 @@ export function TradingViewAdvancedChart({
         // light/dark overrides reach the candlesticks and volume bars. (DEF-001)
         const upColor = cssVars.getPropertyValue('--color-positive').trim() || '#22c55e';
         const downColor = cssVars.getPropertyValue('--color-negative').trim() || '#ef4444';
+        // Series colours: brand blue is focal, Slate is comparison. Reading the
+        // tokens keeps light theme and color-vision mode in sync with the palette
+        // instead of pinning a fixed hue that reads as a state colour.
+        const focalColor = cssVars.getPropertyValue('--chart-blue').trim() || '#3b82f6';
+        const compareColor = cssVars.getPropertyValue('--chart-slate').trim() || '#5B6573';
         const hexToRgba = (hex: string, alpha: number): string => {
           const h = hex.replace('#', '').trim();
           if (h.length !== 6) return `rgba(148,163,184,${alpha})`;
@@ -554,7 +559,7 @@ export function TradingViewAdvancedChart({
         try {
           if (effectiveMode === 'line') {
             series = chart.addLineSeries({
-              color: '#38bdf8',
+              color: focalColor,
               lineWidth: 2,
               crosshairMarkerVisible: true,
               crosshairMarkerRadius: 4,
@@ -564,9 +569,9 @@ export function TradingViewAdvancedChart({
             )));
           } else if (effectiveMode === 'area') {
             series = chart.addAreaSeries({
-              topColor: 'rgba(56, 189, 248, 0.35)',
-              bottomColor: 'rgba(56, 189, 248, 0.04)',
-              lineColor: '#38bdf8',
+              topColor: hexToRgba(focalColor, 0.35),
+              bottomColor: hexToRgba(focalColor, 0.04),
+              lineColor: focalColor,
               lineWidth: 2,
             });
             series.setData(points.map((point) => (
@@ -620,7 +625,7 @@ export function TradingViewAdvancedChart({
 
         if (activeCompareSymbol && safeComparePoints.length > 0) {
           const compareSeries = chart.addLineSeries({
-            color: '#f59e0b',
+            color: compareColor,
             lineWidth: 2,
             priceScaleId: 'right',
             crosshairMarkerVisible: true,

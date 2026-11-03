@@ -221,8 +221,8 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
                   <Area
                     type="monotone"
                     dataKey="parkinson"
-                    stroke="#22d3ee"
-                    fill="rgba(34,211,238,0.18)"
+                    stroke="var(--chart-blue)"
+                    fill="color-mix(in srgb, var(--chart-blue) 18%, transparent)"
                     strokeWidth={2}
                     dot={false}
                     name="Parkinson"
@@ -230,7 +230,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
                   <Line
                     type="monotone"
                     dataKey="closeVol"
-                    stroke="#f59e0b"
+                    stroke="var(--chart-slate)"
                     strokeWidth={1.8}
                     dot={false}
                     name="Close-Close"

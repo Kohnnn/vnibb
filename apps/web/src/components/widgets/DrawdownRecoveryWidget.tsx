@@ -222,8 +222,8 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
                     type="monotone"
                     dataKey="drawdown"
                     name="Drawdown"
-                    stroke="#ef4444"
-                    fill="rgba(239,68,68,0.2)"
+                    stroke="var(--color-negative)"
+                    fill="color-mix(in srgb, var(--color-negative) 20%, transparent)"
                     strokeWidth={2}
                     dot={false}
                   />
@@ -231,8 +231,8 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
                     type="monotone"
                     dataKey="drawdown52w"
                     name="52W Drawdown"
-                    stroke="#f59e0b"
-                    fill="rgba(245,158,11,0.1)"
+                    stroke="var(--chart-slate)"
+                    fill="color-mix(in srgb, var(--chart-slate) 10%, transparent)"
                     strokeWidth={1.6}
                     dot={false}
                   />

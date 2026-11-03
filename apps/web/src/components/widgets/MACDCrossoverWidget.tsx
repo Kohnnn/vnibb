@@ -228,9 +228,9 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
                       formatter={(value: unknown, name?: string) => [Number(value).toFixed(4), name || '']}
                     />
                     <Legend wrapperStyle={{ fontSize: '10px' }} />
-                    <Bar dataKey="histogram" name="Histogram" fill="#8b5cf6" radius={[2, 2, 0, 0]} />
-                    <Line type="monotone" dataKey="macd" name="MACD" stroke="#22d3ee" dot={false} strokeWidth={2} />
-                    <Line type="monotone" dataKey="signal" name="Signal" stroke="#f59e0b" dot={false} strokeWidth={2} />
+                    <Bar dataKey="histogram" name="Histogram" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
+                    <Line type="monotone" dataKey="macd" name="MACD" stroke="var(--chart-blue)" dot={false} strokeWidth={2} />
+                    <Line type="monotone" dataKey="signal" name="Signal" stroke="var(--chart-slate)" strokeDasharray="5 3" dot={false} strokeWidth={2} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </ChartMountGuard>
@@ -281,8 +281,8 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
                       }}
                       formatter={(value: unknown, name?: string) => [`${Number(value).toFixed(2)}%`, name || '']}
                     />
-                    <Bar dataKey="return1m" name="1M Return" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                    <Bar dataKey="return3m" name="3M Return" fill="#06b6d4" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="return1m" name="1M Return" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="return3m" name="3M Return" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </ChartMountGuard>

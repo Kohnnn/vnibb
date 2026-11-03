@@ -541,13 +541,13 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {(drawOverview && chartedSeries.some((entry) => entry.key === 'operatingCF')) ? (
-                                        <Bar dataKey="operatingCF" name="Operating" fill="#3b82f6" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="operatingCF" name="Operating" fill="var(--chart-blue)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'investingCF') ? (
-                                        <Bar dataKey="investingCF" name="Investing" fill="#f59e0b" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="investingCF" name="Investing" fill="var(--chart-slate)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'financingCF') ? (
-                                        <Bar dataKey="financingCF" name="Financing" fill="#ef4444" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="financingCF" name="Financing" fill="var(--chart-slate)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                 </ComposedChart>
                             ) : chartedSeries.length > 0 ? (
@@ -573,10 +573,10 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {chartedSeries.some((entry) => entry.key === 'freeCashFlow') ? (
-                                        <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="#10b981" stroke="#10b981" fillOpacity={0.1} />
+                                        <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="var(--color-positive)" stroke="var(--color-positive)" fillOpacity={0.1} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netCashFlow') ? (
-                                        <Line type="monotone" dataKey="netCashFlow" name="Net Cash Change" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="netCashFlow" name="Net Cash Change" stroke="var(--chart-blue)" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                 </ComposedChart>
                             ) : (

@@ -48,17 +48,18 @@ interface PositionWithPL extends Position {
 
 type ViewMode = 'positions' | 'allocation';
 
+// Brand §20 categorical extension: sectors carry no direction, so no green/red.
 const SECTOR_COLORS: Record<string, string> = {
-    'Technology': '#3B82F6',
-    'Financials': '#10B981',
-    'Real Estate': '#F59E0B',
-    'Consumer Goods': '#EC4899',
-    'Materials': '#06b6d4',
-    'Energy': '#EF4444',
-    'Industrials': '#06B6D4',
-    'Utilities': '#F97316',
-    'Healthcare': '#14B8A6',
-    'Other': '#6B7280',
+    'Technology': 'var(--chart-blue)',
+    'Financials': 'var(--chart-slate)',
+    'Real Estate': 'var(--chart-cat-4)',
+    'Consumer Goods': 'var(--chart-cat-5)',
+    'Materials': 'var(--chart-cat-6)',
+    'Energy': 'var(--chart-cat-3)',
+    'Industrials': 'var(--chart-cat-5)',
+    'Utilities': 'var(--chart-cat-4)',
+    'Healthcare': 'var(--chart-cat-6)',
+    'Other': 'var(--text-muted)',
 };
 
 // ============================================================================

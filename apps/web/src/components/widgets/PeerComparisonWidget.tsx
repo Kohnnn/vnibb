@@ -917,11 +917,12 @@ function formatCellValue(value: any, format: string, unitConfig: UnitConfig) {
     }
 }
 
+// Brand §20 categorical extension: peers carry no direction, so no green/red.
 const CHART_COLORS = [
-    '#3B82F6', // Blue
-    '#10B981', // Green
-    '#F59E0B', // Amber
-    '#EF4444', // Red
-    '#06B6D4', // Cyan
-    '#EC4899', // Pink
+    'var(--chart-blue)',
+    'var(--chart-slate)',
+    'var(--chart-cat-4)',
+    'var(--chart-cat-5)',
+    'var(--chart-cat-6)',
+    'var(--chart-cat-3)',
 ];

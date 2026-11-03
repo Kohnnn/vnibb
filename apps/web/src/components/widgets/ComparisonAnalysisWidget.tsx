@@ -67,7 +67,16 @@ const CATEGORY_DEFINITIONS = [
   },
 ] as const
 
-const COLOR_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#14b8a6', '#06b6d4']
+// Documented extension of the brand's two-hue series rule (§20): the first
+// symbol is the focal blue series, the rest are Slate at varying tints.
+// Never green/red - those read as direction, and peers are not a direction.
+const COLOR_PALETTE = [
+  'var(--chart-blue)',
+  'var(--chart-slate)',
+  'color-mix(in srgb, var(--chart-slate) 70%, transparent)',
+  'color-mix(in srgb, var(--chart-slate) 45%, transparent)',
+  'color-mix(in srgb, var(--chart-blue) 45%, var(--chart-slate))',
+]
 const PERFORMANCE_PERIODS = ['1M', '3M', '6M', '1Y', '3Y', '5Y', 'YTD', 'ALL'] as const
 const COMPARISON_PERIOD_OPTIONS: ExtendedPeriod[] = ['FY', 'Q1', 'Q2', 'Q3', 'Q4', 'TTM']
 const MAX_SYMBOLS = 5

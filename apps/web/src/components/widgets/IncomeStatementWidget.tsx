@@ -546,16 +546,16 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                         formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     {chartedSeries.some((entry) => entry.key === 'revenue') ? (
-                                        <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                                        <Bar dataKey="revenue" name="Revenue" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
                                     ) : null}
                                     {selection && chartedSeries.some((entry) => entry.key === 'grossProfit') ? (
-                                        <Line type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="var(--chart-slate)" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                     {selection && chartedSeries.some((entry) => entry.key === 'operatingIncome') ? (
-                                        <Line type="monotone" dataKey="operatingIncome" name="Operating Income" stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="operatingIncome" name="Operating Income" stroke="var(--chart-slate)" strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netIncome') ? (
-                                        <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="var(--color-positive)" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                 </ComposedChart>
                             ) : effectiveChartType === 'margins' ? (
@@ -577,13 +577,13 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {chartedSeries.some((entry) => entry.key === 'grossMargin') ? (
-                                        <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                                        <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="var(--chart-blue)" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'operatingMargin') ? (
-                                        <Line type="monotone" dataKey="operatingMargin" name="Operating %" stroke="#a855f7" strokeWidth={2} dot={{ r: 2 }} />
+                                        <Line type="monotone" dataKey="operatingMargin" name="Operating %" stroke="var(--chart-slate)" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netMargin') ? (
-                                        <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                                        <Line type="monotone" dataKey="netMargin" name="Net %" stroke="var(--color-positive)" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                 </ComposedChart>
                             ) : (

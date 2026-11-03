@@ -22,12 +22,15 @@ interface ValuationBandWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+// Documented extension of the two-hue series rule (§20): P/E is the focal blue
+// series, the rest are Slate variants. Valuation multiples are not directions,
+// so no green/red.
 const METRIC_OPTIONS = [
-  { key: 'pe', label: 'P/E', color: '#38bdf8' },
-  { key: 'pb', label: 'P/B', color: '#22c55e' },
-  { key: 'ps', label: 'P/S', color: '#f59e0b' },
-  { key: 'ev_ebitda', label: 'EV/EBITDA', color: '#f97316' },
-  { key: 'ev_sales', label: 'EV/Sales', color: '#e11d48' },
+  { key: 'pe', label: 'P/E', color: 'var(--chart-blue)' },
+  { key: 'pb', label: 'P/B', color: 'var(--chart-slate)' },
+  { key: 'ps', label: 'P/S', color: 'color-mix(in srgb, var(--chart-slate) 65%, transparent)' },
+  { key: 'ev_ebitda', label: 'EV/EBITDA', color: 'color-mix(in srgb, var(--chart-blue) 55%, var(--chart-slate))' },
+  { key: 'ev_sales', label: 'EV/Sales', color: 'color-mix(in srgb, var(--chart-slate) 40%, transparent)' },
 ] as const;
 
 function average(values: number[]): number | null {
