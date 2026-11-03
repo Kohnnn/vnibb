@@ -27,6 +27,18 @@ def validate_free_runtime() -> None:
     _refuse_persisted_paid_account()
 
 
+def _is_auth_rejection(exc: BaseException) -> bool:
+    """Whether the SDK answered "this device/credential is not authenticated".
+
+    The SDK raises its core `AuthError` for an unregistered device, an expired
+    key or a refused device. That is a definite negative answer, not a probe
+    failure: no paid credential can be exercised, so the free runtime is safe.
+    Matched by class name because `vnstock._core` is a compiled extension the
+    module cannot import statically without importing the SDK itself.
+    """
+    return any(cls.__name__ == "AuthError" for cls in type(exc).__mro__)
+
+
 def _refuse_persisted_paid_account() -> None:
     """Refuse acquisition when the installed SDK already holds a paid credential.
 
@@ -53,6 +65,12 @@ def _refuse_persisted_paid_account() -> None:
     try:
         state = status()
     except Exception as exc:
+        # "Device not registered" and similar auth rejections are a definite
+        # answer: no credential is valid right now, so nothing paid can be
+        # exercised and the free runtime proceeds. Only a probe that produced
+        # no answer at all is unverifiable, and that still fails closed.
+        if _is_auth_rejection(exc):
+            return
         raise RuntimeError(
             "Free runtime could not read the installed vnstock credential state; "
             "refusing to acquire."
@@ -82,8 +100,8 @@ def _refuse_persisted_paid_account() -> None:
     )
 
 
-def validate_runtime() -> None:
-    """Enforce the configured tier and VCI policy before importing the SDK."""
+def validate_runtime_policy() -> None:
+    """Enforce the configured tier and VCI source without touching credentials."""
     tier = os.getenv("VNSTOCK_RUNTIME_TIER", settings.vnstock_runtime_tier).strip().lower()
     if tier not in {"free", "golden"}:
         raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free' or 'golden'")
@@ -91,7 +109,12 @@ def validate_runtime() -> None:
         raise ValueError("VNSTOCK_RUNTIME_TIER differs from configured runtime tier")
     validate_source(settings.vnstock_source)
     validate_source(os.getenv("VNSTOCK_SOURCE", settings.vnstock_source))
-    if tier == "free":
+
+
+def validate_runtime() -> None:
+    """Enforce tier, source and the free-tier credential guard before an import."""
+    validate_runtime_policy()
+    if os.getenv("VNSTOCK_RUNTIME_TIER", settings.vnstock_runtime_tier).strip().lower() == "free":
         validate_free_runtime()
 
 
