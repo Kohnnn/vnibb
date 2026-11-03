@@ -36,13 +36,15 @@ function formatPrice(value: number): string {
 }
 
 function getRegime(percentile: number) {
+  // Volatility regime is an ordinal level, not a direction: low volatility is
+  // not a gain. One accent hue, muted at the low end.
   if (percentile < 33) {
-    return { label: 'Low Vol', className: 'text-emerald-300', stopMultiple: 1.2 };
+    return { label: 'Low Vol', className: 'text-[var(--text-secondary)]', stopMultiple: 1.2 };
   }
   if (percentile < 67) {
-    return { label: 'Normal Vol', className: 'text-[var(--color-warning)]', stopMultiple: 1.5 };
+    return { label: 'Normal Vol', className: 'text-[var(--text-primary)]', stopMultiple: 1.5 };
   }
-  return { label: 'High Vol', className: 'text-red-300', stopMultiple: 2.0 };
+  return { label: 'High Vol', className: 'text-[var(--color-accent-primary)]', stopMultiple: 2.0 };
 }
 
 export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) {

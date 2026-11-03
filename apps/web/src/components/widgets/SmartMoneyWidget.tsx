@@ -22,11 +22,11 @@ function formatBillions(value: number): string {
   return `${value >= 0 ? '+' : '-'}${abs.toFixed(0)}`
 }
 
+// Signed score: direction only. The cyan/amber middle steps read as extra states.
 function smartMoneyTone(score: number): string {
-  if (score >= 2) return 'text-emerald-400'
-  if (score >= 1) return 'text-cyan-400'
-  if (score <= -2) return 'text-red-400'
-  return 'text-amber-400'
+  if (score >= 1) return 'text-[var(--color-positive)]'
+  if (score <= -1) return 'text-[var(--color-negative)]'
+  return 'text-[var(--text-secondary)]'
 }
 
 function smartMoneyLabel(value: string, score: number): string {

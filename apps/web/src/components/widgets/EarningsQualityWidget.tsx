@@ -30,12 +30,11 @@ function persistence(value: number | null | undefined): string {
   return value.toFixed(2)
 }
 
+// A-D is an ordinal grade, not a gain or a loss. Green-to-red implied the grade
+// was a P&L direction; a single accent keeps it legible as a rank.
 function gradeTone(grade: string): string {
-  if (grade === 'A') return 'text-emerald-400'
-  if (grade === 'B') return 'text-cyan-400'
-  if (grade === 'C') return 'text-amber-400'
-  if (grade === 'D') return 'text-red-400'
-  return 'text-[var(--text-primary)]'
+  if (grade === 'A' || grade === 'B') return 'text-[var(--color-accent-primary)]'
+  return 'text-[var(--text-secondary)]'
 }
 
 export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityWidgetProps) {

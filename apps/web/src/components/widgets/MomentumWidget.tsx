@@ -21,11 +21,12 @@ function formatPct(value: number | null): string {
   return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
+// A momentum score is signed, so positive/negative is a real direction. The
+// intermediate cyan/amber steps were decoration: they implied a third and fourth
+// state the score does not have.
 function scoreTone(score: number): string {
-  if (score >= 3) return 'text-emerald-400'
-  if (score >= 1) return 'text-cyan-400'
-  if (score <= -3) return 'text-red-400'
-  if (score <= -1) return 'text-amber-400'
+  if (score >= 1) return 'text-[var(--color-positive)]'
+  if (score <= -1) return 'text-[var(--color-negative)]'
   return 'text-[var(--text-secondary)]'
 }
 

@@ -3,7 +3,6 @@ import { convertFinancialValueForUnit, formatUnitValuePlain, resolveUnitScale, t
 export interface TTMSnapshotMetricCard {
   label: string
   value: string
-  tone: string
 }
 
 function readNumber(source: Record<string, any> | null | undefined, ...keys: string[]) {
@@ -46,42 +45,34 @@ export function buildTTMSnapshotCards(
     {
       label: 'Revenue',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'revenue'), unitConfig, incomePeriod)),
-      tone: 'text-blue-300',
     },
     {
       label: 'Gross Profit',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'gross_profit'), unitConfig, incomePeriod)),
-      tone: 'text-emerald-300',
     },
     {
       label: 'Operating Income',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'operating_income'), unitConfig, incomePeriod)),
-      tone: 'text-cyan-300',
     },
     {
       label: 'Net Income',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'net_income'), unitConfig, incomePeriod)),
-      tone: 'text-violet-300',
     },
     {
       label: 'Operating CF',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.cash_flow, 'operating_cash_flow'), unitConfig, cashPeriod)),
-      tone: 'text-amber-300',
     },
     {
       label: 'Free Cash Flow',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.cash_flow, 'free_cash_flow'), unitConfig, cashPeriod)),
-      tone: 'text-orange-300',
     },
     {
       label: 'Total Assets',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.balance, 'total_assets'), unitConfig, balancePeriod)),
-      tone: 'text-slate-200',
     },
     {
       label: 'Equity',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.balance, 'total_equity', 'equity'), unitConfig, balancePeriod)),
-      tone: 'text-pink-300',
     },
   ]
 

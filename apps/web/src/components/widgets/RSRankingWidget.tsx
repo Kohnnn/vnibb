@@ -24,20 +24,18 @@ interface RSRankingWidgetProps {
 
 type TabType = 'leaders' | 'laggards' | 'gainers';
 
-function getRSColor(rating: number): string {
-    if (rating >= 80) return 'text-green-400';
-    if (rating >= 60) return 'text-cyan-400';
-    if (rating >= 40) return 'text-yellow-400';
-    if (rating >= 20) return 'text-orange-400';
-    return 'text-red-400';
+// An RS rating is an ordinal score, not a gain or a loss, so it gets a
+// single-hue sequential ramp: one accent, strength rising with the score. A
+// five-hue rainbow (green/cyan/yellow/orange/red) read as bullish/bearish data
+// that the number does not contain, and red at the bottom implied a loss.
+export function getRSColor(rating: number): string {
+    if (rating >= 60) return 'text-[var(--color-accent-primary)]';
+    return 'text-[var(--text-secondary)]';
 }
 
-function getRSBg(rating: number): string {
-    if (rating >= 80) return 'bg-green-500/20';
-    if (rating >= 60) return 'bg-cyan-500/20';
-    if (rating >= 40) return 'bg-yellow-500/20';
-    if (rating >= 20) return 'bg-orange-500/20';
-    return 'bg-red-500/20';
+export function getRSBg(rating: number): { background: string } {
+    const strength = Math.max(0, Math.min(100, rating));
+    return { background: `color-mix(in srgb, var(--color-accent-primary) ${strength}%, transparent)` };
 }
 
 export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetProps) {
@@ -135,14 +133,15 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                 <div className="flex flex-col items-end">
                                     <Badge
                                         variant="outline"
-                                        className={`text-xs font-bold border-none ${getRSBg(stock.rs_rating)} ${getRSColor(stock.rs_rating)}`}
+                                        className={`text-xs font-bold border-none ${getRSColor(stock.rs_rating)}`}
+                                        style={getRSBg(stock.rs_rating)}
                                     >
                                         {stock.rs_rating}
                                     </Badge>
                                     {stock.rs_rating_change !== undefined && activeTab === 'gainers' && (
                                         <div className="flex items-center gap-1 mt-0.5">
-                                            <TrendingUp size={10} className="text-green-400" />
-                                            <span className="text-[9px] text-green-400 font-mono">+{stock.rs_rating_change}</span>
+                                            <TrendingUp size={10} className="text-[var(--color-positive)]" />
+                                            <span className="text-[9px] text-[var(--color-positive)] font-mono">+{stock.rs_rating_change}</span>
                                         </div>
                                     )}
                                 </div>
@@ -184,10 +183,10 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="flex-1 flex flex-col overflow-hidden">
                 <TabsList className="grid w-full grid-cols-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] p-0.5 h-8">
-                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-green-400">
+                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-primary)]">
                         Leaders
                     </TabsTrigger>
-                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-red-400">
+                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-primary)]">
                         Laggards
                     </TabsTrigger>
                     <TabsTrigger value="gainers" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-blue-400">

@@ -20,10 +20,8 @@ interface RelativeRotationWidgetProps {
 }
 
 function quadrantTone(quadrant: string): string {
-  if (quadrant === 'Leading') return 'text-emerald-400'
-  if (quadrant === 'Improving') return 'text-cyan-400'
-  if (quadrant === 'Weakening') return 'text-amber-400'
-  if (quadrant === 'Lagging') return 'text-red-400'
+  if (quadrant === 'Leading' || quadrant === 'Improving') return 'text-[var(--color-positive)]'
+  if (quadrant === 'Weakening' || quadrant === 'Lagging') return 'text-[var(--color-negative)]'
   return 'text-[var(--text-secondary)]'
 }
 
