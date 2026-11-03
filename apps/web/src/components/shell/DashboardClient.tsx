@@ -1408,7 +1408,7 @@ function DashboardContent() {
                                         type="button"
                                         onClick={() => void handlePersistSystemLayout(true)}
                                         disabled={!isAdmin || !activeDashboard.adminUnlocked || isPublishingSystemLayout}
-                                        className="rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-xs font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         {isPublishingSystemLayout ? 'Publishing...' : 'Publish Global'}
                                     </button>
@@ -1626,7 +1626,7 @@ function DashboardContent() {
 
                                     <button
                                         onClick={() => setIsWidgetLibraryOpen(true)}
-                                        className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                                        className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                                     >
                                         Open Widget Library
                                     </button>
@@ -1802,7 +1802,7 @@ function EmptyDashboardState({ onCreateWorkspace }: { onCreateWorkspace: () => v
             </div>
             <button
                 onClick={onCreateWorkspace}
-                className="inline-flex items-center gap-2 rounded-md bg-[var(--color-accent-primary)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                className="inline-flex items-center gap-2 rounded-md bg-[var(--color-accent-fill)] px-5 py-2.5 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
             >
                 <PlusCircle size={16} />
                 Create Workspace
@@ -1840,7 +1840,7 @@ function EmptyWorkspaceTabsState({
                 <button
                     type="button"
                     onClick={onCreateTab}
-                    className="inline-flex items-center gap-2 rounded-md bg-[var(--color-accent-primary)] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                    className="inline-flex items-center gap-2 rounded-md bg-[var(--color-accent-fill)] px-5 py-2.5 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                 >
                     <PlusCircle size={16} />
                     Add tab

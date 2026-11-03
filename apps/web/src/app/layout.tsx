@@ -41,7 +41,10 @@ export const metadata: Metadata = {
   // No root-level canonical: a layout-level canonical would make every page
   // (login, dashboard, shares) claim the site root. Pages that need one set it.
   metadataBase: new URL(SITE_URL),
-  title: "VniBB | Research cockpit for Vietnamese equities",
+  title: {
+    default: "VniBB | Research cockpit for Vietnamese equities",
+    template: "VniBB %s",
+  },
   description: SITE_DESCRIPTION,
   applicationName: "VniBB",
   manifest: "/manifest.json",
@@ -67,8 +70,8 @@ export const metadata: Metadata = {
     description: SITE_DESCRIPTION,
     images: ["/brand/og-vnibb.png"],
   },
-  /* Favicon/app-icon artwork is not in the brand pack and needs approval;
-     Next keeps serving the existing /favicon.ico until that lands. */
+  /* Brand §10: no approved symbol or favicon exists. The plain-text browser
+     title stands in until a small-size asset is designed and approved. */
 };
 
 // Theme and UI preferences pre-hydration scripts
@@ -102,6 +105,15 @@ function ThemeUiScripts() {
                 if (localStorage.getItem('vnibb-reduce-effects') === 'true') {
                   document.documentElement.setAttribute('data-reduce-effects', 'true');
                 }
+                // Browser chrome must match the painted background; a static
+                // theme-color would clash with the other theme (WIG: dark mode).
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (!meta) {
+                  meta = document.createElement('meta');
+                  meta.setAttribute('name', 'theme-color');
+                  document.head.appendChild(meta);
+                }
+                meta.setAttribute('content', resolved === 'light' ? '#FFFFFF' : '#0A0E17');
               } catch (e) {}
             })();
           `

@@ -31,10 +31,10 @@ type SignalFilter = (typeof SIGNALS)[number];
 type SortMode = 'newest' | 'score' | 'revenue' | 'earnings';
 
 function signalTone(signal: string): string {
-  if (signal === 'High Conviction') return 'text-emerald-300 border-emerald-500/20 bg-emerald-500/10';
-  if (signal === 'Watch') return 'text-cyan-300 border-cyan-500/20 bg-cyan-500/10';
+  if (signal === 'High Conviction') return 'text-[var(--color-positive)] border-[var(--color-state-border)] bg-[var(--color-positive-bg)]';
+  if (signal === 'Watch') return 'text-[var(--color-accent-primary)] border-[var(--color-state-border)] bg-[var(--color-state-bg)]';
   if (signal === 'Mixed') return 'text-[var(--color-warning)] border-[var(--color-state-border)] bg-[var(--color-state-bg)]';
-  return 'text-rose-300 border-rose-500/20 bg-rose-500/10';
+  return 'text-[var(--color-negative)] border-[var(--color-state-border)] bg-[var(--color-negative-bg)]';
 }
 
 export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataChange }: EarningsSeasonMonitorWidgetProps) {
@@ -122,7 +122,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <CalendarClock className="h-4 w-4 text-blue-400" />
+              <CalendarClock className="h-4 w-4 text-[var(--color-accent-primary)]" />
               <div>
                 <div className="text-xs font-semibold text-[var(--text-primary)]">{data?.season || 'Latest quarterly releases'}</div>
                 <div className="text-[10px] text-[var(--text-muted)]">Cross-check new quarterly statements and prioritize follow-up names.</div>
@@ -143,7 +143,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
                 key={option}
                 type="button"
                 onClick={() => setExchange(option)}
-                className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${exchange === option ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${exchange === option ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]' : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
               >
                 {option}
               </button>
@@ -190,8 +190,8 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
           {hasData ? <div className="mt-2 text-[10px] text-[var(--text-muted)]">YoY available for {yoyCoverage} of {rows.length} results. Missing fields are unavailable from stored comparable statements.</div> : null}
 
           <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
-            <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-cyan-300" />
-            <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-emerald-300" />
+            <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-[var(--color-accent-primary)]" />
+            <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-[var(--color-positive)]" />
             <SummaryCard label="High Conviction" value={summary.highConviction} tone="text-[var(--color-warning)]" />
           </div>
         </div>
@@ -214,7 +214,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
                   key={`${row.symbol}-${row.period}`}
                   type="button"
                   onClick={() => setLinkedSymbol(row.symbol)}
-                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-tertiary)]/60"
+                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-left transition-colors hover:border-[var(--color-state-border)] hover:bg-[var(--bg-tertiary)]/60"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>

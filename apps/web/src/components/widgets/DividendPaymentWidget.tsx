@@ -115,7 +115,7 @@ export function DividendPaymentWidget({ symbol, onDataChange }: DividendPaymentW
                                     <td className="py-2 pr-3 text-[var(--text-secondary)]">{formatDividendType(row.dividend_type || row.type)}</td>
                                     <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.year || row.fiscal_year || row.issue_year || '-'}</td>
                                     <td className="py-2 pr-3 text-right text-[var(--text-secondary)]">{formatDividendYield(row.dividend_yield)}</td>
-                                    <td className="py-2 text-right text-green-400 font-medium">{formatDividendPayout(row)}</td>
+                                    <td className="py-2 text-right text-[var(--color-positive)] font-medium">{formatDividendPayout(row)}</td>
                                 </tr>
                             ))}
                         </tbody>

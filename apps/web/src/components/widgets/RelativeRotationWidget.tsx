@@ -1,5 +1,6 @@
 'use client'
 
+import { EMPTY_VALUE } from '@/lib/units'
 import { useEffect, useMemo } from 'react'
 import { Orbit } from 'lucide-react'
 import { CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
@@ -83,7 +84,7 @@ function RotationCoverageEmpty({
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-4 py-6 text-center">
-      <Orbit size={20} className="text-cyan-400/70" />
+      <Orbit size={20} className="text-[var(--color-accent-primary)]" />
       <div>
         <div className="text-sm font-semibold text-[var(--text-primary)]">
           {`No relative-rotation data available for ${symbol}.`}
@@ -112,7 +113,7 @@ function RotationCoverageEmpty({
       <button
         type="button"
         onClick={onRefresh}
-        className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold text-cyan-200 transition-colors hover:bg-cyan-500/20"
+        className="rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1 text-[11px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)]"
       >
         Refresh
       </button>
@@ -226,7 +227,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Orbit size={12} className="text-cyan-400" />
+          <Orbit size={12} className="text-[var(--color-accent-primary)]" />
           <span>Relative Rotation</span>
         </div>
         <WidgetMeta
@@ -268,7 +269,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
                 <div className="font-mono text-[var(--text-primary)]">
                   {selectedRsRatio !== null
                     ? selectedRsRatio.toFixed(2)
-                    : '-'}
+                    : EMPTY_VALUE}
                 </div>
               </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -276,13 +277,13 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
               <div
                 className={
                   (selectedRsMomentum ?? 0) >= 100
-                    ? 'font-mono text-emerald-400'
-                    : 'font-mono text-red-400'
+                    ? 'font-mono text-[var(--color-positive)]'
+                    : 'font-mono text-[var(--color-negative)]'
                 }
               >
                   {selectedRsMomentum !== null
                     ? selectedRsMomentum.toFixed(2)
-                    : '-'}
+                    : EMPTY_VALUE}
               </div>
             </div>
           </div>

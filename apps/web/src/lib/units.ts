@@ -11,7 +11,9 @@ export interface UnitConfig {
   usdVndRatesByYear?: Record<string, number>
 }
 
-export const EMPTY_VALUE = '—'
+// Brand §19: an unavailable financial value reads `n/a`, not a dash that could
+// be mistaken for a measured value.
+export const EMPTY_VALUE = 'n/a'
 export const DEFAULT_USD_VND_RATE = 25_000
 export const DEFAULT_USD_VND_RATES_BY_YEAR: Record<string, number> = {
   '2016': 22_300,

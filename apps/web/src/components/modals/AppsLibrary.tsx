@@ -148,7 +148,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                 className={cn(
                                     'rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]',
                                     selectedCategory === 'all'
-                                        ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] text-white'
+                                        ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                                         : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                                 )}
                             >
@@ -163,7 +163,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                         className={cn(
                                             'flex items-center gap-2 rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]',
                                             selectedCategory === category.id
-                                                ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] text-white'
+                                                ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                                                 : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                                         )}
                                     >

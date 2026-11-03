@@ -1,4 +1,5 @@
 'use client';
+import { EMPTY_VALUE } from '@/lib/units';
 
 import { BarChart3 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -23,7 +24,7 @@ type EstimateRow = {
 
 function formatEstimate(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return '—';
+    return EMPTY_VALUE;
   }
 
   return value.toLocaleString('en-US', {

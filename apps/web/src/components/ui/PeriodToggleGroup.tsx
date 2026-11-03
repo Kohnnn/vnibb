@@ -21,7 +21,7 @@ export function PeriodToggleGroup({
           onClick={() => onChange(option)}
           className={`rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] ${
             value === option
-              ? 'bg-[var(--color-accent-primary)] text-white'
+              ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
               : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
           }`}
         >

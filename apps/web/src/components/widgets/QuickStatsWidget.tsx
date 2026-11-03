@@ -10,6 +10,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { EMPTY_VALUE, formatPercent } from '@/lib/units';
+import { signedToneClass, priceDirection } from '@/lib/priceColor';
 
 interface QuickStatsWidgetProps {
     symbol: string;
@@ -91,37 +93,37 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
     const stats = [
         {
             label: 'Price',
-            value: (latestQuote?.price ?? latest?.close)?.toLocaleString() ?? '-',
+            value: (latestQuote?.price ?? latest?.close)?.toLocaleString() ?? EMPTY_VALUE,
             icon: DollarSign,
             color: 'text-[var(--text-primary)]',
         },
         {
             label: 'Change',
-            value: change !== null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '-',
-            icon: change !== null && change >= 0 ? TrendingUp : TrendingDown,
-            color: change !== null && change >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]',
+            value: change !== null ? formatPercent(change, { input: 'percent', decimals: 2, signed: true }) : EMPTY_VALUE,
+            icon: priceDirection(change) === 'down' ? TrendingDown : priceDirection(change) === 'up' ? TrendingUp : Activity,
+            color: signedToneClass(change),
         },
         {
             label: '30D High',
-            value: high30 > 0 ? high30.toLocaleString() : '-',
+            value: high30 > 0 ? high30.toLocaleString() : EMPTY_VALUE,
             icon: TrendingUp,
             color: 'text-[var(--text-primary)]',
         },
         {
             label: '30D Low',
-            value: low30 > 0 ? low30.toLocaleString() : '-',
+            value: low30 > 0 ? low30.toLocaleString() : EMPTY_VALUE,
             icon: TrendingDown,
             color: 'text-[var(--text-primary)]',
         },
         {
             label: 'Avg Volume',
-            value: avgVol > 0 ? `${(avgVol / 1e6).toFixed(1)}M` : '-',
+            value: avgVol > 0 ? `${(avgVol / 1e6).toFixed(1)}M` : EMPTY_VALUE,
             icon: BarChart2,
             color: 'text-[var(--text-secondary)]',
         },
         {
             label: 'P/E Ratio',
-            value: latestRatio?.pe?.toFixed(1) || '-',
+            value: latestRatio?.pe?.toFixed(1) || EMPTY_VALUE,
             icon: Activity,
             color: 'text-[var(--text-secondary)]',
         },

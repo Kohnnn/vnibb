@@ -10,9 +10,10 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useForeignTrading, useInsiderSentiment, useShareholders } from '@/lib/queries';
 import { buildOwnershipSummary } from '@/lib/ownershipAnalytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatNumber } from '@/lib/units';
+import { EMPTY_VALUE, formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import type { WidgetDataPayload } from '@/lib/widgetRuntime';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface OwnershipRatingSummaryWidgetProps {
   id: string;
@@ -22,12 +23,12 @@ interface OwnershipRatingSummaryWidgetProps {
 }
 
 function formatPct(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return EMPTY_VALUE
   return `${value.toFixed(2)}%`
 }
 
 function formatCompact(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return EMPTY_VALUE
   const abs = Math.abs(value)
   if (abs >= 1e6) return `${value < 0 ? '-' : ''}${(abs / 1e6).toFixed(2)}M`
   if (abs >= 1e3) return `${value < 0 ? '-' : ''}${(abs / 1e3).toFixed(1)}K`
@@ -50,7 +51,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
   const error = shareholderError || foreignQuery.error || insiderQuery.error
   const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
-  const gradeTone = summary.grade === 'A' ? 'text-emerald-300' : summary.grade === 'B' ? 'text-cyan-300' : summary.grade === 'C' ? 'text-[var(--color-warning)]' : summary.grade === 'D' ? 'text-rose-300' : 'text-[var(--text-muted)]'
+  const gradeTone = summary.grade === 'A' ? 'text-[var(--color-positive)]' : summary.grade === 'B' ? 'text-[var(--color-accent-primary)]' : summary.grade === 'C' ? 'text-[var(--color-warning)]' : summary.grade === 'D' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]'
   const warnings = useMemo(() => {
     const inputs = [
       ['Shareholders', { ...shareholdersQuery, error: shareholderError }, summary.holderCount !== null && summary.holderCount > 0],
@@ -112,9 +113,9 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
       <div className="flex h-full flex-col bg-[var(--bg-primary)] p-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
-            {summary.grade && (summary.grade === 'A' || summary.grade === 'B' ? <ShieldCheck size={20} className="text-emerald-300" /> : <ShieldX size={20} className="text-rose-300" />)}
+            {summary.grade && (summary.grade === 'A' || summary.grade === 'B' ? <ShieldCheck size={20} className="text-[var(--color-positive)]" /> : <ShieldX size={20} className="text-[var(--color-negative)]" />)}
             <div>
-              <div className={`text-2xl font-black ${gradeTone}`}>{summary.grade ?? '—'}</div>
+              <div className={`text-2xl font-black ${gradeTone}`}>{summary.grade ?? EMPTY_VALUE}</div>
               <div className="text-[11px] text-[var(--text-secondary)]">{summary.stance ?? 'Ownership rating unavailable'}</div>
             </div>
           </div>
@@ -135,14 +136,14 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
           />
         ) : (
           <div className="grid flex-1 grid-cols-2 gap-2 xl:grid-cols-4">
-            <MetricCard label="Top 3" value={formatPct(summary.top3Pct)} tone="text-cyan-300" />
-            <MetricCard label="Top 10" value={formatPct(summary.top10Pct)} tone="text-blue-300" />
-            <MetricCard label="Foreign Net 20D" value={formatCompact(summary.foreignNetVolume)} tone={summary.foreignNetVolume != null && summary.foreignNetVolume >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
-            <MetricCard label="Insider Net 90D" value={formatCompact(summary.insiderNetValue)} tone={summary.insiderNetValue != null && summary.insiderNetValue >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
+            <MetricCard label="Top 3" value={formatPct(summary.top3Pct)} tone="text-[var(--color-accent-primary)]" />
+            <MetricCard label="Top 10" value={formatPct(summary.top10Pct)} tone="text-[var(--color-accent-primary)]" />
+            <MetricCard label="Foreign Net 20D" value={formatCompact(summary.foreignNetVolume)} tone={signedToneClass(summary.foreignNetVolume)} />
+            <MetricCard label="Insider Net 90D" value={formatCompact(summary.insiderNetValue)} tone={signedToneClass(summary.insiderNetValue)} />
             <MetricCard label="Reported Institutional" value={formatCompact(summary.institutionalCount)} tone="text-[var(--text-primary)]" />
             <MetricCard label="Reported Foreign Holders" value={formatCompact(summary.foreignCount)} tone="text-[var(--text-primary)]" />
             <MetricCard label="Reported Insider Holders" value={formatCompact(summary.insiderCount)} tone="text-[var(--text-primary)]" />
-            <MetricCard label="Score" value={summary.score !== null ? `${summary.score}/100` : '—'} tone={gradeTone} />
+            <MetricCard label="Score" value={summary.score !== null ? `${summary.score}/100` : EMPTY_VALUE} tone={gradeTone} />
           </div>
         )}
       </div>

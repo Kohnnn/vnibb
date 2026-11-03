@@ -69,7 +69,7 @@ describe('PredictionMarketDrawer', () => {
         fireEvent.click(screen.getByRole('button', { name: '1d' }));
         expect(within(section).queryByText('+20.0 pp')).not.toBeInTheDocument();
         completeOneDay(json({ points: [{ captured_at: '2026-09-26T12:00:00Z', yes_price: 0.6 }] }));
-        await waitFor(() => expect(within(section).getByText('Observed change').nextElementSibling).toHaveTextContent('—'));
+        await waitFor(() => expect(within(section).getByText('Observed change').nextElementSibling).toHaveTextContent('n/a'));
         expect(within(section).queryByRole('img')).not.toBeInTheDocument();
     });
 });

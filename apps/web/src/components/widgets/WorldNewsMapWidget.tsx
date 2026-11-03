@@ -151,7 +151,7 @@ function getNumberConfig(config: Record<string, unknown> | undefined, key: strin
 function chipClass(active: boolean) {
   return `rounded-md px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
     active
-      ? 'bg-amber-500/20 text-[var(--text-secondary)] ring-1 ring-amber-400/30'
+      ? 'bg-[var(--color-state-bg)] text-[var(--text-secondary)] ring-1 ring-[var(--color-state-border)]'
       : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
   }`;
 }
@@ -159,7 +159,7 @@ function chipClass(active: boolean) {
 function mapViewClass(active: boolean) {
   return `rounded border px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${
     active
-      ? 'border-amber-300/50 bg-amber-300/15 text-amber-100'
+      ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]'
       : 'border-white/10 bg-black/20 text-white/50 hover:border-white/25 hover:text-white'
   }`;
 }
@@ -216,7 +216,7 @@ function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[]
   if (failedFeeds.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-amber-100/85">
+    <div className="mt-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-[var(--color-warning)]">
       <div className="font-black uppercase tracking-[0.14em] text-[var(--text-secondary)]">
         {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
       </div>
@@ -474,19 +474,19 @@ function WorldNewsMapWidgetComponent({
               value={customUrlInput}
               onChange={(event) => setCustomUrlInput(event.target.value)}
               placeholder="Ask a custom RSS feed..."
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-amber-400/50"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
             <input
               aria-label="Custom RSS source name"
               value={customNameInput}
               onChange={(event) => setCustomNameInput(event.target.value)}
               placeholder="Source name"
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-amber-400/50"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
             <div className="flex gap-1">
               <button
                 type="submit"
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-amber-400/30 bg-amber-400/10 px-2 text-[10px] font-black uppercase text-amber-100 hover:bg-amber-400/20"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 text-[10px] font-black uppercase text-[var(--color-warning)] hover:bg-[var(--color-state-bg)]"
               >
                 <Radio className="h-3 w-3" />
                 Use Feed
@@ -509,9 +509,9 @@ function WorldNewsMapWidgetComponent({
               )}
             </div>
           </form>
-          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
+          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-[var(--color-negative)]">{customError}</div>}
           {!customError && customNotice && (
-            <div className="mt-1 text-[10px] font-semibold text-emerald-300">{customNotice}</div>
+            <div className="mt-1 text-[10px] font-semibold text-[var(--color-positive)]">{customNotice}</div>
           )}
           {customFeedFailure ? (
             <div role="alert" className="mt-1 truncate text-[10px] text-[var(--text-secondary)]/90">
@@ -687,10 +687,10 @@ function WorldNewsMapWidgetComponent({
 
                 <div className="absolute bottom-3 left-3 right-3 z-10 flex flex-wrap items-center gap-2 rounded border border-white/10 bg-black/30 px-2 py-1 text-[10px] uppercase text-white/55 backdrop-blur">
                   <span className="font-black text-white/75">Marker color</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-400" /> Markets</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Business</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-violet-400" /> Tech</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-400" /> Geo</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-accent-primary)]" /> Markets</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-positive-bg)]" /> Business</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-state-bg)]" /> Tech</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-negative-bg)]" /> Geo</span>
                   <span className="ml-auto">Reference style: graticule + live markers</span>
                 </div>
               </div>
@@ -723,15 +723,15 @@ function WorldNewsMapWidgetComponent({
                         top topic
                       </div>
                       {selectedBucket.failed_feed_count > 0 ? (
-                        <div className="col-span-2 border-t border-amber-400/20 pt-2 text-[var(--text-secondary)]">
-                          <div className="font-black text-amber-100">{selectedBucket.failed_feed_count}</div>
+                        <div className="col-span-2 border-t border-[var(--color-state-border)] pt-2 text-[var(--text-secondary)]">
+                          <div className="font-black text-[var(--color-warning)]">{selectedBucket.failed_feed_count}</div>
                           failed feed{selectedBucket.failed_feed_count === 1 ? '' : 's'} in this geography
                         </div>
                       ) : null}
                     </div>
 
                     {(selectedBucket.failed_feeds || []).length > 0 ? (
-                      <div className="mt-3 rounded border border-amber-400/20 bg-amber-400/10 p-2 text-[10px] text-amber-100/85">
+                      <div className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-[var(--color-warning)]">
                         {(selectedBucket.failed_feeds || []).slice(0, 3).map((feed) => (
                           <div key={`${feed.source_id}-${feed.feed_url}`} className="truncate">
                             {feed.source} failed {formatFailedFeedTime(feed.failed_at)}: {feed.reason}
@@ -775,7 +775,7 @@ function WorldNewsMapWidgetComponent({
                               href={article.feed_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex items-center gap-1 hover:text-emerald-200"
+                              className="flex items-center gap-1 hover:text-[var(--color-positive)]"
                             >
                               <Rss className="h-2.5 w-2.5" />
                               Feed

@@ -1,4 +1,5 @@
 // VND formatting utilities for Vietnam stock market data
+import { EMPTY_VALUE } from '@/lib/units'
 
 /**
  * Format a number as VND currency with unit suffixes
@@ -8,7 +9,8 @@ export function formatVND(value: number | null | undefined, options?: {
     showCurrency?: boolean;
     decimals?: number;
 }): string {
-    if (value === null || value === undefined) return '-';
+    // Brand v1.1: unavailable is `n/a`, never a hyphen that reads as a value.
+    if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE;
 
     const { showCurrency = true, decimals = 0 } = options || {};
     const prefix = showCurrency ? 'VND' : '';
@@ -55,7 +57,7 @@ export function formatDividendPayout(row: {
     if (stock != null) return `${stock.toFixed(2)}% stock`;
     if (row.dividend_ratio != null) return String(row.dividend_ratio);
     if (row.value != null) return formatVND(row.value);
-    return '-';
+    return EMPTY_VALUE;
 }
 
 /**
@@ -63,14 +65,18 @@ export function formatDividendPayout(row: {
  * Example: 0.1523 → "15.23%", -0.05 → "-5.00%"
  */
 export function formatPercent(value: number | null | undefined, decimals = 2): string {
-    if (value === null || value === undefined) return '-';
+    // Brand v1.1: missing is `n/a`, and a measured zero takes no sign.
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
 
     // Check if value is already a percentage (> 1 or < -1)
     const isRaw = Math.abs(value) > 1;
     const percent = isRaw ? value : value * 100;
 
-    const formatted = percent.toFixed(decimals);
-    return `${percent >= 0 ? '+' : ''}${formatted}%`;
+    // Brand v1.1: the sign follows the rendered digits, so a change that
+    // rounds to 0.00 is `0.00%`, never `-0.00%`.
+    const body = Math.abs(percent).toFixed(decimals);
+    const sign = Number(body) === 0 ? '' : percent < 0 ? '-' : '+';
+    return `${sign}${body}%`;
 }
 
 export function readDividendYield(value: unknown, unit: unknown): number | null {
@@ -95,15 +101,15 @@ export function formatPriceChange(change: number | null | undefined): {
     colorClass: string;
 } {
     if (change === null || change === undefined) {
-        return { text: '-', colorClass: 'text-gray-500' };
+        return { text: 'n/a', colorClass: 'text-[var(--text-muted)]' };
     }
 
     const text = formatPercent(change);
     const colorClass = change > 0
-        ? 'text-green-500'
+        ? 'text-[var(--color-positive)]'
         : change < 0
-            ? 'text-red-500'
-            : 'text-gray-500';
+            ? 'text-[var(--color-negative)]'
+            : 'text-[var(--text-muted)]';
 
     return { text, colorClass };
 }
@@ -113,7 +119,7 @@ export function formatPriceChange(change: number | null | undefined): {
  * Example: 1234567 → "1.23M"
  */
 export function formatNumber(value: number | null | undefined, decimals = 2): string {
-    if (value === null || value === undefined) return '-';
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
 
     const absValue = Math.abs(value);
     const sign = value < 0 ? '-' : '';

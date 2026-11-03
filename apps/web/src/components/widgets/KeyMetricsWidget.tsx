@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useScreenerData, useMetricsHistory, useFinancialRatios, useProfile, useStockQuote, useQuantMetrics } from '@/lib/queries';
 import { formatDividendYield, formatRatio, readDividendYield } from '@/lib/formatters';
-import { formatUnitValue, formatPercent } from '@/lib/units';
+import { EMPTY_VALUE, formatUnitValue, formatPercent } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { TableSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -71,7 +71,7 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
                 {finiteSpark.length > 0 && (
                     <Sparkline data={finiteSpark} width={40} height={16} />
                 )}
-                <span className="text-[var(--text-primary)] font-mono text-xs tabular-nums">{value ?? '-'}</span>
+                <span className="text-[var(--text-primary)] font-mono text-xs tabular-nums">{value ?? EMPTY_VALUE}</span>
             </div>
         </div>
     );
@@ -348,7 +348,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                                     onClick={() => setActiveCategory(tab.id)}
                                     className={`px-2 py-1 text-[10px] font-bold uppercase rounded-md transition-colors ${
                                         activeCategory === tab.id
-                                            ? 'bg-blue-600/15 text-blue-300 border border-blue-500/30'
+                                            ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border border-[var(--color-state-border)]'
                                             : 'text-[var(--text-muted)] border border-[var(--border-color)] hover:text-[var(--text-secondary)] hover:border-[var(--border-subtle)]'
                                     }`}
                                 >
@@ -357,8 +357,8 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                             ))}
                         </div>
 
-                        <div className="rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_52%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5">
-                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300/80">
+                        <div className="rounded-2xl border border-[var(--color-state-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_52%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5">
+                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--color-accent-primary)]">
                                 {METRIC_TABS.find((tab) => tab.id === activeCategory)?.label}
                             </div>
                             <div className="mt-1 text-xs text-[var(--text-secondary)]">

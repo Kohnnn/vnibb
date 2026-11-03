@@ -11,6 +11,8 @@ import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 import { toNumber } from './utils';
+import { EMPTY_VALUE } from '@/lib/units';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface MarketMoversSectorsWidgetProps {
   id: string;
@@ -109,12 +111,12 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-3 overflow-auto">
             <section className="space-y-3">
               <div className="flex items-center gap-2">
-                <TrendingUp size={14} className="text-emerald-400" />
+                <TrendingUp size={14} className="text-[var(--color-positive)]" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Market Movers</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Top Gainers</div>
+                  <div className="text-[10px] text-[var(--color-positive)] font-bold uppercase tracking-wider">Top Gainers</div>
                   {topGainers.length === 0 ? (
                     <div className="text-xs text-[var(--text-muted)]">No gainers yet.</div>
                   ) : (
@@ -129,7 +131,7 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
                           <div className="text-xs font-semibold text-[var(--text-primary)]">{item?.symbol}</div>
                           <div className="text-[10px] text-[var(--text-muted)] line-clamp-1">{item?.sectorName}</div>
                         </div>
-                        <div className="text-xs font-bold text-emerald-400">
+                        <div className="text-xs font-bold text-[var(--color-positive)]">
                           {item?.changePct !== null && item?.changePct !== undefined
                             ? `+${item.changePct.toFixed(2)}%`
                             : '--'}
@@ -139,7 +141,7 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
                   )}
                 </div>
                 <div className="space-y-2">
-                  <div className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Top Losers</div>
+                  <div className="text-[10px] text-[var(--color-negative)] font-bold uppercase tracking-wider">Top Losers</div>
                   {topLosers.length === 0 ? (
                     <div className="text-xs text-[var(--text-muted)]">No losers yet.</div>
                   ) : (
@@ -154,7 +156,7 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
                           <div className="text-xs font-semibold text-[var(--text-primary)]">{item?.symbol}</div>
                           <div className="text-[10px] text-[var(--text-muted)] line-clamp-1">{item?.sectorName}</div>
                         </div>
-                        <div className="text-xs font-bold text-red-400">
+                        <div className="text-xs font-bold text-[var(--color-negative)]">
                           {item?.changePct !== null && item?.changePct !== undefined
                             ? `${item.changePct.toFixed(2)}%`
                             : '--'}
@@ -168,7 +170,7 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
 
             <section className="space-y-3">
               <div className="flex items-center gap-2">
-                <LayoutGrid size={14} className="text-blue-400" />
+                <LayoutGrid size={14} className="text-[var(--color-accent-primary)]" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Sector Performance</span>
               </div>
               <div className="space-y-2">
@@ -176,7 +178,6 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
                   // Missing change rows stay missing; "0.00%" would read as a
                   // measured flat session (issue #107).
                   const change = toNumber(sector.changePct);
-                  const isUp = (change ?? 0) >= 0;
                   const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                   return (
                     <div
@@ -187,8 +188,8 @@ export function MarketMoversSectorsWidget({ id, widgetGroup, onRemove, onDataCha
                         <div className="text-xs font-semibold text-[var(--text-primary)]">{name}</div>
                         <div className="text-[10px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
                       </div>
-                      <div className={`text-xs font-bold ${change === null ? 'text-[var(--text-muted)]' : isUp ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {change === null ? '—' : `${isUp ? '+' : ''}${change.toFixed(2)}%`}
+                      <div className={`text-xs font-bold ${signedToneClass(change)}`}>
+                        {change === null ? EMPTY_VALUE : `${Number(change.toFixed(2)) > 0 ? '+' : ''}${change.toFixed(2)}%`}
                       </div>
                     </div>
                   );

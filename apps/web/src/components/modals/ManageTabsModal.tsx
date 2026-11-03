@@ -236,7 +236,7 @@ export function ManageTabsModal({ isOpen, onClose, tabs, onSave }: ManageTabsMod
                         <button
                             type="button"
                             onClick={handleSave}
-                            className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                            className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 font-medium text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                         >
                             Save Changes
                         </button>

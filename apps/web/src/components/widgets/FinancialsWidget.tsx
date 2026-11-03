@@ -651,7 +651,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                     className={cn(
                                          "flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold uppercase tracking-tight rounded-md transition-all whitespace-nowrap",
                                         activeTab === tab.id
-                                            ? "bg-blue-600/10 text-blue-400"
+                                            ? "bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]"
                                             : "text-muted-foreground hover:text-primary hover:bg-[var(--bg-tertiary)]"
                                     )}
                                 >
@@ -670,7 +670,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                                     onClick={() => setPeriod(opt)}
                                     className={cn(
                                         "px-1.5 py-0.5 text-[9px] font-black rounded transition-colors",
-                                        period === opt ? "bg-blue-600 text-white" : "text-muted-foreground hover:text-primary"
+                                        period === opt ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]" : "text-muted-foreground hover:text-primary"
                                     )}
                                 >
                                     {opt}
@@ -737,7 +737,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                     ) : (
                         <div className="min-w-0">
                             {isSparseData && (
-                                <div className="px-2 pb-1 text-[10px] text-amber-400">
+                                <div className="px-2 pb-1 text-[10px] text-[var(--color-warning)]">
                                     Partial dataset: some provider fields are still missing for this symbol.
                                 </div>
                             )}

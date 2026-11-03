@@ -36,6 +36,7 @@ import { parseWatchlistSymbols } from './WatchlistWidget';
 import { findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 import { canEditDashboard } from '@/contexts/DashboardContext/helpers';
+import { EMPTY_VALUE } from '@/lib/units';
 
 
 interface ScreenerWidgetProps {
@@ -617,8 +618,6 @@ export function ScreenerWidget({
                 try {
                     const notification = new Notification(`${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`, {
                         body: newMatches.slice(0, 8).join(', '),
-                        icon: '/favicon.ico',
-                        badge: '/favicon.ico',
                         tag: `screener-${id}-${activeSavedScreen.id}`,
                     });
                     setTimeout(() => notification.close(), 10_000);
@@ -820,7 +819,7 @@ export function ScreenerWidget({
             sortable: false,
             accessor: (row: Record<string, unknown>) => {
                 const symbol = String(row.ticker ?? row.symbol ?? '');
-                return <div className="flex items-center gap-1"><button type="button" onClick={(event) => { event.stopPropagation(); handleSymbolSelect(symbol); }} aria-label={`View ${symbol}`} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Search size={13} /></button><button type="button" onClick={(event) => { event.stopPropagation(); handleAddToWatchlist(symbol); }} aria-label={`Add ${symbol} to Watchlist`} className="min-h-11 min-w-11 rounded p-2 text-blue-300 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={13} /></button></div>;
+                return <div className="flex items-center gap-1"><button type="button" onClick={(event) => { event.stopPropagation(); handleSymbolSelect(symbol); }} aria-label={`View ${symbol}`} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"><Search size={13} /></button><button type="button" onClick={(event) => { event.stopPropagation(); handleAddToWatchlist(symbol); }} aria-label={`Add ${symbol} to Watchlist`} className="min-h-11 min-w-11 rounded p-2 text-[var(--color-accent-primary)] hover:bg-[var(--color-state-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"><Plus size={13} /></button></div>;
             },
         },
     ], [handleAddToWatchlist, handleSymbolSelect, visibleColumns]);
@@ -876,7 +875,7 @@ export function ScreenerWidget({
                             onChange={(event) => changeSearch(event.target.value)}
                             placeholder="Quick search..."
                             aria-label="Filter screener results"
-                            className="h-8 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] pl-8 pr-3 text-[11px] text-[var(--text-primary)] outline-none transition-all placeholder:text-[var(--text-muted)] focus:border-blue-500/50"
+                            className="h-8 w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] pl-8 pr-3 text-[11px] text-[var(--text-primary)] outline-none transition-all placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
                         />
                     </div>
 
@@ -896,7 +895,7 @@ export function ScreenerWidget({
                             className={cn(
                                 'rounded-md p-1.5 transition-all',
                                 viewMode === 'table'
-                                    ? 'bg-[var(--bg-tertiary)] text-blue-400 shadow-inner'
+                                    ? 'bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-inner'
                                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                             )}
                             title="Table View"
@@ -917,7 +916,7 @@ export function ScreenerWidget({
                             className={cn(
                                 'rounded-md p-1.5 transition-all',
                                 viewMode === 'performance'
-                                    ? 'bg-[var(--bg-tertiary)] text-blue-400 shadow-inner'
+                                    ? 'bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-inner'
                                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                             )}
                             title="Performance View"
@@ -938,7 +937,7 @@ export function ScreenerWidget({
                             className={cn(
                                 'rounded-md p-1.5 transition-all',
                                 viewMode === 'chart'
-                                    ? 'bg-[var(--bg-tertiary)] text-blue-400 shadow-inner'
+                                    ? 'bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-inner'
                                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
                             )}
                             title="Chart Grid"
@@ -961,7 +960,7 @@ export function ScreenerWidget({
                             className={cn(
                                 'flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[10px] font-bold uppercase transition-all',
                                 showAdvancedFilters
-                                    ? 'border-blue-500 bg-blue-600 text-white shadow-lg shadow-blue-900/20'
+                                    ? 'border-[var(--color-state-border)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg shadow-[var(--color-state-bg)]'
                                     : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]'
                             )}
                         >
@@ -978,14 +977,14 @@ export function ScreenerWidget({
                 </div>
 
                 {pendingWatchlistSymbol && (
-                    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-color)] bg-blue-500/5 px-3 py-2 text-xs" role="group" aria-label={`Choose watchlist for ${pendingWatchlistSymbol}`}>
+                    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-color)] bg-[var(--color-state-bg)] px-3 py-2 text-xs" role="group" aria-label={`Choose watchlist for ${pendingWatchlistSymbol}`}>
                         <span className="font-semibold text-[var(--text-primary)]">Add {pendingWatchlistSymbol} to:</span>
-                        {watchlistTargets.length === 0 && <button type="button" onClick={() => createWatchlistWithSymbol(pendingWatchlistSymbol)} className="min-h-11 rounded border border-blue-500/40 px-3 py-1 text-blue-300 hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Create watchlist for {pendingWatchlistSymbol}</button>}
-                        {watchlistTargets.map((target) => <button key={`${target.dashboardId}:${target.tabId}:${target.widgetId}`} type="button" onClick={() => addSymbolToTarget(pendingWatchlistSymbol, target)} className="min-h-11 rounded border border-[var(--border-color)] px-3 py-1 text-[var(--text-secondary)] hover:border-blue-500/40 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">{target.label}</button>)}
-                        <button type="button" onClick={() => setPendingWatchlistSymbol(null)} className="min-h-11 rounded px-3 py-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Cancel</button>
+                        {watchlistTargets.length === 0 && <button type="button" onClick={() => createWatchlistWithSymbol(pendingWatchlistSymbol)} className="min-h-11 rounded border border-[var(--color-state-border)] px-3 py-1 text-[var(--color-accent-primary)] hover:bg-[var(--color-state-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">Create watchlist for {pendingWatchlistSymbol}</button>}
+                        {watchlistTargets.map((target) => <button key={`${target.dashboardId}:${target.tabId}:${target.widgetId}`} type="button" onClick={() => addSymbolToTarget(pendingWatchlistSymbol, target)} className="min-h-11 rounded border border-[var(--border-color)] px-3 py-1 text-[var(--text-secondary)] hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">{target.label}</button>)}
+                        <button type="button" onClick={() => setPendingWatchlistSymbol(null)} className="min-h-11 rounded px-3 py-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">Cancel</button>
                     </div>
                 )}
-                {watchlistStatus && <div className="border-b border-[var(--border-color)] px-3 py-1 text-[10px] text-emerald-300" role="status">{watchlistStatus}</div>}
+                {watchlistStatus && <div className="border-b border-[var(--border-color)] px-3 py-1 text-[10px] text-[var(--color-accent-primary)]" role="status">{watchlistStatus}</div>}
 
                 <FilterBar filters={activeFilters} onChange={setActiveFilters} analyticsContext={analyticsContext} />
 
@@ -1072,7 +1071,7 @@ export function ScreenerWidget({
                 <div className="z-20 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] shadow-[0_-5px_15px_rgba(0,0,0,0.2)]">
                     <div className="flex items-center gap-6">
                         <div className="flex items-center gap-2">
-                            <span className="text-xs font-black text-blue-400 drop-shadow-md">{isScanUnavailable && !hasData ? '—' : filteredData.length.toLocaleString()}</span>
+                            <span className="text-xs font-black text-[var(--color-accent-primary)] drop-shadow-md">{isScanUnavailable && !hasData ? EMPTY_VALUE : filteredData.length.toLocaleString()}</span>
                             <span className="font-semibold tracking-tight opacity-40">Matches</span>
                         </div>
                         {market !== 'ALL' && (
@@ -1083,7 +1082,7 @@ export function ScreenerWidget({
                         )}
                         {screenerData?.meta?.membership_current && (
                             <div className="hidden items-center gap-2 sm:flex" title="Current constituent membership only; not historical point-in-time membership.">
-                                <span className={cn('h-1 w-1 rounded-full', screenerData.meta.membership_available ? 'bg-emerald-400' : 'bg-amber-400')} />
+                                <span className={cn('h-1 w-1 rounded-full', screenerData.meta.membership_available ? 'bg-[var(--color-positive-bg)]' : 'bg-[var(--color-state-bg)]')} />
                                 <span>{screenerData.meta.membership_available ? `Current ${screenerData.meta.membership_source ?? 'provider'} members` : 'Current membership unavailable'}</span>
                             </div>
                         )}

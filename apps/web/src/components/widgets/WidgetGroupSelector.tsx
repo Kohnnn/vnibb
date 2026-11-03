@@ -35,7 +35,7 @@ interface WidgetGroupSelectorProps {
 }
 
 const CONTROL_CLASS =
-  'inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400';
+  'inline-flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]';
 
 export function WidgetGroupSelector({
   widgetGroup,
@@ -65,7 +65,7 @@ export function WidgetGroupSelector({
         data-testid="ticker-scope-badge"
         className={
           isDetached
-            ? `${CONTROL_CLASS} bg-amber-500/15 text-[var(--color-warning)]`
+            ? `${CONTROL_CLASS} bg-[var(--color-state-bg)] text-[var(--color-warning)]`
             : `${CONTROL_CLASS} bg-[var(--bg-tertiary)] text-[var(--text-muted)]`
         }
       >

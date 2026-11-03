@@ -478,7 +478,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                     if (!earliestVisible) return null;
                     if (periodSortKey(earliestVisible) >= periodSortKey(coverageStarts)) return null;
                     return (
-                        <div className="border-b border-amber-500/20 bg-amber-500/8 px-3 py-1.5 text-[10px] text-[var(--text-secondary)]/85">
+                        <div className="border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1.5 text-[10px] text-[var(--text-secondary)]/85">
                             Full ratio coverage starts {coverageStarts}. Earlier periods only have valuation metrics (P/E, P/B, P/S, EV/EBITDA) until raw financial statements are backfilled.
                         </div>
                     );

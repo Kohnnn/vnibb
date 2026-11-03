@@ -21,7 +21,7 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
                         peer h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)]
                         text-white transition-colors duration-150 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]
                         disabled:cursor-not-allowed disabled:opacity-50
-                        checked:border-[var(--color-accent-primary)] checked:bg-[var(--color-accent-primary)]
+                        checked:border-[var(--color-accent-fill)] checked:bg-[var(--color-accent-fill)]
                         ${className}
                     `}
                     {...props}

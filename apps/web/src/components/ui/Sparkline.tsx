@@ -1,6 +1,6 @@
 import { Area, AreaChart, Tooltip } from 'recharts'
 import { priceColorClass } from '@/lib/priceColor'
-import { calculatePercentChange, formatPercent } from '@/lib/units'
+import { calculatePercentChange, formatPercent, EMPTY_VALUE } from '@/lib/units'
 
 interface SparklineProps {
   data: number[];
@@ -34,7 +34,7 @@ export function Sparkline({
   const chartHeight = typeof height === 'number' ? height : 20;
   
   const formatValue = (value: number) =>
-    Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-';
+    Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : EMPTY_VALUE;
 
   const TrendTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ value: number }> }) => {
     if (!active || !payload || payload.length === 0) return null;

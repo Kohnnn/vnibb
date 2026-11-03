@@ -36,7 +36,7 @@ export function ColumnPicker({ columns, onColumnsChange, onReset, onClose }: Col
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
                 <div className="flex items-center gap-2">
-                    <Eye size={16} className="text-blue-500" />
+                    <Eye size={16} className="text-[var(--color-accent-primary)]" />
                     <span className="text-sm font-semibold text-[var(--text-primary)]">Customize Columns</span>
                 </div>
                 {onClose && (
@@ -62,7 +62,7 @@ export function ColumnPicker({ columns, onColumnsChange, onReset, onClose }: Col
                                 <Checkbox
                                     checked={col.visible}
                                     onCheckedChange={() => toggleVisibility(col.id)}
-                                    className="border-[var(--border-default)] data-[state=checked]:bg-blue-600"
+                                    aria-label={`Toggle ${col.label} column`}
                                 />
                                 <span className={`text-xs ${col.visible ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'}`}>
                                     {col.label}
@@ -70,7 +70,7 @@ export function ColumnPicker({ columns, onColumnsChange, onReset, onClose }: Col
                             </div>
 
                             {col.visible ? (
-                                <Eye size={14} className="text-blue-500 opacity-0 group-hover:opacity-100" />
+                                <Eye size={14} className="text-[var(--color-accent-primary)] opacity-0 group-hover:opacity-100" />
                             ) : (
                                 <EyeOff size={14} className="text-[var(--text-muted)]" />
                             )}
@@ -93,7 +93,7 @@ export function ColumnPicker({ columns, onColumnsChange, onReset, onClose }: Col
                 <Button
                     size="sm"
                     onClick={onClose}
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-xs h-8"
+                    className="bg-[var(--color-accent-fill)] hover:brightness-105 text-[var(--color-on-accent)] text-xs h-8"
                 >
                     Done
                 </Button>

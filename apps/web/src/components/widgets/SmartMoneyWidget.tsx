@@ -84,7 +84,7 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Landmark size={12} className="text-cyan-400" />
+          <Landmark size={12} className="text-[var(--color-accent-primary)]" />
           <span>Smart Money Flow</span>
         </div>
         <WidgetMeta

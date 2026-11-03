@@ -92,7 +92,7 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
             type="button"
             onClick={handleExport}
             disabled={!items.length}
-            className="inline-flex min-h-11 items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-40"
+            className="inline-flex min-h-11 items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-3 text-[10px] font-semibold text-[var(--color-positive)] transition-colors hover:bg-[var(--color-positive-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-40"
             title="Export notebook as markdown"
           >
             <Download size={11} />
@@ -102,7 +102,7 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
             type="button"
             onClick={handleClear}
             disabled={!items.length}
-            className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded border border-[var(--border-default)] px-2 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:opacity-40"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1 rounded border border-[var(--border-default)] px-2 text-[10px] text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-40"
             aria-label="Clear notebook"
           >
             <Trash2 size={11} />
@@ -121,12 +121,12 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
           {items.map((item) => (
             <div key={item.id} className="p-3 transition-colors hover:bg-[var(--bg-tertiary)]/30">
               <div className="mb-1 flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-200">
+                <span className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-primary)]">
                   <FileText size={9} />
                   {KIND_LABEL[item.kind]}
                 </span>
                 {item.symbol && (normalizeTickerSymbol(item.symbol) ? (
-                  <button type="button" onClick={() => setLinkedSymbol(normalizeTickerSymbol(item.symbol) as string)} aria-label={`View ${normalizeTickerSymbol(item.symbol)}`} className="min-h-11 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[10px] font-bold uppercase text-[var(--text-secondary)] hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                  <button type="button" onClick={() => setLinkedSymbol(normalizeTickerSymbol(item.symbol) as string)} aria-label={`View ${normalizeTickerSymbol(item.symbol)}`} className="min-h-11 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[10px] font-bold uppercase text-[var(--text-secondary)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">
                     {normalizeTickerSymbol(item.symbol)}
                   </button>
                 ) : (
@@ -138,7 +138,7 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
                 <button
                   type="button"
                   onClick={() => setItems(removeNotebookItem(item.id))}
-                  className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] transition-colors hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                  className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] transition-colors hover:text-[var(--color-negative)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                   aria-label={`Remove ${item.title} from notebook`}
                 >
                   <Trash2 size={11} />
@@ -157,7 +157,7 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
                         href={source.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex min-h-11 items-center gap-1 rounded border border-[var(--border-color)] px-3 font-semibold hover:border-blue-400/50 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                        className="inline-flex min-h-11 items-center gap-1 rounded border border-[var(--border-color)] px-3 font-semibold hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                       >
                         <ExternalLink size={9} />
                         {source.label || source.sourceName || 'Source'}

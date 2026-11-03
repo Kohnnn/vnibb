@@ -172,7 +172,7 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <CalendarClock size={12} className="text-cyan-400" />
+          <CalendarClock size={12} className="text-[var(--color-accent-primary)]" />
           <span>Gap Fill Stats</span>
         </div>
         <div className="flex items-center gap-2">
@@ -182,7 +182,7 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -216,11 +216,11 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gaps</div>
-              <div className="text-cyan-300 font-mono">{events.length}</div>
+              <div className="text-[var(--color-accent-primary)] font-mono">{events.length}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Fill Rate</div>
-              <div className="text-emerald-300 font-mono">{fillRate.toFixed(1)}%</div>
+              <div className="text-[var(--color-positive)] font-mono">{fillRate.toFixed(1)}%</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Avg Fill</div>
@@ -231,16 +231,16 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up Fill</div>
-              <div className="text-emerald-300 font-mono">{upFillRate.toFixed(1)}%</div>
+              <div className="text-[var(--color-positive)] font-mono">{upFillRate.toFixed(1)}%</div>
               <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-                <div className="h-full bg-emerald-500/80" style={{ width: `${Math.max(4, upFillRate)}%` }} />
+                <div className="h-full bg-[var(--color-positive)]" style={{ width: `${Math.max(4, upFillRate)}%` }} />
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Down Fill</div>
-              <div className="text-red-300 font-mono">{downFillRate.toFixed(1)}%</div>
+              <div className="text-[var(--color-negative)] font-mono">{downFillRate.toFixed(1)}%</div>
               <div className="mt-1 h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
-                <div className="h-full bg-rose-500/80" style={{ width: `${Math.max(4, downFillRate)}%` }} />
+                <div className="h-full bg-[var(--color-negative)]" style={{ width: `${Math.max(4, downFillRate)}%` }} />
               </div>
             </div>
           </div>
@@ -269,18 +269,18 @@ export function GapFillStatsWidget({ symbol, onDataChange }: GapFillStatsWidgetP
                     <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toLabelDate(event.date)}</div>
                     <div className="w-5 shrink-0">
                       {isUp ? (
-                        <ArrowUpCircle size={11} className="text-emerald-400" />
+                        <ArrowUpCircle size={11} className="text-[var(--color-positive)]" />
                       ) : (
-                        <ArrowDownCircle size={11} className="text-red-400" />
+                        <ArrowDownCircle size={11} className="text-[var(--color-negative)]" />
                       )}
                     </div>
-                    <div className={`w-16 text-[10px] font-mono ${isUp ? 'text-emerald-300' : 'text-red-300'}`}>
+                    <div className={`w-16 text-[10px] font-mono ${isUp ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
                       {event.gapPct >= 0 ? '+' : ''}
                       {event.gapPct.toFixed(2)}%
                     </div>
                     <div className="flex-1 text-right text-[10px]">
                       {event.filled ? (
-                        <span className="text-cyan-300">Filled {event.daysToFill}d</span>
+                        <span className="text-[var(--color-accent-primary)]">Filled {event.daysToFill}d</span>
                       ) : (
                         <span className="text-[var(--text-secondary)]">Unfilled</span>
                       )}

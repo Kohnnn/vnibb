@@ -5,6 +5,7 @@ import { Database, MessageSquareWarning, RefreshCw, ThumbsDown, ThumbsUp } from 
 
 import { getAdminAITelemetry, type AdminAITelemetryRecord } from '@/lib/api';
 import { formatAbsoluteTimestamp } from '@/lib/formatDate';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface AICopilotTelemetryReviewProps {
   enabled: boolean;
@@ -90,7 +91,7 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
       </div>
 
       {error && (
-        <div className="mt-4 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-error)]">
+        <div className="mt-4 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-text-primary)]">
           {error}
         </div>
       )}
@@ -107,11 +108,11 @@ export function AICopilotTelemetryReview({ enabled }: AICopilotTelemetryReviewPr
           </div>
           <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Acceptance</div>
-            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.acceptance_rate ?? '—'}{summary.acceptance_rate !== null && summary.acceptance_rate !== undefined ? '%' : ''}</div>
+            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.acceptance_rate ?? EMPTY_VALUE}{summary.acceptance_rate !== null && summary.acceptance_rate !== undefined ? '%' : ''}</div>
           </div>
           <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Avg latency</div>
-            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.average_latency_ms ?? '—'}</div>
+            <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{summary.average_latency_ms ?? EMPTY_VALUE}</div>
           </div>
           <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Artifact ratings</div>

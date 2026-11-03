@@ -219,8 +219,8 @@ describe('TickerInfoWidget 52W range unit certification', () => {
     mockHistory.mockReturnValue({ data: { data: [{ high: 60, low: 40, price_unit: 'unknown' }] } });
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
     expect(screen.queryByText('52W Range')).not.toBeInTheDocument();
-    expect(within(screen.getByText('52W High').parentElement!).getByText('—')).toBeInTheDocument();
-    expect(within(screen.getByText('52W Low').parentElement!).getByText('—')).toBeInTheDocument();
+    expect(within(screen.getByText('52W High').parentElement!).getByText('n/a')).toBeInTheDocument();
+    expect(within(screen.getByText('52W Low').parentElement!).getByText('n/a')).toBeInTheDocument();
     expect(screen.queryByText('40.00')).not.toBeInTheDocument();
   });
 

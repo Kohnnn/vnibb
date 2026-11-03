@@ -15,6 +15,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { addNotebookItem } from '@/lib/researchNotebook';
 import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface NewsCorporateActionsWidgetProps {
   id: string;
@@ -26,10 +27,10 @@ interface NewsCorporateActionsWidgetProps {
 function getSentimentClasses(sentiment: string | null | undefined): string {
   const normalized = String(sentiment || 'neutral').toLowerCase();
   if (normalized === 'bullish' || normalized === 'positive') {
-    return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+    return 'border-[var(--color-state-border)] bg-[var(--color-positive-bg)] text-[var(--color-positive)]';
   }
   if (normalized === 'bearish' || normalized === 'negative') {
-    return 'border-rose-500/20 bg-rose-500/10 text-rose-300';
+    return 'border-[var(--color-state-border)] bg-[var(--color-negative-bg)] text-[var(--color-negative)]';
   }
   return 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-muted)]';
 }
@@ -216,7 +217,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
             <section className="p-3 flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Newspaper size={14} className="text-blue-400" />
+                  <Newspaper size={14} className="text-[var(--color-accent-primary)]" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Company News</span>
                 </div>
                 <span className="text-[10px] text-[var(--text-muted)]">{recentNewsCount}/{news.length} in 7d</span>
@@ -239,9 +240,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                       className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
                     >
                       <div className="flex items-start gap-2">
-                        <a href={item.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 text-xs font-semibold text-[var(--text-primary)] line-clamp-2 hover:text-blue-300">{item.title}</a>
+                        <a href={item.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 text-xs font-semibold text-[var(--text-primary)] line-clamp-2 hover:text-[var(--color-accent-primary)]">{item.title}</a>
                         {canPin && (
-                          <button type="button" onClick={() => pinNews(item, key)} className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded text-[var(--text-muted)] hover:bg-emerald-500/10 hover:text-emerald-300" aria-label="Save news to Research Notebook" title="Save to Research Notebook">
+                          <button type="button" onClick={() => pinNews(item, key)} className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]" aria-label="Save news to Research Notebook" title="Save to Research Notebook">
                             <BookMarked size={13} fill={pinned[key] ? 'currentColor' : 'none'} />
                           </button>
                         )}
@@ -253,7 +254,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                         </span>
                         {typeof item.relevance_score === 'number' && item.relevance_score > 0 ? (
                           <span
-                            className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 font-semibold uppercase text-blue-300"
+                            className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 font-semibold uppercase text-[var(--color-accent-primary)]"
                             title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
                           >
                             {item.match_reason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevance_score * 100)}/100
@@ -274,7 +275,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
             <section className="p-3 flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <BadgeDollarSign size={14} className="text-emerald-400" />
+                  <BadgeDollarSign size={14} className="text-[var(--color-accent-primary)]" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Corporate Actions</span>
                 </div>
                 <span className="text-[10px] text-[var(--text-muted)]">{dividends.length + insiderDeals.length} items</span>
@@ -317,7 +318,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                                 <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
                               )}
                               {canPin && (
-                                <button type="button" onClick={() => pinDividend(dividend, key)} className="inline-flex min-h-9 min-w-9 items-center justify-center rounded text-[var(--text-muted)] hover:bg-emerald-500/10 hover:text-emerald-300" aria-label="Save corporate action to Research Notebook" title="Save to Research Notebook">
+                                <button type="button" onClick={() => pinDividend(dividend, key)} className="inline-flex min-h-9 min-w-9 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]" aria-label="Save corporate action to Research Notebook" title="Save to Research Notebook">
                                   <BookMarked size={13} fill={pinned[key] ? 'currentColor' : 'none'} />
                                 </button>
                               )}
@@ -338,9 +339,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                         {insiderDeals.slice(0, 4).map((deal) => {
                           const actionToken = normalizeInsiderAction(deal.deal_action);
                           const actionLabel = actionToken ?? 'UNKNOWN';
-                          const actionClass = actionToken === 'BUY' ? 'text-green-400'
-                            : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
-                          const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
+                          const actionClass = actionToken === 'BUY' ? 'text-[var(--color-positive)]'
+                            : actionToken === 'SELL' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]';
+                          const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : EMPTY_VALUE;
                           return (
                             <div
                               key={deal.id}

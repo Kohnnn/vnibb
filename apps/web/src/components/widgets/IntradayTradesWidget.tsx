@@ -221,7 +221,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                             Total {trades.length.toLocaleString()} Ticks
                         </div>
                         <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-positive-bg)] animate-pulse" />
                             <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Live</span>
                         </div>
                     </div>

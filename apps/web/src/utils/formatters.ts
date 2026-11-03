@@ -1,4 +1,4 @@
-import { formatPercent } from '@/lib/units'
+import { EMPTY_VALUE, formatPercent } from '@/lib/units'
 
 function normalizeLikelyPercent(value: number): number {
   let normalized = value
@@ -9,8 +9,7 @@ function normalizeLikelyPercent(value: number): number {
 }
 
 export function formatScreenerValue(value: any, format?: string): string {
-  if (value === null || value === undefined) return '—';
-
+  if (value === null || value === undefined) return EMPTY_VALUE;
   const numericValue = Number(value)
   const isNumeric = Number.isFinite(numericValue)
   

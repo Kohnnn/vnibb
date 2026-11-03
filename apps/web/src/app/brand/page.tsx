@@ -8,22 +8,26 @@ export const metadata: Metadata = {
     robots: { index: false, follow: false },
 };
 
-const EMAIL_SIGNATURE_HTML = `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Inter,Helvetica,Arial,sans-serif;color:#0A0A0A;max-width:520px">
+const EMAIL_SIGNATURE_HTML = `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;max-width:520px;font-family:Inter,Helvetica,Arial,sans-serif;color:#0A0A0A">
   <tr>
-    <td style="padding:0 0 10px 0">
-      <img src="${VNIBB_CANONICAL_URL}/brand/vnibb-wordmark-master.svg" alt="VniBB" width="140" style="display:block;width:140px;height:auto;border:0" />
+    <td style="background:#FFFFFF;padding:5.3px">
+      <img src="${VNIBB_CANONICAL_URL}/brand/vnibb-wordmark-master.svg" alt="VniBB" width="96" style="display:block;width:96px;height:auto;border:0" />
     </td>
   </tr>
   <tr>
-    <td style="border-top:1px solid #D8DCE2;padding:10px 0 0 0;font-size:13px;line-height:20px">
+    <td style="border-top:1px solid #D9DDE3;padding:10px 0 0 0;font-size:13px;line-height:20px">
       <strong style="font-size:14px">Full Name</strong><br />
-      <span style="color:#4A5568">Role · ${VNIBB_BRAND_DESCRIPTOR}</span><br />
-      <a href="mailto:name@example.com" style="color:#1F4FD8;text-decoration:none">name@example.com</a>
-      <span style="color:#4A5568"> · </span>
-      <a href="${VNIBB_CANONICAL_URL}" style="color:#1F4FD8;text-decoration:none">${VNIBB_CANONICAL_URL.replace('https://', '')}</a>
+      <span style="color:#5B6573">Role · ${VNIBB_BRAND_DESCRIPTOR}</span><br />
+      <span style="color:#5B6573">Email: replace with an owner-provided address</span><br />
+      <a href="${VNIBB_CANONICAL_URL}" style="color:#0B3D91;text-decoration:underline">${VNIBB_CANONICAL_URL.replace('https://', '')}</a>
     </td>
   </tr>
 </table>`;
+
+const EMAIL_SIGNATURE_PREVIEW_HTML = EMAIL_SIGNATURE_HTML.replace(
+    `${VNIBB_CANONICAL_URL}/brand/`,
+    '/brand/',
+);
 
 export default function BrandChannelsPage() {
     return (
@@ -53,12 +57,13 @@ export default function BrandChannelsPage() {
             <section className="mt-10">
                 <h2 className="text-lg font-semibold">Email signature (live HTML)</h2>
                 <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    Small wordmark image plus live text, 480–560 px wide. Replace Full Name, Role and the contact address
-                    before use; send it as HTML, never as one raster image.
+                    The preview loads the bundled wordmark locally. Copied HTML uses its absolute production URL, which
+                    requires the wordmark to be deployed there before use. Replace Full Name, Role and the contact
+                    address; send as HTML, never as one raster image. The 520 px layout stacks on narrow screens.
                 </p>
                 <div
                     className="mt-4 overflow-x-auto rounded border border-[var(--border-color)] bg-white p-4"
-                    dangerouslySetInnerHTML={{ __html: EMAIL_SIGNATURE_HTML }}
+                    dangerouslySetInnerHTML={{ __html: EMAIL_SIGNATURE_PREVIEW_HTML }}
                 />
                 <pre className="mt-4 overflow-x-auto rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 font-mono text-[11px] leading-5 text-[var(--text-secondary)]">
                     {EMAIL_SIGNATURE_HTML}

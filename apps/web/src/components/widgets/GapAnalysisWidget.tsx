@@ -94,7 +94,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ArrowUpDown size={12} className="text-cyan-400" />
+          <ArrowUpDown size={12} className="text-[var(--color-accent-primary)]" />
           <span>Gap Analysis</span>
         </div>
         <div className="flex items-center gap-2">
@@ -104,7 +104,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -130,15 +130,15 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Up</div>
-              <div className="text-emerald-300 font-mono">{formatPercent(metric?.gap_up_frequency_pct)}</div>
+              <div className="text-[var(--color-positive)] font-mono">{formatPercent(metric?.gap_up_frequency_pct)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Gap Down</div>
-              <div className="text-red-300 font-mono">{formatPercent(metric?.gap_down_frequency_pct)}</div>
+              <div className="text-[var(--color-negative)] font-mono">{formatPercent(metric?.gap_down_frequency_pct)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Fill Rate</div>
-              <div className="text-cyan-300 font-mono">{formatPercent(metric?.gap_fill_rate_pct)}</div>
+              <div className="text-[var(--color-accent-primary)] font-mono">{formatPercent(metric?.gap_fill_rate_pct)}</div>
             </div>
           </div>
 
@@ -201,10 +201,10 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                   let statusClass = 'text-[var(--color-warning)]';
                   if (row.filled) {
                     statusLabel = 'Filled';
-                    statusClass = 'text-emerald-300';
+                    statusClass = 'text-[var(--color-accent-primary)]';
                   } else if (ageDays !== null && ageDays > 20) {
                     statusLabel = 'Unfilled';
-                    statusClass = 'text-red-300';
+                    statusClass = 'text-[var(--color-warning)]';
                   } else if (ageDays !== null && ageDays > 5) {
                     statusLabel = 'Pending (>5d)';
                     statusClass = 'text-[var(--color-warning)]';

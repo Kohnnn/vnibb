@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface VolumeAnalysisWidgetProps {
     symbol: string;
@@ -91,13 +92,13 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
         <div className="h-full flex flex-col">
             <div className="flex items-center justify-between px-1 py-1 mb-2">
                 <div className="flex items-center gap-2 text-xs">
-                    <BarChart2 size={12} className="text-cyan-400" />
+                    <BarChart2 size={12} className="text-[var(--color-accent-primary)]" />
                     <span className="text-[var(--text-secondary)]">
                         {derivedWithheld ? 'Units not certified' : `Avg: ${formatVolume(avgVolume)}`}
                     </span>
                     {!derivedWithheld && (
-                        <span className={volumeChange >= 0 ? 'text-green-400' : 'text-red-400'}>
-                            {volumeChange >= 0 ? '+' : ''}{volumeChange.toFixed(0)}%
+                        <span className={signedToneClass(volumeChange)}>
+                            {Number(volumeChange) > 0 ? '+' : ''}{volumeChange.toFixed(0)}%
                         </span>
                     )}
                 </div>
@@ -149,8 +150,8 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
                                     <div className="relative h-5 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
                                         <div
                                             className={`h-full transition-all ${isUp
-                                                ? isAboveAvg ? 'bg-green-500' : 'bg-green-500/50'
-                                                : isAboveAvg ? 'bg-red-500' : 'bg-red-500/50'
+                                                ? isAboveAvg ? 'bg-[var(--color-positive-bg)]' : 'bg-[var(--color-positive-bg)]'
+                                                : isAboveAvg ? 'bg-[var(--color-negative-bg)]' : 'bg-[var(--color-negative-bg)]'
                                                 }`}
                                             style={{ width: `${widthPct}%` }}
                                         />
@@ -160,9 +161,9 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
                                     </div>
                                     <div className="w-8 shrink-0">
                                         {isUp ? (
-                                            <TrendingUp size={12} className="text-green-400" />
+                                            <TrendingUp size={12} className="text-[var(--color-positive)]" />
                                         ) : (
-                                            <TrendingDown size={12} className="text-red-400" />
+                                            <TrendingDown size={12} className="text-[var(--color-negative)]" />
                                         )}
                                     </div>
                                 </div>
@@ -174,11 +175,11 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
 
             <div className="flex items-center justify-center gap-4 pt-2 text-[10px] text-[var(--text-muted)]">
                 <div className="flex items-center gap-1">
-                    <div className="w-3 h-2 bg-green-500 rounded" />
+                    <div className="w-3 h-2 bg-[var(--color-positive-bg)] rounded" />
                     <span>↑ High Vol</span>
                 </div>
                 <div className="flex items-center gap-1">
-                    <div className="w-3 h-2 bg-red-500/50 rounded" />
+                    <div className="w-3 h-2 bg-[var(--color-negative-bg)] rounded" />
                     <span>↓ Low Vol</span>
                 </div>
             </div>

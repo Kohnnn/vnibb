@@ -69,7 +69,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup, onDataChange }: Simil
         <div className="h-full flex flex-col">
             <div className="flex items-center justify-between pb-2 border-b border-[var(--border-subtle)]">
                 <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                    <Users size={12} className="text-cyan-400" />
+                    <Users size={12} className="text-[var(--color-accent-primary)]" />
                     <span>Similar to {upperSymbol}</span>
                 </div>
                 <WidgetMeta
@@ -104,7 +104,7 @@ export function SimilarStocksWidget({ symbol, widgetGroup, onDataChange }: Simil
                                     setLinkedSymbol(peer.symbol);
                                 }
                             }}
-                            className="w-full flex items-center justify-between p-2 rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                            className="w-full flex items-center justify-between p-2 rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                         >
                             <div>
                                 <div className="text-sm font-medium text-[var(--text-primary)]">{peer.symbol}</div>

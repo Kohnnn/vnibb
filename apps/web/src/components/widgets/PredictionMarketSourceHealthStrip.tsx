@@ -95,7 +95,7 @@ export function sourceHealthStatusLabel(row: SourceHealthRow): string {
 
 function chipClass(row: SourceHealthRow): string {
     const label = sourceHealthStatusLabel(row);
-    if (label === 'Healthy') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+    if (label === 'Healthy') return 'border-[var(--color-state-border)] bg-[var(--color-positive-bg)] text-[var(--color-positive)]';
     if (label === 'Stale' || label === 'Error') return 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]';
     return 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)]';
 }

@@ -142,7 +142,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
                     className={cn(
                       'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors border',
                       active
-                        ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
+                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
                         : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
                     style={active ? { boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${series.color} 20%, transparent)` } : undefined}
@@ -158,7 +158,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
                   className={cn(
                     'ml-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors border',
                     focusRecent
-                      ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
+                      ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
                       : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                   aria-pressed={focusRecent}

@@ -85,8 +85,9 @@ jest.mock('@/contexts/UnitContext', () => ({
   useUnit: () => ({ config: { unit: 'raw' } }),
 }));
 
+const mockSetLinkedSymbol = jest.fn();
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({
-  useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }),
+  useWidgetSymbolLink: () => ({ setLinkedSymbol: mockSetLinkedSymbol }),
 }));
 
 jest.mock('@/components/ui/WidgetContainer', () => ({
@@ -425,5 +426,78 @@ describe('MarketHeatmapWidget', () => {
       updatedAt: '2026-10-22T00:00:00',
       fetchedAt: 1792726551022,
     });
+  });
+
+  it('drills into a sector with Enter and selects a stock with Space', () => {
+    mockSetLinkedSymbol.mockClear();
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ size_metric: 'volume' }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+
+    // Treemap controls live inside the <svg>: it must stay a `group`, since a
+    // named `img` root would hide every descendant from the a11y tree.
+    const canvas = screen.getByRole('group', { name: /Market heatmap grouped by/ });
+    expect(canvas.querySelector('[role="button"]')).not.toBeNull();
+
+    const sectorTile = screen.getByRole('button', { name: 'Open Banking constituents' });
+    expect(sectorTile).toHaveAttribute('tabindex', '0');
+    sectorTile.focus();
+    expect(sectorTile).toHaveFocus();
+    fireEvent.keyDown(sectorTile, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Open Banking constituents' })).toBeInTheDocument();
+
+    fireEvent.keyDown(sectorTile, { key: 'Enter' });
+    expect(screen.getByText('Banking Constituents')).toBeInTheDocument();
+
+    const stockTile = screen.getByRole('button', { name: 'Select VCB' });
+    stockTile.focus();
+    expect(stockTile).toHaveFocus();
+    fireEvent.keyDown(stockTile, { key: ' ' });
+    expect(mockSetLinkedSymbol).toHaveBeenCalledTimes(1);
+    expect(mockSetLinkedSymbol).toHaveBeenCalledWith('VCB');
+  });
+
+  // `limit: 500` would otherwise put one tab stop per tile in the page order.
+  it('exposes one tab stop for the treemap and moves it with arrow keys', () => {
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      count: 3,
+      sectors: ['Banking', 'Steel', 'Retail'].map((sector) => ({
+        sector,
+        stocks: [{
+          symbol: `${sector.slice(0, 3).toUpperCase()}`,
+          name: `${sector} Corp`,
+          sector,
+          industry: sector,
+          market_cap: 1_000_000,
+          market_cap_provenance: null,
+          size_value: 1_000_000,
+          price: 100,
+          change: 1.2,
+          change_pct: 1.2,
+          volume: 10_000,
+        }],
+        total_market_cap: 1_000_000,
+        total_size_value: 1_000_000,
+        cap_count: 1,
+        avg_change_pct: 1.2,
+        stock_count: 1,
+      })),
+    }));
+    render(<MarketHeatmapWidget id="market-heatmap" />);
+
+    const tiles = screen.getAllByRole('button', { name: /constituents$/ });
+    expect(tiles).toHaveLength(3);
+    expect(tiles.filter((tile) => tile.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(tiles[0]).toHaveAttribute('tabindex', '0');
+
+    fireEvent.keyDown(tiles[0], { key: 'ArrowRight' });
+    expect(screen.getAllByRole('button', { name: /constituents$/ })[1]).toHaveFocus();
+    const afterMove = screen.getAllByRole('button', { name: /constituents$/ });
+    expect(afterMove.filter((tile) => tile.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(afterMove[1]).toHaveAttribute('tabindex', '0');
+
+    // Wrapping backwards from the first tile lands on the last one.
+    fireEvent.keyDown(afterMove[1], { key: 'ArrowLeft' });
+    fireEvent.keyDown(screen.getAllByRole('button', { name: /constituents$/ })[0], { key: 'ArrowLeft' });
+    expect(screen.getAllByRole('button', { name: /constituents$/ })[2]).toHaveFocus();
   });
 });

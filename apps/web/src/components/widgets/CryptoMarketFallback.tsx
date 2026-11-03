@@ -161,7 +161,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
                       </td>
                       <td
                         className={`whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums ${
-                          isUp ? 'text-emerald-300' : 'text-rose-300'
+                          isUp ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'
                         }`}
                         style={{ minWidth: 88 }}
                       >

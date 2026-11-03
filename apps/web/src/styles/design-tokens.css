@@ -47,6 +47,11 @@
   --color-accent-primary: #3B82F6;
   --color-accent-secondary: #60A5FA;
   --color-accent-hover: #2563EB;
+  /* Solid accent fill behind --color-on-accent. Accent-primary itself is
+     #3B82F6, which is only 3.68:1 against white; a filled button needs >=4.5:1,
+     so fills use this darker step (6.1:1). It is a step below `-hover`, so a
+     filled control still changes on hover instead of pinning to one colour. */
+  --color-accent-fill: #1D4ED8;
   /* Text/icon on a filled accent surface (#198). */
   --color-on-accent: #ffffff;
 
@@ -144,6 +149,13 @@
   /* Comparison series (benchmarks, peers, overlays): Slate, never a focal
      series and never a state colour. */
   --chart-slate: #5B6573;
+  /* Corporate-action marker hues (brand §20 categorical extension). Each pair
+     clears 4.5:1 for the 10 px marker label against its own theme's surface:
+     pastels on the dark chart, deeper tones on Paper and inside a light PNG
+     export, where the pastels measured 1.8-2.7:1. */
+  --chart-event-dividend: #f59e0b;
+  --chart-event-split: #a78bfa;
+  --chart-event-rights: #22d3ee;
   /* Documented categorical extension (brand §20): "additional categorical
      palettes require a documented extension; do not improvise rainbow series."
      Used only where slices carry no focal/comparison relation - sector, peer
@@ -217,6 +229,8 @@ html[data-theme="light"],
   --color-accent-secondary: #1A56B8;
   --color-accent-hover: #082E6E;
   --color-on-accent: #ffffff;
+  /* Solid accent fill: brand blue is already 10.04:1 against white. */
+  --color-accent-fill: #0B3D91;
 
   /* System states: neutral/blue only. */
   --color-success: var(--color-accent-primary);
@@ -250,6 +264,9 @@ html[data-theme="light"],
 
   --chart-blue: #0B3D91;
   --chart-slate: #5B6573;
+  --chart-event-dividend: #B45309;
+  --chart-event-split: #6D28D9;
+  --chart-event-rights: #0E7490;
   --chart-cat-3: color-mix(in srgb, #5B6573 70%, #FFFFFF);
   --chart-cat-4: color-mix(in srgb, #0B3D91 55%, #FFFFFF);
   --chart-cat-5: color-mix(in srgb, #0B3D91 45%, #5B6573);

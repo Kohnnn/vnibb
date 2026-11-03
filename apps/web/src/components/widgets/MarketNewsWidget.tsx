@@ -57,7 +57,7 @@ function renderHighlightedText(text: string, tokens: string[]) {
 
   return parts.map((part, index) =>
     escapedTokens.some((token) => new RegExp(`^${token}$`, 'i').test(part)) ? (
-      <mark key={`${part}-${index}`} className="rounded bg-amber-400/20 px-0.5 text-[var(--text-secondary)]">
+      <mark key={`${part}-${index}`} className="rounded bg-[var(--color-state-bg)] px-0.5 text-[var(--text-secondary)]">
         {part}
       </mark>
     ) : (
@@ -227,7 +227,7 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
               disabled={!upperSymbol}
               className={`rounded px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
                 mode === 'related'
-                  ? 'bg-blue-500/20 text-blue-200'
+                  ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40'
               }`}
             >
@@ -268,20 +268,20 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                   className="block p-3 hover:bg-[var(--bg-tertiary)]/30 transition-colors group"
                 >
                   <div className="mb-1 flex flex-wrap items-start gap-1.5">
-                    <div className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 group-hover:text-blue-400 transition-colors">
+                    <div className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 group-hover:text-[var(--color-accent-primary)] transition-colors">
                       {renderHighlightedText(item.title, highlightTokens)}
                     </div>
                     {item.matchedSymbols.slice(0, 3).map((matchedSymbol: string) => (
                       <span
                         key={`${item.id ?? item.title}-${matchedSymbol}`}
-                        className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-300"
+                        className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-primary)]"
                       >
                         {matchedSymbol}
                       </span>
                     ))}
                     {item.relevanceScore !== null && mode === 'related' && !item.isMarketWideFallback && (
                       <span
-                        className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300"
+                        className="rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-positive)]"
                         title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
                       >
                         {item.matchReason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevanceScore * 100)}/100

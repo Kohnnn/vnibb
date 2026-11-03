@@ -183,7 +183,7 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
       isLoading:false, isFetching:false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
     });
     render(<ShareStatisticsWidget id="share-1" symbol="MSR" />);
-    expect(within(screen.getByText('P/E Ratio').parentElement!).getByText('-')).toBeInTheDocument();
-    expect(within(screen.getByText('P/B Ratio').parentElement!).getByText('-')).toBeInTheDocument();
+    expect(within(screen.getByText('P/E Ratio').parentElement!).getByText('n/a')).toBeInTheDocument();
+    expect(within(screen.getByText('P/B Ratio').parentElement!).getByText('n/a')).toBeInTheDocument();
   });
 });

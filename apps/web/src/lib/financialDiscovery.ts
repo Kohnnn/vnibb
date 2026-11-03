@@ -1,4 +1,4 @@
-import { convertFinancialValueForUnit, formatUnitValuePlain, resolveUnitScale, type UnitConfig } from '@/lib/units'
+import { EMPTY_VALUE, convertFinancialValueForUnit, formatUnitValuePlain, resolveUnitScale, type UnitConfig } from '@/lib/units'
 
 export interface TTMSnapshotMetricCard {
   label: string
@@ -38,7 +38,7 @@ export function buildTTMSnapshotCards(
   const scale = resolveUnitScale(convertedValues, unitConfig)
   const formatValue = (value: number | null | undefined) => {
     const formatted = formatUnitValuePlain(value, scale, unitConfig)
-    return formatted === '—' || !scale.suffix ? formatted : `${formatted}${scale.suffix}`
+    return formatted === EMPTY_VALUE || !scale.suffix ? formatted : `${formatted}${scale.suffix}`
   }
 
   const cards: TTMSnapshotMetricCard[] = [
@@ -76,7 +76,7 @@ export function buildTTMSnapshotCards(
     },
   ]
 
-  return cards.filter((card) => card.value !== '—')
+  return cards.filter((card) => card.value !== EMPTY_VALUE)
 }
 
 interface GrowthComparisonLabel {

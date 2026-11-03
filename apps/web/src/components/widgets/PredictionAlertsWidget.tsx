@@ -227,7 +227,7 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
                             aria-pressed={config.bucket === bucket.key}
                             className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                 config.bucket === bucket.key
-                                    ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                    ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                     : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                             }`}
                         >
@@ -285,7 +285,7 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
                                 >
                                     <div className="flex flex-col gap-1">
                                         <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em]">
-                                            <span className="text-blue-300">{alert.source}</span>
+                                            <span className="text-[var(--color-accent-primary)]">{alert.source}</span>
                                             {alert.category && (
                                                 <span className="rounded-full border border-default px-2 py-0.5 text-[var(--text-muted)]">
                                                     {alert.category}
@@ -309,8 +309,8 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
                                         <span
                                             className={
                                                 alert.direction === 'up'
-                                                    ? 'rounded-md px-2 py-1 text-xs text-emerald-400'
-                                                    : 'rounded-md px-2 py-1 text-xs text-red-400'
+                                                    ? 'rounded-md px-2 py-1 text-xs text-[var(--color-positive)]'
+                                                    : 'rounded-md px-2 py-1 text-xs text-[var(--color-negative)]'
                                             }
                                         >
                                             {alert.direction === 'up' ? '▲' : '▼'}{' '}

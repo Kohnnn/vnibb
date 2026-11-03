@@ -195,7 +195,17 @@ describe('exportToCSV provenance', () => {
 });
 
 describe('exportToPNG', () => {
-  afterEach(() => jest.resetModules());
+  // jsdom has no encoder; every capture path ends in `toBlob`.
+  beforeEach(() => {
+    jest.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) => {
+      callback(new Blob(['png'], { type: 'image/png' }));
+    });
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.resetModules();
+  });
+
 
   it('paints the surrounding surface and stamps source + both timestamps into the image', async () => {
     const options: Array<Record<string, unknown>> = [];
@@ -237,8 +247,8 @@ describe('exportToPNG', () => {
       }
       return el;
     }) as typeof document.createElement);
-
-    document.documentElement.style.setProperty('--color-bg-primary', '#ffffff');
+    document.documentElement.style.setProperty('--bg-primary', '#ffffff');
+    document.documentElement.setAttribute('data-theme', 'dark');
     const host = document.createElement('div');
     host.style.backgroundColor = 'rgb(255, 255, 255)';
     const widget = document.createElement('div');
@@ -253,9 +263,9 @@ describe('exportToPNG', () => {
         updatedAt: '2026-11-03',
         fetchedAt: 1762000000000,
       });
-
-      // html2canvas 1.4.1 reads `backgroundColor`; `background` is silently ignored.
-      expect(options[0].backgroundColor).toBe('rgb(255, 255, 255)');
+      // Brand §14: exports are light. html2canvas 1.4.1 reads `backgroundColor`;
+      // `background` is silently ignored.
+      expect(options[0].backgroundColor).toBe('#ffffff');
       // The strip is added below the capture, so the widget's own layout is untouched.
       expect(stampedHeight).toBeGreaterThan(200);
       expect(drawn.join(' ')).toContain('source: Market heatmap');
@@ -265,16 +275,25 @@ describe('exportToPNG', () => {
     } finally {
       jest.restoreAllMocks();
       host.remove();
-      document.documentElement.style.removeProperty('--color-bg-primary');
+      document.documentElement.style.removeProperty('--bg-primary');
+      document.documentElement.removeAttribute('data-theme');
     }
   });
 
-  it('keeps a dark widget surface behind the provenance strip', async () => {
+  it('exports the light surface and leaves a dark user theme untouched', async () => {
     const fills: string[] = [];
+    const captured: Array<Record<string, unknown>> = [];
     jest.resetModules();
     jest.doMock('html2canvas', () => ({
       __esModule: true,
-      default: () => Promise.resolve({ width: 320, height: 200 }),
+      default: (_element: HTMLElement, opts: Record<string, unknown>) => {
+        captured.push(opts);
+        return Promise.resolve({
+          width: 320,
+          height: 200,
+          toBlob: (cb: (blob: Blob) => void) => cb(new Blob(['png'], { type: 'image/png' })),
+        });
+      },
     }));
     const context = {
       fillRect: () => fills.push(context.fillStyle),
@@ -293,8 +312,12 @@ describe('exportToPNG', () => {
       return el;
     }) as typeof document.createElement);
 
+    const root = document.documentElement;
+    root.style.setProperty('--bg-primary', '#ffffff');
+    root.setAttribute('data-theme', 'dark');
+    root.classList.add('dark');
     const host = document.createElement('div');
-    // Dark surface: the strip must not become a white band under the capture.
+    // The widget sits on a dark dashboard; the export is light regardless.
     host.style.backgroundColor = 'rgb(11, 17, 32)';
     const widget = document.createElement('div');
     widget.id = 'png-dark-widget';
@@ -304,10 +327,19 @@ describe('exportToPNG', () => {
     try {
       const { exportToPNG } = await import('./exportWidget');
       await exportToPNG('png-dark-widget', 'dark', { sourceLabel: 'Dark heatmap' });
-      expect(fills[0]).toBe('rgb(11, 17, 32)');
+      expect(captured[0].backgroundColor).toBe('#ffffff');
+      // The strip continues the same light surface instead of a dark band.
+      expect(fills[0]).toBe('#ffffff');
+      // No user preference was changed by exporting.
+      expect(root.getAttribute('data-theme')).toBe('dark');
+      expect(root.classList.contains('dark')).toBe(true);
+      expect(root.classList.contains('light')).toBe(false);
     } finally {
       jest.restoreAllMocks();
       host.remove();
+      root.style.removeProperty('--bg-primary');
+      root.removeAttribute('data-theme');
+      root.classList.remove('dark');
     }
   });
 
@@ -316,7 +348,11 @@ describe('exportToPNG', () => {
     jest.resetModules();
     jest.doMock('html2canvas', () => ({
       __esModule: true,
-      default: () => Promise.resolve({ width: 140, height: 120 }),
+      default: () => Promise.resolve({
+        width: 140,
+        height: 120,
+        toBlob: (cb: (blob: Blob) => void) => cb(new Blob(['png'], { type: 'image/png' })),
+      }),
     }));
     const context = {
       fillRect: jest.fn(),
@@ -376,6 +412,10 @@ describe('exportToPNG', () => {
     document.body.appendChild(widget);
 
     const owner = document.defaultView as Window & typeof globalThis;
+    // A detached clone root: html2canvas themes an iframe document, never the
+    // live one, and `onclone` resolves the light palette from it.
+    const cloneRoot = document.createElement('html');
+    cloneRoot.style.setProperty('--bg-primary', '#ffffff');
     try {
       // Dynamic import is required: jest.resetModules() above rebuilds the
       // module graph so the html2canvas mock replaces the static import.
@@ -384,7 +424,7 @@ describe('exportToPNG', () => {
 
       const documentClone = {
         defaultView: owner,
-        documentElement: document.documentElement,
+        documentElement: cloneRoot,
         body: document.body,
       } as unknown as Document;
       // The widget is id-less, exactly like the market heatmap's ref target.
@@ -395,8 +435,108 @@ describe('exportToPNG', () => {
       // Nothing unparseable may survive for html2canvas to throw on.
       expect(widget.style.cssText).not.toMatch(/oklch|oklab|color\(/);
     } finally {
+      // The export never restyles the live root, so there is nothing to undo.
+      expect(document.documentElement.style.getPropertyValue('--bg-primary')).toBe('');
       jest.restoreAllMocks();
       widget.remove();
+    }
+  });
+
+
+  it('replaces a chart canvas with the light bitmap the chart renders for export', async () => {
+    jest.resetModules();
+    const root = document.documentElement;
+    root.style.setProperty('--bg-primary', '#ffffff');
+    root.setAttribute('data-theme', 'dark');
+    root.classList.add('dark');
+
+    // The chart host mirrors the real component: it answers the capture event
+    // with a bitmap of its own light rendering.
+    const widget = document.createElement('div');
+    const host = document.createElement('div');
+    host.setAttribute('data-light-chart-capture', '');
+    host.appendChild(document.createElement('canvas'));
+    widget.appendChild(host);
+    document.body.appendChild(widget);
+    const drawn: string[] = [];
+    host.addEventListener('vnibb:capture-light-chart', (event) => {
+      const detail = (event as CustomEvent<{ token: (name: string) => string; canvas?: HTMLCanvasElement }>).detail;
+      drawn.push(detail.token('--bg-primary'));
+      const bitmap = document.createElement('canvas');
+      bitmap.width = 100;
+      bitmap.height = 60;
+      detail.canvas = bitmap;
+    });
+
+    let capturedOptions: Record<string, any> = {};
+    const captured: { reference: HTMLElement | null } = { reference: null };
+    let cloneThemes: Array<string | null> = [];
+    let created = 0;
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => { created += 1; return 'blob:test'; }) as typeof URL.createObjectURL;
+    URL.revokeObjectURL = jest.fn();
+    jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    // The mock reproduces html2canvas's contract: it hands back a light clone of
+    // the page and drives `onclone`, which is where the chart capture happens.
+    jest.doMock('html2canvas', () => ({
+      __esModule: true,
+      default: (_element: HTMLElement, opts: Record<string, any>) => {
+        capturedOptions = opts;
+        // A detached clone root: the real `documentClone` belongs to the
+        // html2canvas iframe, so writing to it must not reach the live document.
+        const cloneRoot = document.createElement('html');
+        cloneRoot.style.setProperty('--bg-primary', '#ffffff');
+        cloneRoot.style.setProperty('--text-muted', '#5b6573');
+        const documentClone = {
+          defaultView: document.defaultView,
+          documentElement: cloneRoot,
+          body: document.body,
+        } as unknown as Document;
+        captured.reference = widget.cloneNode(true) as HTMLElement;
+        opts.onclone(documentClone, captured.reference);
+        // html2canvas themes only its own clone document.
+        cloneThemes = [
+          documentClone.documentElement.getAttribute('data-theme'),
+          documentClone.documentElement.classList.contains('light') ? 'light' : null,
+        ];
+        return Promise.resolve({
+          width: 100,
+          height: 60,
+          toBlob: (cb: (blob: Blob) => void) => cb(new Blob(['png'], { type: 'image/png' })),
+        });
+      },
+    }));
+
+    try {
+      // Dynamic import: the mock above must replace html2canvas before the
+      // module under test resolves it.
+      const { exportToPNG } = await import('./exportWidget');
+      expect(await exportToPNG(widget, 'chart', { sourceLabel: 'Price chart' })).toBe(true);
+
+      // The chart answered with a bitmap of its own light rendering.
+      expect(drawn).toEqual(['#ffffff']);
+      expect(capturedOptions.backgroundColor).toBe('#ffffff');
+      const exported = captured.reference?.querySelector<HTMLElement>('[data-light-chart-capture]');
+      expect(exported?.childElementCount).toBe(1);
+      expect(exported?.firstElementChild?.tagName).toBe('CANVAS');
+      // The live widget still owns its original canvas.
+      expect(host.firstElementChild?.tagName).toBe('CANVAS');
+      expect(host.childElementCount).toBe(1);
+      // Only the clone was themed light; the user's theme survived.
+      expect(cloneThemes).toEqual(['light', 'light']);
+      expect(root.getAttribute('data-theme')).toBe('dark');
+      expect(root.classList.contains('dark')).toBe(true);
+      expect(root.classList.contains('light')).toBe(false);
+      expect(created).toBe(1);
+    } finally {
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+      jest.restoreAllMocks();
+      widget.remove();
+      root.style.removeProperty('--bg-primary');
+      root.removeAttribute('data-theme');
+      root.classList.remove('dark');
     }
   });
 });

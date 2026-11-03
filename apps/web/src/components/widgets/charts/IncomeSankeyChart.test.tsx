@@ -49,7 +49,9 @@ describe('CashFlowWaterfallChart delta labels', () => {
     const { rerender, container } = render(
       <ThemeProvider><CashFlowWaterfallChart model={waterfallWithChange(null)} formatValue={(v) => String(v)} /></ThemeProvider>,
     );
-    expect(container.textContent).not.toMatch(/n\/a|\+/);
+    // Summary cards legitimately show `n/a` for absent figures; this test is
+    // about the bar delta labels, so scope the check to the plotted SVG.
+    expect(container.querySelector('svg')!.textContent).not.toMatch(/n\/a|\+/)
 
     rerender(<ThemeProvider><CashFlowWaterfallChart model={waterfallWithChange(5000)} formatValue={(v) => String(v)} /></ThemeProvider>);
     expect(screen.getByText('n/m')).toBeInTheDocument();

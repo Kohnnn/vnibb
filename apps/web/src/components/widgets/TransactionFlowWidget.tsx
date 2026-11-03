@@ -171,10 +171,10 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
       return { value: null, date: null };
     };
     return [
-      { label: 'Domestic', ...(latestIsFullSession ? lastNonNull('domestic') : { value: null, date: latest.date }), tone: 'text-sky-300' },
-      { label: 'Foreign', ...lastNonNull('foreign'), tone: 'text-fuchsia-300' },
-      { label: 'Prop', ...lastNonNull('proprietary'), tone: 'text-cyan-300' },
-      { label: latestIsFullSession ? 'Total' : 'Observed sample', value: getScopeValue(latest, 'total', mode), date: latest.date, tone: 'text-emerald-300' },
+      { label: 'Domestic', ...(latestIsFullSession ? lastNonNull('domestic') : { value: null, date: latest.date }), tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Foreign', ...lastNonNull('foreign'), tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Prop', ...lastNonNull('proprietary'), tone: 'text-[var(--color-accent-primary)]' },
+      { label: latestIsFullSession ? 'Total' : 'Observed sample', value: getScopeValue(latest, 'total', mode), date: latest.date, tone: 'text-[var(--color-positive)]' },
     ];
   }, [latest, latestIsFullSession, mode, rows]);
 
@@ -251,7 +251,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                     className={cn(
                       'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                       active
-                        ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
+                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                         : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
                   >
@@ -272,7 +272,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                     className={cn(
                       'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                       mode === option.id
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
                   >
@@ -294,7 +294,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
 
         <div className="flex-1 overflow-auto px-3 py-3 scrollbar-hide">
           {hasData ? (
-            <div className="mb-3 rounded-lg border border-amber-500/20 bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+            <div className="mb-3 rounded-lg border border-[var(--color-state-border)] bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-secondary)]">
               <div className="font-semibold text-[var(--text-primary)]">
                 {latestIsFullSession ? 'Session coverage' : 'Observed sample'} · {completeness}
               </div>

@@ -1,4 +1,5 @@
 'use client';
+import { EMPTY_VALUE } from '@/lib/units';
 
 import { useEffect, useMemo, useState } from 'react';
 import { BookMarked, Check, ExternalLink, Loader2, Plus, ThumbsDown, ThumbsUp } from 'lucide-react';
@@ -62,7 +63,7 @@ function formatArtifactValue(
   kind?: CopilotArtifactValueKind,
 ): string {
   if (value === null || value === undefined || value === '') {
-    return '—';
+    return EMPTY_VALUE;
   }
 
   if (typeof value !== 'number') {

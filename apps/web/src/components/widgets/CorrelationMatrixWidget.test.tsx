@@ -78,7 +78,7 @@ describe('CorrelationMatrixWidget', () => {
     expect(screen.getByText(/Partial window:/)).toBeInTheDocument()
     expect(screen.getByText('Anchor latest date: 2020-01-01')).toBeInTheDocument()
     expect(screen.getByText('Anchor observations: 5 · Window 60 trading days')).toBeInTheDocument()
-    expect(screen.getByText('— overlapping returns')).toBeInTheDocument()
+    expect(screen.getByText('n/a overlapping returns')).toBeInTheDocument()
     expect(screen.queryByText('0 overlapping returns')).not.toBeInTheDocument()
     expect(screen.queryByText(/aligned peer coverage/i)).not.toBeInTheDocument()
   })
@@ -107,7 +107,7 @@ describe('CorrelationMatrixWidget', () => {
     render(<CorrelationMatrixWidget id="correlation" symbol="VCI" />)
 
     expect(screen.getByText('0 overlapping returns')).toBeInTheDocument()
-    expect(screen.queryByText('— overlapping returns')).not.toBeInTheDocument()
+    expect(screen.queryByText('n/a overlapping returns')).not.toBeInTheDocument()
   })
 
   it('shows the empty coverage disclosure when the API has no matrix', () => {

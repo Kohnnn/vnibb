@@ -119,7 +119,7 @@ export function TopMoversWidget({
               aria-pressed={mode === 'gainer'}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'gainer'
-                  ? 'bg-[var(--color-accent-primary)] text-white'
+                  ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
@@ -130,7 +130,7 @@ export function TopMoversWidget({
               aria-pressed={mode === 'loser'}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'loser'
-                  ? 'bg-[var(--color-accent-primary)] text-white'
+                  ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
@@ -207,7 +207,7 @@ export function TopMoversWidget({
                         handleSymbolSelect(stock.symbol);
                       }
                     }}
-                    className={`w-full flex items-center justify-between py-2 px-2.5 rounded-lg group transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${rowHoverClass} border border-transparent`}
+                    className={`w-full flex items-center justify-between py-2 px-2.5 rounded-lg group transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] ${rowHoverClass} border border-transparent`}
                   >
                     <div className="flex items-center gap-2.5">
                       <span

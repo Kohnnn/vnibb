@@ -41,7 +41,7 @@ it('uses supported screener fields and excludes missing metrics and returns from
   expect(screen.getByText('Avg return: passing vs universe').parentElement).toHaveTextContent('+5.0% edge')
   expect(screen.queryByText('3M')).not.toBeInTheDocument()
   expect(screen.queryByText('6M')).not.toBeInTheDocument()
-  expect(within(screen.getByText('NOPERF').closest('tr')!).getByText('—')).toBeInTheDocument()
+  expect(within(screen.getByText('NOPERF').closest('tr')!).getByText('n/a')).toBeInTheDocument()
   expect(within(screen.getByText('ZERO').closest('tr')!).getByText('0.0%')).toBeInTheDocument()
   expect(onDataChange).toHaveBeenCalledWith(expect.objectContaining({
     return_reads: [{ label: '1M', passAvg: 5, universeAvg: 0, edge: 5 }],

@@ -12,7 +12,7 @@ import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatTimestamp } from '@/lib/formatDate';
 import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
-import { formatLargeNumber } from '@/lib/units';
+import { EMPTY_VALUE, formatLargeNumber } from '@/lib/units';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
 
 interface TickerProfileWidgetProps {
@@ -195,7 +195,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                 align="right"
             />
 
-            <div className="rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] p-3">
+            <div className="rounded-2xl border border-[var(--color-state-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] p-3">
                 <div className="flex items-start gap-3">
                     <CompanyLogo
                         symbol={symbol}
@@ -204,7 +204,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                         size={36}
                     />
                     <div className="min-w-0 flex-1">
-                        <div className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300/80">{symbol}</div>
+                        <div className="text-[10px] font-black uppercase tracking-[0.24em] text-[var(--color-accent-primary)]">{symbol}</div>
                         <h3 className="truncate text-lg font-semibold text-[var(--text-primary)]">
                             {companyName}
                         </h3>
@@ -216,12 +216,12 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
 
                 <div className="mt-2 flex flex-wrap gap-1.5">
                     {exchange && (
-                        <span className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+                        <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-accent-primary)]">
                             {exchange}
                         </span>
                     )}
                     {industry && (
-                        <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                        <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-positive)]">
                             {industry}
                         </span>
                     )}
@@ -239,7 +239,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                     return (
                         <div key={item.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
                             <div className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                                <Icon size={12} className="text-blue-400" />
+                                <Icon size={12} className="text-[var(--color-accent-primary)]" />
                                 <span>{item.label}</span>
                             </div>
                             <div className="truncate text-sm font-medium text-[var(--text-primary)]">
@@ -275,7 +275,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                 {dividendsLoading && dividends.length === 0 ? (
                                     <WidgetSkeleton lines={2} />
                                 ) : dividendsError && dividends.length === 0 ? (
-                                    <div className="flex items-center gap-2 text-xs text-red-400">
+                                    <div className="flex items-center gap-2 text-xs text-[var(--color-negative)]">
                                         <AlertTriangle size={12} />
                                         Unable to load dividends
                                     </div>
@@ -315,7 +315,7 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                 {insiderLoading && insiderDeals.length === 0 ? (
                                     <WidgetSkeleton lines={2} />
                                 ) : insiderError && insiderDeals.length === 0 ? (
-                                    <div className="flex items-center gap-2 text-xs text-red-400">
+                                    <div className="flex items-center gap-2 text-xs text-[var(--color-negative)]">
                                         <AlertTriangle size={12} />
                                         Unable to load insider deals
                                     </div>
@@ -324,9 +324,9 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                                         {insiderDeals.slice(0, 2).map((deal) => {
                                             const actionToken = normalizeInsiderAction(deal.deal_action);
                                             const actionLabel = actionToken ?? 'UNKNOWN';
-                                            const actionClass = actionToken === 'BUY' ? 'text-green-400'
-                                                : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
-                                            const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
+                                            const actionClass = actionToken === 'BUY' ? 'text-[var(--color-positive)]'
+                                                : actionToken === 'SELL' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]';
+                                            const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : EMPTY_VALUE;
                                             return (
                                                 <div
                                                     key={deal.id}

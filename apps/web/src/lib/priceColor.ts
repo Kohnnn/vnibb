@@ -67,6 +67,21 @@ export function priceColor(change: number | null | undefined): string {
 }
 
 /**
+ * Text class for a signed figure: gain, loss, ink for a measured zero and muted
+ * for a missing reading (brand §13 `financialSemantics`: zero is `ink`).
+ *
+ * Use this instead of `change >= 0 ? gain : loss`, which paints a real zero as
+ * a gain and a null as a loss.
+ */
+export function signedToneClass(change: number | null | undefined): string {
+  const dir = priceDirection(change);
+  if (dir === 'none') return 'text-[var(--text-muted)]';
+  if (dir === 'flat') return 'text-[var(--text-primary)]';
+  return dir === 'up' ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]';
+}
+
+
+/**
  * Directional glyph so direction is conveyed by shape, not color alone (a11y).
  * Missing values get an empty string: `n/a` already says there is no reading,
  * and a dash would read as a measured flat.

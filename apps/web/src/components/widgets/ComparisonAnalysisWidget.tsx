@@ -490,7 +490,7 @@ function ComparisonAnalysisWidgetComponent({
                 <button
                   type="button"
                   onClick={addSymbol}
-                  className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-blue-400"
+                  className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--color-accent-primary)]"
                   aria-label="Confirm add ticker"
                 >
                   <Plus size={12} />
@@ -521,7 +521,7 @@ function ComparisonAnalysisWidgetComponent({
                   key={ticker}
                   type="button"
                   onClick={() => addPeerSuggestion(ticker)}
-                  className="rounded border border-blue-500/30 bg-blue-600/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300 hover:bg-blue-600/20"
+                  className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-accent-primary)] hover:bg-[var(--color-state-bg)]"
                 >
                   + {ticker}
                 </button>
@@ -537,10 +537,11 @@ function ComparisonAnalysisWidgetComponent({
                 key={option}
                 type="button"
                 onClick={() => setPerformancePeriod(option)}
+                aria-pressed={performancePeriod === option}
                 className={cn(
                   'rounded px-2 py-1 text-[10px] font-bold uppercase tracking-wide',
                   performancePeriod === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border border-[var(--color-state-border)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                 )}
               >
@@ -628,7 +629,7 @@ function ComparisonAnalysisWidgetComponent({
                 className={cn(
                   'rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors',
                   activeCategory === category.id
-                    ? 'bg-blue-600/15 text-blue-300 border border-blue-500/35'
+                    ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border border-[var(--color-state-border)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                 )}
               >
@@ -718,9 +719,9 @@ function ComparisonAnalysisWidgetComponent({
                               isMissing
                                 ? 'text-[var(--text-muted)]'
                                 : isBest
-                                  ? 'text-green-500'
+                                  ? 'text-[var(--color-positive)]'
                                   : isWorst
-                                    ? 'text-red-500'
+                                    ? 'text-[var(--color-negative)]'
                                     : 'text-[var(--text-primary)]'
                             )}
                           >
@@ -837,9 +838,9 @@ function ComparisonAnalysisWidgetComponent({
                                 label === EMPTY_VALUE
                                   ? 'text-[var(--text-muted)]'
                                   : isBest
-                                    ? 'text-green-500'
+                                    ? 'text-[var(--color-positive)]'
                                     : isWorst
-                                      ? 'text-red-500'
+                                      ? 'text-[var(--color-negative)]'
                                       : 'text-[var(--text-primary)]'
                               )}
                             >

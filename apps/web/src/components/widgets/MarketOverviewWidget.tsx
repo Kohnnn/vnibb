@@ -1,5 +1,6 @@
 'use client';
 
+import { formatPercent, EMPTY_VALUE } from '@/lib/units';
 import { useEffect } from 'react';
 import { TrendingDown, TrendingUp, Activity } from 'lucide-react';
 import { useMarketOverview } from '@/lib/queries';
@@ -18,14 +19,13 @@ interface MarketOverviewWidgetProps {
 }
 
 function formatValue(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '-';
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE;
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function formatPct(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '-';
-  const prefix = value >= 0 ? '+' : '';
-  return `${prefix}${value.toFixed(2)}%`;
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE;
+  return formatPercent(value, { input: 'percent', decimals: 2, signed: value !== 0 });
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -119,32 +119,36 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
                   (indexPayload.indexName as string | undefined) ||
                   (indexPayload.index_code as string | undefined) ||
                   `Index ${i + 1}`;
-                const isUp = (changePct ?? changeValue ?? 0) >= 0;
-                const hasTrend = changePct !== null || changeValue !== null;
+                const reference = changePct ?? changeValue;
+                const hasTrend = typeof reference === 'number' && Number.isFinite(reference);
+                // A measured flat session is neither a gain nor a loss, and a
+                // missing change is unavailable rather than flat.
+                const direction = !hasTrend ? 'flat' : reference > 0 ? 'up' : reference < 0 ? 'down' : 'flat';
 
                 return (
-                  <div key={i} className={`index-card ${isUp ? 'up' : 'down'}`}>
+                  <div key={i} className={`index-card ${direction}`}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="index-card__name">{indexName}</span>
-                      {!hasTrend ? (
+                      {direction === 'flat' ? (
                         <Activity size={14} className="text-[var(--text-muted)]" />
-                      ) : isUp ? (
+                      ) : direction === 'up' ? (
                         <TrendingUp size={14} className="text-[var(--color-positive)]" />
                       ) : (
                         <TrendingDown size={14} className="text-[var(--color-negative)]" />
                       )}
                     </div>
 
-                    <div className={`index-card__value ${isUp ? 'data-value-up' : 'data-value-down'}`}>
+                    {/* The index level is a price, not a direction. */}
+                    <div className="index-card__value text-[var(--text-primary)]">
                       {formatValue(currentValue)}
                     </div>
 
-                    <div className={`index-card__change ${isUp ? 'data-value-up' : 'data-value-down'}`}>
+                    <div className={direction === 'flat' ? 'index-card__change text-[var(--text-secondary)]' : `index-card__change ${direction === 'up' ? 'data-value-up' : 'data-value-down'}`}>
                       {formatValue(changeValue)} ({formatPct(changePct)})
                     </div>
 
                     <div className="flex items-center gap-2 mt-2 text-[9px] text-[var(--text-muted)]">
-                      <span>Vol: {idx.volume?.toLocaleString() || '-'}</span>
+                      <span>Vol: {idx.volume?.toLocaleString() || EMPTY_VALUE}</span>
                       <span>H: {formatValue(idx.high)}</span>
                       <span>L: {formatValue(idx.low)}</span>
                     </div>

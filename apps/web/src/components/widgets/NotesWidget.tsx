@@ -155,7 +155,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 </div>
                 {dueTheses.length === 0 ? <div className="text-xs text-[var(--text-muted)]">No theses are due for review.</div> : (
                     <div className="space-y-2 overflow-auto">
-                        {dueTheses.map(([dueSymbol, value]) => <button key={dueSymbol} type="button" onClick={() => { setLinkedSymbol(dueSymbol); setShowDueOnly(false); }} aria-label={`View due thesis for ${dueSymbol}`} className="min-h-11 w-full rounded border border-[var(--border-subtle)] p-2 text-left text-xs hover:border-blue-500/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                        {dueTheses.map(([dueSymbol, value]) => <button key={dueSymbol} type="button" onClick={() => { setLinkedSymbol(dueSymbol); setShowDueOnly(false); }} aria-label={`View due thesis for ${dueSymbol}`} className="min-h-11 w-full rounded border border-[var(--border-subtle)] p-2 text-left text-xs hover:border-[var(--color-state-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">
                             <div className="font-semibold text-[var(--text-primary)]">{dueSymbol} · {value.reviewDate}</div>
                             <div className="mt-1 text-[var(--text-secondary)]">{value.thesis || 'No thesis recorded.'}</div>
                         </button>)}
@@ -168,18 +168,18 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
     return (
         <div className="flex h-full flex-col gap-2">
             <div className="flex items-center justify-between px-1 text-xs text-[var(--text-muted)]">
-                <div className="flex items-center gap-2"><StickyNote size={12} className="text-yellow-400" /><span>Thesis · {symbol}</span>{canSave && !isSaved && <span className="text-orange-400">Unsaved</span>}</div>
+                <div className="flex items-center gap-2"><StickyNote size={12} className="text-[var(--color-accent-primary)]" /><span>Thesis · {symbol}</span>{canSave && !isSaved && <span className="text-[var(--color-warning)]">Unsaved</span>}</div>
                 <div className="flex items-center gap-1">
                     <WidgetMeta note={canSave ? 'Saved in dashboard' : 'Read-only system workspace'} align="right" />
                     <button type="button" onClick={() => setShowDueOnly(true)} className="rounded px-2 py-1 hover:bg-[var(--bg-tertiary)]" aria-label="Show theses due for review">Due {dueTheses.length}</button>
-                    <button type="button" onClick={save} disabled={!canSave} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-green-400 disabled:cursor-not-allowed disabled:opacity-50" aria-label="Save thesis"><Save size={13} /></button>
+                    <button type="button" onClick={save} disabled={!canSave} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-[var(--color-accent-primary)] disabled:cursor-not-allowed disabled:opacity-50" aria-label="Save thesis"><Save size={13} /></button>
                 </div>
             </div>
-            {!canSave && <p role="status" className="rounded border border-amber-500/30 p-2 text-xs text-[var(--color-warning)]">System workspace is read-only. Use Templates or Blank workspace in the sidebar, add a tab and Notes widget, then save your thesis there.</p>}
+            {!canSave && <p role="status" className="rounded border border-[var(--color-state-border)] p-2 text-xs text-[var(--color-warning)]">System workspace is read-only. Use Templates or Blank workspace in the sidebar, add a tab and Notes widget, then save your thesis there.</p>}
             <fieldset disabled={!canSave} className="contents">
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 text-[10px]" aria-label="Investment Thesis completion checklist">
                 <div className="flex items-center justify-between text-[var(--text-muted)]"><span>Thesis completion</span><span>{completedChecks}/6</span></div>
-                <div className="mt-1 grid grid-cols-6 gap-1">{completionChecks.map(([label, complete]) => <span key={label} className={complete ? 'text-emerald-400' : 'text-[var(--text-muted)]'} title={label}>{complete ? 'Ready' : label}</span>)}</div>
+                <div className="mt-1 grid grid-cols-6 gap-1">{completionChecks.map(([label, complete]) => <span key={label} className={complete ? 'text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)]'} title={label}>{complete ? 'Ready' : label}</span>)}</div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
                 <label className="text-[var(--text-muted)]">Status<select value={thesis.status} onChange={(event) => updateThesis('status', event.target.value as ThesisStatus)} className="mt-1 w-full rounded bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-primary)]"><option value="researching">Researching</option><option value="watching">Watching</option><option value="active">Active</option><option value="closed">Closed</option></select></label>
@@ -195,7 +195,7 @@ export function NotesWidget({ id, symbol, config, onDataChange, widgetGroup }: N
                 <label className="flex items-center gap-1 text-[var(--text-muted)]"><Link2 size={12} />Attach existing research<select value="" disabled={linkedEvidence.length >= MAX_THESIS_CITATIONS} onChange={(event) => { if (event.target.value) attachEvidence(event.target.value); }} className="min-w-0 flex-1 rounded bg-[var(--bg-tertiary)] p-1 text-[var(--text-primary)]" aria-label="Attach browser-local research evidence"><option value="">Select evidence</option>{attachableEvidence.map((item) => <option key={item.id} value={item.id}>{item.symbol ? `${item.symbol} · ` : 'No symbol · '}{item.title}</option>)}</select></label>
                 {attachableEvidence.length === 0 && linkedEvidence.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No matching browser-local research. Symbol-less items may be selected when available.</div>}
             </div>
-            <div className="flex min-h-0 flex-1 flex-col"><div className="flex items-center justify-between text-xs text-[var(--text-muted)]"><label htmlFor={`${id}-notes`}>Legacy notes</label><button type="button" onClick={() => updateDraft((current) => ({ ...current, notes: '' }))} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-red-400" aria-label="Clear legacy notes"><Trash2 size={12} /></button></div><textarea id={`${id}-notes`} value={notes} onChange={(event) => { const value = event.target.value; updateDraft((current) => ({ ...current, notes: value })); }} placeholder={`Write notes about ${symbol}...`} className="mt-1 min-h-16 flex-1 resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></div>
+            <div className="flex min-h-0 flex-1 flex-col"><div className="flex items-center justify-between text-xs text-[var(--text-muted)]"><label htmlFor={`${id}-notes`}>Legacy notes</label><button type="button" onClick={() => updateDraft((current) => ({ ...current, notes: '' }))} className="rounded p-1 hover:bg-[var(--bg-tertiary)] hover:text-[var(--color-negative)]" aria-label="Clear legacy notes"><Trash2 size={12} /></button></div><textarea id={`${id}-notes`} value={notes} onChange={(event) => { const value = event.target.value; updateDraft((current) => ({ ...current, notes: value })); }} placeholder={`Write notes about ${symbol}...`} className="mt-1 min-h-16 flex-1 resize-none rounded bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--focus-ring-color)]" /></div>
             </fieldset>
         </div>
     );
@@ -207,13 +207,13 @@ function EvidenceItem({ item, citation, itemId, onDetach }: { item: NotebookItem
         recorded.asOf && `As of ${recorded.asOf}`, `Captured ${recorded.capturedAt}`].filter(Boolean).join(' · ');
     const sourceUrl = recorded?.url && /^https?:\/\//i.test(recorded.url) ? recorded.url : undefined;
     return <div className="flex items-start justify-between gap-2 rounded bg-[var(--bg-tertiary)] p-1.5"><div className="min-w-0">
-        <div className="truncate text-[var(--text-primary)]">{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-blue-300">{recorded!.title}<ExternalLink size={10} /></a> : recorded?.title || itemId}</div>
+        <div className="truncate text-[var(--text-primary)]">{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 hover:text-[var(--color-accent-primary)]">{recorded!.title}<ExternalLink size={10} /></a> : recorded?.title || itemId}</div>
         {details && <div className="text-[10px] text-[var(--text-muted)]">{details}</div>}
         {!item && <div className="text-[10px] text-[var(--color-warning)]">Original research unavailable or deleted. Citation only; original content is not included.</div>}
-    </div><button type="button" onClick={onDetach} className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-red-300" aria-label={`Detach evidence ${recorded?.title || itemId}`}><Unlink size={12} /></button></div>;
+    </div><button type="button" onClick={onDetach} className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-[var(--color-negative)]" aria-label={`Detach evidence ${recorded?.title || itemId}`}><Unlink size={12} /></button></div>;
 }
 
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-    return <label className="flex flex-col gap-1 text-xs text-[var(--text-muted)]">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} className="min-h-12 resize-y rounded bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500" /></label>;
+    return <label className="flex flex-col gap-1 text-xs text-[var(--text-muted)]">{label}<textarea value={value} onChange={(event) => onChange(event.target.value)} className="min-h-12 resize-y rounded bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--focus-ring-color)]" /></label>;
 }

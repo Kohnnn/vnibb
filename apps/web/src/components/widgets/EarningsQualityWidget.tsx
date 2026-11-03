@@ -16,17 +16,17 @@ interface EarningsQualityWidgetProps {
 }
 
 function pct(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a'
   return `${value.toFixed(2)}%`
 }
 
 function score(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a'
   return value.toFixed(1)
 }
 
 function persistence(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a'
   return value.toFixed(2)
 }
 
@@ -71,7 +71,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ShieldCheck size={12} className="text-cyan-400" />
+          <ShieldCheck size={12} className="text-[var(--color-accent-primary)]" />
           <span>Earnings Quality</span>
         </div>
         <WidgetMeta

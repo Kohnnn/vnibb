@@ -126,12 +126,12 @@ export function CrossSourceCalibrationWidget() {
                     className="flex flex-col gap-2 rounded-lg border border-default bg-[var(--bg-tertiary)] p-3"
                 >
                     <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.16em]">
-                        <span className="text-blue-300">{topicLabel(topic.topic)}</span>
+                        <span className="text-[var(--color-accent-primary)]">{topicLabel(topic.topic)}</span>
                         <span
                             className={`rounded-full border px-2 py-0.5 ${
                                 !comparable ? 'border-default text-[var(--text-muted)]' : topic.sources_agree
-                                    ? `border-emerald-500/40 ${colorblindClass('positive')}`
-                                    : `border-amber-500/40 ${colorblindClass('warning')}`
+                                    ? `border-[var(--color-state-border)] ${colorblindClass('positive')}`
+                                    : `border-[var(--color-state-border)] ${colorblindClass('warning')}`
                             }`}
                         >
                             {!comparable ? (pricedSources.length === 0 ? 'No data' : 'Insufficient sources') : topic.sources_agree ? 'Source averages align' : 'Source averages differ'}

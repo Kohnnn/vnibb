@@ -17,6 +17,7 @@ import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods
 import { cn } from '@/lib/utils';
 import type { OHLCData } from '@/lib/chartUtils';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface RiskDashboardWidgetProps {
   id: string;
@@ -44,7 +45,7 @@ function average(values: number[]): number | null {
 }
 
 function formatSigned(value: number | null | undefined, suffix = ''): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE;
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}${suffix}`;
 }
 
@@ -99,16 +100,16 @@ function computeHurstFromPrices(prices: number[]): number | null {
 
 function classifyHurst(hurst: number | null): { label: string; tone: string } {
   if (hurst === null) return { label: 'Insufficient Data', tone: 'text-[var(--text-secondary)]' };
-  if (hurst > 0.55) return { label: 'Trending', tone: 'text-emerald-300' };
+  if (hurst > 0.55) return { label: 'Trending', tone: 'text-[var(--color-positive)]' };
   if (hurst < 0.45) return { label: 'Mean-Reverting', tone: 'text-[var(--color-warning)]' };
-  return { label: 'Random Walk', tone: 'text-cyan-300' };
+  return { label: 'Random Walk', tone: 'text-[var(--color-accent-primary)]' };
 }
 
 function riskGrade(score: number): { label: string; tone: string } {
-  if (score >= 80) return { label: 'Low Risk', tone: 'text-emerald-300' };
-  if (score >= 60) return { label: 'Balanced', tone: 'text-cyan-300' };
+  if (score >= 80) return { label: 'Low Risk', tone: 'text-[var(--color-positive)]' };
+  if (score >= 60) return { label: 'Balanced', tone: 'text-[var(--color-accent-primary)]' };
   if (score >= 40) return { label: 'Elevated', tone: 'text-[var(--color-warning)]' };
-  return { label: 'High Risk', tone: 'text-rose-300' };
+  return { label: 'High Risk', tone: 'text-[var(--color-negative)]' };
 }
 
 /**
@@ -230,13 +231,13 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
     // Driver cards show the actual point deduction each factor contributes
     // (weight * stress * 100), so they sum to the total deduction (100 - score).
     const drivers = [
-      { label: 'Drawdown Stress', value: weights.drawdown * drawdownStress * 100, tone: 'text-rose-300' },
+      { label: 'Drawdown Stress', value: weights.drawdown * drawdownStress * 100, tone: 'text-[var(--color-negative)]' },
       { label: 'Volatility Stress', value: weights.vol * volStress * 100, tone: 'text-[var(--color-warning)]' },
-      { label: 'Relative DD', value: weights.relDd * relDdStress * 100, tone: 'text-fuchsia-300' },
-      { label: 'Tracking Error', value: weights.tracking * trackingStress * 100, tone: 'text-cyan-300' },
-      { label: 'Downside Dev', value: weights.downside * downsideStress * 100, tone: 'text-sky-300' },
-      { label: 'Sortino Penalty', value: weights.sortino * sortinoStress * 100, tone: 'text-cyan-300' },
-      { label: 'Structure Penalty', value: weights.hurst * hurstStress * 100, tone: 'text-violet-300' },
+      { label: 'Relative DD', value: weights.relDd * relDdStress * 100, tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Tracking Error', value: weights.tracking * trackingStress * 100, tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Downside Dev', value: weights.downside * downsideStress * 100, tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Sortino Penalty', value: weights.sortino * sortinoStress * 100, tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Structure Penalty', value: weights.hurst * hurstStress * 100, tone: 'text-[var(--color-accent-primary)]' },
     ];
 
     return { score, drivers };
@@ -325,7 +326,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                 onClick={() => setPeriod(option)}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
                   period === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
@@ -373,11 +374,11 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                     formatting placeholder. We still tone the score in
                     rose for the high-risk band so the visual hierarchy
                     distinguishes critical readings. */}
-                <div className={`mt-1 text-2xl font-black ${riskScore < 10 ? 'text-rose-300' : scoreLabel.tone}`}>
+                <div className={`mt-1 text-2xl font-black ${riskScore < 10 ? 'text-[var(--color-negative)]' : scoreLabel.tone}`}>
                   {riskScore}
                   <span className="ml-0.5 text-sm font-semibold text-[var(--text-muted)]">/100</span>
                 </div>
-                <div className={`mt-1 text-sm font-semibold ${riskScore < 10 ? 'text-rose-300' : scoreLabel.tone}`}>
+                <div className={`mt-1 text-sm font-semibold ${riskScore < 10 ? 'text-[var(--color-negative)]' : scoreLabel.tone}`}>
                   {riskScore < 10 ? 'Critical Risk Zone' : scoreLabel.label}
                 </div>
                 {/* U6 — sector benchmark context. Renders a small reference
@@ -386,7 +387,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                 <div className="mt-2 space-y-1">
                   <div className="relative h-1.5 overflow-hidden rounded-full bg-[var(--bg-primary)]">
                     <div
-                      className="absolute top-0 bottom-0 bg-cyan-500/25"
+                      className="absolute top-0 bottom-0 bg-[var(--color-state-bg)]"
                       style={{
                         left: `${RISK_BENCHMARK.marketTypicalLow}%`,
                         width: `${RISK_BENCHMARK.marketTypicalHigh - RISK_BENCHMARK.marketTypicalLow}%`,
@@ -394,13 +395,15 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                       title={`VN market typical band ${RISK_BENCHMARK.marketTypicalLow}–${RISK_BENCHMARK.marketTypicalHigh}`}
                     />
                     <div
-                      className={cn('absolute -top-0.5 h-2.5 w-0.5 rounded-full', {
-                        'bg-emerald-300': riskScore >= 80,
-                        'bg-cyan-300': riskScore >= 60 && riskScore < 80,
-                        'bg-amber-300': riskScore >= 40 && riskScore < 60,
-                        'bg-rose-300': riskScore < 40,
-                      })}
-                      style={{ left: `calc(${riskScore}% - 1px)` }}
+                      // Risk score is ordinal, not a gain or a loss: one accent
+                      // hue whose strength rises with the risk level. The bands
+                      // used to be four palette colours, and the token
+                      // migration collapsed two of them onto the same key.
+                      className="absolute -top-0.5 h-2.5 w-0.5 rounded-full"
+                      style={{
+                        left: `calc(${riskScore}% - 1px)`,
+                        background: `color-mix(in srgb, var(--color-accent-primary) ${Math.round(25 + Math.min(100, Math.max(0, riskScore)) * 0.75)}%, transparent)`,
+                      }}
                     />
                   </div>
                   <div className="text-[10px] text-[var(--text-muted)]">
@@ -413,19 +416,19 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Max Drawdown</div>
-                <div className="mt-1 text-lg font-semibold text-rose-300">{formatSigned(drawdown?.max_drawdown_from_52w_high_pct, '%')}</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-negative)]">{formatSigned(drawdown?.max_drawdown_from_52w_high_pct, '%')}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Benchmark DD</div>
-                <div className="mt-1 text-lg font-semibold text-fuchsia-300">{formatSigned(benchmarkRisk?.current_benchmark_drawdown_pct, '%')}</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">{formatSigned(benchmarkRisk?.current_benchmark_drawdown_pct, '%')}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Tracking Error</div>
-                <div className="mt-1 text-lg font-semibold text-cyan-300">{formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')}</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">{formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Downside Dev</div>
-                <div className="mt-1 text-lg font-semibold text-sky-300">{formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')}</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">{formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Beta 63D</div>
@@ -458,7 +461,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
               <div className="flex flex-col gap-3">
                 <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Sortino Quality</div>
-                  <div className="mt-1 text-lg font-semibold text-emerald-300">{formatSigned(sortinoAverage)}</div>
+                  <div className="mt-1 text-lg font-semibold text-[var(--color-positive)]">{formatSigned(sortinoAverage)}</div>
                   <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
                     Best months: {(sortino?.best_months || []).join(', ') || '—'}
                   </div>
@@ -484,7 +487,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                   <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Relative DD</div>
-                      <div className="mt-1 font-mono text-fuchsia-300">{formatSigned(benchmarkRisk?.current_relative_drawdown_pct, '%')}</div>
+                      <div className="mt-1 font-mono text-[var(--color-accent-primary)]">{formatSigned(benchmarkRisk?.current_relative_drawdown_pct, '%')}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Corr 63D</div>
@@ -496,7 +499,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95 (period)</div>
-                      <div className="mt-1 font-mono text-rose-300">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
+                      <div className="mt-1 font-mono text-[var(--color-negative)]">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
                     </div>
                   </div>
                 </div>
@@ -506,19 +509,19 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
                   <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-[var(--text-secondary)]">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Parkinson 30D</div>
-                      <div className="mt-1 font-mono text-cyan-300">{formatSigned(parkinson?.current_parkinson_vol_30d_pct, '%')}</div>
+                      <div className="mt-1 font-mono text-[var(--color-accent-primary)]">{formatSigned(parkinson?.current_parkinson_vol_30d_pct, '%')}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Volatility Regime</div>
-                      <div className="mt-1 font-mono text-cyan-300">{parkinson?.current_regime || '—'}</div>
+                      <div className="mt-1 font-mono text-[var(--color-accent-primary)]">{parkinson?.current_regime || '—'}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">52W Drawdown</div>
-                      <div className="mt-1 font-mono text-rose-300">{formatSigned(drawdown?.current_drawdown_from_52w_high_pct, '%')}</div>
+                      <div className="mt-1 font-mono text-[var(--color-negative)]">{formatSigned(drawdown?.current_drawdown_from_52w_high_pct, '%')}</div>
                     </div>
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-2">
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Hurst Value</div>
-                      <div className="mt-1 font-mono text-[var(--text-primary)]">{hurst === null ? '—' : hurst.toFixed(3)}</div>
+                      <div className="mt-1 font-mono text-[var(--text-primary)]">{hurst === null ? EMPTY_VALUE : hurst.toFixed(3)}</div>
                     </div>
                   </div>
                   <div className="mt-2 text-[11px] text-[var(--text-secondary)]">

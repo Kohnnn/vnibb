@@ -126,7 +126,7 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
             className={cn(
               'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
               adjustmentMode === mode
-                ? 'bg-blue-600 text-white'
+                ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                 : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
             )}
           >

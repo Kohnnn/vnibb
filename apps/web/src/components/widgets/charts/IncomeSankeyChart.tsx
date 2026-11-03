@@ -114,11 +114,11 @@ export function IncomeSankeyChart({ model, formatValue }: IncomeSankeyChartProps
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
-        <SummaryCard label="Revenue" value={formatValue(model.metrics.revenue)} tone="text-blue-300" />
-        <SummaryCard label="Gross Profit" value={formatValue(model.metrics.grossProfit)} tone="text-cyan-300" />
-        <SummaryCard label="Operating Income" value={formatValue(model.metrics.operatingIncome)} tone="text-emerald-300" />
-        <SummaryCard label="Pre-tax Profit" value={formatValue(model.metrics.preTaxProfit)} tone="text-teal-300" />
-        <SummaryCard label="Net Income" value={formatValue(model.metrics.netIncome)} tone="text-emerald-200" />
+        <SummaryCard label="Revenue" value={formatValue(model.metrics.revenue)} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="Gross Profit" value={formatValue(model.metrics.grossProfit)} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="Operating Income" value={formatValue(model.metrics.operatingIncome)} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="Pre-tax Profit" value={formatValue(model.metrics.preTaxProfit)} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="Net Income" value={formatValue(model.metrics.netIncome)} tone="text-[var(--text-primary)]" />
       </div>
 
       <div className="min-h-[360px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

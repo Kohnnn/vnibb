@@ -32,7 +32,7 @@ test('ranks known negative returns ahead of unknown sectors and displays unknown
   const header = screen.getByText('Unknown').parentElement!;
   const unavailable = within(header).getByText('Unavailable');
   expect(unavailable).toHaveClass('text-[var(--text-muted)]');
-  expect(unavailable).not.toHaveClass('text-emerald-300');
+  expect(unavailable).not.toHaveClass('text-[var(--color-positive)]');
   expect(header).not.toHaveTextContent('+—%');
 });
 

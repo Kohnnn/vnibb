@@ -11,8 +11,10 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useMarketHeatmap } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { cn } from '@/lib/utils';
+import { EMPTY_VALUE } from '@/lib/units';
 import type { SectorGroup } from '@/lib/api';
 import { toNumber } from './utils';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface SectorBreakdownWidgetProps {
   id: string;
@@ -147,7 +149,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     topCount === option
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                   )}
                 >
@@ -165,7 +167,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                     className={cn(
                       'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                       metric === option.id
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
                   >
@@ -209,7 +211,7 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                       itemStyle={{ color: 'var(--text-primary)', fontSize: '10px' }}
                       formatter={(value: any, _name, props: any) => {
                         const payload = props?.payload;
-                        if (metric === 'change') return [payload?.changePct === null || payload?.changePct === undefined ? '—' : `${Number(payload.changePct).toFixed(2)}%`, 'Avg Change'];
+                        if (metric === 'change') return [payload?.changePct === null || payload?.changePct === undefined ? EMPTY_VALUE : `${Number(payload.changePct).toFixed(2)}%`, 'Avg Change'];
                         if (metric === 'count') return [String(payload?.stockCount || 0), 'Stocks'];
                         return [payload?.share == null ? 'Unavailable' : `${payload.share.toFixed(1)}%`, 'Share of admitted cap'];
                       }}
@@ -235,19 +237,19 @@ function SectorBreakdownWidgetComponent({ id, onRemove, onDataChange }: SectorBr
                           <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
                           <span className="truncate text-sm font-medium text-[var(--text-primary)]">{entry.name}</span>
                         </div>
-                        <span className={cn('text-sm font-semibold', metric === 'change' ? (entry.changePct === null ? 'text-[var(--text-muted)]' : entry.changePct >= 0 ? 'text-emerald-300' : 'text-rose-300') : 'text-blue-300')}>
+                        <span className={cn('text-sm font-semibold', metric === 'change' ? signedToneClass(entry.changePct) : 'text-[var(--color-accent-primary)]')}>
                           {metric === 'change'
                             ? entry.changePct === null
-                              ? '—'
-                              : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`
+                              ? EMPTY_VALUE
+                              : `${Number(entry.changePct.toFixed(2)) > 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`
                             : metric === 'count'
                               ? entry.stockCount.toLocaleString()
-                              : entry.share === null ? '—' : `${entry.share.toFixed(1)}%`}
+                              : entry.share === null ? EMPTY_VALUE : `${entry.share.toFixed(1)}%`}
                         </span>
                       </div>
                       <div className="mt-1 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
                         <span>{entry.stockCount} stocks</span>
-                        <span>{entry.changePct === null ? 'Change —' : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`}</span>
+                        <span>{entry.changePct === null ? `Change ${EMPTY_VALUE}` : `${entry.changePct >= 0 ? '+' : ''}${entry.changePct.toFixed(2)}%`}</span>
                         <span>Cap: {entry.capCount}/{entry.stockCount}{entry.capCount < entry.stockCount ? ' (partial)' : ''}</span>
                       </div>
                     </div>

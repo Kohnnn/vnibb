@@ -1,4 +1,32 @@
-import { formatDividendPayout, formatDividendYield, readDividendYield } from './formatters'
+import {
+  formatDividendPayout, formatDividendYield, formatNumber, formatPercent, formatVND, readDividendYield,
+} from './formatters'
+
+describe('legacy percent formatting', () => {
+  it.each([
+    [0.1523, '+15.23%'],
+    [-0.05, '-5.00%'],
+    [12.5, '+12.50%'],
+    [0, '0.00%'],
+    [-0, '0.00%'],
+    // Rounds to 0.00 at 2dp: the sign follows the digits, not the raw value.
+    [-0.00004, '0.00%'],
+    [null, 'n/a'],
+    [undefined, 'n/a'],
+    [Number.NaN, 'n/a'],
+  ] as const)('formats %s as %s', (value, expected) => {
+    expect(formatPercent(value as number | null | undefined)).toBe(expected)
+  })
+
+  // A dash reads as a value; brand §19 requires `n/a` for unavailable.
+  it.each([null, undefined, Number.NaN, Number.POSITIVE_INFINITY])(
+    'renders unavailable money and counts as n/a for %s',
+    (value) => {
+      expect(formatVND(value as number | null | undefined)).toBe('n/a')
+      expect(formatNumber(value as number | null | undefined)).toBe('n/a')
+    },
+  )
+})
 
 describe('dividend yield formatting', () => {
   it.each([
@@ -50,8 +78,8 @@ describe('dividend payout formatting', () => {
     [{ dividend_ratio: 0, value: 1000 }, '0'],
     [{ dividend_ratio: '10:1', value: 1000 }, '10:1'],
     [{ dividend_ratio: null, value: 0 }, 'VND0'],
-    [{ cash_dividend: null, stock_dividend: null, dividend_ratio: null, value: null }, '-'],
-    [{}, '-'],
+    [{ cash_dividend: null, stock_dividend: null, dividend_ratio: null, value: null }, 'n/a'],
+    [{}, 'n/a'],
   ])('preserves reported payout %j as %s', (row, expected) => {
     expect(formatDividendPayout(row)).toBe(expected)
   })

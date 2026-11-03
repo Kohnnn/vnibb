@@ -398,7 +398,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
               className={cn(
                   "rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
                   !selectedCategory
-                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] text-white'
+                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
               )}
             >
@@ -414,7 +414,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                 className={cn(
                   "flex items-center gap-2 rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
                   selectedCategory === category.id
-                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-primary)] text-white'
+                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                 )}
               >
@@ -456,7 +456,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                       setSaveError(null);
                       setSaveSuccess(null);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                   >
                     <Save size={12} />
                     Save current
@@ -485,7 +485,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                   <button
                     type="button"
                     onClick={handleSaveCurrent}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white hover:bg-[var(--color-accent-hover)]"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                   >
                     Save layout
                   </button>
@@ -500,7 +500,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                 </div>
               ) : null}
               {!showSaveDialog && saveError ? (
-                <div className="mt-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] font-semibold text-[var(--color-error)]">
+                <div className="mt-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] font-semibold text-[var(--color-text-primary)]">
                   {saveError}
                 </div>
               ) : null}
@@ -543,7 +543,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                         <button
                           type="button"
                           onClick={() => handleApplyTemplate(template)}
-                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white hover:bg-[var(--color-accent-hover)]"
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                         >
                           Use Layout <ChevronRight size={12} />
                         </button>
@@ -600,7 +600,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                       <button
                         type="button"
                         onClick={() => handleApplyTemplate(template)}
-                        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white hover:bg-[var(--color-accent-hover)]"
+                        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                       >
                         Use Template <ChevronRight size={12} />
                       </button>
@@ -662,7 +662,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                     <button
                       type="button"
                       onClick={() => handleApplyTemplate(template)}
-                      className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                      className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                     >
                       Use Template
                       <ChevronRight size={13} />
@@ -722,7 +722,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                 <button
                   type="button"
                   onClick={handleConfirmStarter}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                 >
                   Apply {pendingStarter.template.name}
                   <ChevronRight size={13} />

@@ -1,5 +1,6 @@
 'use client'
 
+import { EMPTY_VALUE } from '@/lib/units'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react'
 import { useFullTechnicalAnalysis } from '@/lib/queries'
@@ -27,7 +28,7 @@ function signalTone(signal: Signal | string) {
     case 'sell':
       return 'bg-[color-mix(in_srgb,var(--color-negative)_12%,transparent)] price-down border-[color-mix(in_srgb,var(--color-negative)_20%,transparent)]'
     default:
-      return 'bg-amber-500/12 text-amber-100 border-amber-500/20'
+      return 'bg-[var(--color-state-bg)] text-[var(--color-warning)] border-[var(--color-state-border)]'
   }
 }
 
@@ -151,7 +152,7 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
     <div className="flex h-full flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ShieldAlert size={13} className="text-amber-400" />
+          <ShieldAlert size={13} className="text-[var(--color-warning)]" />
           <span>Signal Summary</span>
         </div>
         <div className="flex items-center gap-2">
@@ -163,7 +164,7 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
                 onClick={() => setTimeframe(option.value)}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${
                   timeframe === option.value
-                    ? 'bg-amber-500/20 text-amber-100'
+                    ? 'bg-[var(--color-state-bg)] text-[var(--color-warning)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >
@@ -213,7 +214,7 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
                 <span>{derived.consensus}%</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-                <div className="h-full rounded-full bg-gradient-to-r from-amber-400 via-sky-400 to-emerald-400" style={{ width: `${derived.consensus}%` }} />
+                <div className="h-full rounded-full bg-gradient-to-r from-[var(--color-warning)] via-[var(--color-accent-primary)] to-[var(--color-positive)]" style={{ width: `${derived.consensus}%` }} />
               </div>
             </div>
           </div>
@@ -225,7 +226,7 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
             </div>
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-center">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Neutral</div>
-              <div className="mt-1 text-lg font-bold text-amber-200">{data.signals.neutral_count}</div>
+              <div className="mt-1 text-lg font-bold text-[var(--color-warning)]">{data.signals.neutral_count}</div>
             </div>
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-center">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Bearish</div>
@@ -237,11 +238,11 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Entry Zones</div>
               <div className="mt-1 space-y-1 text-[var(--text-primary)]">
-                <div>Current: {derived.price?.toLocaleString() || '--'}</div>
-                <div>Support 1: {derived.support?.toLocaleString() || '--'}</div>
-                <div>Support 2: {derived.support2?.toLocaleString() || '--'}</div>
-                <div>Resistance 1: {derived.resistance?.toLocaleString() || '--'}</div>
-                <div>Resistance 2: {derived.resistance2?.toLocaleString() || '--'}</div>
+                <div>Current: {derived.price?.toLocaleString() || EMPTY_VALUE}</div>
+                <div>Support 1: {derived.support?.toLocaleString() || EMPTY_VALUE}</div>
+                <div>Support 2: {derived.support2?.toLocaleString() || EMPTY_VALUE}</div>
+                <div>Resistance 1: {derived.resistance?.toLocaleString() || EMPTY_VALUE}</div>
+                <div>Resistance 2: {derived.resistance2?.toLocaleString() || EMPTY_VALUE}</div>
               </div>
             </div>
             <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
@@ -291,7 +292,7 @@ export function SignalSummaryWidget({ symbol, onDataChange }: { symbol?: string;
             </div>
           </div>
 
-          <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-[10px] text-amber-100/85">
+          <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[10px] text-[var(--color-warning)]">
             Evidence only, not advice. Use this widget as a closing read after checking trend, structure, volume, and support or resistance behavior above it.
           </div>
         </>

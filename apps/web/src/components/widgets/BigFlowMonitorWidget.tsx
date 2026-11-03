@@ -5,6 +5,7 @@ import { Waves } from 'lucide-react'
 import { useBlockTrades } from '@/lib/queries'
 import { formatTimestamp } from '@/lib/formatDate'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
+import { EMPTY_VALUE } from '@/lib/units'
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink'
@@ -34,7 +35,8 @@ const SCOPES: Array<{ value: ScopeFilter; label: string }> = [
 ]
 
 function fmtValue(value: number | null | undefined): string {
-  const abs = Math.abs(value ?? 0)
+  if (value == null || !Number.isFinite(value)) return 'n/a'
+  const abs = Math.abs(value)
   if (abs >= 1e12) return `${(abs / 1e12).toFixed(2)}T`
   if (abs >= 1e9) return `${(abs / 1e9).toFixed(1)}B`
   if (abs >= 1e6) return `${(abs / 1e6).toFixed(1)}M`
@@ -53,27 +55,43 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
   // No symbol filter: this is a market-wide tape of the largest prints.
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useBlockTrades({ limit: 100 })
 
-  const trades = useMemo(() => {
+  // A print whose value the source did not report cannot be ranked against the
+  // threshold. Count them so the header never claims the tape was exhaustive.
+  const { trades, unknownCount } = useMemo(() => {
     const minValue = threshold * 1e9
-    return (data || [])
-      .filter((trade) => (trade.value || 0) >= minValue)
-      .filter((trade) => {
-        if (scope === 'foreign') return trade.is_foreign
-        if (scope === 'proprietary') return trade.is_proprietary
-        return true
-      })
-      .sort((a, b) => (b.value || 0) - (a.value || 0))
+    const scoped = (data || []).filter((trade) => {
+      if (scope === 'foreign') return trade.is_foreign
+      if (scope === 'proprietary') return trade.is_proprietary
+      return true
+    })
+    const unknownCount = scoped.filter((trade) => typeof trade.value !== 'number' || !Number.isFinite(trade.value)).length
+    const trades = scoped
+      .filter((trade) => typeof trade.value === 'number' && Number.isFinite(trade.value) && trade.value >= minValue)
+      .sort((a, b) => b.value - a.value)
+    return { trades, unknownCount }
   }, [data, threshold, scope])
+
+  // A print with a valid value but no usable side still belongs in the tape, yet
+  // it cannot be added to either leg. Counting it keeps Buy/Sell/Net from
+  // reading as exhaustive when one leg is silently short.
+  const sideUnknownCount = useMemo(
+    () => trades.filter((trade) => trade.side !== 'BUY' && trade.side !== 'SELL').length,
+    [trades],
+  )
 
   const totals = useMemo(() => {
     let buy = 0
     let sell = 0
     for (const trade of trades) {
-      if (trade.side === 'BUY') buy += trade.value || 0
-      else if (trade.side === 'SELL') sell += trade.value || 0
+      if (trade.side === 'BUY') buy += trade.value
+      else if (trade.side === 'SELL') sell += trade.value
     }
     return { buy, sell, net: buy - sell }
   }, [trades])
+
+  // Value-side coverage is unknown when either kind of gap exists.
+  const isPartial = unknownCount > 0 || sideUnknownCount > 0
+
 
   const receivedTrades = data ?? []
   const lastDataDate = receivedTrades.reduce<string | null>((latest, trade) => {
@@ -114,13 +132,24 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
 
   if (error && !data) return <WidgetError error={error as Error} onRetry={() => refetch()} />
 
+  const awaitingFirstData = data === undefined
+
+  // Brand §22: a pending request must not flash placeholder zeros. Nothing has
+  // been reported yet, so the header counts and legs read as unavailable
+  // instead of as a measured 0.
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Waves size={12} className="text-cyan-400" />
+          <Waves size={12} className="text-[var(--color-accent-primary)]" />
           <span>Big Flow</span>
-          <span className="text-[10px] text-[var(--text-muted)]">{error ? 'Latest tape unavailable' : `${trades.length} prints ≥ ${threshold}B`}</span>
+          <span className="text-[10px] text-[var(--text-muted)]">{error
+              ? 'Latest tape unavailable'
+              : awaitingFirstData
+                  ? `Loading prints ≥ ${threshold}B…`
+                  // `unknownCount` counts prints with no reported value, not prints
+                  // that fell below the threshold, so the label names the real gap.
+                  : `${trades.length} prints ≥ ${threshold}B${unknownCount ? ` · ${unknownCount} without a reported value` : ''}`}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1">
@@ -131,7 +160,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
                 onClick={() => setThreshold(value)}
                 className={
                   threshold === value
-                    ? 'rounded bg-cyan-600/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300'
+                    ? 'rounded bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-primary)]'
                     : 'rounded px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }
               >
@@ -147,7 +176,7 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
                 onClick={() => setScope(item.value)}
                 className={
                   scope === item.value
-                    ? 'rounded bg-violet-600/20 px-1.5 py-0.5 text-[10px] font-bold text-violet-300'
+                    ? 'rounded bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-primary)]'
                     : 'rounded px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }
               >
@@ -160,17 +189,19 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
 
       <div className="mb-2 grid grid-cols-3 gap-2 px-1 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Buy</div>
-          <div className="font-mono text-emerald-300">{fmtValue(totals.buy)}</div>
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Buy{isPartial ? ' · partial' : ''}</div>
+          <div className="font-mono text-[var(--color-positive)]">{awaitingFirstData ? EMPTY_VALUE : fmtValue(totals.buy)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Sell</div>
-          <div className="font-mono text-red-300">{fmtValue(totals.sell)}</div>
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Sell{isPartial ? ' · partial' : ''}</div>
+          <div className="font-mono text-[var(--color-negative)]">{awaitingFirstData ? EMPTY_VALUE : fmtValue(totals.sell)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-          <div className="text-[var(--text-muted)] uppercase tracking-widest">Net</div>
-          <div className={`font-mono ${totals.net > 0 ? 'text-emerald-300' : totals.net < 0 ? 'text-red-300' : 'text-[var(--text-secondary)]'}`}>
-            {totals.net >= 0 ? '+' : '-'}{fmtValue(totals.net)}
+          <div className="text-[var(--text-muted)] uppercase tracking-widest">Net{isPartial ? ' · partial' : ''}</div>
+          <div className={`font-mono ${totals.net > 0 ? 'text-[var(--color-positive)]' : totals.net < 0 ? 'text-[var(--color-negative)]' : 'text-[var(--text-secondary)]'}`}>
+            {awaitingFirstData
+              ? EMPTY_VALUE
+              : `${totals.net > 0 ? '+' : totals.net < 0 ? '-' : ''}${fmtValue(totals.net)}`}
           </div>
         </div>
       </div>
@@ -180,6 +211,12 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
         <WidgetSkeleton lines={8} />
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
+      ) : !hasData && unknownCount ? (
+        <WidgetEmpty
+          message="No classified block trades above this threshold"
+          icon={<Waves size={18} />}
+          detail={`${unknownCount} print${unknownCount === 1 ? '' : 's'} had no finite reported value, so the tape may contain trades above this threshold.`}
+        />
       ) : !hasData ? (
         <WidgetEmpty
           message="No block trades above this threshold"
@@ -207,21 +244,21 @@ export function BigFlowMonitorWidget({ id, symbol, widgetGroup, onSymbolClick, o
                       <button
                         type="button"
                         onClick={() => selectSymbol(trade.symbol)}
-                        className={`font-bold hover:underline ${trade.symbol === symbol ? 'text-cyan-300' : 'text-[var(--accent-blue)]'}`}
+                        className={`font-bold hover:underline ${trade.symbol === symbol ? 'text-[var(--color-accent-primary)]' : 'text-[var(--accent-blue)]'}`}
                       >
                         {trade.symbol}
                       </button>
                     ) : <span title="Ticker local to this widget; use its ticker selector to change it">{trade.symbol}</span>}
                   </td>
-                  <td className={`px-1 py-1 font-semibold ${trade.side === 'BUY' ? 'text-emerald-400' : trade.side === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
+                  <td className={`px-1 py-1 font-semibold ${trade.side === 'BUY' ? 'text-[var(--color-positive)]' : trade.side === 'SELL' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]'}`}>
                     {trade.side || '—'}
                   </td>
                   <td className="px-1 py-1 text-right font-mono">{fmtValue(trade.value)}</td>
-                  <td className="px-1 py-1 text-right font-mono">{trade.price ? trade.price.toLocaleString() : '—'}</td>
+                  <td className="px-1 py-1 text-right font-mono">{typeof trade.price !== 'number' || !Number.isFinite(trade.price) ? 'n/a' : trade.price.toLocaleString()}</td>
                   <td className="px-1 py-1">
                     <span className="inline-flex gap-1">
                       {trade.is_foreign && (
-                        <span className="rounded border border-blue-500/25 bg-blue-500/10 px-1 text-[9px] font-bold uppercase text-blue-300">F</span>
+                        <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1 text-[9px] font-bold uppercase text-[var(--color-accent-primary)]">F</span>
                       )}
                       {trade.is_proprietary && (
                         <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1 text-[9px] font-bold uppercase text-[var(--color-warning)]">P</span>

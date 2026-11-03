@@ -10,6 +10,8 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { formatPercent } from '@/lib/units';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface OBVDivergenceWidgetProps {
   symbol: string;
@@ -146,9 +148,9 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
         : 'No Divergence';
   const signalClass =
     signal === 'bullish'
-      ? 'text-emerald-300'
+      ? 'text-[var(--color-positive)]'
       : signal === 'bearish'
-        ? 'text-red-300'
+        ? 'text-[var(--color-negative)]'
         : 'text-[var(--text-secondary)]';
 
   if (!upperSymbol) {
@@ -159,7 +161,7 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Activity size={12} className="text-cyan-400" />
+          <Activity size={12} className="text-[var(--color-accent-primary)]" />
           <span>OBV vs Price ({lookback}D)</span>
         </div>
         <WidgetMeta
@@ -206,18 +208,16 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Price %</div>
-                <div className={`text-xs font-mono ${priceDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {priceDeltaPct >= 0 ? '+' : ''}
-                  {priceDeltaPct.toFixed(2)}%
+                <div className={`text-xs font-mono ${signedToneClass(priceDeltaPct)}`}>
+                  {formatPercent(priceDeltaPct, { input: 'percent', decimals: 2, signed: true })}
                 </div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="OBV B%: Bollinger Band %B applied to On-Balance-Volume. Values outside ±300% indicate OBV is far below/above its 20-period band; usually means the price-volume divergence is extreme rather than a calculation error.">
                 <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">OBV %</div>
-                <div className={`text-xs font-mono ${obvDeltaPct >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {obvDeltaPct >= 0 ? '+' : ''}
+                <div className={`text-xs font-mono ${signedToneClass(obvDeltaPct)}`}>
                   {Math.abs(obvDeltaPct) > 300
                     ? `${obvDeltaPct > 0 ? '>' : '<'} ${obvDeltaPct > 0 ? '+' : '-'}300%`
-                    : `${obvDeltaPct.toFixed(2)}%`}
+                    : formatPercent(obvDeltaPct, { input: 'percent', decimals: 2, signed: true })}
                 </div>
               </div>
             </div>
@@ -232,15 +232,15 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
                   <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0">{String(point.time).slice(5, 10)}</div>
                   <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                     <div
-                      className={`h-full ${isUp ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
+                      className={`h-full ${isUp ? 'bg-[var(--color-positive-bg)]' : 'bg-[var(--color-negative-bg)]'}`}
                       style={{ width: `${Math.max(2, widthPct)}%` }}
                     />
                   </div>
                   <div className="w-16 text-[10px] text-[var(--text-secondary)] text-right font-mono">{formatCompact(point.value)}</div>
                   {isUp ? (
-                    <TrendingUp size={10} className="text-emerald-400" />
+                    <TrendingUp size={10} className="text-[var(--color-positive)]" />
                   ) : (
-                    <TrendingDown size={10} className="text-red-400" />
+                    <TrendingDown size={10} className="text-[var(--color-negative)]" />
                   )}
                 </div>
               );

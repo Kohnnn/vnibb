@@ -503,7 +503,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         value={effectiveChartType}
                         onChange={(e) => setChartType(e.target.value as 'overview' | 'margins' | 'sankey')}
                         aria-label="Income statement chart mode"
-                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-state-border)] uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Revenue & Profit</option>
                         <option value="margins">Margins %</option>
@@ -628,7 +628,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 className={cn(
                                     "p-1 rounded transition-all",
                                     viewMode === 'table'
-                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                                         : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 )}
                                 title="Table View"
@@ -643,7 +643,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 className={cn(
                                     "p-1 rounded transition-all",
                                     viewMode === 'chart'
-                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                                         : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 )}
                                 title="Chart View"

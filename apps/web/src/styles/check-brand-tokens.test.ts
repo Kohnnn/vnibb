@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -17,6 +17,15 @@ const tokens = readFileSync(join(stylesDir, "design-tokens.css"), "utf8");
 const globals = readFileSync(join(appDir, "globals.css"), "utf8");
 const layout = readFileSync(join(appDir, "layout.tsx"), "utf8");
 const accessibility = readFileSync(join(stylesDir, "accessibility.css"), "utf8");
+
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (/\.(tsx?|css)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
 
 const lightBlock = (() => {
   // Comment-free slice: find the light selector, then its opening brace and the
@@ -172,11 +181,18 @@ describe("probability-band and loss-mode remap (brand §13)", () => {
     }
   });
 
-  it("remaps loss colours, not only gains", () => {
-    // Regression: only emerald-* was remapped, so color-vision mode left every
-    // red/rose loss colour untouched.
-    expect(globals).toMatch(/colorblind'\] \.text-red-400[\s\S]{0,200}--color-negative/);
-    expect(globals).toMatch(/colorblind'\] \.text-rose-400[\s\S]{0,200}--color-negative/);
-    expect(globals).toMatch(/colorblind'\] \.text-green-500[\s\S]{0,200}--color-positive/);
+  it("leaves no raw palette class for the colorblind mode to remap", () => {
+    // The swap works because colour comes from tokens. The old emerald/red
+    // class overrides existed only to patch markup that bypassed them; every
+    // component now uses tokens, so no raw palette class may return.
+    const rawPalette = /\b(?:text|bg|border|ring|fill|stroke)-(?:emerald|green|red|rose|amber|cyan|blue|violet|purple|fuchsia|orange)-\d{2,3}\b/;
+    for (const dir of ["components", "app", "hooks", "lib"]) {
+      const root = join(stylesDir, "..", dir);
+      for (const file of walk(root)) {
+        if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
+        const source = readFileSync(file, "utf8");
+        expect([file, source.match(rawPalette)?.[0]]).toEqual([file, undefined]);
+      }
+    }
   });
 });

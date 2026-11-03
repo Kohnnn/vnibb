@@ -185,7 +185,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
                 <button
                   onClick={() => fetchNextPage()}
                   disabled={isFetchingNextPage}
-                  className="w-full py-4 text-center text-[10px] font-black uppercase text-blue-500 hover:text-blue-400 hover:bg-[var(--bg-hover)] transition-all"
+                  className="w-full py-4 text-center text-[10px] font-black uppercase text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] hover:bg-[var(--bg-hover)] transition-all"
                 >
                   {isFetchingNextPage ? (
                     <div className="flex items-center justify-center gap-2">

@@ -39,7 +39,7 @@ export function AnnotationToolbar({
             className={cn(
                 "p-1.5 rounded transition-all",
                 selectedTool === tool.id
-                    ? "bg-[var(--color-accent-primary)] text-white shadow-lg"
+                    ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg"
                     : "text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
             )}
             title={tool.label}

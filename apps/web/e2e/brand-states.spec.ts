@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { readFileSync, statSync } from 'node:fs';
 
 /**
  * #202 state matrix.
@@ -90,7 +91,18 @@ async function baseRoutes(
       return route.fulfill(json({ data, meta: { count: data.length, source: 'live' } }));
     }
     if (path.endsWith('/market/freshness')) {
-      return route.fulfill(json({ overall: 'fresh', buckets: [] }));
+      // `buckets: []` is the banner's "status unavailable" signal, so an empty
+      // list with `overall: 'fresh'` is a payload the UI must not render as
+      // fresh. Give the shared default one real bucket instead.
+      return route.fulfill(json({
+        timestamp: '2026-11-03T07:00:00Z',
+        overall: 'fresh',
+        buckets: [{
+          label: 'Prices', status: 'fresh', reason: null,
+          raw_last_data_date: '2026-11-03', settled_last_data_date: '2026-11-03',
+          age_days: 0, last_data_date: '2026-11-03', detail: null, scope: 'hose_quotes',
+        }],
+      }));
     }
     if (path.includes('/news/feed')) return route.fulfill(json({ articles: [] }));
     if (path.includes('/system-layouts')) return route.fulfill(json({ data: [] }));
@@ -131,6 +143,7 @@ test('partial freshness shows the bucket line and keeps critical styling neutral
   await mount(page, [{ type: 'key_metrics' }]);
   await baseRoutes(page, {
     '/market/freshness': (route) => route.fulfill(json({
+      timestamp: '2026-11-01T07:00:00Z',
       overall: 'partial',
       buckets: [{
         label: 'Prices', status: 'partial', reason: 'latest_sync_unsettled',
@@ -197,15 +210,77 @@ test('PNG export downloads a real image for a chart widget', async ({ page }) =>
   const file = await download;
   const path = await file.path();
   expect(path).toBeTruthy();
-  const { statSync, readFileSync } = await import('node:fs');
   expect(statSync(path!).size).toBeGreaterThan(2000);
   // PNG magic bytes prove a real image, not an error page saved as .png.
   expect(readFileSync(path!).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-  // Not asserted: a light export surface. `exportToPNG` paints whatever theme is
-  // live, and a chart's candles/background are baked into its own canvas bitmap
-  // at creation (TradingViewAdvancedChart reads --bg-primary), so html2canvas
-  // copies those dark pixels regardless of CSS theming. Brand §14 wants light
-  // exports by default; that needs the chart re-rendered on a light palette
-  // before capture, which this spec does not do. Tracked as an open gap.
+  // Brand §14: exports are light even though this dashboard renders dark. A
+  // canvas bakes its colours into pixels, so the chart answers the capture
+  // request with its own light rendering. Probe inside the chart's own box
+  // rather than the image's rounded corner, and require ink as well as paper:
+  // an all-white image would pass a corner check while shipping no data.
+  const box = await widget.locator('#states-widget-0').evaluate((element) => {
+    const canvas = element.querySelector('canvas');
+    if (!canvas) return null;
+    const target = element.getBoundingClientRect();
+    const chart = canvas.getBoundingClientRect();
+    return {
+      targetWidth: target.width,
+      targetHeight: target.height,
+      left: chart.left - target.left,
+      top: chart.top - target.top,
+      width: chart.width,
+      height: chart.height,
+    };
+  });
+  expect(box).not.toBeNull();
 
+  const bytes = readFileSync(path!).toString('base64');
+  const probe = await page.evaluate(async ({ data, region }) => {
+    const response = await fetch(`data:image/png;base64,${data}`);
+    const bitmap = await createImageBitmap(await response.blob());
+    const surface = document.createElement('canvas');
+    surface.width = bitmap.width;
+    surface.height = bitmap.height;
+    const ctx = surface.getContext('2d')!;
+    ctx.drawImage(bitmap, 0, 0);
+
+    const scale = bitmap.width / region.targetWidth;
+    const x = Math.max(0, Math.round(region.left * scale) + 2);
+    const y = Math.max(0, Math.round(region.top * scale) + 2);
+    const w = Math.min(bitmap.width - x, Math.max(1, Math.round(region.width * scale) - 4));
+    const h = Math.min(bitmap.height - y, Math.max(1, Math.round(region.height * scale) - 4));
+    const plot = ctx.getImageData(x, y, w, h).data;
+
+    let light = 0;
+    let candles = 0;
+    for (let index = 0; index < plot.length; index += 4) {
+      const [r, g, b] = [plot[index], plot[index + 1], plot[index + 2]];
+      if (r > 240 && g > 240 && b > 240) light += 1;
+      if (r < 110 && g > 70 && g < 190 && g > r * 1.3 && g > b * 1.1) candles += 1;
+    }
+    const total = plot.length / 4;
+    const footerTop = Math.floor(region.targetHeight * scale);
+    const footerHeight = bitmap.height - footerTop;
+    const footer = footerHeight > 0 ? ctx.getImageData(0, footerTop, bitmap.width, footerHeight).data : [];
+    let footerInk = 0;
+    let footerLight = 0;
+    for (let index = 0; index < footer.length; index += 4) {
+      const [r, g, b] = [footer[index], footer[index + 1], footer[index + 2]];
+      if (r < 180 && g < 180 && b < 180) footerInk += 1;
+      if (r > 240 && g > 240 && b > 240) footerLight += 1;
+    }
+    return { light: light / total, candles, footerHeight, footerInk, footerLight: footerLight / (footer.length / 4) };
+  }, { data: bytes, region: box! });
+
+  // Paper dominates a light chart, and the rising candles remain visible.
+  expect(probe.light).toBeGreaterThan(0.5);
+  expect(probe.candles).toBeGreaterThan(25);
+  // A strip exists below the widget and contains text, not just white pixels.
+  expect(probe.footerHeight).toBeGreaterThan(10);
+  expect(probe.footerLight).toBeGreaterThan(0.5);
+  expect(probe.footerInk).toBeGreaterThan(25);
+  // The temporary light swap must not persist into the user's saved preference.
+  expect(await page.evaluate(() => localStorage.getItem('vnibb-theme'))).toBe('dark');
+  expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('dark');
 });
+

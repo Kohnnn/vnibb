@@ -1,4 +1,5 @@
 'use client';
+import { EMPTY_VALUE } from '@/lib/units';
 
 /**
  * Per-source freshness panel for Settings → Data Sources.
@@ -76,7 +77,7 @@ function formatLastUpdated(iso: string | null): string {
 }
 
 function formatAgeDays(age: number | null): string {
-  if (age === null || age === undefined) return '—';
+  if (age === null || age === undefined) return EMPTY_VALUE;
   if (age < 1) return 'today';
   if (age < 2) return '1 day ago';
   return `${Math.floor(age)} days ago`;
@@ -152,7 +153,7 @@ export function DataSourcesHealthPanel() {
                     <StatusPill status={src.status} scope={src.scope} />
                   </td>
                   <td className="px-3 py-2 align-top text-[10px] leading-4 text-[var(--text-muted)]">
-                    {src.next_sync ?? '—'}
+                    {src.next_sync ?? EMPTY_VALUE}
                   </td>
                 </tr>
               ))}

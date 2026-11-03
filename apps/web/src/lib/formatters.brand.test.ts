@@ -9,7 +9,7 @@ test('screener change keeps percentage-point scale', () => {
   expect(formatScreenerValue(1.25, 'change')).toBe('+1.25%');
   expect(formatScreenerValue(-2.5, 'change')).toBe('-2.50%');
   expect(formatScreenerValue(0, 'change')).toBe('0.00%');
-  expect(formatScreenerValue(null, 'change')).toBe('—');
+  expect(formatScreenerValue(null, 'change')).toBe('n/a');
 });
 
 test('screener percent does not rescale sub-1 values', () => {

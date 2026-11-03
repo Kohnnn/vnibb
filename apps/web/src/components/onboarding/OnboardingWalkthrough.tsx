@@ -412,7 +412,7 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
             {routeError ? <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-warning)]">{routeError}</p> : null}
             <div className="mt-5 flex items-center justify-between gap-3">
               <button type="button" onClick={() => { setStage('goal'); setSelectedGoal(null); setRouteError('') }} className="inline-flex min-h-10 items-center gap-1.5 px-1 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={14} />Back</button>
-              <button type="submit" className="inline-flex min-h-10 items-center gap-2 rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-[var(--color-accent-hover)]">Open {presentation?.result}<ArrowRight size={14} /></button>
+              <button type="submit" className="inline-flex min-h-10 items-center gap-2 rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-xs font-bold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]">Open {presentation?.result}<ArrowRight size={14} /></button>
             </div>
           </form>
         ) : null}
@@ -438,7 +438,7 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
               <button type="button" onClick={() => finish()} className="min-h-9 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">Exit tour</button>
               <div className="flex items-center gap-2">
                 {!isFinalStep && stepIndex > 0 ? <button type="button" onClick={() => setStepIndex((current) => current - 1)} className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-strong)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"><ArrowLeft size={14} />Back</button> : null}
-                <button type="button" data-walkthrough-initial-focus="true" onClick={() => isFinalStep ? finish(selectedGoal !== 'scan_market') : setStepIndex((current) => current + 1)} className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-[var(--color-accent-hover)]">
+                <button type="button" data-walkthrough-initial-focus="true" onClick={() => isFinalStep ? finish(selectedGoal !== 'scan_market') : setStepIndex((current) => current + 1)} className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-xs font-bold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]">
                   {isFinalStep ? <><Check size={14} />{presentation?.finalAction}</> : <>Next<ArrowRight size={14} /></>}
                 </button>
               </div>

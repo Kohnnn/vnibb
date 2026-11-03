@@ -335,7 +335,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         {/* Header */}
                         <div className="p-4 border-b border-[var(--border-default)] flex items-center justify-between bg-[var(--bg-elevated)]">
                             <div className="flex items-center gap-2">
-                                <Layers size={18} className="text-blue-500" />
+                                <Layers size={18} className="text-[var(--color-accent-primary)]" />
                                 <div>
                                     <span className="text-sm font-black uppercase tracking-widest text-[var(--text-primary)]">Add Widgets</span>
                                     <p className="mt-0.5 text-[10px] font-medium text-[var(--text-muted)]">Pick one widget, select many, or add a curated bundle.</p>
@@ -360,7 +360,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     placeholder="Search widgets, bundles, or data sources..."
-                                    className="w-full pl-9 pr-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-blue-500/50 transition-all font-medium"
+                                    className="w-full pl-9 pr-3 py-2 bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--color-state-border)] transition-all font-medium"
                                 />
                             </div>
                         </div>
@@ -393,7 +393,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         type="button"
                                                         onClick={() => handleAddBundle(bundle)}
                                                         disabled={!dashboardEditable}
-                                                        className="shrink-0 rounded-lg bg-blue-600 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        className="shrink-0 rounded-lg bg-[var(--color-accent-fill)] px-2.5 py-1.5 text-[9px] font-black uppercase tracking-[0.14em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-fill)] disabled:cursor-not-allowed disabled:opacity-50"
                                                     >
                                                         Add
                                                     </button>
@@ -429,10 +429,10 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                 <button
                                                     key={type}
                                                     onClick={() => handleAddWidget(widget)}
-                                                    className="p-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-blue-500/50 hover:bg-blue-500/5 transition-all text-left group"
+                                                    className="p-2 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-default)] hover:border-[var(--color-state-border)] hover:bg-[var(--color-state-bg)] transition-all text-left group"
                                                 >
                                                     <div className="mb-1 flex items-start justify-between gap-2">
-                                                        <div className="text-[10px] font-bold text-[var(--text-secondary)] group-hover:text-blue-400 truncate uppercase tracking-tighter">
+                                                        <div className="text-[10px] font-bold text-[var(--text-secondary)] group-hover:text-[var(--color-accent-primary)] truncate uppercase tracking-tighter">
                                                             {widget.name}
                                                         </div>
                                                         <Checkbox
@@ -465,18 +465,18 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                             onClick={() => setActiveCategory(isExpanded && searchQuery === '' ? null : cat.id)}
                                             className={cn(
                                                 "w-full flex items-center justify-between px-4 py-3 text-left transition-colors",
-                                                isExpanded ? "bg-blue-600/5" : "hover:bg-[var(--bg-hover)]"
+                                                isExpanded ? "bg-[var(--color-state-bg)]" : "hover:bg-[var(--bg-hover)]"
                                             )}
                                         >
                                             <div className="flex items-center gap-3">
-                                                <Icon size={16} className={cn(isExpanded ? "text-blue-400" : "text-[var(--text-muted)]")} />
+                                                <Icon size={16} className={cn(isExpanded ? "text-[var(--color-accent-primary)]" : "text-[var(--text-muted)]")} />
                                                 <span className={cn("text-[11px] font-bold uppercase tracking-tighter", isExpanded ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]")}>
                                                     {cat.name}
                                                 </span>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[10px] text-[var(--text-muted)] font-black">{cat.widgets.length}</span>
-                                                <ChevronRight size={14} className={cn("text-[var(--text-muted)] transition-transform duration-200", isExpanded && "rotate-90 text-blue-500")} />
+                                                <ChevronRight size={14} className={cn("text-[var(--text-muted)] transition-transform duration-200", isExpanded && "rotate-90 text-[var(--color-accent-primary)]")} />
                                             </div>
                                         </button>
 
@@ -513,7 +513,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         className={cn(
                                                             "p-3 rounded-xl border transition-all group cursor-default",
                                                             selectedWidgetTypes.includes(widget.type)
-                                                                ? "border-blue-500/40 bg-blue-500/5"
+                                                                ? "border-[var(--color-state-border)] bg-[var(--color-state-bg)]"
                                                                 : "border-transparent hover:border-[var(--border-default)] hover:bg-[var(--bg-surface)]"
                                                         )}
                                                     >
@@ -526,7 +526,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                     disabled={!dashboardEditable}
                                                                 />
                                                                 <div className="min-w-0">
-                                                                    <div className="text-[11px] font-black text-[var(--text-primary)] group-hover:text-blue-400 transition-colors uppercase tracking-tight">
+                                                                    <div className="text-[11px] font-black text-[var(--text-primary)] group-hover:text-[var(--color-accent-primary)] transition-colors uppercase tracking-tight">
                                                                         {widget.name}
                                                                     </div>
                                                                 </div>
@@ -535,7 +535,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                 onClick={() => handleAddWidget(widget)}
                                                                 disabled={!dashboardEditable}
                                                                 title={dashboardEditable ? `Add ${widget.name}` : 'Main dashboard is read-only'}
-                                                                className="rounded-lg bg-blue-600 px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white transition-all hover:bg-blue-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                                                                className="rounded-lg bg-[var(--color-accent-fill)] px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-[var(--color-on-accent)] transition-all hover:bg-[var(--color-accent-fill)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                                                             >
                                                                 <span className="flex items-center gap-1">
                                                                     <Plus size={12} strokeWidth={3} />
@@ -548,7 +548,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                         </div>
                                                         <div className="mt-2 flex flex-wrap items-center gap-2">
                                                             {widget.recommended && (
-                                                                <div className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+                                                                <div className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--color-positive)]">
                                                                     Recommended
                                                                 </div>
                                                             )}
@@ -559,7 +559,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                 {getWidgetDataLabel(widget.type)}
                                                             </div>
                                                             <div className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                                                                <Maximize2 size={10} className="text-blue-400/60" />
+                                                                <Maximize2 size={10} className="text-[var(--color-accent-primary)]" />
                                                                 {libraryLayout.w}x{libraryLayout.h}
                                                             </div>
                                                         </div>
@@ -571,7 +571,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                                                 <span className="text-[7px] font-bold text-[var(--text-muted)] bg-[var(--bg-surface)] px-1 rounded">
                                                                     {libraryLayout.w}×{libraryLayout.h}
                                                                 </span>
-                                                                <Maximize2 size={10} className="text-blue-400/60" />
+                                                                <Maximize2 size={10} className="text-[var(--color-accent-primary)]" />
                                                             </div>
                                                         </div>
                                                     </div>
@@ -608,7 +608,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         <div className="p-4 border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
                             <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-3 text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
-                                    <Info size={14} className="text-blue-500" />
+                                    <Info size={14} className="text-[var(--color-accent-primary)]" />
                                     <span>
                                         {selectedWidgetTypes.length > 0
                                             ? `${selectedWidgetTypes.length} selected`
@@ -629,7 +629,7 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                         type="button"
                                         onClick={handleAddSelected}
                                         disabled={!dashboardEditable || selectedWidgetTypes.length === 0}
-                                        className="rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-lg bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-fill)] disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                         Add Selected ({selectedWidgetTypes.length})
                                     </button>

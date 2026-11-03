@@ -101,10 +101,10 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
   const latestCards = useMemo(() => {
     if (!latest) return [];
     return [
-      { key: 'loan_to_deposit', icon: Landmark, accent: 'text-sky-300' },
-      { key: 'nim', icon: TrendingUp, accent: 'text-emerald-300' },
+      { key: 'loan_to_deposit', icon: Landmark, accent: 'text-[var(--color-accent-primary)]' },
+      { key: 'nim', icon: TrendingUp, accent: 'text-[var(--color-accent-secondary)]' },
       { key: 'credit_cost', icon: ShieldCheck, accent: 'text-[var(--color-warning)]' },
-      { key: 'equity_to_assets', icon: Building2, accent: 'text-cyan-300' },
+      { key: 'equity_to_assets', icon: Building2, accent: 'text-[var(--color-accent-primary)]' },
     ].map((item) => ({
       ...item,
       value: latest[item.key as keyof typeof latest] as number | null | undefined,

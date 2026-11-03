@@ -17,7 +17,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
-import { formatCompactValueForUnit } from '@/lib/units';
+import { EMPTY_VALUE, formatCompactValueForUnit, formatPercent } from '@/lib/units';
 import { formatShortDate } from '@/lib/formatDate';
 import { cn } from '@/lib/utils';
 
@@ -57,23 +57,36 @@ function clampLabelSize(width: number, height: number): number {
     return Math.max(10, Math.min(18, Math.min(width / 7.5, height / 2.4)));
 }
 
-// Color scale based on Phase 20 MD. A group whose change is unknown is not a flat
-// 0% group: coercing a missing change to 0 painted the neutral band and printed
-// "+0.00%", a fabricated neutral market read (issue #107). Unknown gets its own
-// slate colour and a "—" label.
-const UNKNOWN_CHANGE_COLOR = 'rgb(71, 85, 105)'; // slate-600
+// A group whose change is unknown is not a flat 0% group: coercing a missing
+// change to 0 painted the neutral band and printed "+0.00%", a fabricated
+// neutral market read (issue #107). Unknown keeps its own darker neutral fill
+// and a "—" label.
+const UNKNOWN_CHANGE_COLOR = 'color-mix(in srgb, var(--text-muted, #929aa8) 42%, black)';
+
+// Treemap tiles carry white labels, so each band must be dark enough for white
+// text (>=4.5:1). Mixing the semantic direction token with black keeps gain/loss
+// meaning and follows the colour-vision swap, which a fixed rgb() ramp did not:
+// the old scale darkened toward cyan/blue, so the biggest gain and the biggest
+// loss read as a third category, and the neutral band was yellow.
+function band(token: string, strength: number): string {
+    return `color-mix(in srgb, var(${token}) ${strength}%, black)`;
+}
+
+const HEAT_GAIN = [band('--color-positive', 55), band('--color-positive', 46), band('--color-positive', 38), band('--color-positive', 30)];
+const HEAT_LOSS = [band('--color-negative', 55), band('--color-negative', 46), band('--color-negative', 38), band('--color-negative', 30)];
+const HEAT_NEUTRAL = band('--text-muted', 62);
 
 function getHeatmapColor(change: number | null | undefined): string {
     if (change === null || change === undefined || !Number.isFinite(change)) return UNKNOWN_CHANGE_COLOR;
-    if (change >= 6.9) return 'rgb(6, 182, 212)'; // cyan-500 (Ceiling)
-    if (change >= 4) return 'rgb(34, 197, 94)';   // green-500
-    if (change >= 2) return 'rgb(22, 163, 74)';   // green-600
-    if (change >= 0.5) return 'rgb(21, 128, 61)'; // green-700
-    if (change >= -0.5) return 'rgb(202, 138, 4)'; // yellow-600 (Neutral)
-    if (change >= -2) return 'rgb(185, 28, 28)';   // red-700
-    if (change >= -4) return 'rgb(220, 38, 38)';   // red-600
-    if (change <= -6.9) return 'rgb(59, 130, 246)'; // blue-500 (Floor)
-    return 'rgb(239, 68, 68)'; // red-500
+    if (change >= 6.9) return HEAT_GAIN[3];
+    if (change >= 4) return HEAT_GAIN[2];
+    if (change >= 2) return HEAT_GAIN[1];
+    if (change >= 0.5) return HEAT_GAIN[0];
+    if (change >= -0.5) return HEAT_NEUTRAL;
+    if (change >= -2) return HEAT_LOSS[0];
+    if (change >= -4) return HEAT_LOSS[1];
+    if (change >= -6.9) return HEAT_LOSS[2];
+    return HEAT_LOSS[3];
 }
 
 function buildTreemapLayout(data: unknown, width: number, height: number) {
@@ -97,6 +110,9 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
     const [groupBy, setGroupBy] = useState<HeatmapGroupBy>('sector');
     const [exchange, setExchange] = useState<HeatmapExchange>('HOSE');
     const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+    // Roving tabindex: the treemap is one tab stop, arrows move within it.
+    const [tileIndex, setTileIndex] = useState(0);
+    const tileRefs = useRef<Array<SVGRectElement | null>>([]);
     const heatmapRef = useRef<HTMLDivElement>(null);
     const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'market_heatmap' });
     const { config: unitConfig } = useUnit();
@@ -196,7 +212,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                         }}
                         className={cn(
                             "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
-                            groupBy === presetGroupBy ? "bg-blue-600 text-white shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                            groupBy === presetGroupBy ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                         )}
                     >
                         {label}
@@ -215,7 +231,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                         }}
                         className={cn(
                             "px-2 py-0.5 text-[9px] font-bold rounded transition-all",
-                            exchange === m ? "bg-blue-600 text-white shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                            exchange === m ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-sm" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                         )}
                     >
                         {m}
@@ -225,7 +241,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
 
             <button
                 onClick={handleExport}
-                className="p-1 text-[var(--text-muted)] hover:text-blue-400 transition-colors"
+                className="p-1 text-[var(--text-muted)] hover:text-[var(--color-accent-primary)] transition-colors"
                 title="Export Image"
             >
                 <Download size={14} />
@@ -311,8 +327,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                     <span>{selectedGroup ? `${selectedGroup} Constituents` : `${HEATMAP_GROUP_LABELS[groupBy]} Heatmap`}</span>
                                     <span>Size: {sizeLabel}</span>
                                 </div>
+                                {/* Tiles are now real buttons, so the hint must not
+                                    promise only a pointer interaction. */}
                                 <span className="text-[10px] text-[var(--text-muted)]">
-                                    {selectedGroup ? 'Click a stock to sync the dashboard symbol' : 'Click a block to drill down'}
+                                    {selectedGroup ? 'Select a stock to sync the dashboard symbol' : 'Select a block to drill down'}
                                 </span>
                             </div>
                             <div className="min-h-0 flex-1">
@@ -322,6 +340,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                         if (!treemapLayout) {
                                             return <div className="h-full w-full" />;
                                         }
+                                        // A drilldown can shrink the tile list; keep the
+                                        // roving stop inside the rendered range.
+                                        const tileCount = treemapLayout.leaves().length;
+                                        const activeTile = tileCount > 0 ? Math.min(tileIndex, tileCount - 1) : 0;
 
                                         return (
                                              <svg
@@ -329,10 +351,13 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                  height="100%"
                                                  viewBox={`0 0 ${Math.max(320, Math.floor(containerWidth))} ${Math.max(240, Math.floor(containerHeight))}`}
                                                  preserveAspectRatio="none"
-                                                 role="img"
-                                                 aria-label={`Market heatmap grouped by ${groupBy}`}
+                                                // A named <svg> implies role="img", which makes every
+                                                // descendant presentational — the sector/symbol controls
+                                                // would disappear from the accessibility tree.
+                                                role="group"
+                                                aria-label={`Market heatmap grouped by ${groupBy}`}
                                              >
-                                                {treemapLayout.leaves().map((node: any) => {
+                                                {treemapLayout.leaves().map((node: any, index: number) => {
                                                     const width = node.x1 - node.x0;
                                                     const height = node.y1 - node.y0;
                                                     const rawChange = node.data.changePct;
@@ -346,7 +371,14 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                     const canShowTitle = width > 70 && height > 34;
                                                     const canShowDetail = width > 120 && height > 56;
                                                     const nodeKey = node.data.symbol || node.data.sector || node.data.name;
-
+                                                    const activatesSymbol = Boolean(selectedGroup && node.data.symbol);
+                                                    const activate = () => {
+                                                        if (activatesSymbol) {
+                                                            setLinkedSymbol(node.data.symbol)
+                                                            return
+                                                        }
+                                                        setSelectedGroup(node.data.sector || node.data.name)
+                                                    }
                                                     return (
                                                         <g key={nodeKey} className="group transition-opacity hover:opacity-100">
                                                             <rect
@@ -355,23 +387,42 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                 width={width}
                                                                 height={height}
                                                                 fill={color}
-                                                                className="cursor-pointer transition-all hover:brightness-110"
+                                                                className="cursor-pointer transition-all hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]"
                                                                 stroke="rgba(255,255,255,0.18)"
                                                                 strokeWidth={1}
                                                                 rx={8}
                                                                 ry={8}
-                                                                onClick={() => {
-                                                                    if (selectedGroup && node.data.symbol) {
-                                                                        setLinkedSymbol(node.data.symbol)
+                                                                role="button"
+                                                                // One tab stop for the whole treemap: `limit: 500`
+                                                                // would otherwise put 500 stops before the next widget.
+                                                                // Arrow keys move the roving stop between tiles.
+                                                                tabIndex={index === activeTile ? 0 : -1}
+                                                                aria-label={
+                                                                    activatesSymbol
+                                                                        ? `Select ${node.data.symbol}`
+                                                                        : `Open ${node.data.sector || node.data.name} constituents`
+                                                                }
+                                                                onClick={activate}
+                                                                onKeyDown={(event) => {
+                                                                    if (event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                                                                        || event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+                                                                        event.preventDefault()
+                                                                        const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+                                                                        const next = (index + delta + tileCount) % tileCount
+                                                                        setTileIndex(next)
+                                                                        tileRefs.current[next]?.focus()
                                                                         return
                                                                     }
-                                                                    setSelectedGroup(node.data.sector || node.data.name)
+                                                                    if (event.key !== 'Enter' && event.key !== ' ') return
+                                                                    event.preventDefault()
+                                                                    activate()
                                                                 }}
+                                                                ref={(element) => { tileRefs.current[index] = element }}
                                                             >
                                                                 <title>
                                                                     {node.data.symbol || node.data.name}
                                                                     {node.data.sector ? `\nSector: ${node.data.sector}` : ''}
-                                                                    {'\n'}Change: {changePct === null ? '—' : `${changePct.toFixed(2)}%`}
+                                                                    {'\n'}Change: {changePct === null ? EMPTY_VALUE : `${changePct.toFixed(2)}%`}
                                                                     {'\n'}Size ({sizeLabel}): {formatSize(node.data.value)}
                                                                     {selectedGroup && node.data.marketCap ? `\nMarket cap: ${node.data.marketCap.value === null ? 'Unavailable' : formatCompactValueForUnit(node.data.marketCap.value, unitConfig, { decimals: 1 })}\n${marketCapExplanation(node.data.marketCap)}` : ''}
                                                                     {!selectedGroup ? `\nAdmitted market cap: ${node.data.totalMarketCap === null ? 'Unavailable' : formatCompactValueForUnit(node.data.totalMarketCap, unitConfig, { decimals: 1 })}\nCap coverage: ${node.data.capCount ?? 'unknown'} of ${node.data.stockCount} returned stocks${node.data.capCount < node.data.stockCount || data?.partial ? ' (partial coverage)' : ''}` : ''}
@@ -395,10 +446,10 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                         y={node.y0 + 18 + labelSize + 6}
                                                                         textAnchor="start"
                                                                         className="pointer-events-none select-none font-semibold"
-                                                                        fill="rgba(255,255,255,0.86)"
+                                                                        fill="rgba(255,255,255,0.94)"
                                                                         style={{ fontSize: detailSize }}
                                                                     >
-                                                                        {changePct === null ? '—' : `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
+                                                                        {changePct === null ? EMPTY_VALUE : formatPercent(changePct, { input: 'percent', decimals: 2, signed: true })}
                                                                     </text>
                                                                 </>
                                                             )}
@@ -408,7 +459,7 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                                                     y={node.y1 - 12}
                                                                     textAnchor="start"
                                                                     className="pointer-events-none select-none font-medium"
-                                                                    fill="rgba(255,255,255,0.78)"
+                                                                    fill="rgba(255,255,255,0.90)"
                                                                     style={{ fontSize: 10 }}
                                                                 >
                                                                     {selectedGroup
@@ -432,12 +483,9 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                 <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--bg-secondary)] flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.2)] z-10">
                     <div className="flex items-center gap-3">
                         <div className="flex h-1.5 w-32 rounded-full overflow-hidden border border-[var(--border-subtle)] shadow-inner">
-                            <div className="flex-1 bg-blue-500" title="Floor" />
-                            <div className="flex-1 bg-red-600" />
-                            <div className="flex-1 bg-yellow-600" />
-                            <div className="flex-1 bg-green-700" />
-                            <div className="flex-1 bg-green-500" />
-                            <div className="flex-1 bg-cyan-500" title="Ceiling" />
+                            {[HEAT_LOSS[3], HEAT_LOSS[1], HEAT_NEUTRAL, HEAT_GAIN[1], HEAT_GAIN[3]].map((fill, index) => (
+                                <div key={`legend-${index}`} className="flex-1" style={{ backgroundColor: fill }} />
+                            ))}
                         </div>
                         <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tighter">-7% to +7%</span>
                     </div>

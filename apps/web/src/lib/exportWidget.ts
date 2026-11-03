@@ -1,6 +1,8 @@
 import html2canvas from 'html2canvas';
+import { toast } from 'sonner';
 import { logClientError } from '@/lib/clientLogger';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import { LIGHT_CAPTURE_ATTR, prepareLightCapture } from '@/lib/chartCapture';
 
 /**
  * Source-aware export provenance. Phase 1 (Fincept/Quantcept-inspired) standard:
@@ -250,22 +252,6 @@ export function exportToMarkdown(body: string, filename: string, provenance?: Ex
   downloadBlob(blob, `${filename}.md`);
 }
 
-/**
- * Resolve the surface a capture must paint behind itself. Widget bodies paint
- * their own background on an ancestor, so a transparent canvas would render a
- * dark image of a light page (and vice versa).
- */
-function resolveSurfaceColor(element: HTMLElement): string | undefined {
-  let node: HTMLElement | null = element;
-  while (node) {
-    const color = getComputedStyle(node).backgroundColor;
-    if (color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') return color;
-    node = node.parentElement;
-  }
-  const themed = getComputedStyle(document.documentElement).getPropertyValue('--color-bg-primary').trim();
-  return themed || undefined;
-}
-
 /** The provenance facts a bitmap can carry without a sidecar file. */
 function provenanceFooterText(provenance?: ExportProvenance): string {
   const wanted = ['source', 'source_as_of', 'fetched_at', 'captured_at'];
@@ -371,25 +357,70 @@ export function normalizeCaptureColors(root: HTMLElement, view?: Window | null) 
 }
 
 /**
+ * Report a failed PNG export. A silent failure leaves the user with no file and
+ * no explanation, so every abort path ends here.
+ */
+function reportExportFailure(error: unknown) {
+  logClientError('Failed to export as PNG:', error);
+  if (typeof window !== 'undefined') {
+    toast.error('PNG export failed', {
+      description: error instanceof Error ? error.message : 'The widget could not be captured.',
+    });
+  }
+}
+
+/**
+ * Captures are serialized: html2canvas appends one offscreen iframe to the
+ * shared document per capture and only removes it on success, so two
+ * concurrent exports cannot tell each other's iframe from their own. Without a
+ * queue, a failing export would delete the iframe a running one still paints
+ * into. The queue also makes `clonesBefore` ownership unambiguous.
+ */
+let captureQueue: Promise<unknown> = Promise.resolve();
+
+/**
  * Export a widget as a PNG. `target` is a widget id or the element itself.
  * Provenance is painted into the image, because a bitmap cannot carry a
  * `_provenance` key.
+ *
+ * Resolves `true` only after the download started. Every failure is surfaced to
+ * the user (toast) and reported as `false`, never as a silent wrong image.
  */
-export async function exportToPNG(target: string | HTMLElement, filename: string, provenance?: ExportProvenance) {
+export function exportToPNG(
+  target: string | HTMLElement,
+  filename: string,
+  provenance?: ExportProvenance,
+): Promise<boolean> {
+  const run = captureQueue.then(() => captureWidgetAsPNG(target, filename, provenance));
+  // A rejected link would poison every later export, so the queue never rejects.
+  captureQueue = run.catch(() => {});
+  return run;
+}
+
+async function captureWidgetAsPNG(
+  target: string | HTMLElement,
+  filename: string,
+  provenance?: ExportProvenance,
+): Promise<boolean> {
   const element = typeof target === 'string' ? document.getElementById(target) : target;
   if (!element) {
-    logClientError(`Element with id "${String(target)}" not found`);
-    return;
+    reportExportFailure(new Error(`Element with id "${String(target)}" not found`));
+    return false;
   }
 
   const footerText = provenanceFooterText(provenance);
+  // Set inside `onclone`, the first moment the light surface is known.
+  let lightSurface = '#ffffff';
+  // html2canvas appends an offscreen copy of the whole page and only removes it
+  // on success, so a refused capture would leave one behind per attempt.
+  const clonesBefore = new Set(document.querySelectorAll('iframe.html2canvas-container'));
   try {
-    // The surface travels into html2canvas's own color parser, so it needs the
-    // same downgrade the cloned nodes get.
-    const resolvedSurface = resolveSurfaceColor(element);
-    const surface = resolvedSurface ? rewriteColorSyntax(resolvedSurface) : undefined;
     const canvas = await html2canvas(element, {
-      backgroundColor: surface,
+      // html2canvas reads this after `onclone`, so the getter sees the clone's
+      // resolved light surface rather than a guessed default.
+      get backgroundColor() {
+        return lightSurface;
+      },
       useCORS: true,
       // html2canvas hands us its clone and the cloned element, so this works
       // for ref-based widgets (the market heatmap) that have no id. Before
@@ -397,19 +428,59 @@ export async function exportToPNG(target: string | HTMLElement, filename: string
       // `html`/`body` — the whole page, not just the widget — so those two
       // values need the same downgrade or the export dies before painting.
       onclone: (documentClone, reference) => {
+        // The clone is themed light first, so the charts below read the light
+        // palette from it. The live document keeps the user's theme throughout.
+        documentClone.documentElement.classList.remove('dark');
+        documentClone.documentElement.classList.add('light');
+        documentClone.documentElement.setAttribute('data-theme', 'light');
+        // Ask each live chart for its own light bitmap; it repaints, snapshots
+        // and restores itself, so candles and axes stay the chart's real content.
+        const plan = prepareLightCapture(element, documentClone.documentElement);
+        const chartHosts = reference.querySelectorAll<HTMLElement>(`[${LIGHT_CAPTURE_ATTR}]`);
+        // A count mismatch means a chart mounted or unmounted between planning
+        // and cloning; abort rather than leave its dark canvas in the capture.
+        if (chartHosts.length !== plan.bitmaps.length) {
+          throw new Error('A chart could not be re-rendered for a light export');
+        }
+        chartHosts.forEach((host, index) => {
+          const bitmap = plan.bitmaps[index];
+          // The bitmap is already a canvas of the chart's own light rendering;
+          // append it as-is so no second pixel copy (and no 2D context) is needed.
+          bitmap.style.width = '100%';
+          bitmap.style.height = '100%';
+          host.replaceChildren(bitmap);
+        });
         normalizeCaptureColors(reference, documentClone.defaultView);
+        // html2canvas parses the clone's html/body background before painting,
+        // so this value needs the same downgrade the cloned nodes just got;
+        // a raw `oklch()` here would abort the capture.
+        lightSurface = rewriteColorSyntax(plan.surface);
         for (const node of [documentClone.documentElement, documentClone.body]) {
-          const background = node && documentClone.defaultView?.getComputedStyle(node).backgroundColor;
-          if (node && background) node.style.backgroundColor = rewriteColorSyntax(background);
+          if (node) node.style.backgroundColor = lightSurface;
         }
       },
     });
-    const output = footerText ? stampFooter(canvas, footerText, element.clientWidth, surface) : canvas;
-    output.toBlob((blob) => {
-      if (blob) downloadBlob(blob, `${filename}.png`);
+    const output = footerText ? stampFooter(canvas, footerText, element.clientWidth, lightSurface) : canvas;
+    // A canvas without `toBlob` (or a browser that never calls back) would leave
+    // the export pending forever; refuse instead of hanging without feedback.
+    if (typeof output.toBlob !== 'function') {
+      throw new Error('The browser cannot encode a PNG from this capture');
+    }
+    const { promise, resolve, reject } = Promise.withResolvers<Blob>();
+    output.toBlob((encodedBlob) => {
+      // A null blob means the browser could not encode the capture; never
+      // report success without a downloadable file.
+      if (encodedBlob) resolve(encodedBlob);
+      else reject(new Error('The browser could not encode the captured chart'));
     }, 'image/png');
+    downloadBlob(await promise, `${filename}.png`);
+    return true;
   } catch (error) {
-    logClientError('Failed to export as PNG:', error);
+    for (const clone of document.querySelectorAll('iframe.html2canvas-container')) {
+      if (!clonesBefore.has(clone)) clone.remove();
+    }
+    reportExportFailure(error);
+    return false;
   }
 }
 
@@ -453,18 +524,14 @@ function stampFooter(source: HTMLCanvasElement, text: string, cssWidth: number, 
   const ctx = out.getContext('2d');
   if (!ctx) return source;
 
-  // Match the widget's own surface (dark-theme exports are not white) so the
-  // strip never turns into a white band under a dark capture.
-  const channelAverage = surface
-    ? (surface.match(/\d+/g)?.slice(0, 3).reduce((sum, value) => sum + Number(value), 0) ?? 765) / 3
-    : 255;
-  const dark = channelAverage < 128;
+  // The export is light by design (brand §14), so the strip continues the light
+  // surface with the light palette's Rule hairline and Slate text.
   ctx.fillStyle = surface ?? '#ffffff';
   ctx.fillRect(0, 0, out.width, out.height);
   ctx.drawImage(source, 0, 0);
-  ctx.fillStyle = dark ? '#475569' : '#e2e8f0';
+  ctx.fillStyle = '#d9dde3';
   ctx.fillRect(0, source.height, out.width, Math.max(1, Math.round(scale)));
-  ctx.fillStyle = dark ? '#cbd5e1' : '#64748b';
+  ctx.fillStyle = '#5b6573';
   ctx.font = probe.font;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';

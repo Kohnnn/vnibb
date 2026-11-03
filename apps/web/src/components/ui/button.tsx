@@ -19,7 +19,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
         // Solid, flat surfaces. No glow, no glass, no scale-on-press.
         const variants = {
-            primary: 'bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-hover)]',
+            primary: 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]',
             secondary:
                 'border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]',
             outline:

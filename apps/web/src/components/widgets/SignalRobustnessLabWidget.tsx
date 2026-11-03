@@ -18,6 +18,8 @@ import { useDashboardWidget } from '@/hooks/useDashboardWidget'
 import { useWidgetGroups } from '@/contexts/WidgetGroupContext'
 import { readTickerScope } from '@/lib/widgetScope'
 import type { WidgetGroupId } from '@/types/widget'
+import { EMPTY_VALUE } from '@/lib/units'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface SignalRobustnessLabWidgetProps {
   id: string
@@ -172,7 +174,7 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
     <div className="flex h-full flex-col overflow-hidden">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <FlaskConical size={12} className="text-violet-400" />
+          <FlaskConical size={12} className="text-[var(--color-accent-primary)]" />
           <span>Signal Robustness</span>
           <span className="text-[10px] text-[var(--text-muted)]">descriptive</span>
         </div>
@@ -210,10 +212,10 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
       {/* Summary */}
       <div className="mt-2 grid grid-cols-3 gap-1 px-1">
         <Kpi label="Universe" value={String(evaluation.universeCount)} />
-        <Kpi label="Pass" value={String(evaluation.passCount)} tone="text-cyan-400" />
+        <Kpi label="Pass" value={String(evaluation.passCount)} tone="text-[var(--color-accent-primary)]" />
         <Kpi
           label="Pass rate"
-          value={evaluation.passRate === null ? '—' : `${evaluation.passRate.toFixed(0)}%`}
+          value={evaluation.passRate === null ? EMPTY_VALUE : `${evaluation.passRate.toFixed(0)}%`}
         />
       </div>
 
@@ -227,18 +229,18 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
             <div key={read.label} className="rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-1 py-1">
               <div className="text-[var(--text-muted)]">{read.label}</div>
               <div className="font-semibold text-[var(--text-primary)]">
-                {read.passAvg === null ? '—' : `${read.passAvg.toFixed(1)}%`}
+                {read.passAvg === null ? EMPTY_VALUE : `${read.passAvg.toFixed(1)}%`}
               </div>
               <div
                 className={
                   read.edge === null
                     ? 'text-[var(--text-muted)]'
                     : read.edge >= 0
-                      ? 'text-emerald-400'
-                      : 'text-red-400'
+                      ? 'text-[var(--color-positive)]'
+                      : 'text-[var(--color-negative)]'
                 }
               >
-                {read.edge === null ? '—' : `${read.edge >= 0 ? '+' : ''}${read.edge.toFixed(1)}% edge`}
+                {read.edge === null ? EMPTY_VALUE : `${Number(read.edge.toFixed(1)) > 0 ? '+' : ''}${read.edge.toFixed(1)}% edge`}
               </div>
             </div>
           ))}
@@ -253,10 +255,10 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
             <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
               Period stability
             </span>
-            <span className="text-[10px] font-bold text-cyan-300">
+            <span className="text-[10px] font-bold text-[var(--color-accent-primary)]">
               {robustness.foldStability.evaluableFolds > 0
                 ? `${robustness.foldStability.signAgreement}/${robustness.foldStability.evaluableFolds}`
-                : '—'}
+                : EMPTY_VALUE}
             </span>
           </div>
           <div className="flex items-end gap-1" style={{ height: 28 }}>
@@ -270,8 +272,8 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
                       fold.edge === null
                         ? 'w-full rounded-sm bg-[var(--border-subtle)]'
                         : positive
-                          ? 'w-full rounded-sm bg-emerald-500/60'
-                          : 'w-full rounded-sm bg-red-500/60'
+                          ? 'w-full rounded-sm bg-[var(--color-positive-bg)]'
+                          : 'w-full rounded-sm bg-[var(--color-negative-bg)]'
                     }
                     style={{ height }}
                     title={fold.edge === null ? `Fold ${fold.fold}: n/a` : `Fold ${fold.fold}: ${fold.edge.toFixed(1)}% edge`}
@@ -298,14 +300,14 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
                 robustness.nullBenchmark.percentile === null
                   ? 'text-[var(--text-muted)]'
                   : robustness.nullBenchmark.percentile >= 90
-                    ? 'text-emerald-300'
+                    ? 'text-[var(--color-positive)]'
                     : robustness.nullBenchmark.percentile <= 10
-                      ? 'text-red-300'
+                      ? 'text-[var(--color-negative)]'
                       : 'text-[var(--text-primary)]'
               }`}
             >
               {robustness.nullBenchmark.percentile === null
-                ? '—'
+                ? EMPTY_VALUE
                 : `${robustness.nullBenchmark.percentile.toFixed(0)}%`}
             </span>
           </div>
@@ -342,10 +344,10 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
                   ) : <span title="Ticker local to this widget; use its ticker selector to change it">{row.symbol}</span>}
                 </td>
                 <td className="px-1 py-1 text-right font-semibold text-[var(--text-primary)]">
-                  {row.signal === null ? '—' : row.signal.toFixed(1)}
+                  {row.signal === null ? EMPTY_VALUE : row.signal.toFixed(1)}
                 </td>
-                <td className={`px-1 py-1 text-right ${(row.perf1m ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {row.perf1m === null ? '—' : `${row.perf1m.toFixed(1)}%`}
+                <td className={`px-1 py-1 text-right ${signedToneClass(row.perf1m)}`}>
+                  {row.perf1m === null ? EMPTY_VALUE : `${row.perf1m.toFixed(1)}%`}
                 </td>
               </tr>
             ))}

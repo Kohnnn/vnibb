@@ -25,8 +25,8 @@ function formatSignal(signal?: string) {
 
 function signalColor(signal?: string) {
   if (!signal) return 'text-[var(--text-secondary)]';
-  if (signal.includes('strong_buy') || signal.includes('buy')) return 'text-emerald-400';
-  if (signal.includes('strong_sell') || signal.includes('sell')) return 'text-red-400';
+  if (signal.includes('strong_buy') || signal.includes('buy')) return 'text-[var(--color-positive)]';
+  if (signal.includes('strong_sell') || signal.includes('sell')) return 'text-[var(--color-negative)]';
   return 'text-[var(--text-secondary)]';
 }
 

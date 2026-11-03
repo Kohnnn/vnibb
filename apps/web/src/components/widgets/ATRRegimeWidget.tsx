@@ -1,5 +1,6 @@
 'use client';
 
+import { EMPTY_VALUE } from '@/lib/units';
 import { useEffect, useMemo } from 'react';
 import { Gauge, ShieldAlert, TrendingDown, TrendingUp } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
@@ -32,7 +33,7 @@ function formatCompact(value: number): string {
 }
 
 function formatPrice(value: number): string {
-  return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '-';
+  return Number.isFinite(value) ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : EMPTY_VALUE;
 }
 
 function getRegime(percentile: number) {
@@ -146,7 +147,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Gauge size={12} className="text-cyan-400" />
+          <Gauge size={12} className="text-[var(--color-accent-primary)]" />
           <span>ATR Regime (14D)</span>
         </div>
         <WidgetMeta
@@ -174,7 +175,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
       <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">ATR</div>
-          <div className="text-cyan-300 font-mono">{formatPrice(lastAtr)}</div>
+          <div className="text-[var(--color-accent-primary)] font-mono">{formatPrice(lastAtr)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">ATR %</div>
@@ -197,7 +198,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
           <div className="text-[var(--text-muted)]">Stop Distance</div>
           <div className="text-right text-[var(--text-primary)] font-mono">{formatPrice(stopDistance)}</div>
           <div className="text-[var(--text-muted)]">Suggested Shares</div>
-          <div className="text-right text-cyan-300 font-mono">{suggestedShares.toLocaleString()}</div>
+          <div className="text-right text-[var(--color-accent-primary)] font-mono">{suggestedShares.toLocaleString()}</div>
           <div className="text-[var(--text-muted)]">Position Value</div>
           <div className="text-right text-[var(--text-primary)] font-mono">{formatCompact(suggestedValue)}</div>
         </div>
@@ -214,15 +215,15 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
                 <div className="w-14 text-[10px] text-[var(--text-muted)] shrink-0">{String(point.time).slice(5, 10)}</div>
                 <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                   <div
-                    className={`h-full ${isRising ? 'bg-amber-500/70' : 'bg-cyan-500/70'}`}
+                    className={`h-full ${isRising ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-accent-primary)]'}`} 
                     style={{ width: `${Math.max(2, widthPct)}%` }}
                   />
                 </div>
                 <div className="w-14 text-[10px] text-[var(--text-secondary)] text-right font-mono">{point.value.toFixed(2)}</div>
                 {isRising ? (
-                  <TrendingUp size={10} className="text-amber-400" />
+                  <TrendingUp size={10} className="text-[var(--color-warning)]" />
                 ) : (
-                  <TrendingDown size={10} className="text-cyan-400" />
+                  <TrendingDown size={10} className="text-[var(--color-accent-primary)]" />
                 )}
               </div>
             );

@@ -8,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
+import { formatPercent } from '@/lib/units'
 
 interface MomentumWidgetProps {
   symbol: string
@@ -17,8 +18,8 @@ interface MomentumWidgetProps {
 }
 
 function formatPct(value: number | null): string {
-  if (value === null) return '-'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+  if (value === null) return 'n/a'
+  return formatPercent(value, { input: 'percent', decimals: 2, signed: true })
 }
 
 // A momentum score is signed, so positive/negative is a real direction. The
@@ -103,7 +104,7 @@ export function MomentumWidget({ symbol, onDataChange }: MomentumWidgetProps) {
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Gauge size={12} className="text-cyan-400" />
+          <Gauge size={12} className="text-[var(--color-accent-primary)]" />
           <span>Momentum Profile</span>
         </div>
         <div className="flex items-center gap-2">
@@ -115,7 +116,7 @@ export function MomentumWidget({ symbol, onDataChange }: MomentumWidgetProps) {
                 onClick={() => setPeriod(option)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                   period === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >

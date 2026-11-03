@@ -124,7 +124,7 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                 setLinkedSymbol(stock.symbol);
                             }
                         }}
-                        className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                        className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                     >
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -146,10 +146,15 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                     >
                                         {stock.rs_rating}
                                     </Badge>
-                                    {stock.rs_rating_change !== undefined && activeTab === 'gainers' && (
+                                    {typeof stock.rs_rating_change === 'number' && activeTab === 'gainers' && (
+                                        // Movement of an ordinal score, not a price return: it
+                                        // keeps the score's single-hue ramp (sign + glyph carry
+                                        // direction), so it never reads as profit or loss.
                                         <div className="flex items-center gap-1 mt-0.5">
-                                            <TrendingUp size={10} className="text-[var(--color-positive)]" />
-                                            <span className="text-[9px] text-[var(--color-positive)] font-mono">+{stock.rs_rating_change}</span>
+                                            <TrendingUp size={10} className={stock.rs_rating_change < 0 ? 'text-[var(--text-muted)]' : 'text-[var(--color-accent-primary)]'} />
+                                            <span className={`text-[9px] font-mono ${stock.rs_rating_change < 0 ? 'text-[var(--text-muted)]' : 'text-[var(--color-accent-primary)]'}`}>
+                                                {stock.rs_rating_change >= 0 ? '+' : ''}{stock.rs_rating_change}
+                                            </span>
                                         </div>
                                     )}
                                 </div>
@@ -165,7 +170,7 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
         <div aria-label="RS rankings" className="h-full flex flex-col space-y-3 overflow-hidden">
             <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                    <Zap size={14} className="text-blue-400" />
+                    <Zap size={14} className="text-[var(--color-accent-primary)]" />
                     <span className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">RS Rankings</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -191,13 +196,13 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="flex-1 flex flex-col overflow-hidden">
                 <TabsList className="grid w-full grid-cols-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] p-0.5 h-8">
-                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-primary)]">
+                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-secondary)]">
                         Leaders
                     </TabsTrigger>
-                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-primary)]">
+                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-secondary)]">
                         Laggards
                     </TabsTrigger>
-                    <TabsTrigger value="gainers" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-blue-400">
+                    <TabsTrigger value="gainers" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-secondary)]">
                         Gainers
                     </TabsTrigger>
                 </TabsList>

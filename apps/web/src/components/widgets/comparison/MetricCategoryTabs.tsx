@@ -27,7 +27,7 @@ export function MetricCategoryTabs({ activeCategory, onChange }: MetricCategoryT
           className={cn(
               "px-3 py-1.5 text-[10px] font-bold uppercase tracking-tight rounded-md transition-all",
               activeCategory === cat.id
-                ? "bg-blue-600 text-white shadow-lg"
+                ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg"
                 : "text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]"
           )}
         >

@@ -259,8 +259,8 @@ describe('FinancialsWidget', () => {
     expect(rowCells(/^P\/E$/i).get('2018')).toContain('12.50');
     expect(rowCells(/^P\/E$/i).get('2025')).toContain('22.00');
     expect(rowCells(/^P\/B$/i).get('2025')).toContain('3.60');
-    expect(rowCells(/^P\/E$/i).get('2026 (YTD)')).toBe('—');
-    expect(rowCells(/^P\/B$/i).get('2026 (YTD)')).toBe('—');
+    expect(rowCells(/^P\/E$/i).get('2026 (YTD)')).toBe('n/a');
+    expect(rowCells(/^P\/B$/i).get('2026 (YTD)')).toBe('n/a');
   });
 
   // The statement reference is optional: when that API is unavailable the Ratios tab must
@@ -346,7 +346,7 @@ describe('FinancialsWidget', () => {
 
     const interestCells = screen.getByText('Interest Expense').closest('tr')!.querySelectorAll('td');
     const revenueCells = screen.getByText('Revenue').closest('tr')!.querySelectorAll('td');
-    expect(interestCells[1]).toHaveTextContent(/^—$/);
+    expect(interestCells[1]).toHaveTextContent(/^n\/a$/);
     expect(revenueCells[1]).toHaveTextContent('120.00');
   });
 
@@ -368,7 +368,7 @@ describe('FinancialsWidget', () => {
       : { ...certified, ...override };
     mockUseIncomeStatement.mockReturnValue(makeQueryResult({ data: [{ ...certified, period: '2024', revenue: 1 }, row] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>);
     renderWithProviders(<FinancialsWidget id="financial-unverified-money" symbol="FPT" config={{ periodSyncGroup: null }} onDataChange={onDataChange} />);
-    expect(Array.from(screen.getByText('Revenue').closest('tr')!.querySelectorAll('td')).at(-1)).toHaveTextContent(/^—$/);
+    expect(Array.from(screen.getByText('Revenue').closest('tr')!.querySelectorAll('td')).at(-1)).toHaveTextContent(/^n\/a$/);
     expect(JSON.stringify(onDataChange.mock.calls.at(-1)?.[0])).not.toContain('120000000000');
     expect(JSON.parse(screen.getByTestId('financial-export').textContent!)).toContainEqual(expect.objectContaining({ period: '2025', revenue: null }));
   });
@@ -381,7 +381,7 @@ describe('FinancialsWidget', () => {
     }] }) as unknown as UseQueryResult<IncomeStatementResponse, Error>);
     renderWithProviders(<FinancialsWidget id="financial-certified-money" symbol="FPT" config={{ periodSyncGroup: null }} />);
     expect(screen.getByText('Revenue').closest('tr')!.querySelectorAll('td')[1]).toHaveTextContent(expected);
-    expect(screen.getByText('Interest Expense').closest('tr')!.querySelectorAll('td')[1]).toHaveTextContent(/^—$/);
+    expect(screen.getByText('Interest Expense').closest('tr')!.querySelectorAll('td')[1]).toHaveTextContent(/^n\/a$/);
   });
 
   test('snapshot shares strict monetary and payout values with runtime export', () => {
@@ -395,8 +395,8 @@ describe('FinancialsWidget', () => {
       ratio_units: { payout_ratio: 'percent' } }] }) as unknown as UseQueryResult<FinancialRatiosResponse, Error>);
     renderWithProviders(<FinancialSnapshotWidget id="snapshot-admission" symbol="FPT" onDataChange={onDataChange} />);
     expect(screen.getByText('Revenue').closest('tr')).toHaveTextContent('120.00');
-    expect(screen.getByText('Interest Expense').closest('tr')).toHaveTextContent('—');
-    expect(screen.getByText('Financial Expenses').closest('tr')).toHaveTextContent('—');
+    expect(screen.getByText('Interest Expense').closest('tr')).toHaveTextContent('n/a');
+    expect(screen.getByText('Financial Expenses').closest('tr')).toHaveTextContent('n/a');
     expect(screen.getByText('DPS/EPS (%)').closest('tr')).toHaveTextContent('0.3%');
     const published = onDataChange.mock.calls.at(-1)?.[0].data.find((row: { section: string }) => row.section === 'Profit & Loss');
     expect(published).toEqual(expect.objectContaining({ revenue: 120_000_000_000, interest_expense: null, financial_expenses: null, payout_ratio: 0.25 }));

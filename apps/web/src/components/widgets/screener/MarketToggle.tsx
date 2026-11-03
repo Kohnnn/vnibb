@@ -38,7 +38,7 @@ function MarketToggleComponent({ value, onChange }: MarketToggleProps) {
           className={cn(
             "px-3 py-1 text-[10px] font-black uppercase tracking-tighter rounded transition-all",
             value === market.id 
-              ? "bg-blue-600 text-white shadow-sm" 
+              ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-sm" 
               : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
           )}
         >

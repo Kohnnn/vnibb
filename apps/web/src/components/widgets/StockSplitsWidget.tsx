@@ -112,8 +112,8 @@ export function StockSplitsWidget({ symbol, onDataChange }: StockSplitsWidgetPro
                                 return (
                                     <tr key={`${executionDate || 'split'}-${idx}`} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-2 pr-4 text-[var(--text-secondary)]">{formatDate(executionDate || undefined)}</td>
-                                        <td className="py-2 pr-4 text-center text-blue-400 font-medium">{ratio.from}</td>
-                                        <td className="py-2 text-center text-green-400 font-medium">{ratio.to}</td>
+                                        <td className="py-2 pr-4 text-center text-[var(--color-accent-primary)] font-medium">{ratio.from}</td>
+                                        <td className="py-2 text-center text-[var(--color-positive)] font-medium">{ratio.to}</td>
                                     </tr>
                                 );
                             })}

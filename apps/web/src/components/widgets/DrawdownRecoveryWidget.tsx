@@ -44,7 +44,7 @@ type Episode = {
 }
 
 function formatPct(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(Number(value))) return '-'
+  if (value == null || Number.isNaN(Number(value))) return 'n/a'
   return `${Number(value).toFixed(1)}%`
 }
 
@@ -121,7 +121,7 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ShieldAlert size={12} className="text-amber-400" />
+          <ShieldAlert size={12} className="text-[var(--color-warning)]" />
           <span>Drawdown & Recovery</span>
         </div>
         <div className="flex items-center gap-2">
@@ -131,7 +131,7 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -155,15 +155,15 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Current DD</div>
-              <div className="font-mono text-amber-200">{formatPct(metric?.current_drawdown_pct)}</div>
+              <div className="font-mono text-[var(--color-warning)]">{formatPct(metric?.current_drawdown_pct)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">52W DD</div>
-              <div className="font-mono text-red-300">{formatPct(metric?.current_drawdown_from_52w_high_pct)}</div>
+              <div className="font-mono text-[var(--color-negative)]">{formatPct(metric?.current_drawdown_from_52w_high_pct)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Avg Recovery</div>
-              <div className="font-mono text-cyan-300">
+              <div className="font-mono text-[var(--color-accent-primary)]">
                 {metric?.avg_days_to_recovery != null ? `${Number(metric.avg_days_to_recovery).toFixed(1)}d` : '-'}
               </div>
             </div>
@@ -257,15 +257,15 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
                   <tr key={`${episode.peak_date}-${episode.trough_date}`} className="border-b border-[var(--border-color)] text-[var(--text-secondary)]">
                     <td className="py-1">{episode.peak_date}</td>
                     <td className="py-1">{episode.trough_date}</td>
-                    <td className="py-1 text-right font-mono text-red-300">{formatPct(episode.depth_pct)}</td>
+                    <td className="py-1 text-right font-mono text-[var(--color-negative)]">{formatPct(episode.depth_pct)}</td>
                     <td className="py-1 text-right font-mono">{episode.days_to_trough}d</td>
                     <td className="py-1 text-right font-mono">
                       {episode.days_to_recovery != null ? (
-                        <span className="inline-flex rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-semibold text-emerald-300">
+                        <span className="inline-flex rounded-full bg-[var(--color-positive-bg)] px-2 py-0.5 text-[9px] font-semibold text-[var(--color-positive)]">
                           Recovered {episode.days_to_recovery}d
                         </span>
                       ) : (
-                        <span className="inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-[9px] font-semibold text-[var(--color-warning)]">
+                        <span className="inline-flex rounded-full bg-[var(--color-state-bg)] px-2 py-0.5 text-[9px] font-semibold text-[var(--color-warning)]">
                           Recovering
                         </span>
                       )}

@@ -155,7 +155,7 @@ export function CopilotActionPanel({ actions, responseMeta, surface = 'sidebar' 
                       onClick={() => {
                         void executeAction(action)
                       }}
-                      className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-2 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                      className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-fill)] px-2 py-1 text-[10px] font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                     >
                       <Check size={10} />
                       Confirm

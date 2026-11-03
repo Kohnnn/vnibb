@@ -1,5 +1,6 @@
 'use client';
 
+import { EMPTY_VALUE } from '@/lib/units';
 import { ProbabilityBar } from './ProbabilityBar';
 
 /**
@@ -46,10 +47,14 @@ export function ConsensusStrip({ rows, caption }: ConsensusStripProps) {
                         {row.source}
                     </span>
                     <div className="flex-1">
-                        <ProbabilityBar value={row.yesPrice ?? 0} height={6} />
+                        {row.yesPrice === null ? (
+                            <span className="text-[10px] text-[var(--text-muted)]">No data</span>
+                        ) : (
+                            <ProbabilityBar value={row.yesPrice} height={6} />
+                        )}
                     </div>
                     <span className="w-10 text-right text-[11px] tabular-nums text-[var(--text-primary)]">
-                        {row.yesPrice === null ? '—' : `${Math.round(row.yesPrice * 100)}%`}
+                        {row.yesPrice === null ? EMPTY_VALUE : `${Math.round(row.yesPrice * 100)}%`}
                     </span>
                 </div>
             ))}

@@ -1613,7 +1613,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             }
                           }}
                           disabled={isAdminAiRuntimeSaving || isAdminAiRuntimeLoading}
-                          className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminAiRuntimeSaving ? 'Saving…' : 'Save AI Model'}
                         </button>
@@ -1712,7 +1712,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             }
                           }}
                           disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
-                          className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminUnitRuntimeSaving ? 'Saving…' : 'Save Admin USD Defaults'}
                         </button>
@@ -1839,7 +1839,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           type="button"
                           onClick={() => void saveSharedPromptLibrary()}
                           disabled={isAdminPromptLibraryLoading || isAdminPromptLibrarySaving}
-                          className="rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminPromptLibrarySaving ? 'Saving…' : 'Save Shared Prompts'}
                         </button>

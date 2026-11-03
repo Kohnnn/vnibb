@@ -10,6 +10,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
+import { EMPTY_VALUE, formatPercent } from '@/lib/units';
 
 const INDICES = [
   { symbol: 'VNINDEX', name: 'VN-Index' },
@@ -65,7 +66,10 @@ function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data
                 (index.symbol === 'VNINDEX' && i.index_name === 'VN-INDEX')
               );
 
-              const isUp = (dataPoint?.change_pct || 0) >= 0;
+              const changePct = dataPoint?.change_pct;
+              // A missing change is unavailable, not a flat session.
+              const hasChange = typeof changePct === 'number' && Number.isFinite(changePct);
+              const isUp = hasChange && changePct > 0;
 
               return (
                 <div
@@ -75,16 +79,22 @@ function IndexComparisonWidgetComponent({ onDataChange }: { onDataChange?: (data
                   <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">{index.name}</div>
                   <div className="flex items-baseline justify-between mt-1">
                     <div className="text-lg font-black text-[var(--text-primary)]">
-                      {dataPoint?.current_value?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '—'}
+                      {typeof dataPoint?.current_value === 'number' && Number.isFinite(dataPoint.current_value) ? dataPoint.current_value.toLocaleString(undefined, { minimumFractionDigits: 2 }) : EMPTY_VALUE}
                     </div>
                     <div
                       className={cn(
                         'flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded',
-                        isUp ? 'text-green-400 bg-green-500/10' : 'text-red-400 bg-red-500/10'
+                        !hasChange || changePct === 0
+                          ? 'text-[var(--text-muted)] bg-[var(--bg-tertiary)]'
+                          : isUp
+                            ? 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]'
+                            : 'text-[var(--color-negative)] bg-[var(--color-negative-bg)]',
                       )}
                     >
-                      {isUp ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
-                      {isUp ? '+' : ''}{dataPoint?.change_pct?.toFixed(2)}%
+                      {/* A measured flat session has no direction: an arrow needs a
+                          side. Missing stays n/a with no glyph either. */}
+                      {hasChange && changePct !== 0 && (isUp ? <ArrowUp size={10} /> : <ArrowDown size={10} />)}
+                      {hasChange ? formatPercent(changePct, { input: 'percent', decimals: 2, signed: changePct !== 0 }) : EMPTY_VALUE}
                     </div>
                   </div>
                 </div>

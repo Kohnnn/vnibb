@@ -200,7 +200,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
                 onClick={() => setSelectedTable(table.name)}
                 className={`px-2 py-1 text-[10px] font-bold rounded transition-all uppercase ${
                   selectedTable === table.name
-                    ? 'bg-blue-600 text-white shadow-lg'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg'
                     : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
@@ -223,7 +223,7 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
                             placeholder={`Search in ${selectedTable}...`}
                             value={searchTerm}
                             onChange={e => setSearchTerm(e.target.value)}
-                            className="w-full pl-7 pr-2 py-1 text-[10px] bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                            className="w-full pl-7 pr-2 py-1 text-[10px] bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded text-[var(--text-primary)] focus:outline-none focus:border-[var(--color-state-border)]"
                         />
                     </div>
                     <button

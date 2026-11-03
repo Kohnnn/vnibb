@@ -9,6 +9,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface VolumeDeltaWidgetProps {
   symbol: string
@@ -222,7 +223,7 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
   const divergence = hasMicroData
     ? {
         label: 'Mongo match-type flow',
-        className: lastPoint?.cumulativeDelta >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]',
+        className: signedToneClass(lastPoint?.cumulativeDelta),
         priceChange: 0,
         deltaChange: lastPoint?.cumulativeDelta ?? 0,
       }
@@ -299,15 +300,15 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
             <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[var(--text-muted)] uppercase tracking-widest">Today</div>
-                <div className={`font-mono ${lastPoint?.delta >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
-                  {lastPoint?.delta >= 0 ? '+' : ''}
+                <div className={`font-mono ${signedToneClass(lastPoint?.delta)}`}>
+                  {Number(lastPoint?.delta ?? 0) > 0 ? '+' : ''}
                   {formatCompact(lastPoint?.delta ?? 0)}
                 </div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[var(--text-muted)] uppercase tracking-widest">{hasMicroData ? 'Loaded Cum' : '20D Cum'}</div>
-                <div className={`font-mono ${rollingDelta >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
-                  {rollingDelta >= 0 ? '+' : ''}
+                <div className={`font-mono ${signedToneClass(rollingDelta)}`}>
+                  {rollingDelta > 0 ? '+' : ''}
                   {formatCompact(rollingDelta)}
                 </div>
               </div>
@@ -323,11 +324,11 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
               <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Flow Signal</div>
               <div className={`text-sm font-semibold ${divergence.className}`}>{divergence.label}</div>
               <div className="grid grid-cols-2 gap-2 mt-1 text-[10px]">
-                  <div className={hasMicroData ? 'text-[var(--text-muted)]' : divergence.priceChange >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}>
-                  {hasMicroData ? 'Mode: tick proxy' : `Price: ${divergence.priceChange >= 0 ? '+' : ''}${divergence.priceChange.toFixed(2)}%`}
+                  <div className={hasMicroData ? 'text-[var(--text-muted)]' : signedToneClass(divergence.priceChange)}>
+                  {hasMicroData ? 'Mode: tick proxy' : `Price: ${Number(divergence.priceChange) > 0 ? '+' : ''}${divergence.priceChange.toFixed(2)}%`}
                 </div>
-                <div className={divergence.deltaChange >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}>
-                  Delta: {divergence.deltaChange >= 0 ? '+' : ''}
+                <div className={signedToneClass(divergence.deltaChange)}>
+                  Delta: {divergence.deltaChange > 0 ? '+' : ''}
                   {formatCompact(divergence.deltaChange)}
                 </div>
               </div>

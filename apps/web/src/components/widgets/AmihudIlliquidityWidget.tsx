@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { getQuantPeriodStartDate, QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
+import { formatPercent } from '@/lib/units'
 
 interface AmihudIlliquidityWidgetProps {
   symbol: string
@@ -23,7 +24,7 @@ interface AmihudPoint {
 }
 
 function formatAmihud(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '-'
+  if (!Number.isFinite(value) || value <= 0) return 'n/a'
   if (value >= 1) return value.toFixed(2)
   if (value >= 0.01) return value.toFixed(4)
   if (value >= 0.0001) return value.toFixed(6)
@@ -128,9 +129,9 @@ function yearlyMeans(data: AmihudPoint[]): { year: number; value: number }[] {
 }
 
 function resolveLiquidityState(trendPct: number) {
-  if (trendPct <= -5) return { label: 'Improving', className: 'text-emerald-300' }
-  if (trendPct >= 5) return { label: 'Deteriorating', className: 'text-red-300' }
-  return { label: 'Stable', className: 'text-cyan-300' }
+  if (trendPct <= -5) return { label: 'Improving', className: 'text-[var(--color-positive)]' }
+  if (trendPct >= 5) return { label: 'Deteriorating', className: 'text-[var(--color-negative)]' }
+  return { label: 'Stable', className: 'text-[var(--color-accent-primary)]' }
 }
 
 export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquidityWidgetProps) {
@@ -197,7 +198,7 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Droplets size={12} className="text-cyan-400" />
+          <Droplets size={12} className="text-[var(--color-accent-primary)]" />
           <span>Amihud Illiquidity</span>
         </div>
         <div className="flex items-center gap-2">
@@ -207,7 +208,7 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -251,13 +252,12 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
             <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[var(--text-muted)] uppercase tracking-widest">Current</div>
-                <div className="font-mono text-cyan-300">{formatAmihud(current)}</div>
+                <div className="font-mono text-[var(--color-accent-primary)]">{formatAmihud(current)}</div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Trend</div>
-                <div className={trendPct <= 0 ? 'text-emerald-300 font-mono' : 'text-red-300 font-mono'}>
-                  {trendPct >= 0 ? '+' : ''}
-                  {trendPct.toFixed(2)}%
+                <div className={trendPct <= 0 ? 'text-[var(--color-positive)] font-mono' : 'text-[var(--color-negative)] font-mono'}>
+                  {formatPercent(trendPct, { input: 'percent', decimals: 2, signed: true })}
                 </div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -272,9 +272,9 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
                 return (
                   <div key={row.year} className="rounded border border-[var(--border-subtle)] px-2 py-1 bg-[var(--bg-secondary)]">
                     <div className="text-[var(--text-muted)]">{row.year}</div>
-                    <div className="text-cyan-300 font-mono">{formatAmihud(row.value)}</div>
+                    <div className="text-[var(--color-accent-primary)] font-mono">{formatAmihud(row.value)}</div>
                     <div className="mt-1 h-1.5 rounded bg-[var(--bg-tertiary)] overflow-hidden">
-                      <div className="h-full bg-cyan-500/70" style={{ width: `${Math.max(6, widthPct)}%` }} />
+                      <div className="h-full bg-[var(--color-accent-primary)]" style={{ width: `${Math.max(6, widthPct)}%` }} />
                     </div>
                   </div>
                 )
@@ -291,7 +291,7 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
                   <div className="w-12 text-[10px] text-[var(--text-muted)] shrink-0">{toDateLabel(row.time)}</div>
                   <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
                     <div
-                      className={`h-full ${improving ? 'bg-emerald-500/65' : 'bg-red-500/65'}`}
+                      className={`h-full ${improving ? 'bg-[var(--color-positive-bg)]' : 'bg-[var(--color-negative-bg)]'}`}
                       style={{ width: `${Math.max(2, widthPct)}%` }}
                     />
                   </div>
@@ -299,9 +299,9 @@ export function AmihudIlliquidityWidget({ symbol, onDataChange }: AmihudIlliquid
                     {formatAmihud(row.value)}
                   </div>
                   {improving ? (
-                    <TrendingDown size={10} className="text-emerald-400" />
+                    <TrendingDown size={10} className="text-[var(--color-positive)]" />
                   ) : (
-                    <TrendingUp size={10} className="text-red-400" />
+                    <TrendingUp size={10} className="text-[var(--color-negative)]" />
                   )}
                 </div>
               )

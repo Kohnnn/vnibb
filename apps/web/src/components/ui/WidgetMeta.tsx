@@ -12,21 +12,26 @@ const fetchingBadgeStyle = {
 } as const;
 
 const warningBadgeStyle = {
-  backgroundColor: 'color-mix(in srgb, #f59e0b 12%, transparent)',
-  borderColor: 'color-mix(in srgb, #f59e0b 28%, transparent)',
-  color: 'color-mix(in srgb, #b45309 72%, var(--text-primary) 28%)',
+  backgroundColor: 'color-mix(in srgb, var(--color-warning) 12%, transparent)',
+  borderColor: 'color-mix(in srgb, var(--color-warning) 28%, transparent)',
+  color: 'var(--color-warning)',
 } as const;
 
 const infoBadgeStyle = {
-  backgroundColor: 'color-mix(in srgb, #38bdf8 12%, transparent)',
-  borderColor: 'color-mix(in srgb, #38bdf8 28%, transparent)',
-  color: 'color-mix(in srgb, #0ea5e9 72%, var(--text-primary) 28%)',
+  backgroundColor: 'color-mix(in srgb, var(--color-accent-secondary) 12%, transparent)',
+  borderColor: 'color-mix(in srgb, var(--color-accent-secondary) 28%, transparent)',
+  color: 'var(--color-accent-secondary)',
 } as const;
 
+/* Live is a system state, not financial direction: brand §13 reserves
+   gain/loss for signed values, so health chips stay on the accent ramp.
+   It must also be distinguishable from the `unknown`/`awaiting` chip, which
+   owns the low-emphasis accent tint; a live feed is the stronger claim, so it
+   takes the solid fill. accent-fill/on-accent is 6.7:1 in dark, 10:1 in light. */
 const liveBadgeStyle = {
-  backgroundColor: 'color-mix(in srgb, #10b981 12%, transparent)',
-  borderColor: 'color-mix(in srgb, #10b981 32%, transparent)',
-  color: 'color-mix(in srgb, #059669 72%, var(--text-primary) 28%)',
+  backgroundColor: 'var(--color-accent-fill)',
+  borderColor: 'var(--color-accent-fill)',
+  color: 'var(--color-on-accent)',
 } as const;
 
 interface WidgetMetaProps {

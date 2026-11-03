@@ -46,8 +46,8 @@ type MACDSeriesRow = {
 }
 
 function stateClass(state: string): string {
-  if (state === 'bullish') return 'text-emerald-300'
-  if (state === 'bearish') return 'text-red-300'
+  if (state === 'bullish') return 'text-[var(--color-positive)]'
+  if (state === 'bearish') return 'text-[var(--color-negative)]'
   return 'text-[var(--text-secondary)]'
 }
 
@@ -133,7 +133,7 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ActivitySquare size={12} className="text-cyan-400" />
+          <ActivitySquare size={12} className="text-[var(--color-accent-primary)]" />
           <span>MACD Crossover History</span>
         </div>
         <div className="flex items-center gap-2">
@@ -143,7 +143,7 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -182,7 +182,7 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">MACD</div>
-              <div className="text-cyan-300 font-mono">{Number(metric?.current_macd ?? 0).toFixed(4)}</div>
+              <div className="text-[var(--color-accent-primary)] font-mono">{Number(metric?.current_macd ?? 0).toFixed(4)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
@@ -240,13 +240,13 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Bull 1M Avg</div>
-              <div className="text-emerald-300 font-mono">
+              <div className="text-[var(--color-positive)] font-mono">
                 {Number(metric?.avg_return_after_bullish_1m_pct ?? 0).toFixed(2)}%
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Bull 3M Avg</div>
-              <div className="text-cyan-300 font-mono">
+              <div className="text-[var(--color-accent-primary)] font-mono">
                 {Number(metric?.avg_return_after_bullish_3m_pct ?? 0).toFixed(2)}%
               </div>
             </div>

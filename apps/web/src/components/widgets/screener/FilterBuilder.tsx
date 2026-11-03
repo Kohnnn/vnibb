@@ -41,7 +41,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
         <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Filters</span>
         <button
           onClick={addFilter}
-          className="flex items-center gap-1 text-[10px] font-bold text-blue-400 hover:text-blue-300 uppercase"
+          className="flex items-center gap-1 text-[10px] font-bold text-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)] uppercase"
         >
           <Plus size={12} /> Add Filter
         </button>
@@ -57,7 +57,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
             value={filter.field}
             onChange={(e) => updateFilter(filter.id, { field: e.target.value })}
             aria-label="Filter field"
-            className="flex-1 bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-blue-500"
+            className="flex-1 bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-[var(--color-state-border)]"
           >
             {availableFields.map(f => (
               <option key={f.id} value={f.id}>{f.label}</option>
@@ -68,7 +68,7 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
             value={filter.operator}
             onChange={(e) => updateFilter(filter.id, { operator: e.target.value as Filter['operator'] })}
             aria-label="Filter operator"
-            className="bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-blue-500"
+            className="bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-[var(--color-state-border)]"
           >
             <option value="gt">&gt;</option>
             <option value="lt">&lt;</option>
@@ -81,12 +81,12 @@ export function FilterBuilder({ filters, onChange, availableFields }: FilterBuil
             value={filter.value as number}
             onChange={(e) => updateFilter(filter.id, { value: parseFloat(e.target.value) })}
             aria-label="Filter value"
-            className="w-20 bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-blue-500 font-mono"
+            className="w-20 bg-[var(--bg-tertiary)] text-[var(--text-primary)] text-[11px] rounded px-2 py-1.5 border border-[var(--border-color)] outline-none focus:border-[var(--color-state-border)] font-mono"
           />
 
           <button
             onClick={() => removeFilter(filter.id)}
-            className="p-1 text-[var(--text-muted)] hover:text-red-400 transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           >
             <X size={14} />
           </button>

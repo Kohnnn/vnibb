@@ -97,7 +97,7 @@ function WorkspaceBackupSession({ onClose }: { onClose: () => void }) {
                 </div>
                 <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">Download personal dashboard layout, tabs, widget configuration and positions, sync groups and folders as a JSON file. Entered thesis text and citations are widget configuration, not original research. The file stays on your device unless you share it.</p>
                 <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">{WORKSPACE_BACKUP_EXCLUSIONS}</p>
-                <button type="button" onClick={handleExport} className="mt-4 rounded-md bg-[var(--color-accent-primary)] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">Download backup</button>
+                <button type="button" onClick={handleExport} className="mt-4 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-xs font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">Download backup</button>
                 <div className="mt-5 border-t border-[var(--border-color)] pt-4">
                     <label htmlFor="workspace-backup-file" className="block text-xs font-semibold">Restore from a backup file (up to 5 MB)</label>
                     <input id="workspace-backup-file" type="file" disabled={reading} accept=".json,application/json" onChange={handleFile} className="mt-2 block w-full text-xs text-[var(--text-secondary)] file:mr-3 file:rounded-md file:border-0 file:bg-[var(--bg-tertiary)] file:px-3 file:py-2 file:text-[var(--text-primary)]" />
@@ -109,7 +109,7 @@ function WorkspaceBackupSession({ onClose }: { onClose: () => void }) {
                         <p className="mt-1 break-words">Folders: {preview.folderNames.join(', ') || 'None'}</p>
                         <p className="mt-2 text-[var(--text-muted)]">{preview.exclusions}</p>
                         <p className="mt-2">Your existing dashboards and folders stay unchanged. New local-only copies get fresh IDs; nothing is sent to the backend.</p>
-                        <button type="button" onClick={handleRestore} disabled={!preview.dashboards && !preview.folders} className="mt-3 rounded-md bg-[var(--color-accent-primary)] px-3 py-2 font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] disabled:opacity-50">Import as new workspaces</button>
+                        <button type="button" onClick={handleRestore} disabled={!preview.dashboards && !preview.folders} className="mt-3 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] disabled:opacity-50">Import as new workspaces</button>
                     </div>}
                 </div>
                 {error && <p role="alert" className="mt-3 text-xs text-[var(--color-error)]">{error}</p>}

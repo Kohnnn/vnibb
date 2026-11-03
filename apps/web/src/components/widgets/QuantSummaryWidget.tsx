@@ -25,6 +25,7 @@ import { useQuantMetrics } from '@/lib/queries'
 import { QUANT_PERIOD_OPTIONS, type QuantPeriodOption } from '@/lib/quantPeriods'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import type { QuantPriceDiagnostics } from '@/lib/api'
+import { EMPTY_VALUE } from '@/lib/units'
 import {
   average,
   scoreDrawdown,
@@ -87,7 +88,7 @@ type BenchmarkRiskMetric = {
 }
 
 function formatSigned(value: number | null | undefined, suffix = ''): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}${suffix}`
 }
 
@@ -98,9 +99,9 @@ function flowLabel(score: number): string {
 }
 
 function flowTone(score: number): string {
-  if (score >= 68) return 'text-emerald-300'
-  if (score <= 32) return 'text-rose-300'
-  return 'text-cyan-300'
+  if (score >= 68) return 'text-[var(--color-positive)]'
+  if (score <= 32) return 'text-[var(--color-negative)]'
+  return 'text-[var(--color-accent-primary)]'
 }
 
 function scoreTrackingError(value: number | null | undefined): number {
@@ -262,7 +263,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                 onClick={() => setPeriod(option)}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
                   period === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
@@ -319,16 +320,16 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Trend</div>
                 <div className={`mt-1 text-lg font-semibold ${regime.structure.tone}`}>{regime.structure.shortLabel}</div>
-                <div className="text-[10px] text-[var(--text-secondary)]">Hurst {regime.hurst === null ? '—' : regime.hurst.toFixed(3)}</div>
+                <div className="text-[10px] text-[var(--text-secondary)]">Hurst {regime.hurst === null ? EMPTY_VALUE : regime.hurst.toFixed(3)}</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Risk Score</div>
-                <div className="mt-1 text-lg font-semibold text-cyan-300">{compositeRiskScore}/100</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">{compositeRiskScore}/100</div>
                 <div className="text-[10px] text-[var(--text-secondary)]">Composite regime risk</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Tracking</div>
-                <div className="mt-1 text-lg font-semibold text-fuchsia-300">{formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')}</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">{formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')}</div>
                 <div className="text-[10px] text-[var(--text-secondary)]">{benchmarkRisk?.benchmark || 'VNINDEX'} error 30D</div>
               </div>
             </div>
@@ -378,11 +379,11 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Best Month</div>
-                      <div className="mt-1 text-emerald-300">{seasonality?.best_month || '—'}</div>
+                      <div className="mt-1 text-[var(--color-positive)]">{seasonality?.best_month || '—'}</div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Worst Month</div>
-                      <div className="mt-1 text-rose-300">{seasonality?.worst_month || '—'}</div>
+                      <div className="mt-1 text-[var(--color-negative)]">{seasonality?.worst_month || '—'}</div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Sortino Avg</div>
@@ -414,7 +415,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">CVaR 95 (period)</div>
-                      <div className="mt-1 text-rose-300">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
+                      <div className="mt-1 text-[var(--color-negative)]">{formatSigned(benchmarkRisk?.cvar_95_1d_pct, '%')}</div>
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Ann. Return</div>
@@ -422,7 +423,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Calmar</div>
-                      <div className="mt-1 text-cyan-300">{formatSigned(calmar?.calmar_ratio)}</div>
+                      <div className="mt-1 text-[var(--color-accent-primary)]">{formatSigned(calmar?.calmar_ratio)}</div>
                     </div>
                   </div>
 

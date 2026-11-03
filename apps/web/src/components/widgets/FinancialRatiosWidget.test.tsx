@@ -240,7 +240,7 @@ describe('FinancialRatiosWidget period columns', () => {
     expect(cellByHeader['2025']).toBe('18.40');
     // The YTD roll-up is its own period: the ratio feed's 2026 fiscal-year row belongs to
     // FY 2026, not to it, so the cell stays empty rather than claiming a value.
-    expect(cellByHeader['2026 (YTD)']).toBe('—');
+    expect(cellByHeader['2026 (YTD)']).toBe('n/a');
   });
 
   // The ratio query is the widget's own source; the statement query only names the periods,

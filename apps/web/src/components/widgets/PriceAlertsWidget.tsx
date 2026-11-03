@@ -18,6 +18,7 @@ import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { recordAlertActivity } from '@/lib/alertActivity';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
+import { EMPTY_VALUE } from '@/lib/units';
 
 // ============ Types ============
 
@@ -89,11 +90,7 @@ class NotificationService {
         if (!this.isGranted()) return null;
 
         try {
-            const notification = new Notification(title, {
-                icon: '/favicon.ico',
-                badge: '/favicon.ico',
-                ...options,
-            });
+            const notification = new Notification(title, options);
 
             // Auto-close after 10 seconds
             setTimeout(() => notification.close(), 10000);
@@ -458,11 +455,11 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
             {/* Header */}
             <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-2 text-xs">
-                    <Bell size={12} className="text-yellow-400" />
+                    <Bell size={12} className="text-[var(--color-accent-primary)]" />
                     <span className="text-[var(--text-muted)]">{activeAlerts.length} active</span>
                     {wsConnected && (
-                        <span className="flex items-center gap-1 text-green-500">
-                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                        <span className="flex items-center gap-1 text-[var(--color-positive)]">
+                            <span className="w-1.5 h-1.5 bg-[var(--color-positive-bg)] rounded-full animate-pulse" />
                             Live
                         </span>
                     )}
@@ -474,7 +471,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             type="button"
                             onClick={handleRequestPermission}
                             aria-label="Enable browser alert notifications"
-                            className="min-h-11 min-w-11 rounded p-2 text-yellow-500 hover:bg-[var(--bg-hover)] hover:text-yellow-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                            className="min-h-11 min-w-11 rounded p-2 text-[var(--color-accent-primary)] hover:bg-[var(--bg-hover)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                             title="Enable notifications"
                         >
                             <BellOff size={12} />
@@ -484,7 +481,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         type="button"
                         onClick={openAddForm}
                         aria-label={showAdd ? 'Close price alert form' : 'Add price alert'}
-                        className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                        className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                     >
                         <Plus size={12} />
                     </button>
@@ -496,10 +493,10 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
 
             {/* Notification Permission Banner */}
             {notificationPermission === 'default' && (
-                <div className="px-2 py-1.5 bg-yellow-500/10 border-b border-yellow-500/20">
+                <div className="px-2 py-1.5 bg-[var(--color-state-bg)] border-b border-[var(--color-state-border)]">
                     <button
                         onClick={handleRequestPermission}
-                        className="flex items-center gap-2 text-xs text-yellow-400 hover:text-yellow-300 w-full"
+                        className="flex items-center gap-2 text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] w-full"
                     >
                         <BellRing size={12} />
                         <span>Enable browser notifications for alerts</span>
@@ -517,14 +514,14 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             placeholder="Symbol"
                             value={newAlert.symbol}
                             onChange={(e) => setNewAlert({ ...newAlert, symbol: e.target.value.toUpperCase() })}
-                            className="w-20 bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
+                            className="w-20 bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-[var(--color-state-border)] focus:outline-none"
                             maxLength={10}
                         />
                         <select
                             aria-label="Alert condition"
                             value={newAlert.condition}
                             onChange={(e) => setNewAlert({ ...newAlert, condition: e.target.value as PriceAlert['condition'] })}
-                            className="bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
+                            className="bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-[var(--color-state-border)] focus:outline-none"
                         >
                             <option value="above">Price Above</option>
                             <option value="below">Price Below</option>
@@ -539,7 +536,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             placeholder={newAlert.condition.includes('change') ? 'Percent' : 'Price'}
                             value={newAlert.threshold}
                             onChange={(e) => setNewAlert({ ...newAlert, threshold: e.target.value })}
-                            className="flex-1 bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
+                            className="flex-1 bg-[var(--bg-primary)] text-[var(--text-primary)] text-xs px-2 py-1.5 rounded border border-[var(--border-color)] focus:border-[var(--color-state-border)] focus:outline-none"
                             min={0}
                             step={newAlert.condition.includes('change') ? 0.1 : 100}
                         />
@@ -547,12 +544,12 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                             type="button"
                             onClick={addAlert}
                             disabled={!normalizeTickerSymbol(newAlert.symbol) || !isValidAlertThreshold(newAlert.threshold) || duplicateAlert}
-                            className="min-h-11 rounded bg-yellow-600 px-3 text-xs font-medium text-white transition-colors hover:bg-yellow-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)]"
+                            className="min-h-11 rounded bg-[var(--color-accent-fill)] px-3 text-xs font-medium text-[var(--color-on-accent)] transition-colors hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:bg-[var(--bg-hover)] disabled:text-[var(--text-muted)]"
                         >
                             Add
                         </button>
                     </div>
-                    {duplicateAlert && <p role="status" className="text-xs text-amber-400">This alert already exists. Resume or delete the existing rule instead.</p>}
+                    {duplicateAlert && <p role="status" className="text-xs text-[var(--color-warning)]">This alert already exists. Resume or delete the existing rule instead.</p>}
                 </div>
             )}
 
@@ -603,7 +600,7 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                                     <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Triggered</span>
                                     <button
                                         onClick={clearTriggered}
-                                        className="text-[10px] text-[var(--text-muted)] hover:text-red-400 flex items-center gap-1"
+                                        className="text-[10px] text-[var(--text-muted)] hover:text-[var(--color-negative)] flex items-center gap-1"
                                     >
                                         <Trash2 size={10} />
                                         Clear
@@ -636,7 +633,7 @@ interface AlertItemProps {
 function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
     const isPercentCondition = alert.condition.includes('change');
     const Icon = alert.condition === 'above' || alert.condition === 'change_up' ? ArrowUp : ArrowDown;
-    const iconColor = alert.condition === 'above' || alert.condition === 'change_up' ? 'text-green-400' : 'text-red-400';
+    const iconColor = alert.condition === 'above' || alert.condition === 'change_up' ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]';
 
     return (
         <div
@@ -669,7 +666,7 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
                     type="button"
                     onClick={() => onToggle(alert.id)}
                     aria-label={`${alert.isActive ? 'Pause' : 'Resume'} ${alert.symbol} alert`}
-                    className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+                    className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                     title={alert.isActive ? 'Pause alert' : 'Resume alert'}
                 >
                     {alert.isActive ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
@@ -678,7 +675,7 @@ function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
                     type="button"
                     onClick={() => onRemove(alert.id)}
                     aria-label={`Delete ${alert.symbol} alert`}
-                    className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                    className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--color-negative)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                     title="Delete alert"
                 >
                     <X size={12} />
@@ -697,12 +694,12 @@ function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
     const triggeredLabel = alert.triggeredAt ? formatTimestamp(alert.triggeredAt) : '—';
 
     return (
-        <div className="flex items-center justify-between p-2 rounded bg-green-500/10 border border-green-500/20 group">
+        <div className="flex items-center justify-between p-2 rounded bg-[var(--color-positive-bg)] border border-[var(--color-state-border)] group">
             <div className="flex items-center gap-2 min-w-0">
-                <Check size={14} className="text-green-400 shrink-0" />
+                <Check size={14} className="text-[var(--color-positive)] shrink-0" />
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-green-400">{alert.symbol}</span>
+                        <span className="text-sm font-medium text-[var(--color-positive)]">{alert.symbol}</span>
                         <span className="break-words whitespace-normal text-xs text-[var(--text-secondary)]">
                             {formatCondition(alert.condition)} {formatThreshold(alert)}
                         </span>
@@ -717,7 +714,7 @@ function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
                 type="button"
                 onClick={() => onRemove(alert.id)}
                 aria-label={`Delete triggered ${alert.symbol} alert`}
-                className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40"
+                className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-muted)] hover:text-[var(--color-negative)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
             >
                 <X size={12} />
             </button>

@@ -28,9 +28,9 @@ interface IchimokuWidgetProps {
 
 function labelTone(value: string) {
   const normalized = value.toLowerCase()
-  if (normalized.includes('bull')) return 'text-emerald-300'
-  if (normalized.includes('bear')) return 'text-rose-300'
-  if (normalized.includes('strong')) return 'text-sky-300'
+  if (normalized.includes('bull')) return 'text-[var(--color-positive)]'
+  if (normalized.includes('bear')) return 'text-[var(--color-negative)]'
+  if (normalized.includes('strong')) return 'text-[var(--color-accent-primary)]'
   return 'text-[var(--text-secondary)]'
 }
 
@@ -121,7 +121,7 @@ export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
     <div className="flex h-full flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <CloudSun size={13} className="text-sky-400" />
+          <CloudSun size={13} className="text-[var(--color-accent-primary)]" />
           <span>Ichimoku Cloud</span>
         </div>
         <div className="flex items-center gap-2">
@@ -133,7 +133,7 @@ export function IchimokuWidget({ symbol, onDataChange }: IchimokuWidgetProps) {
                 onClick={() => setPeriod(option)}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold transition-colors ${
                   period === option
-                    ? 'bg-sky-500/20 text-sky-200'
+                    ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
               >

@@ -8,6 +8,8 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { buildVolumeProfile, type ProfileBar } from '@/lib/marketStructure'
+import { EMPTY_VALUE, formatPercent } from '@/lib/units'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface MarketStructureWidgetProps {
   symbol: string
@@ -17,7 +19,7 @@ interface MarketStructureWidgetProps {
 }
 
 function fmtPrice(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return '—'
+  if (value === null || !Number.isFinite(value)) return EMPTY_VALUE
   return value.toFixed(2)
 }
 
@@ -130,7 +132,7 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
     <div className="flex h-full flex-col overflow-hidden">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <LayoutGrid size={12} className="text-cyan-400" />
+          <LayoutGrid size={12} className="text-[var(--color-accent-primary)]" />
           <span>Market Structure</span>
         </div>
         <div className="flex items-center gap-1">
@@ -141,7 +143,7 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
               onClick={() => setPeriod(option)}
               className={
                 period === option
-                  ? 'rounded bg-cyan-600/20 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300'
+                  ? 'rounded bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-primary)]'
                   : 'rounded px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }
             >
@@ -154,9 +156,9 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
       {/* Header KPIs */}
       <div className="grid grid-cols-4 gap-1 px-1">
         <Kpi label="Last" value={fmtPrice(lastClose)} />
-        <Kpi label="POC" value={fmtPrice(profile!.poc)} tone="text-amber-400" />
-        <Kpi label="VAH" value={fmtPrice(profile!.vah)} tone="text-emerald-400" />
-        <Kpi label="VAL" value={fmtPrice(profile!.val)} tone="text-red-400" />
+        <Kpi label="POC" value={fmtPrice(profile!.poc)} tone="text-[var(--color-warning)]" />
+        <Kpi label="VAH" value={fmtPrice(profile!.vah)} tone="text-[var(--color-positive)]" />
+        <Kpi label="VAL" value={fmtPrice(profile!.val)} tone="text-[var(--color-negative)]" />
       </div>
 
       <div className="mt-2 flex-1 overflow-y-auto px-1">
@@ -172,9 +174,9 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
                   <div
                     className={
                       bin.isPoc
-                        ? 'h-full rounded-sm bg-amber-500/70'
+                        ? 'h-full rounded-sm bg-[var(--color-state-bg)]'
                         : bin.inValueArea
-                          ? 'h-full rounded-sm bg-cyan-500/50'
+                          ? 'h-full rounded-sm bg-[var(--color-state-bg)]'
                           : 'h-full rounded-sm bg-[var(--text-muted)]/30'
                     }
                     style={{ width: `${Math.max(1, widthPct)}%` }}
@@ -199,8 +201,8 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
                 <div key={i} className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-[var(--text-primary)]">{level.price.toFixed(2)}</span>
                   <span className="text-[var(--text-muted)]">{level.volumePct.toFixed(1)}% vol</span>
-                  <span className={dist === null ? 'text-[var(--text-muted)]' : dist >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                    {dist === null ? '—' : `${dist >= 0 ? '+' : ''}${dist.toFixed(1)}%`}
+                  <span className={signedToneClass(dist)}>
+                    {dist === null ? EMPTY_VALUE : formatPercent(dist, { input: 'percent', decimals: 1, signed: true })}
                   </span>
                 </div>
               )
@@ -212,7 +214,7 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
         {foreignNet !== null && (
           <div className="mt-3 rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1.5 text-[10px]">
             <span className="text-[var(--text-muted)]">Foreign net (last ~60 sessions): </span>
-            <span className={foreignNet >= 0 ? 'font-semibold text-emerald-400' : 'font-semibold text-red-400'}>
+            <span className={foreignNet >= 0 ? 'font-semibold text-[var(--color-positive)]' : 'font-semibold text-[var(--color-negative)]'}>
               {foreignNet >= 0 ? '+' : ''}
               {fmtCompact(foreignNet)}
             </span>

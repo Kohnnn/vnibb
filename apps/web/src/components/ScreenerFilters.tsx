@@ -84,7 +84,7 @@ function RangeInput({
                     aria-label={`${label} minimum`}
                     onChange={(e) => onMinChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder.min}
-                    className="w-20 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500"
+                    className="w-20 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)]"
                 />
                 <span className="text-[var(--text-muted)]">-</span>
                 <input
@@ -94,7 +94,7 @@ function RangeInput({
                     aria-label={`${label} maximum`}
                     onChange={(e) => onMaxChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder.max}
-                    className="w-20 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500"
+                    className="w-20 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)]"
                 />
             </div>
         </div>
@@ -127,7 +127,7 @@ function MinInput({
                     aria-label={`${label} minimum`}
                     onChange={(e) => onChange(e.target.value ? parseFloat(e.target.value) : undefined)}
                     placeholder={placeholder}
-                    className="w-24 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500"
+                    className="w-24 bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)]"
                 />
                 {suffix && <span className="text-xs text-[var(--text-muted)]">{suffix}</span>}
             </div>
@@ -201,10 +201,10 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                    <Filter size={16} className="text-blue-400" />
+                    <Filter size={16} className="text-[var(--color-accent-primary)]" />
                     <span className="text-sm font-medium text-[var(--text-primary)]">Advanced Filters</span>
                     {hasActiveFilters && (
-                        <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">
+                        <span className="px-2 py-0.5 bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] text-xs rounded">
                             Active
                         </span>
                     )}
@@ -331,7 +331,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                     </span>
                     <button
                         onClick={() => setShowPresetModal(true)}
-                        className="flex items-center gap-1 px-2 py-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-[var(--color-accent-primary)] hover:text-[var(--text-primary)] transition-colors"
                     >
                         <Save size={12} />
                         Save Current
@@ -351,13 +351,13 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                         <div key={preset.name} className="flex items-center gap-1">
                             <button
                                 onClick={() => loadPreset(preset)}
-                                className="px-3 py-1.5 text-xs bg-blue-600/15 hover:bg-blue-600/25 text-blue-300 rounded-l transition-colors"
+                                className="px-3 py-1.5 text-xs bg-[var(--color-state-bg)] hover:bg-[var(--bg-hover)] text-[var(--color-accent-primary)] rounded-l transition-colors"
                             >
                                 {preset.name}
                             </button>
                             <button
                                 onClick={() => deletePreset(preset.name)}
-                                className="px-1.5 py-1.5 text-xs bg-red-600/15 hover:bg-red-600/25 text-red-400 rounded-r transition-colors"
+                                className="px-1.5 py-1.5 text-xs bg-[var(--color-state-bg)] hover:bg-[var(--bg-hover)] text-[var(--color-warning)] rounded-r transition-colors"
                             >
                                 <X size={12} />
                             </button>
@@ -377,7 +377,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                             aria-label="Preset name"
                             onChange={(e) => setPresetName(e.target.value)}
                             placeholder="Preset name"
-                            className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-blue-500 mb-3"
+                            className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-accent-primary)] mb-3"
                             autoFocus
                         />
                         <div className="flex justify-end gap-2">
@@ -390,7 +390,7 @@ export function ScreenerFilters({ filters, onFilterChange, onClose }: ScreenerFi
                             <button
                                 onClick={savePreset}
                                 disabled={!presetName.trim()}
-                                className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                className="px-3 py-1.5 text-sm bg-[var(--color-accent-fill)] hover:bg-[var(--color-accent-hover)] text-[var(--color-on-accent)] rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
                                 Save
                             </button>

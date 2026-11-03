@@ -10,7 +10,7 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
    rather than red — red stays reserved for financial direction. */
 function Badge({ className, variant = "default", ...props }: BadgeProps) {
     const variants = {
-        default: "border-transparent bg-[var(--color-accent-primary)] text-white",
+        default: "border-transparent bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]",
         secondary: "border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
         destructive: "border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-error)]",
         outline: "border-[var(--border-strong)] text-[var(--text-primary)]",

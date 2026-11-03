@@ -103,7 +103,7 @@ export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryW
                                         <td className="py-2 pr-4 text-right text-[var(--text-primary)]">{formatNumber(convertFinancialValueForUnit(row.pre_tax_profit ?? row.profit_before_tax ?? null, unitConfig, row.period), { decimals: 0 })}</td>
                                         <td className="py-2 pr-4 text-right text-[var(--text-primary)]">{formatNumber(convertFinancialValueForUnit(row.net_income ?? null, unitConfig, row.period), { decimals: 0 })}</td>
                                         <td className="py-2 pr-4 text-right text-[var(--text-primary)] font-medium">{formatNumber(convertFinancialValueForUnit(row.eps ?? null, unitConfig, row.period), { decimals: 2 })}</td>
-                                        <td className="py-2 text-right text-green-400 font-medium">{formatPercent(netMargin, { decimals: 2, input: 'percent', clamp: 'margin' })}</td>
+                                        <td className="py-2 text-right text-[var(--color-positive)] font-medium">{formatPercent(netMargin, { decimals: 2, input: 'percent', clamp: 'margin' })}</td>
                                     </tr>
                                 );
                             })}

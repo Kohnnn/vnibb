@@ -12,7 +12,10 @@ import { usePortfolio, type Position } from '@/lib/hooks/usePortfolio';
 import { usePortfolioPrices } from '@/lib/hooks/usePortfolioPrices';
 import * as api from '@/lib/api';
 import { equityQueryKeys } from '@/lib/queries/equity';
-import { formatVND, formatPercent } from '@/lib/formatters';
+import { formatVND } from '@/lib/formatters';
+// P/L percentage is already in percentage points; `input: 'percent'` keeps the
+// auto heuristic (`|v| <= 1` means ratio) from re-scaling a 1.5% gain to 150%.
+import { formatPercent } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { exportToCSV, exportToJSON } from '@/lib/exportWidget';
 import { calculatePortfolioConcentration, calculatePortfolioValuation } from '@/lib/portfolioAnalytics';
@@ -66,6 +69,22 @@ const SECTOR_COLORS: Record<string, string> = {
 // Sub-components
 // ============================================================================
 
+// Direction as the reader sees it: a value that rounds to zero at the rendered
+// precision has no side, so the arrow, the sign and the tint all agree.
+type Direction = 'up' | 'down' | 'flat' | null;
+
+function directionOf(value: number | null | undefined, decimals: number): Direction {
+    if (value === null || value === undefined || !Number.isFinite(value)) return null;
+    if (Number(Math.abs(value).toFixed(decimals)) === 0) return 'flat';
+    return value > 0 ? 'up' : 'down';
+}
+
+function inkFor(direction: Direction): string {
+    if (direction === 'up') return 'text-[var(--color-positive)]';
+    if (direction === 'down') return 'text-[var(--color-negative)]';
+    return 'text-[var(--color-text-muted)]';
+}
+
 function AddPositionForm({
     onAdd,
     onCancel,
@@ -104,14 +123,14 @@ function AddPositionForm({
     };
 
     return (
-        <div className="p-2 bg-zinc-800/50 rounded-lg space-y-2">
+        <div className="p-2 bg-[var(--color-bg-tertiary)] rounded-lg space-y-2">
             <div className="grid grid-cols-4 gap-1">
                 <input
                     type="text"
                     placeholder="Symbol"
                     value={symbol}
                     onChange={e => setSymbol(e.target.value.toUpperCase())}
-                    className="bg-zinc-700 text-white text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                    className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                     maxLength={10}
                 />
                 <input
@@ -119,7 +138,7 @@ function AddPositionForm({
                     placeholder="Qty"
                     value={quantity}
                     onChange={e => setQuantity(e.target.value)}
-                    className="bg-zinc-700 text-white text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                    className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                     min={1}
                     step={1}
                 />
@@ -128,7 +147,7 @@ function AddPositionForm({
                     placeholder="Avg Cost"
                     value={avgCost}
                     onChange={e => setAvgCost(e.target.value)}
-                    className="bg-zinc-700 text-white text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                    className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                     min={0}
                     step={100}
                 />
@@ -136,7 +155,7 @@ function AddPositionForm({
                     type="date"
                     value={purchaseDate}
                     onChange={e => setPurchaseDate(e.target.value)}
-                    className="bg-zinc-700 text-white text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                    className="bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                 />
             </div>
             <div className="flex gap-1">
@@ -145,18 +164,21 @@ function AddPositionForm({
                     placeholder="Notes (optional)"
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
-                    className="flex-1 bg-zinc-700 text-white text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                    className="flex-1 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-2 py-1.5 rounded focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                 />
                 <button
                     onClick={handleSubmit}
                     disabled={!symbol.trim() || !validQuantity || !validCost}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white text-xs rounded transition-colors"
+                    // Dimming only the label left muted ink on a solid fill
+                    // (1.7:1 in light). Dimming the control keeps `on-accent`
+                    // over `accent-fill` paired and still reads as disabled.
+                    className="px-3 py-1.5 bg-[var(--color-accent-fill)] hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed text-[var(--color-on-accent)] text-xs rounded transition-colors"
                 >
                     Add
                 </button>
                 <button
                     onClick={onCancel}
-                    className="px-2 py-1.5 bg-zinc-600 hover:bg-zinc-500 text-white text-xs rounded transition-colors"
+                    className="px-2 py-1.5 text-[var(--color-text-primary)] hover:text-[var(--color-text-muted)] text-xs rounded transition-colors"
                 >
                     <X size={12} />
                 </button>
@@ -181,14 +203,14 @@ function EditPositionRow({
     const validCost = avgCost.trim() !== '' && Number.isFinite(Number(avgCost)) && Number(avgCost) >= 0;
 
     return (
-        <tr className="bg-zinc-800/50">
-            <td className="py-1.5 px-1 text-white font-medium">{position.symbol}</td>
+        <tr className="bg-[var(--color-bg-tertiary)]">
+            <td className="py-1.5 px-1 text-[var(--color-text-primary)] font-medium">{position.symbol}</td>
             <td className="py-1.5 px-1">
                 <input
                     type="number"
                     value={quantity}
                     onChange={e => setQuantity(e.target.value)}
-                    className="w-16 bg-zinc-700 text-white text-xs px-1 py-0.5 rounded"
+                    className="w-16 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-1 py-0.5 rounded"
                     min={1}
                     step={1}
                 />
@@ -198,7 +220,7 @@ function EditPositionRow({
                     type="number"
                     value={avgCost}
                     onChange={e => setAvgCost(e.target.value)}
-                    className="w-20 bg-zinc-700 text-white text-xs px-1 py-0.5 rounded"
+                    className="w-20 bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] text-xs px-1 py-0.5 rounded"
                     min={0}
                     step={100}
                 />
@@ -210,13 +232,13 @@ function EditPositionRow({
                         avgCost: Number(avgCost),
                     })}
                     disabled={!validQuantity || !validCost}
-                    className="p-1 text-green-400 hover:bg-zinc-700 rounded mr-1"
+                    className="p-1 text-[var(--color-positive)] hover:bg-[var(--color-bg-tertiary)] rounded mr-1"
                 >
                     <Check size={12} />
                 </button>
                 <button
                     onClick={onCancel}
-                    className="p-1 text-zinc-400 hover:bg-zinc-700 rounded"
+                    className="p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] rounded"
                 >
                     <X size={12} />
                 </button>
@@ -243,7 +265,7 @@ function AllocationChart({
 
     if (concentration.sectors.length === 0) {
         return (
-            <div className="flex h-32 flex-col items-center justify-center gap-1 text-center text-xs text-zinc-500">
+            <div className="flex h-32 flex-col items-center justify-center gap-1 text-center text-xs text-[var(--color-text-muted)]">
                 <span>{positions.length === 0 ? 'No positions to display' : 'Quoted sector allocation unavailable'}</span>
                 {positions.length > 0 && (
                     <span>Sector profiles: 0 / {concentration.positionCount} quoted holdings · 0 / {formatVND(concentration.totalValue)} quoted market value.</span>
@@ -255,44 +277,44 @@ function AllocationChart({
     return (
         <div className="space-y-3 p-2">
             <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
-                    <div className="text-zinc-500">Largest Holding</div>
-                    <div className="mt-0.5 text-white">
+                <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] p-2">
+                    <div className="text-[var(--color-text-muted)]">Largest Holding</div>
+                    <div className="mt-0.5 text-[var(--color-text-primary)]">
                         {concentration.largestHolding?.symbol} · {((concentration.largestHolding?.weight || 0) * 100).toFixed(1)}%
                     </div>
                 </div>
-                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
-                    <div className="text-zinc-500">Top 3 Holdings</div>
-                    <div className="mt-0.5 text-white">{(concentration.topThreeWeight * 100).toFixed(1)}%</div>
+                <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] p-2">
+                    <div className="text-[var(--color-text-muted)]">Top 3 Holdings</div>
+                    <div className="mt-0.5 text-[var(--color-text-primary)]">{(concentration.topThreeWeight * 100).toFixed(1)}%</div>
                 </div>
-                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
-                    <div className="text-zinc-500">HHI / Effective</div>
-                    <div className="mt-0.5 text-white">
+                <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] p-2">
+                    <div className="text-[var(--color-text-muted)]">HHI / Effective</div>
+                    <div className="mt-0.5 text-[var(--color-text-primary)]">
                         {concentration.hhi.toFixed(3)} / {concentration.effectivePositions.toFixed(1)} positions
                     </div>
                 </div>
-                <div className="rounded-lg border border-zinc-700 bg-zinc-800/50 p-2">
-                    <div className="text-zinc-500">Largest Sector</div>
-                    <div className="mt-0.5 text-white">
+                <div className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-tertiary)] p-2">
+                    <div className="text-[var(--color-text-muted)]">Largest Sector</div>
+                    <div className="mt-0.5 text-[var(--color-text-primary)]">
                         {concentration.largestSector?.name} · {((concentration.largestSector?.weight || 0) * 100).toFixed(1)}%
                     </div>
                 </div>
             </div>
-            <div className="text-[10px] text-zinc-500">
+            <div className="text-[10px] text-[var(--color-text-muted)]">
                 Quote coverage: {concentration.quotedPositionCount} / {positions.length}; allocation uses quoted market value only.
             </div>
-            <div className="text-[10px] text-zinc-500">
+            <div className="text-[10px] text-[var(--color-text-muted)]">
                 Sector profiles: {concentration.resolvedSectorPositionCount} / {concentration.positionCount} quoted holdings · {formatVND(concentration.resolvedSectorValue)} / {formatVND(concentration.totalValue)} quoted market value; unresolved {concentration.unresolvedSectorPositionCount} / {formatVND(concentration.unresolvedSectorValue)}.
             </div>
             {concentration.sectors.map(sector => (
                 <div key={sector.name} className="space-y-1">
                     <div className="flex justify-between text-xs">
-                        <span className="text-zinc-300">{sector.name}</span>
-                        <span className="text-zinc-400">
+                        <span className="text-[var(--color-text-secondary)]">{sector.name}</span>
+                        <span className="text-[var(--color-text-secondary)]">
                             {(sector.weight * 100).toFixed(1)}% • {formatVND(sector.value)}
                         </span>
                     </div>
-                    <div className="h-2 bg-zinc-700 rounded-full overflow-hidden">
+                    <div className="h-2 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
                         <div
                             className="h-full rounded-full transition-all duration-300"
                             style={{
@@ -515,22 +537,28 @@ export function PortfolioTrackerWidget({
         return sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />;
     };
 
-    const isProfit = totals.unrealizedPL !== null && totals.unrealizedPL >= 0;
+    // Break-even is neither gain nor loss: no green ink, no `+`, no arrow.
+    // Each direction is read from the digits it decorates, so a glyph can never
+    // claim a side the adjacent number does not show — the VND total rounds to
+    // whole dong, the percentage to one decimal.
+    const plDirection = directionOf(totals.unrealizedPL, 0);
+    const plPctDirection = directionOf(totals.unrealizedPLPct, 1);
+    const isProfit = plDirection === 'up';
 
     return (
         <div className="h-full flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-2 py-1.5 border-b border-zinc-700">
+            <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--color-border-default)]">
                 <div className="flex items-center gap-2">
-                    <Briefcase size={14} className="text-cyan-400" />
+                    <Briefcase size={14} className="text-[var(--color-accent-primary)]" />
                     <div className="text-xs">
-                        <span className="text-zinc-400">{totals.marketValue === null ? 'Market value:' : 'Quoted market value:'} </span>
-                        <span className="text-white font-medium">
+                        <span className="text-[var(--color-text-secondary)]">{totals.marketValue === null ? 'Market value:' : 'Quoted market value:'} </span>
+                        <span className="text-[var(--color-text-primary)] font-medium">
                             {totals.marketValue === null ? 'Unavailable' : formatVND(totals.marketValue)}
                         </span>
                         {totals.unrealizedPLPct !== null && (
-                            <span className={`ml-2 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-                                {formatPercent(totals.unrealizedPLPct / 100)}
+                            <span className={`ml-2 ${inkFor(plPctDirection)}`}>
+                                {formatPercent(totals.unrealizedPLPct, { input: 'percent', decimals: 1, signed: true })}
                             </span>
                         )}
                     </div>
@@ -545,7 +573,7 @@ export function PortfolioTrackerWidget({
                     />
                     <button
                         onClick={() => refetch()}
-                        className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors"
+                        className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] rounded transition-colors"
                         title="Refresh prices"
                     >
                         <RefreshCw size={12} className={pricesLoading ? 'animate-spin' : ''} />
@@ -553,7 +581,7 @@ export function PortfolioTrackerWidget({
                     <button
                         onClick={handleExportCSV}
                         disabled={positions.length === 0}
-                        className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors disabled:opacity-50"
+                        className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] rounded transition-colors disabled:opacity-50"
                         title="Export to CSV"
                     >
                         <Download size={12} />
@@ -561,7 +589,7 @@ export function PortfolioTrackerWidget({
                     <button
                         onClick={handleExportJSON}
                         disabled={positions.length === 0}
-                        className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors disabled:opacity-50"
+                        className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] rounded transition-colors disabled:opacity-50"
                         title="Export to JSON"
                         aria-label="Export portfolio to JSON"
                     >
@@ -577,8 +605,8 @@ export function PortfolioTrackerWidget({
                         }}
                         className={`p-1 rounded transition-colors ${
                             viewMode === 'allocation' 
-                                ? 'text-cyan-400 bg-cyan-400/10' 
-                                : 'text-zinc-500 hover:text-white hover:bg-zinc-700'
+                                ? 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]' 
+                                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)]'
                         }`}
                         title="Sector allocation"
                         aria-label="Toggle sector allocation"
@@ -587,7 +615,7 @@ export function PortfolioTrackerWidget({
                     </button>
                     <button
                         onClick={() => setShowAddForm(!showAddForm)}
-                        className="p-1 text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors"
+                        className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] rounded transition-colors"
                         title="Add position"
                     >
                         <Plus size={12} />
@@ -595,44 +623,44 @@ export function PortfolioTrackerWidget({
                 </div>
             </div>
 
-            <div className="border-b border-zinc-800 px-2 py-1 text-[10px] text-zinc-500">
+            <div className="border-b border-[var(--color-border-default)] px-2 py-1 text-[10px] text-[var(--color-text-muted)]">
                 Browser-local holdings monitor. Not transaction accounting; realized returns, fees, dividends, deposits, withdrawals, and cash-flow-aware performance are not included.
             </div>
 
-            <div className="grid grid-cols-2 gap-2 px-2 py-1.5 border-b border-zinc-800 text-xs sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 px-2 py-1.5 border-b border-[var(--color-border-default)] text-xs sm:grid-cols-4">
                 <div>
-                    <div className="text-zinc-500">Quoted market value</div>
-                    <div className="text-white font-mono">{formatVND(totals.quotedMarketValue)}</div>
+                    <div className="text-[var(--color-text-muted)]">Quoted market value</div>
+                    <div className="text-[var(--color-text-primary)] font-mono">{formatVND(totals.quotedMarketValue)}</div>
                 </div>
                 <div>
-                    <div className="text-zinc-500">Unpriced cost basis</div>
-                    <div className="text-white font-mono">{formatVND(totals.unpricedCostBasis)}</div>
+                    <div className="text-[var(--color-text-muted)]">Unpriced cost basis</div>
+                    <div className="text-[var(--color-text-primary)] font-mono">{formatVND(totals.unpricedCostBasis)}</div>
                 </div>
                 <div>
-                    <div className="text-zinc-500">Quote coverage</div>
-                    <div className="text-white font-mono">{totals.quotedPositionCount} / {totals.positionCount}</div>
+                    <div className="text-[var(--color-text-muted)]">Quote coverage</div>
+                    <div className="text-[var(--color-text-primary)] font-mono">{totals.quotedPositionCount} / {totals.positionCount}</div>
                 </div>
                 <div>
-                    <div className="text-zinc-500">Unrealized P/L</div>
-                    <div className={`font-mono ${totals.unrealizedPL === null ? 'text-zinc-500' : isProfit ? 'text-green-400' : 'text-red-400'}`}>
-                        {totals.unrealizedPL === null ? 'Unavailable' : `${isProfit ? '+' : ''}${formatVND(totals.unrealizedPL)}`}
+                    <div className="text-[var(--color-text-muted)]">Unrealized P/L</div>
+                    <div className={`font-mono ${inkFor(plDirection)}`}>
+                        {totals.unrealizedPL === null ? 'Unavailable' : `${plDirection === 'up' ? '+' : ''}${formatVND(totals.unrealizedPL)}`}
                     </div>
                 </div>
             </div>
             {totals.unpricedPositionCount > 0 && (
-                <div className="border-b border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[10px] text-amber-200">
+                <div className="border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                     Aggregate market value and unrealized P/L are unavailable: {totals.unpricedPositionCount} holding{totals.unpricedPositionCount === 1 ? '' : 's'} lack a valid quote. Unpriced cost basis is not market value.
                 </div>
             )}
 
             {storageError && (
-                <div role="alert" className="border-b border-red-500/30 bg-red-500/10 px-2 py-2 text-xs text-red-200">
+                <div role="alert" className="border-b border-[var(--color-state-border)] bg-[var(--color-negative-bg)] px-2 py-2 text-xs text-[var(--color-negative)]">
                     {storageError} Export CSV or JSON to back up the last saved holdings.
                 </div>
             )}
             {/* Add Form */}
             {showAddForm && (
-                <div className="px-2 py-2 border-b border-zinc-800">
+                <div className="px-2 py-2 border-b border-[var(--color-border-default)]">
                     <AddPositionForm
                         onAdd={pos => {
                             if (!addPosition(pos)) return false;
@@ -652,10 +680,10 @@ export function PortfolioTrackerWidget({
                     <WidgetEmpty message="Add holdings to track" icon={<Briefcase size={18} />} />
                 ) : (
                     <table className="data-table w-full text-xs">
-                        <thead className="text-zinc-500 sticky top-0 bg-zinc-900">
-                            <tr className="border-b border-zinc-800">
+                        <thead className="text-[var(--color-text-muted)] sticky top-0 bg-[var(--color-bg-primary)]">
+                            <tr className="border-b border-[var(--color-border-default)]">
                                 <th
-                                    className="text-left py-1.5 px-1 font-medium cursor-pointer hover:text-white"
+                                    className="text-left py-1.5 px-1 font-medium cursor-pointer hover:text-[var(--color-text-primary)]"
                                     onClick={() => handleSort('symbol')}
                                 >
                                     <span className="flex items-center gap-0.5">
@@ -664,7 +692,7 @@ export function PortfolioTrackerWidget({
                                 </th>
                                 <th className="text-right py-1.5 px-1 font-medium">Qty</th>
                                 <th
-                                    className="text-right py-1.5 px-1 font-medium cursor-pointer hover:text-white"
+                                    className="text-right py-1.5 px-1 font-medium cursor-pointer hover:text-[var(--color-text-primary)]"
                                     onClick={() => handleSort('value')}
                                 >
                                     <span className="flex items-center justify-end gap-0.5">
@@ -672,7 +700,7 @@ export function PortfolioTrackerWidget({
                                     </span>
                                 </th>
                                 <th
-                                    className="text-right py-1.5 px-1 font-medium cursor-pointer hover:text-white"
+                                    className="text-right py-1.5 px-1 font-medium cursor-pointer hover:text-[var(--color-text-primary)]"
                                     onClick={() => handleSort('pl')}
                                 >
                                     <span className="flex items-center justify-end gap-0.5">
@@ -699,11 +727,13 @@ export function PortfolioTrackerWidget({
                                     );
                                 }
 
-                                const profit = pos.unrealizedPL !== null && pos.unrealizedPL >= 0;
+                                // This cell prints the percentage, so its arrow and
+                                // ink follow the percentage — not the VND total.
+                                const rowDirection = directionOf(pos.unrealizedPLPct, 1);
                                 return (
                                     <tr
                                         key={pos.id}
-                                        className="border-b border-zinc-800/30 hover:bg-zinc-800/20 group"
+                                        className="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-tertiary)] group"
                                     >
                                         <td className="py-1.5 px-1">
                                             <button
@@ -712,32 +742,38 @@ export function PortfolioTrackerWidget({
                                                     setLinkedSymbol(pos.symbol);
                                                     onSymbolClick?.(pos.symbol);
                                                 }}
-                                                className="text-left text-white font-medium hover:text-blue-400"
+                                                className="text-left text-[var(--color-text-primary)] font-medium hover:text-[var(--color-accent-primary)]"
                                             >
                                                 <div className="flex items-center gap-1">
                                                     {pos.symbol}
                                                     {pos.isLoading && (
-                                                        <div className="w-2 h-2 border border-zinc-500 border-t-transparent rounded-full animate-spin" />
+                                                        <div className="w-2 h-2 border border-[var(--color-border-default)] border-t-transparent rounded-full animate-spin" />
                                                     )}
                                                 </div>
-                                                {pos.dayChangePct !== null && (
-                                                    <div className={`text-[10px] ${pos.dayChangePct >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                        {pos.dayChangePct >= 0 ? '↑' : '↓'} {Math.abs(pos.dayChangePct).toFixed(1)}%
-                                                    </div>
-                                                )}
+                                                {pos.dayChangePct !== null && Number.isFinite(pos.dayChangePct) && (() => {
+                                                    // Direction follows the displayed precision; zero stays unsigned and neutral.
+                                                    const shown = Number(Math.abs(pos.dayChangePct).toFixed(1));
+                                                    const direction = shown === 0 ? 0 : Math.sign(pos.dayChangePct);
+                                                    return (
+                                                        <div className={`text-[10px] ${direction === 0 ? 'text-[var(--color-text-muted)]' : direction > 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
+                                                            {direction === 0 ? '' : direction > 0 ? '↑ ' : '↓ '}
+                                                            {Math.abs(pos.dayChangePct).toFixed(1)}%
+                                                        </div>
+                                                    );
+                                                })()}
                                             </button>
                                         </td>
-                                        <td className="py-1.5 px-1 text-right text-zinc-400">
+                                        <td className="py-1.5 px-1 text-right text-[var(--color-text-secondary)]">
                                             {pos.quantity.toLocaleString()}
                                         </td>
-                                        <td className="py-1.5 px-1 text-right text-white font-mono">
-                                            {pos.marketValue === null ? <span className="text-zinc-500">Unavailable</span> : formatVND(pos.marketValue)}
+                                        <td className="py-1.5 px-1 text-right text-[var(--color-text-primary)] font-mono">
+                                            {pos.marketValue === null ? <span className="text-[var(--color-text-muted)]">Unavailable</span> : formatVND(pos.marketValue)}
                                         </td>
-                                        <td className={`py-1.5 px-1 text-right font-mono ${pos.unrealizedPLPct === null ? 'text-zinc-500' : profit ? 'text-green-400' : 'text-red-400'}`}>
+                                        <td className={`py-1.5 px-1 text-right font-mono ${inkFor(rowDirection)}`}>
                                             {pos.unrealizedPLPct === null ? 'Unavailable' : (
                                                 <div className="flex items-center justify-end gap-0.5">
-                                                    {profit ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                                                    {formatPercent(pos.unrealizedPLPct / 100)}
+                                                    {rowDirection === 'up' ? <TrendingUp size={10} /> : rowDirection === 'down' ? <TrendingDown size={10} /> : null}
+                                                    {formatPercent(pos.unrealizedPLPct, { input: 'percent', decimals: 1, signed: true })}
                                                 </div>
                                             )}
                                         </td>
@@ -745,14 +781,14 @@ export function PortfolioTrackerWidget({
                                             <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button
                                                     onClick={() => setEditingId(pos.id)}
-                                                    className="p-1 text-zinc-500 hover:text-white rounded"
+                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded"
                                                     title="Edit"
                                                 >
                                                     <Edit2 size={10} />
                                                 </button>
                                                 <button
                                                     onClick={() => removePosition(pos.id)}
-                                                    className="p-1 text-zinc-500 hover:text-red-400 rounded"
+                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-negative)] rounded"
                                                     title="Remove"
                                                 >
                                                     <X size={10} />

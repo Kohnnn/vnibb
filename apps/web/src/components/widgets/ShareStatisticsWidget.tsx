@@ -222,12 +222,12 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
           <div className="space-y-1">
             <div className="flex flex-wrap gap-1.5 pb-2">
               {exchange && (
-                <span className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+                <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-accent-primary)]">
                   {exchange}
                 </span>
               )}
               {industry && (
-                <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-positive)]">
                   {industry}
                 </span>
               )}
@@ -248,13 +248,13 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
               value={outstandingShares === null ? 'Unavailable' : formatNumber(outstandingShares)}
               source={outstandingShares === null ? undefined : profileData?.shares_source ?? undefined}
             />
-            <StatRow label="P/E Ratio" value={pe.value !== null ? pe.value.toFixed(2) : '-'} source={pe.source} />
-            <StatRow label="P/B Ratio" value={pb.value !== null ? pb.value.toFixed(2) : '-'} source={pb.source} />
+            <StatRow label="P/E Ratio" value={pe.value !== null ? pe.value.toFixed(2) : 'n/a'} source={pe.source} />
+            <StatRow label="P/B Ratio" value={pb.value !== null ? pb.value.toFixed(2) : 'n/a'} source={pb.source} />
 
             <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider pt-3 pb-1">Market Activity</div>
             <StatRow
               label="Last Price"
-              value={quote?.price !== null && quote?.price !== undefined ? quote.price.toLocaleString() : '-'}
+              value={quote?.price !== null && quote?.price !== undefined ? quote.price.toLocaleString() : 'n/a'}
               source={quote?.price ? 'Quote' : undefined}
             />
             <StatRow label="Last Volume" value={formatNumber(volume.value)} source={volume.source} />
@@ -269,7 +269,7 @@ export function ShareStatisticsWidget({ id, symbol, hideHeader, onRemove, onData
             />
             <StatRow
               label="Beta"
-              value={beta.value !== null ? beta.value.toFixed(2) : '-'}
+              value={beta.value !== null ? beta.value.toFixed(2) : 'n/a'}
               source={beta.source}
             />
           </div>

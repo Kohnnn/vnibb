@@ -109,7 +109,7 @@ export default function SignupPage() {
                 </div>
 
                 {error && (
-                    <div className="rounded border border-[var(--color-error)]/40 bg-[var(--color-state-bg)] px-4 py-3 text-sm text-[var(--color-error)]">
+                    <div className="rounded border border-[var(--color-error)]/40 bg-[var(--color-state-bg)] px-4 py-3 text-sm text-[var(--color-text-primary)]">
                         {error}
                     </div>
                 )}
@@ -134,7 +134,7 @@ export default function SignupPage() {
                                 required
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)]"
                                 placeholder="you@example.com"
                             />
                         </div>
@@ -151,7 +151,7 @@ export default function SignupPage() {
                                 required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)]"
                                 placeholder="••••••••"
                             />
                         </div>
@@ -168,7 +168,7 @@ export default function SignupPage() {
                                 required
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
-                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
+                                className="mt-1 block w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-blue)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)]"
                                 placeholder="••••••••"
                             />
                         </div>
@@ -177,7 +177,7 @@ export default function SignupPage() {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="flex w-full justify-center rounded-md bg-[var(--accent-blue)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex w-full justify-center rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent)] transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         {loading ? 'Creating account...' : 'Sign up'}
                     </button>
@@ -197,7 +197,7 @@ export default function SignupPage() {
                         <button
                             onClick={handleGoogleSignup}
                             disabled={loading}
-                            className="flex w-full items-center justify-center gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex w-full items-center justify-center gap-3 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                             <svg className="w-5 h-5" viewBox="0 0 24 24">
                                 <path

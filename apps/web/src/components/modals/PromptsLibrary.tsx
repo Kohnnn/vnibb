@@ -421,7 +421,7 @@ export function PromptsLibrary({ isOpen, onClose, onSelectPrompt, symbol, widget
                                 </button>
                                 <button
                                     onClick={handleAddPrompt}
-                                    className="rounded bg-[var(--color-accent-primary)] px-3 py-1 text-xs text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+                                    className="rounded bg-[var(--color-accent-fill)] px-3 py-1 text-xs text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                                 >
                                     Save Prompt
                                 </button>

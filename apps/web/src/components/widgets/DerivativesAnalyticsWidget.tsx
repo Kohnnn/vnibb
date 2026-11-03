@@ -14,10 +14,11 @@ import * as api from '@/lib/api';
 import { queryKeys, useDerivativesContracts } from '@/lib/queries';
 import { buildDerivativesCurveRows, classifyDerivativesCurve } from '@/lib/derivativesAnalytics';
 import { formatDate } from '@/lib/formatDate';
-import { formatNumber, formatPercent } from '@/lib/units';
+import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface DerivativesAnalyticsWidgetProps {
   id: string;
@@ -26,7 +27,7 @@ interface DerivativesAnalyticsWidgetProps {
 }
 
 function formatCompact(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return '—'
+  if (value == null || !Number.isFinite(value)) return EMPTY_VALUE
   if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(2)}M`
   if (Math.abs(value) >= 1e3) return `${(value / 1e3).toFixed(1)}K`
   return formatNumber(value, { decimals: 0 })
@@ -120,7 +121,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
       <div className="flex h-full flex-col bg-[var(--bg-primary)] p-3">
         <div className="mb-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
-            <Sigma size={20} className="text-cyan-300" />
+            <Sigma size={20} className="text-[var(--color-accent-primary)]" />
             <div>
               <div className="text-lg font-semibold text-[var(--text-primary)] capitalize">{curveState}</div>
               <div className="text-[11px] text-[var(--text-secondary)]">Short curve classification from front to far contracts</div>
@@ -144,8 +145,8 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
           <div className="flex h-full flex-col gap-3">
             <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
               <MetricCard label="Front Contract" value={front?.symbol || '—'} tone="text-[var(--text-primary)]" />
-              <MetricCard label="Front 20D Return" value={formatPercent(front?.return20dPct, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} tone={front?.return20dPct != null && front.return20dPct >= 0 ? 'text-emerald-300' : 'text-rose-300'} />
-              <MetricCard label="Front Vol 20D" value={formatPercent(front?.realizedVol20dPct, { decimals: 1, input: 'percent', clamp: 'margin' })} tone="text-cyan-300" />
+              <MetricCard label="Front 20D Return" value={formatPercent(front?.return20dPct, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} tone={signedToneClass(front?.return20dPct)} />
+              <MetricCard label="Front Vol 20D" value={formatPercent(front?.realizedVol20dPct, { decimals: 1, input: 'percent', clamp: 'margin' })} tone="text-[var(--color-accent-primary)]" />
               <MetricCard label="Avg Vol 20D" value={formatCompact(front?.avgVolume20d)} tone="text-[var(--text-primary)]" />
             </div>
 
@@ -175,7 +176,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <div className="text-sm font-semibold text-[var(--text-primary)]">{row.symbol}</div>
-                        <div className="text-[10px] text-[var(--text-muted)]">{formatDate(row.expiry)} • {row.daysToExpiry ?? '—'} days</div>
+                        <div className="text-[10px] text-[var(--text-muted)]">{formatDate(row.expiry)} • {row.daysToExpiry ?? EMPTY_VALUE} days</div>
                       </div>
                       <div className="text-right text-[10px] text-[var(--text-secondary)]">
                         <div>Close {formatNumber(row.latestClose, { decimals: 2 })}</div>

@@ -13,6 +13,8 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatShortDate } from '@/lib/formatDate';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
+import { EMPTY_VALUE } from '@/lib/units';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface InsiderTradingWidgetProps {
   id?: string;
@@ -27,7 +29,7 @@ interface InsiderTradingWidgetProps {
 // Unavailable is now an em dash, zero is a real zero, and negatives keep the
 // sign inside the formatted amount instead of collapsing into "VND-…".
 function formatCurrency(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—';
+  if (value == null || !Number.isFinite(value)) return EMPTY_VALUE;
   const sign = value < 0 ? '-' : '';
   const magnitude = Math.abs(value);
   if (magnitude >= 1e9) return `${sign}VND${(magnitude / 1e9).toFixed(1)}bn`;
@@ -39,7 +41,7 @@ function formatCurrency(value: number | null | undefined): string {
 // Admitted money is canonical VND only when the provider supplied unit
 // evidence; anything else renders unavailable instead of assuming VND.
 function formatAdmittedMoney(value: number | null | undefined, unit: string | null | undefined): string {
-  if (unit !== 'VND') return '—';
+  if (unit !== 'VND') return EMPTY_VALUE;
   return formatCurrency(value);
 }
 
@@ -48,8 +50,8 @@ function formatDate(dateStr: string): string {
 }
 
 function getSentimentColor(score: number): string {
-  if (score > 30) return 'text-green-400';
-  if (score < -30) return 'text-red-400';
+  if (score > 30) return 'text-[var(--color-positive)]';
+  if (score < -30) return 'text-[var(--color-negative)]';
   return 'text-[var(--text-secondary)]';
 }
 
@@ -160,7 +162,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
             <div className="flex items-center gap-1.5 text-xs">
               <span className="text-[var(--text-muted)]">Sentiment:</span>
               <span className={`font-medium ${admittedScore != null ? getSentimentColor(admittedScore) : 'text-[var(--text-muted)]'}`}>
-                {admittedScore == null ? '—' : `${admittedScore > 0 ? '+' : ''}${admittedScore.toFixed(0)}`}
+                {admittedScore == null ? EMPTY_VALUE : `${admittedScore > 0 ? '+' : ''}${admittedScore.toFixed(0)}`}
               </span>
               <span className={`text-[10px] ${admittedScore != null ? getSentimentColor(admittedScore) : 'text-[var(--text-muted)]'}`}>
                 ({admittedScore == null ? 'Unavailable' : getSentimentLabel(admittedScore)})
@@ -196,7 +198,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           onClick={() => setFilter('all')}
           className={`flex-1 px-2 py-1 text-[10px] rounded transition-colors ${
             filter === 'all'
-              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+              ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border border-[var(--color-state-border)]'
               : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
@@ -206,7 +208,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           onClick={() => setFilter('buy')}
           className={`flex-1 px-2 py-1 text-[10px] rounded transition-colors ${
             filter === 'buy'
-              ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+              ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)] border border-[var(--color-state-border)]'
               : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
@@ -216,7 +218,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           onClick={() => setFilter('sell')}
           className={`flex-1 px-2 py-1 text-[10px] rounded transition-colors ${
             filter === 'sell'
-              ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+              ? 'bg-[var(--color-negative-bg)] text-[var(--color-negative)] border border-[var(--color-state-border)]'
               : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
           }`}
         >
@@ -258,7 +260,7 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
               const isBuy = action === 'BUY';
               const isSell = action === 'SELL';
               const ActionIcon = isBuy ? TrendingUp : isSell ? TrendingDown : AlertCircle;
-              const actionColor = isBuy ? 'text-green-400' : isSell ? 'text-red-400' : 'text-[var(--text-muted)]';
+              const actionColor = isBuy ? 'text-[var(--color-positive)]' : isSell ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]';
               const actionLabel = isBuy ? 'BUY' : isSell ? 'SELL' : 'UNKNOWN';
 
               return (
@@ -302,26 +304,24 @@ export function InsiderTradingWidget({ symbol = DEFAULT_TICKER, onDataChange }: 
           <div className="grid grid-cols-2 gap-2 text-[10px]">
             <div className="flex items-center justify-between">
               <span className="text-[var(--text-muted)]">Buy:</span>
-              <span className={sentimentAdmitted ? 'text-green-400 font-medium' : 'text-[var(--text-muted)] font-medium'}>
-                {sentimentAdmitted ? formatCurrency(sentiment.buy_value) : '—'}
+              <span className={sentimentAdmitted ? 'text-[var(--color-positive)] font-medium' : 'text-[var(--text-muted)] font-medium'}>
+                {sentimentAdmitted ? formatCurrency(sentiment.buy_value) : EMPTY_VALUE}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[var(--text-muted)]">Sell:</span>
-              <span className={sentimentAdmitted ? 'text-red-400 font-medium' : 'text-[var(--text-muted)] font-medium'}>
-                {sentimentAdmitted ? formatCurrency(sentiment.sell_value) : '—'}
+              <span className={sentimentAdmitted ? 'text-[var(--color-negative)] font-medium' : 'text-[var(--text-muted)] font-medium'}>
+                {sentimentAdmitted ? formatCurrency(sentiment.sell_value) : EMPTY_VALUE}
               </span>
             </div>
           </div>
           <div className="flex items-center justify-between mt-1">
             <span className="text-[var(--text-muted)]">Net:</span>
             <span className={`font-medium ${
-              !sentimentAdmitted || sentiment.net_value == null
-                ? 'text-[var(--text-muted)]'
-                : sentiment.net_value >= 0 ? 'text-green-400' : 'text-red-400'
+              sentimentAdmitted ? signedToneClass(sentiment.net_value) : 'text-[var(--text-muted)]'
             }`}>
               {sentimentAdmitted && sentiment.net_value != null && sentiment.net_value > 0 ? '+' : ''}
-              {sentimentAdmitted ? formatCurrency(sentiment.net_value) : '—'}
+              {sentimentAdmitted ? formatCurrency(sentiment.net_value) : EMPTY_VALUE}
             </span>
           </div>
           <div className="mt-1 text-[10px] text-[var(--text-muted)]">

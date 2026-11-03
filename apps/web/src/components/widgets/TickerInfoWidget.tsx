@@ -226,9 +226,9 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
           className="justify-between"
         />
 
-        <div className="flex items-start justify-between rounded-2xl border border-blue-500/15 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5 animate-in fade-in duration-500">
+        <div className="flex items-start justify-between rounded-2xl border border-[var(--color-state-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5 animate-in fade-in duration-500">
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-blue-300/80">
+            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-[var(--color-accent-primary)]">
               {symbol}
             </span>
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
@@ -250,8 +250,8 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               <span>{changeLabel}</span>
             </div>
           </div>
-            <div className="bg-blue-500/10 rounded-xl p-2 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-              <Activity size={18} className="text-blue-400" />
+            <div className="bg-[var(--color-state-bg)] rounded-xl p-2 border border-[var(--color-state-border)] shadow-[0_0_15px_rgba(59,130,246,0.15)]">
+              <Activity size={18} className="text-[var(--color-accent-primary)]" />
             </div>
         </div>
 
@@ -274,7 +274,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               key={i}
               className="group flex min-h-[56px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"
             >
-              <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest group-hover:text-blue-400 transition-colors">
+              <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest group-hover:text-[var(--color-accent-primary)] transition-colors">
                 {item.label}
               </div>
               <div className={cn(
@@ -303,7 +303,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               <span className="text-[var(--text-secondary)]">{rangePosition.toFixed(0)}%</span>
             </div>
             <div className="relative h-2 rounded-full bg-[var(--bg-secondary)]">
-              <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-rose-400/60 via-amber-300/60 to-emerald-400/70" style={{ width: `${rangePosition}%` }} />
+              <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[var(--color-negative)] via-[var(--color-warning)] to-[var(--color-positive)]" style={{ width: `${rangePosition}%` }} />
               <div className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white/50 bg-[var(--bg-primary)] shadow" style={{ left: `calc(${rangePosition}% - 6px)` }} />
             </div>
             <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
@@ -316,7 +316,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
 
         <div className="pt-1.5 border-t border-[var(--border-subtle)]">
           <div className="flex items-center gap-2 mb-1.5">
-            <Info size={12} className="text-blue-500" />
+            <Info size={12} className="text-[var(--color-accent-primary)]" />
             <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">Company Profile</span>
           </div>
           <div
@@ -327,12 +327,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {exchange && (
-              <span className="inline-flex items-center rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
+              <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-accent-primary)]">
                 {exchange}
               </span>
             )}
             {industry && (
-              <span className="inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+              <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-positive)]">
                 {industry}
               </span>
             )}
@@ -341,10 +341,10 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                 className={cn(
                   'inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold',
                   quantRegime.momentum.shortLabel === 'Bull'
-                    ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                    ? 'border-[var(--color-state-border)] bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
                     : quantRegime.momentum.shortLabel === 'Bear'
-                      ? 'border-rose-500/20 bg-rose-500/10 text-rose-300'
-                      : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-300'
+                      ? 'border-[var(--color-state-border)] bg-[var(--color-negative-bg)] text-[var(--color-negative)]'
+                      : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                 )}
                 title={quantRegime.action}
               >

@@ -17,10 +17,10 @@ interface GammaExposureWidgetProps {
 }
 
 function estimateGammaRegime(zScore: number): { label: string; tone: string } {
-  if (zScore >= 1.5) return { label: 'Negative Gamma Risk', tone: 'text-red-400' }
-  if (zScore >= 0.5) return { label: 'Neutral / Choppy', tone: 'text-amber-400' }
-  if (zScore <= -0.8) return { label: 'Positive Gamma Cushion', tone: 'text-emerald-400' }
-  return { label: 'Balanced', tone: 'text-cyan-400' }
+  if (zScore >= 1.5) return { label: 'Negative Gamma Risk', tone: 'text-[var(--color-negative)]' }
+  if (zScore >= 0.5) return { label: 'Neutral / Choppy', tone: 'text-[var(--color-warning)]' }
+  if (zScore <= -0.8) return { label: 'Positive Gamma Cushion', tone: 'text-[var(--color-positive)]' }
+  return { label: 'Balanced', tone: 'text-[var(--color-accent-primary)]' }
 }
 
 export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidgetProps) {
@@ -53,10 +53,10 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
         label: payload.regime_label,
         tone:
           payload.dealer_position_proxy === 'long_gamma'
-            ? 'text-emerald-400'
+            ? 'text-[var(--color-positive)]'
             : payload.dealer_position_proxy === 'short_gamma'
-              ? 'text-red-400'
-              : 'text-cyan-400',
+              ? 'text-[var(--color-negative)]'
+              : 'text-[var(--color-accent-primary)]',
       }
     : estimateGammaRegime(Number.isFinite(zScore) ? zScore : 0)
 
@@ -87,7 +87,7 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Atom size={12} className="text-cyan-400" />
+          <Atom size={12} className="text-[var(--color-accent-primary)]" />
           <span>Gamma Exposure (Proxy)</span>
         </div>
         <div className="flex items-center gap-2">
@@ -99,7 +99,7 @@ export function GammaExposureWidget({ symbol, onDataChange }: GammaExposureWidge
                 onClick={() => setPeriod(option)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                   period === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >

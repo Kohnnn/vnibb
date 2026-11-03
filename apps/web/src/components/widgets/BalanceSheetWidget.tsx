@@ -19,7 +19,7 @@ import {
     Legend,
     CartesianGrid,
 } from 'recharts';
-import { convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale, toFiniteNumber } from '@/lib/units';
+import { EMPTY_VALUE, convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale, toFiniteNumber } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -338,7 +338,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
                         aria-label="Balance sheet chart mode"
-                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-state-border)] uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Assets & Liab.</option>
                         <option value="debt">Debt Structure</option>
@@ -404,7 +404,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                         formatter={(value: unknown, name: unknown) => {
                                             const numeric = toFiniteNumber(value)
                                             return name === 'D/E Ratio'
-                                                ? `${numeric === null ? '—' : numeric.toFixed(2)}x`
+                                                ? `${numeric === null ? EMPTY_VALUE : numeric.toFixed(2)}x`
                                                 : formatConvertedValue(numeric, unitConfig)
                                         }}
                                     />
@@ -428,7 +428,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                     className={cn(
                         "p-1 rounded transition-all",
                         viewMode === 'table'
-                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                             : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Table View"
@@ -440,7 +440,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                     className={cn(
                         "p-1 rounded transition-all",
                         viewMode === 'chart'
-                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                             : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Chart View"

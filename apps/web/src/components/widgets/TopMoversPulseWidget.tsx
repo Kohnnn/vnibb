@@ -146,7 +146,7 @@ export function TopMoversPulseWidget() {
                                 aria-pressed={config.window === key}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     config.window === key
-                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                         : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                             >
@@ -204,8 +204,8 @@ export function TopMoversPulseWidget() {
                                         <span
                                             className={
                                                 direction === 'up'
-                                                    ? 'rounded-md px-1.5 py-0.5 text-[10px] text-emerald-400'
-                                                    : 'rounded-md px-1.5 py-0.5 text-[10px] text-red-400'
+                                                    ? 'rounded-md px-1.5 py-0.5 text-[10px] text-[var(--color-positive)]'
+                                                    : 'rounded-md px-1.5 py-0.5 text-[10px] text-[var(--color-negative)]'
                                             }
                                         >
                                             {direction === 'up' ? '+' : ''}

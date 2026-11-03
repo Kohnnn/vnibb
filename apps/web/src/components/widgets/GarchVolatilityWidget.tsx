@@ -1,5 +1,6 @@
 'use client'
 
+import { EMPTY_VALUE } from '@/lib/units'
 import { useEffect, useState } from 'react'
 import { Activity } from 'lucide-react'
 import type { GarchVolatilityMetric } from '@/lib/api'
@@ -19,11 +20,11 @@ interface GarchVolatilityWidgetProps {
 }
 
 function formatNumber(value: number | null | undefined): string {
-  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '-'
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : EMPTY_VALUE
 }
 
 function formatPct(value: number | null | undefined): string {
-  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '-'
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : EMPTY_VALUE
 }
 
 function formatSeriesSummary(series: NonNullable<GarchVolatilityMetric['series']>): string {
@@ -83,7 +84,7 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Activity size={12} className="text-cyan-400" />
+          <Activity size={12} className="text-[var(--color-accent-primary)]" />
           <span>GARCH Volatility</span>
         </div>
         <div className="flex items-center gap-2">
@@ -93,7 +94,7 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -130,11 +131,11 @@ export function GarchVolatilityWidget({ symbol, onDataChange }: GarchVolatilityW
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Omega</div>
-              <div className="font-mono text-cyan-300">{formatNumber(metric?.omega)}</div>
+              <div className="font-mono text-[var(--color-accent-primary)]">{formatNumber(metric?.omega)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Alpha</div>
-              <div className="font-mono text-cyan-300">{formatNumber(metric?.alpha)}</div>
+              <div className="font-mono text-[var(--color-accent-primary)]">{formatNumber(metric?.alpha)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Beta</div>

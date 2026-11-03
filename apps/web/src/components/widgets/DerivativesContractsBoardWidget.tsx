@@ -77,7 +77,7 @@ export function DerivativesContractsBoardWidget({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Filter contracts..."
-                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               />
             </div>
             <WidgetMeta

@@ -89,20 +89,21 @@ describe('SectorPerformanceWidget', () => {
     mockUseSectorPerformance.mockReturnValue(mockSectorData(null));
     render(<SectorPerformanceWidget />);
 
-    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('n/a').length).toBeGreaterThan(0);
     expect(screen.queryByText('+0.00%')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'List' }));
-    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('n/a').length).toBeGreaterThan(0);
     expect(screen.queryByText('+0.00%')).not.toBeInTheDocument();
   });
 
-  it('keeps a real zero change as +0.00%', () => {
+  it('keeps a real zero change as an unsigned 0.00%', () => {
     mockUseSectorPerformance.mockReturnValue(mockSectorData(0));
     render(<SectorPerformanceWidget />);
 
-    expect(screen.getByText('+0.00%')).toBeInTheDocument();
-    expect(screen.queryByText('—')).not.toBeInTheDocument();
+    expect(screen.getByText('0.00%')).toBeInTheDocument();
+    expect(screen.queryByText('+0.00%')).not.toBeInTheDocument();
+    expect(screen.queryByText('n/a')).not.toBeInTheDocument();
   });
 });
 
@@ -134,10 +135,27 @@ describe('getHeatmapStyle', () => {
     expect(token(getHeatmapStyle(null))).toBe('--color-neutral');
   });
 
+  it('keeps a measured zero in the neutral family, not the gain tint', () => {
+    // Brand §13 financialSemantics: zero is ink. A zero tile used to paint the
+    // positive token at 10%, which read as a small gain.
+    expect(token(getHeatmapStyle(0))).toBe('--color-neutral');
+    expect(alpha(getHeatmapStyle(0))).toBeLessThan(alpha(getHeatmapStyle(null)));
+  });
+
+
   it('fully saturates at the outer bands so labels need a contrast flip', () => {
     // The tile flips its label to the page surface colour at |change| >= 2; that
     // is only correct while those bands are solid.
     expect(alpha(getHeatmapStyle(2))).toBe(100);
     expect(alpha(getHeatmapStyle(-2))).toBe(100);
+  });
+
+  it('keeps non-solid bands pale enough for ink on top of them', () => {
+    // Regression: 70/50/28% tints put direction-coloured text at 1.8:1–3.6:1
+    // against its own fill. Non-solid bands must stay <= 30%, where primary ink
+    // measures >= 9:1 in both themes.
+    for (const pct of [0, 0.4, 0.5, 1, 1.999, -0.5, -1, -1.999]) {
+      expect(alpha(getHeatmapStyle(pct))).toBeLessThanOrEqual(30);
+    }
   });
 });

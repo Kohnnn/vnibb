@@ -5,14 +5,24 @@ import { TradingViewAdvancedChart } from './TradingViewAdvancedChart';
 const mockCandleSetData = jest.fn();
 const mockLineSetData = jest.fn();
 const mockAreaSetData = jest.fn();
+const mockVolumeSetData = jest.fn();
+const mockApplyOptions = jest.fn();
+const mockTakeScreenshot = jest.fn(() => document.createElement('canvas'));
+const mockSetMarkers = jest.fn();
+const seriesMock = (setData: jest.Mock) => ({ setData, setMarkers: mockSetMarkers, applyOptions: jest.fn() });
 const mockCreateChart = jest.fn(() => ({
-  addCandlestickSeries: () => ({ setData: mockCandleSetData, setMarkers: jest.fn() }),
-  addLineSeries: () => ({ setData: mockLineSetData, setMarkers: jest.fn() }),
-  addAreaSeries: () => ({ setData: mockAreaSetData, setMarkers: jest.fn() }),
-  addHistogramSeries: () => ({ setData: jest.fn() }),
+  addCandlestickSeries: () => seriesMock(mockCandleSetData),
+  addLineSeries: () => seriesMock(mockLineSetData),
+  addAreaSeries: () => seriesMock(mockAreaSetData),
+  addHistogramSeries: () => ({
+    setData: mockVolumeSetData,
+    applyOptions: jest.fn(),
+    data: () => mockVolumeSetData.mock.calls.at(-1)?.[0] ?? [],
+  }),
   priceScale: () => ({ applyOptions: jest.fn() }),
   timeScale: () => ({ setVisibleLogicalRange: jest.fn(), fitContent: jest.fn() }),
-  applyOptions: jest.fn(),
+  applyOptions: mockApplyOptions,
+  takeScreenshot: mockTakeScreenshot,
   subscribeCrosshairMove: jest.fn(),
   remove: jest.fn(),
 }));
@@ -294,4 +304,176 @@ describe('TradingViewAdvancedChart detached mount', () => {
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57300 },
     ]));
   });
+});
+
+// The PNG exporter cannot lighten a canvas: it asks the chart for a light
+// rendering of the same content and keeps the live theme untouched.
+describe('TradingViewAdvancedChart light capture', () => {
+  const LIGHT_TOKENS = {
+    '--bg-primary': '#ffffff',
+    '--bg-secondary': '#ffffff',
+    '--text-muted': '#5b6573',
+    '--border-color': '#d9dde3',
+    '--border-subtle': '#e8ecf1',
+    '--color-positive': '#1e7b4f',
+    '--color-negative': '#b3261e',
+    '--chart-blue': '#0b3d91',
+    '--chart-event-dividend': '#b45309',
+    '--chart-event-split': '#6d28d9',
+    '--chart-event-rights': '#0e7490',
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockApplyOptions.mockClear();
+    mockTakeScreenshot.mockClear();
+    mockSetMarkers.mockClear();
+    jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: 800, height: 300, x: 0, y: 0, top: 0, left: 0, right: 800, bottom: 300,
+      toJSON: () => ({}),
+    });
+    global.ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as typeof ResizeObserver;
+    mockHistory.mockResolvedValue({ data: [historyRow()] });
+    mockQuote.mockResolvedValue({ data: null });
+    mockEvents.mockResolvedValue({ data: [] });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    global.ResizeObserver = originalResizeObserver;
+  });
+
+  test('answers a capture request with a light bitmap and restores the live chart', async () => {
+    const { container } = render(<TradingViewAdvancedChart symbol="FPT" timeframe="1M" />);
+    await waitFor(() => expect(container.querySelector('[data-light-chart-capture]')).not.toBeNull());
+
+    const host = container.querySelector<HTMLElement>('[data-light-chart-capture]');
+
+    const detail: { token: (name: string) => string; canvas?: HTMLCanvasElement } = {
+      token: (name) => LIGHT_TOKENS[name as keyof typeof LIGHT_TOKENS] ?? '',
+    };
+    host!.dispatchEvent(new CustomEvent('vnibb:capture-light-chart', { detail }));
+
+    // The bitmap is the chart's own screenshot taken after the light repaint.
+    expect(detail.canvas).toBeInstanceOf(HTMLCanvasElement);
+    expect(mockTakeScreenshot).toHaveBeenCalled();
+    const lightCall = mockApplyOptions.mock.calls.find(([options]) => options?.layout?.background?.color === '#ffffff');
+    expect(lightCall?.[0]).toMatchObject({
+      layout: { background: { color: '#ffffff' }, textColor: '#5b6573' },
+    });
+
+    // The live chart is dark again, so the export cannot leave the widget light.
+    const lastCall = mockApplyOptions.mock.calls.at(-1)?.[0];
+    // jsdom defines no --bg-primary, so the chart's own dark fallback comes back.
+    expect(lastCall?.layout?.background?.color).toBe('#0b1220');
+  });
+
+  test('reports a refused snapshot and still restores the live chart', async () => {
+    // An empty bitmap must not be reported as a successful capture.
+    mockTakeScreenshot.mockImplementationOnce(() => {
+      const blank = document.createElement('canvas');
+      blank.width = 0;
+      blank.height = 0;
+      return blank;
+    });
+    const { container } = render(<TradingViewAdvancedChart symbol="FPT" timeframe="1M" />);
+    await waitFor(() => expect(container.querySelector('[data-light-chart-capture]')).not.toBeNull());
+
+    const host = container.querySelector<HTMLElement>('[data-light-chart-capture]');
+    const detail: { token: (name: string) => string; canvas?: HTMLCanvasElement; error?: unknown } = {
+      token: (name) => LIGHT_TOKENS[name as keyof typeof LIGHT_TOKENS] ?? '',
+    };
+    host!.dispatchEvent(new CustomEvent('vnibb:capture-light-chart', { detail }));
+
+    // The exporter needs the failure signal; a missing canvas alone is ambiguous.
+    expect(detail.canvas).toBeUndefined();
+    expect(detail.error).toBeInstanceOf(Error);
+    // The live chart is dark again despite the throw.
+    const lastCall = mockApplyOptions.mock.calls.at(-1)?.[0];
+    expect(lastCall?.layout?.background?.color).toBe('#0b1220');
+  });
+
+  test('snapshots the light repaint, then restores candles, volume and colours', async () => {
+    const { container } = render(<TradingViewAdvancedChart symbol="FPT" timeframe="1M" />);
+    await waitFor(() => expect(mockCandleSetData).toHaveBeenCalled());
+    await waitFor(() => expect(container.querySelector('[data-light-chart-capture]')).not.toBeNull());
+
+    const darkVolume = mockVolumeSetData.mock.calls.at(-1)?.[0];
+    const detail: { token: (name: string) => string; canvas?: HTMLCanvasElement } = {
+      token: (name) => LIGHT_TOKENS[name as keyof typeof LIGHT_TOKENS] ?? '',
+    };
+    container.querySelector<HTMLElement>('[data-light-chart-capture]')!
+      .dispatchEvent(new CustomEvent('vnibb:capture-light-chart', { detail }));
+
+    // The bitmap is taken after the light repaint, not before it.
+    const lightIndex = mockApplyOptions.mock.calls
+      .findIndex(([options]) => options?.layout?.background?.color === '#ffffff');
+    expect(lightIndex).toBeGreaterThanOrEqual(0);
+    expect(mockTakeScreenshot.mock.invocationCallOrder[0])
+      .toBeGreaterThan(mockApplyOptions.mock.invocationCallOrder[lightIndex]);
+    // Volume bars were recoloured for the snapshot, then put back with the same
+    // bars (same times and values) so the live chart keeps its content.
+    const volumeCalls = mockVolumeSetData.mock.calls.map(([data]) => data);
+    const lightVolume = volumeCalls.find((data) => JSON.stringify(data).includes('rgba(30, 123, 79'));
+    expect(lightVolume).toBeDefined();
+    expect(volumeCalls.at(-1)).toEqual(darkVolume);
+    // Candles kept their data throughout: only colours were touched.
+    const candleCalls = mockCandleSetData.mock.calls.map(([data]) => data);
+    expect(candleCalls.at(-1)).toEqual(candleCalls[0]);
+  });
+
+  // Marker hues are per-theme tokens and labels are 10 px text: the dark pastels
+  // measure 1.8-2.7:1 on the white export, so the capture must re-apply the light
+  // values and the widget must come back to the live ones.
+  test('re-applies marker colours from the light cascade, then restores the live ones', async () => {
+    mockEvents.mockResolvedValue({
+      data: [{ symbol: 'FPT', action_category: 'dividend', effective_date: '2026-10-02' }],
+    });
+    const { container } = render(<TradingViewAdvancedChart symbol="FPT" timeframe="1M" />);
+    await waitFor(() => expect(container.querySelector('[data-light-chart-capture]')).not.toBeNull());
+    await waitFor(() => expect(mockSetMarkers).toHaveBeenCalled());
+
+    const lastMarkers = () => mockSetMarkers.mock.calls.at(-1)?.[0] as Array<{ color: string }>;
+    // jsdom resolves no theme tokens, so the live path falls back to the dark hues.
+    expect(lastMarkers().some((marker) => marker.color === '#f59e0b')).toBe(true);
+
+    const detail: { token: (name: string) => string; canvas?: HTMLCanvasElement } = {
+      token: (name) => LIGHT_TOKENS[name as keyof typeof LIGHT_TOKENS] ?? '',
+    };
+    container.querySelector<HTMLElement>('[data-light-chart-capture]')!
+      .dispatchEvent(new CustomEvent('vnibb:capture-light-chart', { detail }));
+
+    expect(detail.canvas).toBeInstanceOf(HTMLCanvasElement);
+    // Restored to the live value, never left on the light one.
+    expect(lastMarkers()).toEqual([{ time: '2026-10-02', position: 'belowBar', color: '#f59e0b', shape: 'arrowDown', text: 'D' }]);
+    const applied = mockSetMarkers.mock.calls.map(([markers]) => (markers as Array<{ color: string }>)[0]?.color);
+    expect(applied).toContain('#b45309');
+    // A canvas silently drops `var(...)`, so no call may carry one.
+    for (const colour of applied) expect(colour).not.toContain('var(');
+  });
+
+  test('refuses the capture when the light palette is missing', async () => {
+    const { container } = render(<TradingViewAdvancedChart symbol="FPT" timeframe="1M" />);
+    await waitFor(() => expect(container.querySelector('[data-light-chart-capture]')).not.toBeNull());
+
+    const detail: { token: (name: string) => string; canvas?: HTMLCanvasElement; error?: unknown } = {
+      // An empty token means the light cascade never resolved; substituting the
+      // dark value here would hand the exporter a dark bitmap.
+      token: () => '',
+    };
+    container.querySelector<HTMLElement>('[data-light-chart-capture]')!
+      .dispatchEvent(new CustomEvent('vnibb:capture-light-chart', { detail }));
+
+    expect(detail.canvas).toBeUndefined();
+    expect(detail.error).toBeInstanceOf(Error);
+    expect(mockTakeScreenshot).not.toHaveBeenCalled();
+    // The live chart is dark again despite the refusal.
+    expect(mockApplyOptions.mock.calls.at(-1)?.[0]?.layout?.background?.color).toBe('#0b1220');
+  });
+
+
 });

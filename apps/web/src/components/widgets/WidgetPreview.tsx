@@ -158,7 +158,7 @@ function WorldNewsMapPreview() {
             ].map((point, index) => (
                 <span
                     key={index}
-                    className={`absolute h-2 w-2 rounded-full border ${point.active ? 'border-amber-100 bg-amber-300' : 'border-sky-100 bg-sky-300'}`}
+                    className={`absolute h-2 w-2 rounded-full border ${point.active ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]' : 'border-[var(--border-default)] bg-[var(--bg-tertiary)]'}`}
                     style={{ left: point.left, top: point.top }}
                 />
             ))}
@@ -187,14 +187,14 @@ function WorldNewsSourcesPreview() {
         <div className="h-full space-y-1 p-1.5">
             <div className="grid grid-cols-3 gap-1">
                 {[1, 2, 3].map((item) => (
-                    <div key={item} className="h-4 rounded bg-sky-500/15" />
+                    <div key={item} className="h-4 rounded bg-[var(--color-state-bg)]" />
                 ))}
             </div>
             {[1, 2, 3].map((item) => (
                 <div key={item} className="space-y-0.5 rounded border border-[var(--border-subtle)] p-1">
                     <div className="h-1.5 w-2/3 rounded bg-[var(--bg-tertiary)]" />
                     <div className="flex gap-1">
-                        <div className="h-1.5 w-5 rounded bg-sky-500/25" />
+                        <div className="h-1.5 w-5 rounded bg-[var(--color-state-bg)]" />
                         <div className="h-1.5 w-5 rounded bg-[var(--color-positive-bg)]" />
                         <div className="h-1.5 w-5 rounded bg-[var(--bg-tertiary)]" />
                     </div>
@@ -215,7 +215,7 @@ function TradingViewPreview() {
             }}
         >
             <div className="flex h-full flex-col justify-between rounded-md border border-white/10 bg-black/20 p-2">
-                <div className="flex items-center justify-between text-[7px] font-bold uppercase tracking-[0.18em] text-sky-200/80">
+                <div className="flex items-center justify-between text-[7px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                     <span>TradingView</span>
                     <span>TV</span>
                 </div>
@@ -414,7 +414,7 @@ function NewsPreview() {
 function TickerInfoPreview() {
     return (
         <div className="h-full flex flex-col items-center justify-center p-2">
-            <div className="text-[10px] font-bold text-blue-400">VNM</div>
+            <div className="text-[10px] font-bold text-[var(--color-accent-primary)]">VNM</div>
             <div className="text-[14px] font-black text-[var(--text-primary)]">85,200</div>
             <div className="text-[8px] font-bold text-[var(--color-positive)]">+2.4%</div>
         </div>
@@ -447,7 +447,7 @@ function PortfolioPreview() {
                 {[30, 50, 40, 60, 55, 70].map((h, i) => (
                     <div
                         key={i}
-                        className="flex-1 bg-gradient-to-t from-green-600/50 to-green-400/20 rounded-t"
+                        className="flex-1 bg-gradient-to-t from-[var(--color-positive)] to-[var(--color-positive)] rounded-t"
                         style={{ height: `${h}%` }}
                     />
                 ))}
@@ -518,8 +518,8 @@ function TechnicalPreview() {
 function AIPreview() {
     return (
         <div className="h-full flex flex-col items-center justify-center p-2">
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/30 to-cyan-500/30 flex items-center justify-center mb-1">
-                <Activity size={10} className="text-blue-400" />
+            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-primary)] flex items-center justify-center mb-1">
+                <Activity size={10} className="text-[var(--color-accent-primary)]" />
             </div>
             <div className="text-[6px] text-[var(--text-muted)]">AI Analysis</div>
         </div>
@@ -536,8 +536,8 @@ function ComparisonPreview() {
                 { h1: 40, h2: 55, label: 'C' },
             ].map((item, i) => (
                 <div key={i} className="flex-1 flex gap-px items-end">
-                    <div className="flex-1 bg-blue-600/50 rounded-t" style={{ height: `${item.h1}%` }} />
-                    <div className="flex-1 bg-cyan-600/50 rounded-t" style={{ height: `${item.h2}%` }} />
+                    <div className="flex-1 bg-[var(--color-state-bg)] rounded-t" style={{ height: `${item.h1}%` }} />
+                    <div className="flex-1 bg-[var(--color-state-bg)] rounded-t" style={{ height: `${item.h2}%` }} />
                 </div>
             ))}
         </div>

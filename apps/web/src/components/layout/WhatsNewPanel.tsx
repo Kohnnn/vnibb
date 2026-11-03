@@ -277,7 +277,7 @@ export function WhatsNewPanel() {
             <button
               type="button"
               onClick={handleClose}
-              className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-primary)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-fill)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
             >
               Got it
             </button>

@@ -169,7 +169,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAna
         {/* Actions bar */}
         <div className="flex items-center justify-between p-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)]">
           <div className="flex items-center gap-2">
-            <BrainCircuit size={16} className="text-cyan-400" />
+            <BrainCircuit size={16} className="text-[var(--color-accent-primary)]" />
             <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">VniBB Database-First AI</span>
           </div>
           <div className="flex items-center gap-2">
@@ -187,7 +187,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAna
                   "flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all",
                   isLoading 
                       ? "bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed" 
-                      : "bg-cyan-600 text-white hover:bg-cyan-500 shadow-lg shadow-cyan-900/20"
+                      : "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] hover:brightness-110 shadow-lg shadow-[var(--color-state-bg)]"
               )}
               aria-label={analysis ? 'Re-analyze stock' : 'Analyze stock'}
             >
@@ -199,7 +199,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAna
 
         <div className="flex-1 overflow-auto p-4 scrollbar-hide">
           {error ? (
-            <div className="flex flex-col items-center justify-center h-full text-red-500/60 gap-2 text-center p-6">
+            <div className="flex flex-col items-center justify-center h-full text-[var(--color-negative)] gap-2 text-center p-6">
                 <AlertTriangle size={32} />
                 <p className="text-xs font-bold uppercase">{error}</p>
                 <button
@@ -210,7 +210,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAna
                       runAnalysis();
                     }
                   }}
-                  className="mt-2 text-[10px] text-blue-400 underline uppercase"
+                  className="mt-2 text-[10px] text-[var(--color-accent-primary)] underline uppercase"
                   aria-label="Retry analysis"
                 >
                   Retry Analysis
@@ -236,7 +236,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAna
               {showDetails && (
                 <div className="space-y-3">
                   {Boolean(reasoningLog.length) && (
-                    <div className="rounded border border-cyan-500/20 bg-cyan-500/5 p-3 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
+                    <div className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-3 text-[10px] leading-relaxed text-[var(--color-accent-primary)] whitespace-pre-wrap">
                       {reasoningLog.join('\n')}
                     </div>
                   )}
@@ -270,7 +270,7 @@ function AIAnalysisWidgetComponent({ id, symbol, onRemove, onDataChange }: AIAna
                     <BrainCircuit size={48} strokeWidth={1} />
                     {isLoading && (
                         <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-12 h-12 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                            <div className="w-12 h-12 border-2 border-[var(--color-state-border)] border-t-transparent rounded-full animate-spin" />
                         </div>
                     )}
                 </div>

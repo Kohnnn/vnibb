@@ -168,7 +168,7 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                                     <tr key={index} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-1.5 px-1 align-top">
                                             <div className="flex items-start gap-1.5">
-                                                <Icon size={12} className="text-blue-400 shrink-0" />
+                                                <Icon size={12} className="text-[var(--color-accent-primary)] shrink-0" />
                                                 <span className="break-words whitespace-normal text-[var(--text-primary)]" title={(sh.shareholder_name || row.name || row.share_holder || '') as string}>
                                                     {(sh.shareholder_name || row.name || row.share_holder || 'Unknown') as string}
                                                 </span>
@@ -177,7 +177,7 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                                         <td className={`text-right py-1.5 px-1 ${missingShares ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--text-secondary)]'}`}>
                                             {formatShares(sharesOwned as number | null | undefined)}
                                         </td>
-                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-green-400'}`}>
+                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--color-positive)]'}`}>
                                             {formatPct(ownershipPct as number | null | undefined)}
                                         </td>
                                     </tr>

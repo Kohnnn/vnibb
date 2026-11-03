@@ -9,8 +9,9 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketBreadth } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatNumber } from '@/lib/units';
+import { formatNumber, formatPercent } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface MarketBreadthWidgetProps {
   id: string;
@@ -19,8 +20,8 @@ interface MarketBreadthWidgetProps {
 }
 
 function formatPct(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '--';
-  return `${value.toFixed(1)}%`;
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
+  return formatPercent(value, { input: 'percent', decimals: 1 });
 }
 
 export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadthWidgetProps) {
@@ -124,8 +125,8 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
                       <div className="text-[10px] text-[var(--text-muted)]">{formatNumber(row.total, { decimals: 0 })}</div>
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
-                      <div className="text-emerald-400">▲ {row.advancers}</div>
-                      <div className="text-red-400">▼ {row.decliners}</div>
+                      <div className="text-[var(--color-positive)]">▲ {row.advancers}</div>
+                      <div className="text-[var(--color-negative)]">▼ {row.decliners}</div>
                       <div className="text-[var(--text-secondary)]">= {row.unchanged}</div>
                     </div>
 
@@ -138,23 +139,23 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
                       </div>
                       <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1.5">
                         <div className="uppercase tracking-widest text-[var(--text-muted)]">Breadth Bias</div>
-                        <div className={`mt-1 font-mono ${breadthPct >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                          {breadthPct >= 0 ? '+' : ''}{breadthPct.toFixed(1)}%
+                        <div className={`mt-1 font-mono ${signedToneClass(breadthPct)}`}>
+                          {formatPercent(breadthPct, { input: 'percent', decimals: 1, signed: true })}
                         </div>
                       </div>
                       <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1.5">
                         <div className="uppercase tracking-widest text-[var(--text-muted)]">Above SMA20</div>
-                        <div className="mt-1 font-mono text-cyan-300">{formatPct(row.pct_above_sma20)}</div>
+                        <div className="mt-1 font-mono text-[var(--color-accent-primary)]">{formatPct(row.pct_above_sma20)}</div>
                       </div>
                       <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1.5">
                         <div className="uppercase tracking-widest text-[var(--text-muted)]">Above SMA50</div>
-                        <div className="mt-1 font-mono text-cyan-300">{formatPct(row.pct_above_sma50)}</div>
+                        <div className="mt-1 font-mono text-[var(--color-accent-primary)]">{formatPct(row.pct_above_sma50)}</div>
                       </div>
                     </div>
 
                     <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-secondary)]">
-                      <span>52W Highs <span className="font-mono text-emerald-300">{row.new_highs_52w}</span></span>
-                      <span>52W Lows <span className="font-mono text-rose-300">{row.new_lows_52w}</span></span>
+                      <span>52W Highs <span className="font-mono text-[var(--color-positive)]">{row.new_highs_52w}</span></span>
+                      <span>52W Lows <span className="font-mono text-[var(--color-negative)]">{row.new_lows_52w}</span></span>
                     </div>
                   </div>
                 );

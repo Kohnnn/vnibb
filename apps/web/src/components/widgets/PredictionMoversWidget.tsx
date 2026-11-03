@@ -157,7 +157,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                                 aria-pressed={windowKey === key}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     windowKey === key
-                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                         : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                             >
@@ -174,7 +174,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                                 aria-pressed={direction === value}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     direction === value
-                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                         : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                             >
@@ -203,7 +203,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                                     aria-pressed={on}
                                     className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                         on
-                                            ? 'border-red-500/60 bg-red-500/10 text-red-400'
+                                            ? 'border-[var(--color-state-border)] bg-[var(--color-negative-bg)] text-[var(--color-negative)]'
                                             : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                     }`}
                                 >
@@ -252,7 +252,7 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                             >
                                 <div className="flex items-center justify-between">
                                     <div className="flex flex-col">
-                                        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
+                                        <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--color-accent-primary)]">
                                             {row.source} · {row.category}
                                         </div>
                                         <span className="text-[var(--text-primary)]">
@@ -263,8 +263,8 @@ export function PredictionMoversWidget(props: PredictionMoversWidgetProps = {}) 
                                         <div
                                             className={
                                                 row.absoluteMovement >= 0
-                                                    ? 'rounded-md px-2 py-1 text-xs text-emerald-400'
-                                                    : 'rounded-md px-2 py-1 text-xs text-red-400'
+                                                    ? 'rounded-md px-2 py-1 text-xs text-[var(--color-positive)]'
+                                                    : 'rounded-md px-2 py-1 text-xs text-[var(--color-negative)]'
                                             }
                                         >
                                             {formatMovement(row.absoluteMovement)}
@@ -306,5 +306,9 @@ function formatProbability(value: number): string {
 }
 
 function formatMovement(value: number): string {
-    return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)}pp`;
+    // Brand §19: the sign follows the rendered digits, so a move that rounds
+    // to 0.0 at 1dp reads `0.0pp`, never `-0.0pp`.
+    const magnitude = Math.abs(value * 100).toFixed(1);
+    const sign = Number(magnitude) === 0 ? '' : value > 0 ? '+' : '-';
+    return `${sign}${magnitude}pp`;
 }

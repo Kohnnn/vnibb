@@ -14,7 +14,7 @@ export default function NotFound() {
                 </p>
                 <Link
                     href="/dashboard"
-                    className="mt-6 inline-flex rounded-md bg-[var(--accent-blue)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)] focus-visible:ring-offset-2"
+                    className="mt-6 inline-flex rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent)] transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-primary)] focus-visible:ring-offset-2"
                 >
                     Return to the workspace
                 </Link>

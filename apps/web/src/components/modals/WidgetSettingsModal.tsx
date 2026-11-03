@@ -569,7 +569,7 @@ export function WidgetSettingsModal({
                                 This shows the final TradingView payload after linked-symbol overrides, presets, and runtime transforms are applied.
                             </p>
                             {advancedConfigState.error ? (
-                                <div className="rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-error)]">
+                                <div className="rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-text-primary)]">
                                     Fix Advanced JSON to preview the final runtime payload: {advancedConfigState.error}
                                 </div>
                             ) : runtimePreviewConfig ? (
@@ -606,7 +606,7 @@ export function WidgetSettingsModal({
                         type="button"
                         onClick={handleSave}
                         disabled={isWidgetSettingsReadOnly}
-                        className="flex items-center gap-2 rounded-md bg-[var(--color-accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex items-center gap-2 rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <Save size={16} />
                         Save Changes
