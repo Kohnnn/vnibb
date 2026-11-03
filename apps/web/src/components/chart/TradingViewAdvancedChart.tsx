@@ -771,7 +771,7 @@ export function TradingViewAdvancedChart({
             className={cn(
               'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
               adjustmentMode === modeOption
-                ? 'bg-blue-600 text-white'
+                ? 'bg-[var(--color-accent-primary)] text-white'
                 : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
             )}
           >
@@ -797,7 +797,7 @@ export function TradingViewAdvancedChart({
       ) : null}
 
       {activeCompareSymbol && comparePoints.length > 0 ? (
-        <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200 backdrop-blur">
+        <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] backdrop-blur">
           Compare {activeCompareSymbol}
         </div>
       ) : null}
@@ -805,7 +805,7 @@ export function TradingViewAdvancedChart({
       {!isLoading && !error && excludedNotice ? (
         <div
           role="status"
-          className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-amber-200 backdrop-blur"
+          className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-secondary)] backdrop-blur"
         >
           {excludedNotice}
         </div>
@@ -828,7 +828,7 @@ export function TradingViewAdvancedChart({
           className="absolute inset-0 flex items-center justify-center backdrop-blur-sm"
           style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 82%, transparent)' }}
         >
-          <div className="max-w-sm rounded-xl border border-red-500/25 bg-[var(--bg-modal)] px-4 py-3 text-center text-xs text-[var(--text-secondary)] shadow-xl">
+          <div className="max-w-sm rounded-xl border border-[var(--color-state-border)] bg-[var(--bg-modal)] px-4 py-3 text-center text-xs text-[var(--text-secondary)] shadow-xl">
             <div className="mb-1 font-semibold text-[var(--text-primary)]">Chart data unavailable</div>
             <div>{error}</div>
           </div>

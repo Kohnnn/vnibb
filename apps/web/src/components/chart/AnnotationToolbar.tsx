@@ -39,7 +39,7 @@ export function AnnotationToolbar({
             className={cn(
                 "p-1.5 rounded transition-all",
                 selectedTool === tool.id
-                    ? "bg-blue-600 text-white shadow-lg"
+                    ? "bg-[var(--color-accent-primary)] text-white shadow-lg"
                     : "text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
             )}
             title={tool.label}
@@ -95,7 +95,7 @@ export function AnnotationToolbar({
           }
         }}
         disabled={annotationCount === 0}
-        className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold uppercase text-[var(--text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex items-center gap-1 rounded px-2 py-1 text-[10px] font-bold uppercase text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-30"
         title="Clear all annotations"
         aria-label="Clear all annotations"
       >

@@ -127,8 +127,8 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
               <div
                 className={
                   (payload?.net_foreign_20d_value || 0) >= 0
-                    ? 'font-mono text-emerald-400'
-                    : 'font-mono text-red-400'
+                    ? 'font-mono text-[var(--color-positive)]'
+                    : 'font-mono text-[var(--color-negative)]'
                 }
               >
                 {formatBillions(Number(payload?.net_foreign_20d_value || 0))}
@@ -139,8 +139,8 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
               <div
                 className={
                   Number(payload?.block_buy_20d_value || 0) - Number(payload?.block_sell_20d_value || 0) >= 0
-                    ? 'font-mono text-emerald-400'
-                    : 'font-mono text-red-400'
+                    ? 'font-mono text-[var(--color-positive)]'
+                    : 'font-mono text-[var(--color-negative)]'
                 }
               >
                 {formatBillions(
@@ -168,9 +168,9 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
                   <span
                     className={
                       row.type === 'accumulation'
-                        ? 'text-emerald-400 font-mono'
+                        ? 'text-[var(--color-positive)] font-mono'
                         : row.type === 'distribution'
-                          ? 'text-red-400 font-mono'
+                          ? 'text-[var(--color-negative)] font-mono'
                           : 'text-[var(--text-secondary)] font-mono'
                     }
                   >

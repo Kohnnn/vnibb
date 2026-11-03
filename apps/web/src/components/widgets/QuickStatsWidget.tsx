@@ -93,44 +93,44 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
             label: 'Price',
             value: (latestQuote?.price ?? latest?.close)?.toLocaleString() ?? '-',
             icon: DollarSign,
-            color: 'text-blue-400',
+            color: 'text-[var(--text-primary)]',
         },
         {
             label: 'Change',
             value: change !== null ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '-',
             icon: change !== null && change >= 0 ? TrendingUp : TrendingDown,
-            color: change !== null && change >= 0 ? 'text-green-400' : 'text-red-400',
+            color: change !== null && change >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]',
         },
         {
             label: '30D High',
             value: high30 > 0 ? high30.toLocaleString() : '-',
             icon: TrendingUp,
-            color: 'text-green-400',
+            color: 'text-[var(--text-primary)]',
         },
         {
             label: '30D Low',
             value: low30 > 0 ? low30.toLocaleString() : '-',
             icon: TrendingDown,
-            color: 'text-red-400',
+            color: 'text-[var(--text-primary)]',
         },
         {
             label: 'Avg Volume',
             value: avgVol > 0 ? `${(avgVol / 1e6).toFixed(1)}M` : '-',
             icon: BarChart2,
-            color: 'text-cyan-400',
+            color: 'text-[var(--text-secondary)]',
         },
         {
             label: 'P/E Ratio',
             value: latestRatio?.pe?.toFixed(1) || '-',
             icon: Activity,
-            color: 'text-cyan-400',
+            color: 'text-[var(--text-secondary)]',
         },
     ];
 
     return (
         <div className="h-full flex flex-col">
             <div className="mb-2 flex items-center gap-2 px-1 py-1 text-xs text-[var(--text-secondary)]">
-                <Activity size={12} className="text-blue-400" />
+                <Activity size={12} className="text-[var(--color-accent-primary)]" />
                 <span>Quick Stats - {symbol}</span>
             </div>
 

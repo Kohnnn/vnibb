@@ -35,20 +35,6 @@ function formatCompactNumber(value: number | null | undefined) {
   return formatNumber(value, { decimals: 0 });
 }
 
-function colorClass(color: string) {
-  switch (color) {
-    case 'purple':
-      return 'text-violet-300';
-    case 'blue':
-      return 'text-sky-300';
-    case 'green':
-      return 'text-emerald-300';
-    case 'red':
-      return 'text-rose-300';
-    default:
-      return 'text-amber-200';
-  }
-}
 
 function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardWidgetProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -118,7 +104,7 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
               >
                 <div className="text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">{key}</div>
                 <div className="text-xs font-semibold text-[var(--text-primary)]">{formatNumber(value?.value ?? null, { decimals: 2 })}</div>
-                <div className={cn('text-[10px] font-semibold', value?.change_pct == null || !Number.isFinite(value.change_pct) ? 'text-[var(--text-muted)]' : value.change_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                <div className={cn('text-[10px] font-semibold', value?.change_pct == null || !Number.isFinite(value.change_pct) ? 'text-[var(--text-muted)]' : value.change_pct >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]')}>
                   {value?.change_pct == null || !Number.isFinite(value.change_pct) ? 'Unavailable' : `${formatNumber(value.change_pct, { decimals: 2 })}%`}
                 </div>
               </div>
@@ -142,7 +128,7 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
                     className={cn(
                      'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                      sortBy === option.value
-                       ? 'bg-blue-600 text-white ring-1 ring-blue-300/40'
+                       ? 'bg-[var(--color-accent-primary)] text-white ring-1 ring-[var(--color-accent-primary)]/40'
                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                    )}
                  >
@@ -194,7 +180,7 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
                     <div className="break-words whitespace-normal text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
                       {sector.name}
                     </div>
-                    <div className={cn('text-xs font-semibold', sector.change_pct == null || !Number.isFinite(sector.change_pct) ? 'text-[var(--text-muted)]' : sector.change_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                    <div className={cn('text-xs font-semibold', sector.change_pct == null || !Number.isFinite(sector.change_pct) ? 'text-[var(--text-muted)]' : sector.change_pct >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]')}>
                       {sector.change_pct == null || !Number.isFinite(sector.change_pct) ? 'Unavailable' : `${sector.change_pct >= 0 ? '+' : ''}${formatNumber(sector.change_pct, { decimals: 2 })}%`}
                     </div>
                   </div>
@@ -214,7 +200,7 @@ function SectorBoardWidgetComponent({ id, onRemove, onDataChange }: SectorBoardW
                           </div>
                         </div>
                         <div className="min-w-[64px] text-right">
-                            <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', stock.change_pct == null || !Number.isFinite(stock.change_pct) ? 'text-[var(--text-muted)]' : colorClass(stock.color))}>
+                            <div className={cn('break-words whitespace-normal text-xs font-semibold tabular-nums', stock.change_pct == null || !Number.isFinite(stock.change_pct) ? 'text-[var(--text-muted)]' : stock.change_pct >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]')}>
                               {stock.change_pct == null || !Number.isFinite(stock.change_pct) ? 'Unavailable' : `${stock.change_pct > 0 ? '+' : ''}${formatNumber(stock.change_pct, { decimals: 2 })}%`}
                             </div>
                             <div className="text-[10px] font-mono text-[var(--text-secondary)]">
