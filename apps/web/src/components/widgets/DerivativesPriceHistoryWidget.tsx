@@ -139,7 +139,7 @@ export function DerivativesPriceHistoryWidget({
                       <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval={chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0} minTickGap={12} />
                       <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => formatAxisValue(value)} width={56} />
                       <Tooltip formatter={(value) => formatNumber(Number(Array.isArray(value) ? value[0] : value), { decimals: 2 })} />
-                      <Area type="monotone" dataKey="close" stroke="#38bdf8" fill="rgba(56,189,248,0.18)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="close" stroke="var(--chart-blue)" fill="color-mix(in srgb, var(--chart-blue) 18%, transparent)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>

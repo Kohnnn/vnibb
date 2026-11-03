@@ -110,8 +110,8 @@ export function ValuationWidget({ symbol, onDataChange }: ValuationWidgetProps) 
                 {chartData.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={entry.isCurrent ? '#3b82f6' : 'var(--bg-secondary)'}
-                    stroke={entry.isCurrent ? '#60a5fa' : 'var(--border-default)'}
+                    fill={entry.isCurrent ? 'var(--chart-blue)' : 'var(--bg-secondary)'}
+                    stroke={entry.isCurrent ? 'var(--chart-blue)' : 'var(--border-default)'}
                   />
                 ))}
               </Bar>

@@ -187,13 +187,15 @@ function markerRadius(articleCount: number) {
   return 5;
 }
 
+// Categories are peer topics, not directions: focal blue for markets, then the
+// documented categorical extension. Active state uses the brand accent dimmed.
 function markerTone(bucket: WorldNewsMapBucket, active: boolean) {
-  if (active) return { fill: '#fbbf24', stroke: '#fffbeb', glow: 'rgba(251,191,36,0.7)' };
-  if (bucket.article_count === 0) return { fill: '#64748b', stroke: '#cbd5e1', glow: 'rgba(148,163,184,0.35)' };
-  if (bucket.top_category === 'markets') return { fill: '#38bdf8', stroke: '#e0f2fe', glow: 'rgba(56,189,248,0.55)' };
-  if (bucket.top_category === 'technology') return { fill: '#a78bfa', stroke: '#ede9fe', glow: 'rgba(167,139,250,0.55)' };
-  if (bucket.top_category === 'business') return { fill: '#34d399', stroke: '#d1fae5', glow: 'rgba(52,211,153,0.55)' };
-  return { fill: '#fb7185', stroke: '#ffe4e6', glow: 'rgba(251,113,133,0.55)' };
+  if (active) return { fill: 'var(--chart-blue)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-blue) 70%, transparent)' };
+  if (bucket.article_count === 0) return { fill: 'var(--text-muted)', stroke: 'var(--border-default)', glow: 'color-mix(in srgb, var(--text-muted) 35%, transparent)' };
+  if (bucket.top_category === 'markets') return { fill: 'var(--chart-blue)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-blue) 55%, transparent)' };
+  if (bucket.top_category === 'technology') return { fill: 'var(--chart-slate)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-slate) 55%, transparent)' };
+  if (bucket.top_category === 'business') return { fill: 'var(--chart-cat-4)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-cat-4) 55%, transparent)' };
+  return { fill: 'var(--chart-cat-5)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-cat-5) 55%, transparent)' };
 }
 
 function formatCategory(value: string | null) {

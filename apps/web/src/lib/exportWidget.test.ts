@@ -355,6 +355,50 @@ describe('exportToPNG', () => {
       widget.remove();
     }
   });
+
+  it('hands html2canvas a clone whose modern colors were already rewritten', async () => {
+    let capturedOptions: Record<string, any> = {};
+    jest.resetModules();
+    jest.doMock('html2canvas', () => ({
+      __esModule: true,
+      default: (_element: HTMLElement, opts: Record<string, any>) => {
+        capturedOptions = opts;
+        return Promise.resolve({ width: 100, height: 100, toBlob: (cb: (b: null) => void) => cb(null) });
+      },
+    }));
+
+    // The reference element html2canvas passes back is a *clone* in a fresh
+    // document: reproduction of the real call, where `documentClone` differs
+    // from the live `document` and the widget element has no id.
+    const widget = document.createElement('div');
+    widget.style.color = 'oklch(0.901 0.058 230.902)';
+    widget.style.borderTopColor = 'color(srgb 0.231373 0.509804 0.964706 / 0.45)';
+    document.body.appendChild(widget);
+
+    const owner = document.defaultView as Window & typeof globalThis;
+    try {
+      // Dynamic import is required: jest.resetModules() above rebuilds the
+      // module graph so the html2canvas mock replaces the static import.
+      const { exportToPNG } = await import('./exportWidget');
+      await exportToPNG(widget, 'heatmap', { sourceLabel: 'Market heatmap' });
+
+      const documentClone = {
+        defaultView: owner,
+        documentElement: document.documentElement,
+        body: document.body,
+      } as unknown as Document;
+      // The widget is id-less, exactly like the market heatmap's ref target.
+      capturedOptions.onclone(documentClone, widget);
+
+      expect(widget.style.color).toBe('rgb(184, 230, 254)');
+      expect(widget.style.borderTopColor).toMatch(/^rgba\(59, 130, 246, 0\.45\)$/);
+      // Nothing unparseable may survive for html2canvas to throw on.
+      expect(widget.style.cssText).not.toMatch(/oklch|oklab|color\(/);
+    } finally {
+      jest.restoreAllMocks();
+      widget.remove();
+    }
+  });
 });
 
 describe('exportToCSV matrix export', () => {
@@ -383,6 +427,78 @@ describe('exportToCSV matrix export', () => {
       URL.createObjectURL = originalCreate;
       URL.revokeObjectURL = originalRevoke;
       click.mockRestore();
+    }
+  });
+});
+
+describe('modern color downgrade', () => {
+  // Chromium serializes Tailwind v4's palette and `color-mix()` output as
+  // oklch()/oklab()/color(srgb …). html2canvas 1.4.1 parses only rgb/hsl and
+  // threw `Attempting to parse an unsupported color function` before painting,
+  // so every dashboard PNG export came back empty.
+  const channelsOf = (css: string) => css.match(/-?[\d.]+/g)?.map(Number) ?? [];
+
+  /** Chromium's own rasterizer is the oracle; its matrix differs by <=1 LSB. */
+  const expectColor = (actual: string, expected: [number, number, number], alpha?: number) => {
+    const [r, g, b, a] = channelsOf(actual);
+    const [er, eg, eb] = expected;
+    expect(Math.abs(r - er)).toBeLessThanOrEqual(1);
+    expect(Math.abs(g - eg)).toBeLessThanOrEqual(1);
+    expect(Math.abs(b - eb)).toBeLessThanOrEqual(1);
+    expect(a ?? 1).toBeCloseTo(alpha ?? 1, 2);
+  };
+
+  it('converts oklch, oklab, and color(srgb) to rgb the parser accepts', async () => {
+    const { rewriteColorSyntax } = await import('./exportWidget');
+    // Expected RGB read back from Chromium's canvas rasterizer in the live app.
+    expect(rewriteColorSyntax('oklch(0.901 0.058 230.902)')).toMatch(/^rgb\(/);
+    expectColor(rewriteColorSyntax('oklch(0.901 0.058 230.902)'), [184, 230, 254]);
+    expectColor(rewriteColorSyntax('oklab(0.623 -0.0378409 -0.210628)'), [43, 127, 255]);
+    expectColor(rewriteColorSyntax('color(srgb 0.231373 0.509804 0.964706)'), [59, 130, 246]);
+  });
+
+  it('keeps the alpha channel as rgba', async () => {
+    const { rewriteColorSyntax } = await import('./exportWidget');
+    expectColor(rewriteColorSyntax('oklab(0.623 -0.0378409 -0.210628 / 0.3)'), [43, 127, 255], 0.3);
+    expectColor(rewriteColorSyntax('oklch(0.5 0.1 200 / 45%)'), [0, 116, 122], 0.45);
+    expect(rewriteColorSyntax('oklab(0.623 -0.0378409 -0.210628 / 1)')).toMatch(/^rgb\(/);
+  });
+
+  it('rewrites colors embedded in gradients and shadows, leaving others alone', async () => {
+    const { rewriteColorSyntax } = await import('./exportWidget');
+    expect(rewriteColorSyntax('linear-gradient(to right, oklch(0.901 0.058 230.902), rgb(1, 2, 3))'))
+      .toMatch(/^linear-gradient\(to right, rgb\(184, 230, 254\), rgb\(1, 2, 3\)\)$/);
+    expect(rewriteColorSyntax('oklab(0.6 -0.1 -0.2 / 0.4) 0px 1px 2px 0px'))
+      .toMatch(/^rgba\(\d+, \d+, \d+, 0\.4\) 0px 1px 2px 0px$/);
+    expect(rewriteColorSyntax('rgb(1, 2, 3)')).toBe('rgb(1, 2, 3)');
+    expect(rewriteColorSyntax('10px solid rgba(0, 0, 0, 0)')).toBe('10px solid rgba(0, 0, 0, 0)');
+  });
+
+  it('leaves colorspaces it cannot convert untouched instead of emitting junk', async () => {
+    const { rewriteColorSyntax } = await import('./exportWidget');
+    expect(rewriteColorSyntax('color(display-p3 0.2 0.9 0.3)')).toBe('color(display-p3 0.2 0.9 0.3)');
+    expect(rewriteColorSyntax('oklch(nonsense)')).toBe('oklch(nonsense)');
+  });
+
+  it('normalizes every computed color on the capture subtree', async () => {
+    const { normalizeCaptureColors } = await import('./exportWidget');
+    const host = document.createElement('div');
+    // jsdom echoes authored inline styles back, so a rewrite is observable
+    // without a layout engine.
+    host.style.color = 'oklch(0.901 0.058 230.902)';
+    host.style.borderTopColor = 'color(srgb 0.231373 0.509804 0.964706 / 0.45)';
+    const child = document.createElement('span');
+    child.style.backgroundColor = 'oklab(0.623 -0.0378409 -0.210628 / 0.3)';
+    host.appendChild(child);
+    document.body.appendChild(host);
+
+    try {
+      normalizeCaptureColors(host);
+      expect(host.style.color).toMatch(/^rgb\(184, 230, 254\)$/);
+      expect(host.style.borderTopColor).toMatch(/^rgba\(\d+, \d+, \d+, 0\.45\)$/);
+      expect(child.style.backgroundColor).toMatch(/^rgba\(\d+, \d+, \d+, 0\.3\)$/);
+    } finally {
+      host.remove();
     }
   });
 });

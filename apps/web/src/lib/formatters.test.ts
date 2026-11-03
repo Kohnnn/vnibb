@@ -14,8 +14,13 @@ describe('dividend yield formatting', () => {
     expect(formatDividendYield(value)).toBe(expected)
   })
 
-  it.each([null, undefined, -1, NaN, Infinity, -Infinity])('rejects invalid canonical percent %s', value => {
-    expect(formatDividendYield(value)).toBe('-')
+  it.each([null, undefined, NaN, Infinity, -Infinity])('renders unavailable dividend yield as n/a for %s', value => {
+    expect(formatDividendYield(value)).toBe('n/a')
+  })
+
+  // Brand v1.1 keeps "not meaningful" distinct from "unavailable".
+  it('renders a negative dividend yield as n/m', () => {
+    expect(formatDividendYield(-1)).toBe('n/m')
   })
 
   it.each([0.25, 0, 388, '0.25', ' 0.25 '])('admits certified percent %s without scaling', value => {

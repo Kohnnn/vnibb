@@ -369,9 +369,9 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                         formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                    <Bar dataKey="totalAssets" name="Assets" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                                    <Bar dataKey="totalLiabilities" name="Liabilities" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                                    <Line type="monotone" dataKey="equity" name="Equity" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                    <Bar dataKey="totalAssets" name="Assets" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
+                                    <Bar dataKey="totalLiabilities" name="Liabilities" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
+                                    <Line type="monotone" dataKey="equity" name="Equity" stroke="var(--color-positive)" strokeWidth={2} dot={{ r: 3 }} />
                                 </ComposedChart>
                             ) : (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
@@ -409,8 +409,8 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                         }}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                    <Bar yAxisId="left" dataKey="totalLiabilities" name="Total Debt" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                                    <Line yAxisId="right" type="monotone" dataKey="debtToEquity" name="D/E Ratio" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                    <Bar yAxisId="left" dataKey="totalLiabilities" name="Total Debt" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
+                                    <Line yAxisId="right" type="monotone" dataKey="debtToEquity" name="D/E Ratio" stroke="var(--chart-blue)" strokeWidth={2} dot={{ r: 3 }} />
                                 </ComposedChart>
                             )}
                         </ResponsiveContainer>

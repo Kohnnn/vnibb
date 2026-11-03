@@ -188,7 +188,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
                     }}
                     formatter={(value) => [Number(value).toFixed(2), 'Sharpe'] as [string, string]}
                   />
-                  <Line type="monotone" dataKey="sharpe" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="sharpe" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </ChartMountGuard>

@@ -161,7 +161,7 @@ export function DerivativesAnalyticsWidget({ id, onRemove, onDataChange }: Deriv
                     <XAxis dataKey="tenor" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => `${value}d`} />
                     <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} width={56} />
                     <Tooltip formatter={(value) => formatNumber(Number(value), { decimals: 2 })} labelFormatter={(value, payload) => `${payload?.[0]?.payload?.symbol || ''} · ${value} days`} />
-                    <Area type="monotone" dataKey="close" stroke="#38bdf8" fill="rgba(56,189,248,0.18)" strokeWidth={2} />
+                    <Area type="monotone" dataKey="close" stroke="var(--chart-blue)" fill="color-mix(in srgb, var(--chart-blue) 18%, transparent)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </ChartMountGuard>

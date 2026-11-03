@@ -20,7 +20,15 @@ interface SectorBreakdownWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
-const COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#22d3ee', '#ef4444', '#06b6d4', '#f97316', '#22c55e'];
+// Brand §20 categorical extension: slices are peer categories, not directions.
+const COLORS = [
+  'var(--chart-blue)',
+  'var(--chart-slate)',
+  'var(--chart-cat-4)',
+  'var(--chart-cat-5)',
+  'var(--chart-cat-6)',
+  'var(--chart-cat-3)',
+];
 const EMPTY_SECTORS: SectorGroup[] = [];
 const TOP_OPTIONS = [5, 10, 20, -1] as const;
 const METRIC_OPTIONS = [

@@ -49,7 +49,11 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
         const corporate = eventQueries.flatMap((query) => query.data?.data?.map(companyEventToInvestorEvent).filter((event): event is InvestorCalendarEvent => Boolean(event)) || []);
         return aggregateInvestorEvents(corporate);
     }, [eventQueries]);
-    const failedSymbols = symbols.filter((_, index) => eventQueries[index]?.isError);
+    // `useQueries` returns a new array every render, so depend on a primitive key
+    // instead: a fresh `failedSymbols` array re-ran the publish effect below,
+    // whose `onDataChange` re-rendered the parent and looped until React aborted.
+    const failedSymbolsKey = symbols.filter((_, index) => eventQueries[index]?.isError).join(',');
+    const failedSymbols = useMemo(() => (failedSymbolsKey ? failedSymbolsKey.split(',') : []), [failedSymbolsKey]);
     const loading = eventQueries.some((query) => query.isLoading);
     const error = eventQueries.find((query) => query.error)?.error;
     // Event dates here are action schedules, not source observations, so
@@ -69,8 +73,7 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
                 data: { eventCount: events.length, symbolCount: symbols.length, unavailableSymbols: failedSymbols },
             },
         });
-    }, [events.length, failedSymbols, fetchedAt, onDataChange, symbols.length]);
-
+    }, [events.length, failedSymbolsKey, fetchedAt, onDataChange, symbols.length]);
     if (loading && events.length === 0) return <WidgetLoading message="Loading event coverage..." />;
     if (error && events.length === 0) return <WidgetError error={error as Error} />;
 

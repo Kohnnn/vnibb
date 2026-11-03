@@ -237,8 +237,8 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                           fontSize: '11px',
                         }}
                       />
-                      <Line yAxisId="delta" type="monotone" dataKey="cumulativeDelta" stroke="#06b6d4" strokeWidth={2} dot={false} name="Cumulative Delta" />
-                      <Line yAxisId="price" type="monotone" dataKey="close" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Close" />
+                      <Line yAxisId="delta" type="monotone" dataKey="cumulativeDelta" stroke="var(--chart-blue)" strokeWidth={2} dot={false} name="Cumulative Delta" />
+                      <Line yAxisId="price" type="monotone" dataKey="close" stroke="var(--chart-slate)" strokeWidth={1.5} strokeDasharray="5 3" dot={false} name="Close" />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>

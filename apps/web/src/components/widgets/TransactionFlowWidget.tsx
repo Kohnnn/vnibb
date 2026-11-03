@@ -446,20 +446,20 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
 
                       {scope === 'total' && hasIncompleteSessions ? (
                         <>
-                          <Bar yAxisId="flow" dataKey="observed" fill="#10b981" name="Observed sample" radius={[2, 2, 0, 0]} />
-                          <Bar yAxisId="flow" dataKey="sessionTotal" fill="#2563eb" name="Certified session total" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="observed" fill="var(--chart-slate)" name="Observed sample" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="sessionTotal" fill="var(--chart-blue)" name="Certified session total" radius={[2, 2, 0, 0]} />
                         </>
                       ) : scope === 'total' ? (
                         <>
-                          <Bar yAxisId="flow" dataKey="domestic" stackId="flow" fill="#2563eb" name="Domestic" radius={[2, 2, 0, 0]} />
-                          <Bar yAxisId="flow" dataKey="foreign" stackId="flow" fill="#c026d3" name="Foreign" radius={[2, 2, 0, 0]} />
-                          <Bar yAxisId="flow" dataKey="proprietary" stackId="flow" fill="#06b6d4" name="Proprietary" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="domestic" stackId="flow" fill="var(--chart-blue)" name="Domestic" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="foreign" stackId="flow" fill="var(--chart-slate)" name="Foreign" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="proprietary" stackId="flow" fill="var(--chart-cat-4)" name="Proprietary" radius={[2, 2, 0, 0]} />
                         </>
                       ) : (
                         <Bar
                           yAxisId="flow"
                           dataKey="selected"
-                          fill={scope === 'foreign' ? '#c026d3' : scope === 'proprietary' ? '#06b6d4' : '#2563eb'}
+                          fill={scope === 'foreign' ? 'var(--chart-slate)' : scope === 'proprietary' ? 'var(--chart-cat-4)' : 'var(--chart-blue)'}
                           name={scope === 'foreign' ? 'Foreign' : scope === 'proprietary' ? 'Proprietary' : 'Domestic'}
                           radius={[2, 2, 0, 0]}
                         />

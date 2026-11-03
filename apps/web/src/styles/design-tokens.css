@@ -134,8 +134,17 @@
   --chart-green: var(--color-positive);
   --chart-red: var(--color-negative);
   --chart-blue: #3b82f6;
-  --chart-cyan: #06b6d4;
-  --chart-orange: #f97316;
+  /* Comparison series (benchmarks, peers, overlays): Slate, never a focal
+     series and never a state colour. */
+  --chart-slate: #5B6573;
+  /* Documented categorical extension (brand §20): "additional categorical
+     palettes require a documented extension; do not improvise rainbow series."
+     Used only where slices carry no focal/comparison relation - sector, peer
+     and portfolio breakdowns. Everything else uses blue + Slate. */
+  --chart-cat-3: color-mix(in srgb, #5B6573 78%, #FFFFFF);
+  --chart-cat-4: color-mix(in srgb, #3b82f6 55%, #FFFFFF);
+  --chart-cat-5: color-mix(in srgb, #3b82f6 45%, #5B6573);
+  --chart-cat-6: color-mix(in srgb, #8FA0B5 80%, #3b82f6);
 
   /* ---- Widget Tokens (solid surfaces; no glass, no glow) ---- */
   --widget-bg-solid: #12121a;
@@ -230,6 +239,11 @@ html[data-theme="light"],
   --widget-shadow-hover: 0 4px 12px rgba(10, 10, 10, 0.10);
 
   --chart-blue: #0B3D91;
+  --chart-slate: #5B6573;
+  --chart-cat-3: color-mix(in srgb, #5B6573 70%, #FFFFFF);
+  --chart-cat-4: color-mix(in srgb, #0B3D91 55%, #FFFFFF);
+  --chart-cat-5: color-mix(in srgb, #0B3D91 45%, #5B6573);
+  --chart-cat-6: color-mix(in srgb, #5B6573 45%, #FFFFFF);
 }
 
 /* Density scales control height only; colours and radii stay fixed. */

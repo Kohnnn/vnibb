@@ -176,13 +176,13 @@ export function FibonacciWidget({ symbol, onDataChange }: { symbol?: string; onD
                     <ReferenceLine
                       key={label}
                       y={level}
-                      stroke={label === data.nearest_level.level ? '#f59e0b' : label === '61.8%' ? '#ef4444' : label === '38.2%' ? '#22c55e' : '#64748b'}
+                      stroke={label === data.nearest_level.level ? 'var(--chart-blue)' : 'var(--chart-slate)'}
                       strokeDasharray={label === data.nearest_level.level ? '0' : '4 4'}
                       strokeOpacity={label === data.nearest_level.level ? 0.95 : 0.55}
-                      label={{ value: label, position: 'insideTopRight', fontSize: 10, fill: '#cbd5e1' }}
+                      label={{ value: label, position: 'insideTopRight', fontSize: 10, fill: 'var(--text-secondary)' }}
                     />
                   ))}
-                  <Line type="monotone" dataKey="close" stroke="#f8fafc" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="close" stroke="var(--text-primary)" strokeWidth={2} dot={false} />
                 </LineChart>
               )}
             </ChartSizeBox>

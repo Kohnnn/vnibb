@@ -179,7 +179,7 @@ export function HistoricalPriceChart({ symbol, timeframe = '1Y' }: HistoricalPri
                 label={{ value: marker.shortLabel, fill: marker.color, fontSize: 10, position: 'insideTopRight' }}
               />
             ))}
-            <Line type="monotone" dataKey="close" stroke="#38bdf8" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="close" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
           </LineChart>
         )}
       </ChartSizeBox>

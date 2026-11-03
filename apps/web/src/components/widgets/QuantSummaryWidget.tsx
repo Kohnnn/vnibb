@@ -357,8 +357,8 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                       <Radar
                         name="Quant"
                         dataKey="value"
-                        stroke="#38bdf8"
-                        fill="rgba(56, 189, 248, 0.22)"
+                        stroke="var(--chart-blue)"
+                        fill="color-mix(in srgb, var(--chart-blue) 22%, transparent)"
                         fillOpacity={1}
                         strokeWidth={2}
                       />

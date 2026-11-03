@@ -187,8 +187,8 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
                     formatter={(value: unknown, name?: string) => [Number(value ?? 0).toFixed(2), name || '']}
                   />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="sortino" name="Sortino" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="sharpe" name="Sharpe" fill="#06b6d4" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="sortino" name="Sortino" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="sharpe" name="Sharpe" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartMountGuard>
