@@ -1214,20 +1214,5 @@ html[data-reduce-effects="true"] .skeleton-premium,
   color: var(--color-positive) !important;
 }
 
-:root[data-color-mode='colorblind'] .bg-red-500\/70,
-:root[data-color-mode='colorblind'] .bg-rose-500\/75 {
-  background-color: var(--color-negative-bg) !important;
-}
-
-:root[data-color-mode='colorblind'] .bg-green-500\/70,
-:root[data-color-mode='colorblind'] .bg-emerald-500\/70,
-:root[data-color-mode='colorblind'] .bg-emerald-500\/75 {
-  background-color: var(--color-positive-bg) !important;
-}
-
-:root[data-color-mode='colorblind'] .border-red-500\/30,
-:root[data-color-mode='colorblind'] .border-emerald-500\/30 {
-  border-color: var(--color-state-border) !important;
-}
 
 

@@ -22,16 +22,23 @@ interface SectorPerformanceWidgetProps {
 // A sector with no usable change rows is not a flat 0% sector: it gets the
 // neutral slate tile and a "—" label instead of a fabricated "+0.00%" read
 // (issue #107). A genuine 0 still paints the neutral band.
-function getHeatmapColor(changePct: number | null): string {
-    if (changePct === null) return 'bg-slate-600/40';
-    if (changePct >= 2) return 'bg-green-600';
-    if (changePct >= 1) return 'bg-green-500/70';
-    if (changePct >= 0.5) return 'bg-green-400/50';
-    if (changePct >= 0) return 'bg-green-300/30';
-    if (changePct >= -0.5) return 'bg-red-300/30';
-    if (changePct >= -1) return 'bg-red-400/50';
-    if (changePct >= -2) return 'bg-red-500/70';
-    return 'bg-red-600';
+//
+// Bands are tint strengths of the semantic direction tokens rather than a raw
+// palette ramp: intensity rises monotonically with magnitude, and color-vision
+// mode reaches the tiles through --color-positive/negative instead of needing a
+// global class remap (which flattened one band and inverted the scale).
+function getHeatmapStyle(changePct: number | null): { background: string } {
+    const tint = (token: string, pct: number) =>
+        `color-mix(in srgb, var(${token}) ${pct}%, transparent)`;
+    if (changePct === null) return { background: tint('--color-neutral', 40) };
+    if (changePct >= 2) return { background: tint('--color-positive', 100) };
+    if (changePct >= 1) return { background: tint('--color-positive', 70) };
+    if (changePct >= 0.5) return { background: tint('--color-positive', 50) };
+    if (changePct >= 0) return { background: tint('--color-positive', 28) };
+    if (changePct >= -0.5) return { background: tint('--color-negative', 28) };
+    if (changePct >= -1) return { background: tint('--color-negative', 50) };
+    if (changePct >= -2) return { background: tint('--color-negative', 70) };
+    return { background: tint('--color-negative', 100) };
 }
 
 export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }: SectorPerformanceWidgetProps) {
@@ -114,7 +121,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                 return (
                                     <div
                                         key={sector.sectorId}
-                                        className={`p-3 rounded-lg border border-[var(--border-default)] ${getHeatmapColor(change)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
+                                        className="p-3 rounded-lg border border-[var(--border-default)] cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]"
+                                        style={getHeatmapStyle(change)}
                                     >
                                         <div className="break-words whitespace-normal text-[10px] font-bold uppercase text-[var(--text-secondary)]">
                                             {name}
