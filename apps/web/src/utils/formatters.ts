@@ -18,14 +18,14 @@ export function formatScreenerValue(value: any, format?: string): string {
     case 'currency':
       return isNumeric ? formatCurrency(numericValue) : String(value);
     case 'percent':
+      // Provider percent fields arrive in percentage points (a 0.75% move is
+      // `0.75`), so `input: 'auto'` would rescale anything under 1 into 75%.
       return isNumeric
-        ? formatPercent(normalizeLikelyPercent(numericValue), { input: 'auto', decimals: 2 })
+        ? formatPercent(normalizeLikelyPercent(numericValue), { input: 'percent', decimals: 2 })
         : String(value);
     case 'change':
       if (!isNumeric) return String(value)
-      const normalized = normalizeLikelyPercent(numericValue)
-      const formatted = formatPercent(normalized, { input: 'auto', decimals: 2 })
-      return normalized > 0 ? `+${formatted}` : formatted
+      return formatPercent(normalizeLikelyPercent(numericValue), { input: 'percent', decimals: 2, signed: true })
     case 'number':
       return isNumeric ? formatNumber(numericValue) : String(value);
     default:

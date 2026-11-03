@@ -78,22 +78,41 @@ export function WidgetToolbar({
     const container = header?.parentElement;
     if (!header || !container || typeof ResizeObserver === 'undefined') return;
 
+    // Compact mode removes the controls it was measured from, so re-measuring
+    // from the compact DOM would shrink `requiredWidth`, flip back to expanded
+    // and oscillate. Measure the expanded width into a ref and keep the compact
+    // threshold stable while compacted.
+    //
+    // Deps are intentionally empty: `parameters`, `actions`, `groupSelector` and
+    // `tickerSelector` are inline JSX recreated every parent render, so depending
+    // on them re-runs this effect (and rebuilds the ResizeObserver) every render.
+    // The container/leading/trailing resize signals below cover real size changes.
     const measure = () => {
       const width = container.getBoundingClientRect().width;
       if (!width) return;
-      if (!isCompact) {
-        requiredWidth.current = Math.ceil((leadingRef.current?.scrollWidth ?? 0) +
-          (trailingRef.current?.scrollWidth ?? 0) + 24);
+      const current = leadingRef.current;
+      const trailing = trailingRef.current;
+      if (!current && !trailing) return;
+      const compacted = compactTriggerRef.current;
+      const expanded = Math.ceil(
+        (current?.scrollWidth ?? 0) + (trailing?.scrollWidth ?? 0) + 24 +
+        (compacted && compacted.offsetParent ? Math.ceil(compacted.getBoundingClientRect().width) : 0)
+      );
+      if (expanded > requiredWidth.current || width >= requiredWidth.current) {
+        requiredWidth.current = expanded;
       }
-      setIsCompact(width < requiredWidth.current);
+      setIsCompact((previous) => {
+        const next = width < requiredWidth.current;
+        return next === previous ? previous : next;
+      });
     };
+    measure();
     const observer = new ResizeObserver(measure);
     observer.observe(container);
     if (leadingRef.current) observer.observe(leadingRef.current);
     if (trailingRef.current) observer.observe(trailingRef.current);
-    measure();
     return () => observer.disconnect();
-  }, [isCompact, title, parameters, actions, groupSelector, tickerSelector]);
+  }, []);
 
   useEffect(() => {
     if (!isCompact) setIsPanelOpen(false);

@@ -276,6 +276,101 @@ function provenanceFooterText(provenance?: ExportProvenance): string {
 }
 
 /**
+ * Downgrade the modern color syntaxes Chromium reports from `getComputedStyle`
+ * into the `rgb()`/`rgba()` forms html2canvas 1.4.1 can parse.
+ *
+ * Tailwind v4 declares its palette in `oklch()`, and `color-mix()` computes to
+ * `oklab()` or `color(srgb …)`; Chromium serializes all three verbatim. The
+ * parser only knows `rgb`/`hsl`, so it threw
+ * `Attempting to parse an unsupported color function` and every dashboard
+ * export produced nothing.
+ *
+ * Rewrites color functions anywhere in the value, so gradients and shadows
+ * survive; anything it cannot convert is left untouched.
+ *
+ * ponytail: srgb colorspace only. Extend if a widget ever paints `display-p3`.
+ */
+export function rewriteColorSyntax(value: string): string {
+  return value.replace(/\b(oklab|oklch|color)\(([^()]*)\)/gi, (token, fn: string, body: string) => {
+    const channels = convertColorChannels(fn.toLowerCase(), body);
+    if (!channels) return token;
+    const alphaPart = body.split('/')[1]?.trim();
+    const parsedAlpha = alphaPart
+      ? Number.parseFloat(alphaPart) / (alphaPart.endsWith('%') ? 100 : 1)
+      : 1;
+    const alpha = Number.isFinite(parsedAlpha) ? Math.min(1, Math.max(0, parsedAlpha)) : 1;
+    return alpha === 1
+      ? `rgb(${channels.join(', ')})`
+      : `rgba(${channels.join(', ')}, ${Number(alpha.toFixed(4))})`;
+  });
+}
+
+/** Convert the channel body of `oklab()`/`oklch()`/`color()` to 0-255 sRGB. */
+function convertColorChannels(fn: string, body: string): number[] | null {
+  const parts = body.split('/')[0].trim().split(/\s+/);
+  const ratio = (part: string) => {
+    const num = Number.parseFloat(part);
+    if (!Number.isFinite(num)) return Number.NaN;
+    return part.endsWith('%') ? num / 100 : num;
+  };
+  const toByte = (channel: number) => Math.round(Math.min(1, Math.max(0, channel)) * 255);
+
+  if (fn === 'color') {
+    // `color(srgb 0.23 0.51 0.96)` is already gamma-encoded sRGB.
+    if (parts.shift()?.toLowerCase() !== 'srgb' || parts.length < 3) return null;
+    const channels = parts.slice(0, 3).map(ratio);
+    return channels.some(Number.isNaN) ? null : channels.map(toByte);
+  }
+
+  const channels = parts.slice(0, 3).map(ratio);
+  if (channels.some(Number.isNaN)) return null;
+  const [l, c, third] = channels;
+  const lightness = Math.min(1, Math.max(0, l));
+  // oklch stores polar chroma + hue; oklab stores cartesian a/b.
+  const hue = fn === 'oklch' ? (third * Math.PI) / 180 : 0;
+  const a = fn === 'oklch' ? c * Math.cos(hue) : c;
+  const b = fn === 'oklch' ? c * Math.sin(hue) : third;
+  const l3 = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m3 = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s3 = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3,
+    -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3,
+    -0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3,
+  ].map((channel) => {
+    const encoded = channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055;
+    return toByte(encoded);
+  });
+}
+
+/**
+ * Inline every unparseable color on the capture clone as `rgb()`/`rgba()` so
+ * html2canvas can read it back. Runs on the clone, so the live widget keeps its
+ * own styles.
+ *
+ * Walks the whole computed declaration rather than a property allowlist: a
+ * single missed property aborts the export. Custom properties are skipped
+ * because html2canvas never reads them.
+ */
+export function normalizeCaptureColors(root: HTMLElement, view?: Window | null) {
+  const owner = view ?? root.ownerDocument.defaultView ?? window;
+  const getStyle = owner.getComputedStyle.bind(owner);
+  for (const node of [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))]) {
+    const computed = getStyle(node);
+    for (let index = 0; index < computed.length; index += 1) {
+      const property = computed[index];
+      if (property.startsWith('--')) continue;
+      const value = computed.getPropertyValue(property);
+      const rewritten = rewriteColorSyntax(value);
+      // `important`, because colourblind mode and the reduced-effects rules
+      // declare colors `!important`; a plain inline value would lose to them
+      // and html2canvas would parse the unparseable stylesheet value instead.
+      if (rewritten !== value) node.style.setProperty(property, rewritten, 'important');
+    }
+  }
+}
+
+/**
  * Export a widget as a PNG. `target` is a widget id or the element itself.
  * Provenance is painted into the image, because a bitmap cannot carry a
  * `_provenance` key.
@@ -289,10 +384,25 @@ export async function exportToPNG(target: string | HTMLElement, filename: string
 
   const footerText = provenanceFooterText(provenance);
   try {
-    const surface = resolveSurfaceColor(element);
+    // The surface travels into html2canvas's own color parser, so it needs the
+    // same downgrade the cloned nodes get.
+    const resolvedSurface = resolveSurfaceColor(element);
+    const surface = resolvedSurface ? rewriteColorSyntax(resolvedSurface) : undefined;
     const canvas = await html2canvas(element, {
       backgroundColor: surface,
       useCORS: true,
+      // html2canvas hands us its clone and the cloned element, so this works
+      // for ref-based widgets (the market heatmap) that have no id. Before
+      // parsing that element it also reads `backgroundColor` off the clone's
+      // `html`/`body` — the whole page, not just the widget — so those two
+      // values need the same downgrade or the export dies before painting.
+      onclone: (documentClone, reference) => {
+        normalizeCaptureColors(reference, documentClone.defaultView);
+        for (const node of [documentClone.documentElement, documentClone.body]) {
+          const background = node && documentClone.defaultView?.getComputedStyle(node).backgroundColor;
+          if (node && background) node.style.backgroundColor = rewriteColorSyntax(background);
+        }
+      },
     });
     const output = footerText ? stampFooter(canvas, footerText, element.clientWidth, surface) : canvas;
     output.toBlob((blob) => {

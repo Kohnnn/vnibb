@@ -81,7 +81,9 @@ export function readDividendYield(value: unknown, unit: unknown): number | null 
 }
 
 export function formatDividendYield(value: number | null | undefined, decimals = 2): string {
-    if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '-';
+    // Brand v1.1 separates unavailable (`n/a`) from not meaningful (`n/m`).
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
+    if (value < 0) return 'n/m';
     return `${value.toFixed(decimals)}%`;
 }
 
@@ -135,7 +137,10 @@ export function formatNumber(value: number | null | undefined, decimals = 2): st
  * Format ratio (PE, PB, etc.)
  */
 export function formatRatio(value: number | null | undefined, decimals = 2): string {
-    if (value === null || value === undefined) return '-';
+    // Brand v1.1: `n/a` is an unavailable value, `n/m` a ratio that is not
+    // meaningful. A missing ratio is unavailable, so it must not read as a
+    // hyphen (which the spec reserves for nothing at all).
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
     return value.toFixed(decimals);
 }
 
