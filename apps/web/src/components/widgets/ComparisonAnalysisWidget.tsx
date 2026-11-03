@@ -450,8 +450,8 @@ function ComparisonAnalysisWidgetComponent({
                   key={ticker}
                   className="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-semibold"
                   style={{
-                    borderColor: `${color}66`,
-                    backgroundColor: `${color}1f`,
+                    borderColor: `color-mix(in srgb, ${color} 40%, transparent)`,
+                    backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
                     color,
                   }}
                 >

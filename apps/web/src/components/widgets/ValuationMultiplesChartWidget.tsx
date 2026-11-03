@@ -145,7 +145,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
                         ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
                         : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
-                    style={active ? { boxShadow: `inset 0 0 0 1px ${series.color}33` } : undefined}
+                    style={active ? { boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${series.color} 20%, transparent)` } : undefined}
                   >
                     {series.label}
                   </button>

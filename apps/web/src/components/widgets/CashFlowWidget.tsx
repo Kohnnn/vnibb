@@ -547,7 +547,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                         <Bar dataKey="investingCF" name="Investing" fill="var(--chart-slate)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'financingCF') ? (
-                                        <Bar dataKey="financingCF" name="Financing" fill="var(--chart-slate)" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="financingCF" name="Financing" fill="var(--chart-cat-4)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                 </ComposedChart>
                             ) : chartedSeries.length > 0 ? (
