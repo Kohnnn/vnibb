@@ -215,7 +215,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
   });
 
   return <section className={styles.root} aria-label="Matrix research workspace">
-    <div className="matrix-topline"><div><span className="matrix-eyebrow">VNIBB / RESEARCH</span><h2>Matrix</h2></div><button disabled={busy} type="button" onClick={() => openSnapshot(matrixApi.fixture)}>Explore synthetic fixture</button></div>
+    <div className="matrix-topline"><div><span className="matrix-eyebrow">VniBB / RESEARCH</span><h2>Matrix</h2></div><button disabled={busy} type="button" onClick={() => openSnapshot(matrixApi.fixture)}>Explore synthetic fixture</button></div>
     <details className="matrix-scope" open={!snapshot}><summary>Research scope <span className="matrix-muted">· explicit creation only</span></summary>
       <div className="matrix-fields"><label>Anchor company<input value={anchor} maxLength={12} onChange={(event) => { prepareGeneration.current += 1; setAnchor(event.target.value.toUpperCase()); setPreparation(null); setAvailability(null); setPeriodError(''); }} /></label><button disabled={busy || !anchor.trim()} type="button" onClick={prepare}>Prepare peer scope</button><label className="matrix-wide">Companies · maximum 10<input value={symbols} onChange={(event) => { prepareGeneration.current += 1; setSymbols(event.target.value); setPeriodError(''); }} aria-describedby="matrix-peer-basis" /></label></div>
       <p id="matrix-peer-basis" className="matrix-muted">{preparation?.peer_basis || 'Prepare to preselect stored sector peers. You can edit the company list before creating.'}</p>

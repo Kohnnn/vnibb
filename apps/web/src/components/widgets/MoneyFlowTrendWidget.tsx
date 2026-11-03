@@ -215,7 +215,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     timeframe === option.id
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -232,7 +232,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     topCount === option.id
-                      ? 'bg-cyan-600 text-white'
+                      ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -249,7 +249,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     rankingMetric === option.id
-                      ? 'bg-emerald-600 text-white'
+                      ? 'bg-[var(--color-positive)] text-[var(--color-bg-primary)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -266,7 +266,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
             />
           </div>
             <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-              <Info size={12} className="text-cyan-300" />
+              <Info size={12} className="text-[var(--color-accent-primary)]" />
               <span>Proxy model: relative strength vs VNINDEX with trend and momentum centered at 100. Ranked view trims clutter to the strongest names first.</span>
             </div>
           {referenceStock && (

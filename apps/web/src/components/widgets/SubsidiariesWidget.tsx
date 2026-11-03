@@ -18,7 +18,7 @@ interface SubsidiariesWidgetProps {
 }
 
 function formatCapital(value: number | null | undefined): string {
-    if (!value) return '-';
+    if (!value) return 'n/a';
     if (value >= 1e12) return `${(value / 1e12).toFixed(1)}T VND`;
     if (value >= 1e9) return `${(value / 1e9).toFixed(1)}B VND`;
     if (value >= 1e6) return `${(value / 1e6).toFixed(0)}M VND`;
@@ -26,7 +26,7 @@ function formatCapital(value: number | null | undefined): string {
 }
 
 function formatPct(pct: number | null | undefined): string {
-    if (pct === null || pct === undefined) return '-';
+    if (pct === null || pct === undefined) return 'n/a';
     return `${pct.toFixed(1)}%`;
 }
 
@@ -99,7 +99,7 @@ export function SubsidiariesWidget({ symbol, onDataChange }: SubsidiariesWidgetP
                                 <div
                                     className={`shrink-0 px-1.5 py-0.5 rounded text-xs font-medium ${
                                         (sub.ownership_pct || 0) >= 50
-                                            ? 'bg-blue-500/20 text-blue-400'
+                                            ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                             : 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
                                     }`}
                                 >

@@ -57,3 +57,31 @@ it('persists imported copies before reporting success and keeps them after remou
     await waitFor(() => expect(reloaded.result.current.state.dashboards.find((dashboard) => dashboard.id === imported.id)).toEqual(imported));
     expect(reloaded.result.current.state.folders.find((folder) => folder.id === imported.folderId)?.name).toBe('Research');
 });
+
+it('keeps an unresolvable saved widget through export, restore and remount', async () => {
+    // Neither catalogued nor registered. Import remaps IDs by design, so the
+    // surviving contract is the widget type, its config and its geometry.
+    const retired = {
+        id: 'retired', type: 'retired_widget', tabId: 'research-tab',
+        config: { symbol: 'FPT', savedFlag: true },
+        layout: { i: 'retired-layout', x: 5, y: 8, w: 10, h: 6 },
+    };
+    const withRetired: DashboardState = {
+        ...source,
+        dashboards: [{ ...source.dashboards[0], tabs: [{ ...source.dashboards[0].tabs[0], widgets: [retired] }] }],
+    } as unknown as DashboardState;
+
+    const view = renderHook(() => useDashboard(), { wrapper: DashboardProvider });
+    await waitFor(() => expect(view.result.current.state.dashboards).toHaveLength(4));
+    act(() => view.result.current.restoreWorkspace(createWorkspaceBackup(withRetired)));
+
+    const restored = view.result.current.state.dashboards.find((dashboard) => dashboard.name === 'Restored research')!;
+    const widget = restored.tabs[0].widgets[0];
+    expect(widget.type).toBe('retired_widget');
+    expect(widget.config).toEqual({ symbol: 'FPT', savedFlag: true });
+    expect(widget.layout).toEqual(expect.objectContaining({ x: 5, y: 8, w: 10, h: 6 }));
+
+    view.unmount();
+    const reloaded = renderHook(() => useDashboard(), { wrapper: DashboardProvider });
+    await waitFor(() => expect(reloaded.result.current.state.dashboards.find((dashboard) => dashboard.id === restored.id)).toEqual(restored));
+});

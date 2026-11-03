@@ -19,10 +19,11 @@
   --color-border-secondary: var(--color-border-default);
   --border-secondary: var(--color-border-default);
 
-  /* Widget layout primitives (unique to this file). */
+  /* Widget layout primitives (unique to this file).
+     Glass was retired in #197: widget surfaces are solid. */
   --widget-header-height: 40px;
   --widget-padding: 12px;
-  --widget-bg: var(--widget-bg-glass);
+  --widget-bg: var(--widget-bg-solid);
   --widget-border: var(--color-border-primary);
 
   /* Was only defined in the now-removed tokens.css; WidgetHeader.css relies on

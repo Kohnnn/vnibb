@@ -54,23 +54,3 @@ export async function exportHistorical(
 
     return response.blob();
 }
-
-export async function exportPeers(
-    symbols: string[],
-    options?: {
-        period?: string;
-        format?: 'csv' | 'xlsx';
-    }
-): Promise<Blob> {
-    const response = await fetch(getExportUrl('/export/peers', {
-        symbols: symbols.join(','),
-        period: options?.period || 'annual',
-        format: options?.format || 'csv',
-    } as Record<string, string>));
-
-    if (!response.ok) {
-        throw new Error(`Export failed: ${response.status}`);
-    }
-
-    return response.blob();
-}

@@ -56,15 +56,14 @@
   border-radius: 0.375rem;
 }
 
-/* OpenBB Pro Dashboard Container Glow */
+/* Dashboard shell (glow retired in #197) */
 .dashboard-grid {
   position: relative;
 }
 
 .dashboard-container {
-  box-shadow: 0 0 80px rgba(59, 130, 246, 0.03);
-  border: 1px solid rgba(59, 130, 246, 0.08);
-  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
   background: var(--dashboard-shell-bg);
 }
 

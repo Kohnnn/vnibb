@@ -1,7 +1,7 @@
 import type { UseQueryResult } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { useHistoricalPrices } from '@/lib/queries';
-import { formatAbsoluteTimestamp } from '@/lib/format';
+import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 import type { EquityHistoricalResponse } from '@/types/equity';
 import { ATRRegimeWidget } from './ATRRegimeWidget';
 

@@ -61,37 +61,6 @@ export function formatVND(value: number | null | undefined, options?: { showCurr
 }
 
 /**
- * OpenBB Pro-inspired dark theme chart colors
- */
-export const chartColors = {
-    // Primary metrics
-    revenue: '#3B82F6',      // Blue - Revenue/Sales
-    profit: '#10B981',       // Green - Profit/Income
-    expense: '#EF4444',      // Red - Expenses/Costs
-
-    // Balance sheet
-    assets: '#06B6D4',       // Cyan - Assets
-    liabilities: '#F59E0B',  // Orange - Liabilities
-    equity: '#06B6D4',       // Cyan - Equity
-
-    // Cash flow
-    operating: '#22C55E',    // Green - Operating CF
-    investing: '#F97316',    // Orange - Investing CF
-    financing: '#22D3EE',    // Cyan Light - Financing CF
-    freeCashFlow: '#14B8A6', // Teal - FCF
-
-    // Margins
-    grossMargin: '#60A5FA',  // Light Blue
-    operatingMargin: '#34D399', // Light Green
-    netMargin: '#FBBF24',    // Yellow
-
-    // Grid and text
-    grid: '#374151',         // Gray-700
-    text: '#9CA3AF',         // Gray-400
-    background: '#111827',   // Gray-900
-};
-
-/**
  * Common chart configuration for dark theme
  */
 export const chartConfig = {

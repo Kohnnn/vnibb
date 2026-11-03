@@ -88,7 +88,7 @@ test('renders the incoming 500-trade tail as an observed sample, not a complete 
   expect(screen.getByText('2026-10-13T13:55:00+07:00 – 2026-10-13T14:45:00+07:00')).toBeInTheDocument();
   expect(screen.getByText('vnstock:VCI / sampled')).toBeInTheDocument();
   expect(screen.getByText('persisted / persisted / failed')).toBeInTheDocument();
-  expect(metric('Session trade count / coverage').getByText('N/A / Unknown')).toBeInTheDocument();
+  expect(metric('Session trade count / coverage').getByText('n/a / Unknown')).toBeInTheDocument();
   expect(screen.queryByText(/100(?:\.0)?%/)).not.toBeInTheDocument();
   expect(metric('Observed gross').getByText('105.0M')).toBeInTheDocument();
   expect(metric('Observed buy value').getByText('70.0M')).toBeInTheDocument();
@@ -98,9 +98,9 @@ test('renders the incoming 500-trade tail as an observed sample, not a complete 
   expect(metric('Observed sell volume').getByText('3.5K')).toBeInTheDocument();
   expect(metric('Observed volume').getByText('10.5K')).toBeInTheDocument();
   expect(metric('Observed net volume').getByText('3.5K')).toBeInTheDocument();
-  expect(metric('Domestic').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Domestic').getByText('n/a')).toBeInTheDocument();
   expect(metric('Observed Big Orders').getByText('0')).toBeInTheDocument();
-  expect(metric('Observed Block Trades').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Observed Block Trades').getByText('n/a')).toBeInTheDocument();
   expect(chartRows()[0]).toMatchObject({ observed: 35_000_000, selected: 35_000_000, sessionTotal: null, domestic: null });
   expect(screen.getAllByTestId('flow-series').map((element) => element.textContent)).toEqual(['Observed sample', 'Certified session total']);
   fireEvent.click(screen.getByRole('button', { name: 'Volume' }));
@@ -111,7 +111,7 @@ test('preserves an incoming observed count above the provider tail size without 
   setRows([{ ...sample, coverage: { ...sample.coverage, observed_trade_count: 1201, denominator_trade_count: 1201, session_fraction: 1 } }]);
   render(<TransactionFlowWidget id="flow" symbol="FPT" />);
   expect(metric('Observed trades').getByText('1201')).toBeInTheDocument();
-  expect(metric('Session trade count / coverage').getByText('N/A / Unknown')).toBeInTheDocument();
+  expect(metric('Session trade count / coverage').getByText('n/a / Unknown')).toBeInTheDocument();
   expect(screen.queryByText(/100(?:\.0)?%/)).not.toBeInTheDocument();
   expect(chartRows()[0]).toMatchObject({ observed: 35_000_000, sessionTotal: null });
 });
@@ -124,10 +124,10 @@ test.each([
   setRows([{ ...sample, coverage, flow_scope: 'full_session', total_net_value: 999_000_000, total_gross_value: 999_000_000, domestic_net_value: 999_000_000 }]);
   render(<TransactionFlowWidget id="flow" symbol="FPT" />);
   expect(screen.getByText('Observed sample · Unknown')).toBeInTheDocument();
-  expect(metric('Domestic').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Domestic').getByText('n/a')).toBeInTheDocument();
   expect(metric('Observed gross').getByText('105.0M')).toBeInTheDocument();
-  expect(metric('Observed Big Orders').getByText('N/A')).toBeInTheDocument();
-  expect(metric('Observed Block Trades').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Observed Big Orders').getByText('n/a')).toBeInTheDocument();
+  expect(metric('Observed Block Trades').getByText('n/a')).toBeInTheDocument();
   expect(chartRows()[0]).toMatchObject({ observed: 35_000_000, sessionTotal: null, domestic: null });
   expect(screen.queryByText('999.0M')).not.toBeInTheDocument();
 });
@@ -136,7 +136,7 @@ test('absent coverage and absent measured values stay unavailable instead of rev
   setRows([{ date: '2026-10-13', total_net_value: 999_000_000, domestic_net_value: 999_000_000 }]);
   render(<TransactionFlowWidget id="flow" symbol="FPT" />);
   expect(screen.getByText('Observed sample · Unknown')).toBeInTheDocument();
-  expect(metric('Observed trades').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Observed trades').getByText('n/a')).toBeInTheDocument();
   expect(screen.queryByTestId('flow-chart-data')).not.toBeInTheDocument();
   expect(screen.queryByText('999.0M')).not.toBeInTheDocument();
 });
@@ -163,7 +163,7 @@ test('an older certified domestic residual is not displayed as the latest sample
     sample,
   ]);
   render(<TransactionFlowWidget id="flow" symbol="FPT" />);
-  expect(metric('Domestic').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Domestic').getByText('n/a')).toBeInTheDocument();
   expect(chartRows().map((row: { observed: number | null; sessionTotal: number | null }) => [row.observed, row.sessionTotal])).toEqual([[null, 120_000_000], [35_000_000, null]]);
 });
 
@@ -171,8 +171,8 @@ test('a one-sided measured zero remains zero without fabricating aggregate value
   setRows([{ ...sample, observed_buy_value: null, observed_sell_value: 0, observed_net_value: null, observed_gross_value: null, observed_buy_volume: null, observed_sell_volume: 0, observed_volume: null, observed_net_volume: null, foreign_net_value: null }]);
   render(<TransactionFlowWidget id="flow" symbol="FPT" />);
   expect(metric('Observed sell value').getByText('0')).toBeInTheDocument();
-  expect(metric('Observed buy value').getByText('N/A')).toBeInTheDocument();
-  expect(metric('Observed net value').getByText('N/A')).toBeInTheDocument();
-  expect(metric('Observed gross').getByText('N/A')).toBeInTheDocument();
+  expect(metric('Observed buy value').getByText('n/a')).toBeInTheDocument();
+  expect(metric('Observed net value').getByText('n/a')).toBeInTheDocument();
+  expect(metric('Observed gross').getByText('n/a')).toBeInTheDocument();
   expect(chartRows()[0]).toMatchObject({ observed: null, selected: null, sessionTotal: null, domestic: null });
 });

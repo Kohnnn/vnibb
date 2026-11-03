@@ -83,7 +83,7 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataCha
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <div className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Leaders</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-[var(--color-positive)]">Leaders</div>
                 {leaders.map((sector) => {
                   const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                   const gainer = sector.topGainer?.symbol;
@@ -98,13 +98,13 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataCha
                           <button
                             type="button"
                             onClick={() => setLinkedSymbol(gainer)}
-                            className="text-[10px] text-emerald-400 hover:text-emerald-300"
+                            className="text-[10px] text-[var(--color-positive)] hover:text-[var(--color-positive)]"
                           >
                             Top gainer: {gainer}
                           </button>
                         )}
                       </div>
-                      <div className="text-xs font-bold text-emerald-400">
+                      <div className="text-xs font-bold text-[var(--color-positive)]">
                         +{(sector.changePct ?? 0).toFixed(2)}%
                       </div>
                     </div>
@@ -112,7 +112,7 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataCha
                 })}
               </div>
               <div className="space-y-2">
-                <div className="text-[10px] font-black uppercase tracking-widest text-red-400">Laggards</div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-[var(--color-negative)]">Laggards</div>
                 {laggards.map((sector) => {
                   const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                   const loser = sector.topLoser?.symbol;
@@ -127,13 +127,13 @@ export function SectorRotationRadarWidget({ id, widgetGroup, onRemove, onDataCha
                           <button
                             type="button"
                             onClick={() => setLinkedSymbol(loser)}
-                            className="text-[10px] text-red-400 hover:text-red-300"
+                            className="text-[10px] text-[var(--color-negative)] hover:text-[var(--color-negative)]"
                           >
                             Top loser: {loser}
                           </button>
                         )}
                       </div>
-                      <div className="text-xs font-bold text-red-400">
+                      <div className="text-xs font-bold text-[var(--color-negative)]">
                         {(sector.changePct ?? 0).toFixed(2)}%
                       </div>
                     </div>

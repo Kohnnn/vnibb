@@ -146,16 +146,20 @@ function resolvePythonCommand() {
     process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python312', 'python.exe'),
     process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python311', 'python.exe'),
     'python',
+    'python3',
   ].filter(Boolean)
 
+  // Prefer an interpreter with pytest, but fall back to any importable one so a
+  // compile-only environment does not break the gate with ENOENT.
   for (const candidate of candidates) {
-    if (!candidate) continue
-    if (candidate.includes('python') && supportsPytest(candidate)) {
-      return candidate
-    }
+    if (supportsPytest(candidate)) return candidate
+  }
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate, ['-c', 'import sys'], { stdio: 'ignore' })
+    if (probe.status === 0) return candidate
   }
 
-  return process.env.PYTHON || 'python'
+  return process.env.PYTHON || 'python3'
 }
 
 function gitOutput(args) {

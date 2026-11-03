@@ -35,10 +35,11 @@ export default function AuthCallbackPage() {
     }, [router]);
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-black">
-            <div className="text-center">
-                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-                <p className="mt-4 text-zinc-400">Completing sign in...</p>
+        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
+            <div className="text-center" role="status" aria-live="polite">
+                <div className="inline-block h-12 w-12 animate-spin rounded-full border-2 border-[var(--border-color)] border-t-[var(--accent-blue)]" />
+                <p className="mt-4 text-sm text-[var(--text-secondary)]">Completing sign in…</p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">If this does not finish, return to sign in and try again.</p>
             </div>
         </div>
     );

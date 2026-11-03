@@ -11,8 +11,8 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 export function WidgetLoading({ message = 'Loading data...' }: { message?: string }) {
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[120px] p-4 text-center">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-500 mb-3" />
-            <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest animate-pulse">
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--color-info)] mb-3" />
+            <p className="text-xs text-[var(--text-muted)] font-bold uppercase tracking-widest animate-pulse">
                 {message}
             </p>
         </div>
@@ -75,7 +75,8 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
 
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[140px] p-4 text-center">
-            <div className="flex items-center gap-2 text-red-400 mb-3">
+            {/* System state, not a loss: neutral/blue + icon (#197). */}
+            <div className="flex items-center gap-2 text-[var(--color-error)] mb-3">
                 {isNetworkError ? <WifiOff size={18} /> : <AlertCircle size={18} />}
                 <span className="text-sm font-medium">{resolvedTitle}</span>
             </div>
@@ -93,7 +94,7 @@ export function WidgetError({ error, onRetry, title = 'Failed to load data' }: W
             {onRetry && (
                 <button
                     onClick={onRetry}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 rounded-md transition-colors"
+                    className="flex items-center gap-1.5 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1.5 text-xs font-medium text-[var(--color-info)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                 >
                     <RefreshCw size={12} />
                     {isTimeout ? 'Retry' : 'Try Again'}
@@ -142,7 +143,7 @@ export function WidgetEmpty({
     return (
         <div className={`flex flex-col items-center justify-center h-full p-4 text-center ${size === 'compact' ? 'min-h-[72px]' : 'min-h-[120px]'}`}>
             {health?.label && (
-                <div className="mb-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200">
+                <div className="mb-2 rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-info)]">
                     {health.label}
                 </div>
             )}
@@ -156,7 +157,7 @@ export function WidgetEmpty({
             {action && (
                 <button
                     onClick={action.onClick}
-                    className="px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded transition-colors"
+                    className="rounded px-3 py-1.5 text-xs text-[var(--color-info)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                 >
                     {action.label}
                 </button>
@@ -170,7 +171,7 @@ export function WidgetEmpty({
  */
 export function CompactError({ message = 'Error', onRetry }: { message?: string; onRetry?: () => void }) {
     return (
-        <div className="flex items-center justify-center gap-2 p-3 text-amber-400">
+        <div className="flex items-center justify-center gap-2 p-3 text-[var(--color-warning)]">
             <AlertTriangle size={14} />
             <span className="text-xs">{message}</span>
             {onRetry && (
@@ -186,8 +187,11 @@ export function CompactError({ message = 'Error', onRetry }: { message?: string;
  * Network status badge
  */
 export function NetworkStatus({ isOnline }: { isOnline: boolean }) {
+    // Connection state is a system state: neutral/blue, never red/green (#197).
     return (
-        <div className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] ${isOnline ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+        <div className={`flex items-center gap-1 px-2 py-1 rounded border text-[10px] ${isOnline
+            ? 'bg-[var(--color-state-bg)] border-[var(--color-state-border)] text-[var(--color-text-secondary)]'
+            : 'bg-[var(--color-state-bg)] border-[var(--color-state-border)] text-[var(--color-info)]'
             }`}>
             {isOnline ? <Wifi size={10} /> : <WifiOff size={10} />}
             {isOnline ? 'Online' : 'Offline'}

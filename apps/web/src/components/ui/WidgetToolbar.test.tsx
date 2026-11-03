@@ -104,3 +104,38 @@ test.each([360, 180])('compact panel remains inside a %ipx viewport when trigger
   expect(viewportWidth - panelRight - panel.offsetWidth).toBeGreaterThanOrEqual(0);
   expect(panelRight).toBeGreaterThanOrEqual(0);
 });
+
+test('stays compacted once the expanded controls no longer fit, without re-measuring on re-render', async () => {
+  // Regression: `parameters`/`actions` are inline JSX rebuilt by the parent every
+  // render. Depending on them re-ran the measure effect and rebuilt the
+  // ResizeObserver on every render; combined with compact mode removing the
+  // controls it measures, the toolbar flipped until React aborted with
+  // "Maximum update depth exceeded".
+  let compacted = false;
+  jest.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(
+    () => (compacted ? 60 : 400),
+  );
+  width = 1000;
+  const { rerender } = render(<ToolbarHarness />);
+  const more = () => screen.queryByRole('button', { name: 'More controls for Long company price history' });
+  expect(more()).not.toBeInTheDocument();
+  expect(observers).toHaveLength(1);
+
+  // 360 sits between the compact mock measurement (60+60+24=144) and the
+  // expanded one (400+400+24=824): below 144 everything stays compact no matter
+  // what the threshold holds, so a smaller width would not test preservation.
+  width = 360;
+  await act(async () => { observers.forEach(notify => notify()); });
+  expect(more()).toBeInTheDocument();
+  compacted = true;
+
+  for (let i = 0; i < 3; i += 1) {
+    rerender(<ToolbarHarness />);
+  }
+  // Unchanged deps: no effect re-run, so no new observer per render.
+  expect(observers).toHaveLength(1);
+
+  // The compact DOM is narrower, but the threshold must survive it.
+  await act(async () => { observers.forEach(notify => notify()); });
+  expect(more()).toBeInTheDocument();
+});

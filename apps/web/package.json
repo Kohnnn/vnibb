@@ -17,6 +17,7 @@
     "test": "jest --passWithNoTests",
     "test:watch": "jest --watch",
     "test:e2e:smoke": "playwright test --project=chromium",
+    "test:e2e:fonts": "playwright test --project=chromium --config=playwright.fonts.config.ts e2e/fonts.spec.ts",
     "qa:live-smoke": "node ./scripts/qa-live-smoke.mjs"
   },
   "dependencies": {
@@ -63,7 +64,6 @@
     "@types/d3-color": "^3.1.3",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/d3-scale": "^4.0.9",
-    "@types/html2canvas": "^0.5.35",
     "@types/jest": "^30.0.0",
     "@types/node": "^20",
     "@types/react": "^19",

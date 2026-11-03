@@ -11,6 +11,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetDataPayload } from '@/lib/widgetRuntime';
 import { readAdmittedOwnershipPct } from '@/lib/ownershipAnalytics';
 import { formatNumber } from '@/lib/formatters';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface OwnershipChangesWidgetProps {
   id: string;
@@ -35,7 +36,7 @@ export function OwnershipChangesWidget({ id, symbol: requestedSymbol, onRemove, 
     ...holder, ownership_pct: readAdmittedOwnershipPct(holder),
   })), [data?.data]);
   const formatOwnershipPct = (value: number | null | undefined): string =>
-    value == null ? '—' : `${value.toFixed(2)}%`;
+    value == null ? EMPTY_VALUE : `${value.toFixed(2)}%`;
 
   const hasData = holders.length > 0;
 

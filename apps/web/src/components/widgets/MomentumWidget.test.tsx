@@ -124,4 +124,25 @@ describe('MomentumWidget degraded-payload safety', () => {
     expect(screen.getByText('Strong Downtrend')).toBeInTheDocument()
     expect(screen.queryByText('Direction not assessed')).not.toBeInTheDocument()
   })
+
+  it('renders a measured zero return unsigned while a missing one stays n/a', () => {
+    showMomentum({
+      data: {
+        symbol: 'FPT',
+        period: '3Y',
+        adjustment_mode: 'adjusted',
+        computed_at: '2026-10-07T00:00:00Z',
+        last_data_date: '2026-10-07',
+        returns_pct: { r1m: 0, r3m: null, r6m: 0, r12m: null },
+        momentum_score: 0,
+        peer_distribution: [],
+      },
+      meta: { unit_status: 'confirmed_vnd' },
+    })
+
+    // Brand §19: a measured zero is `0.00%`, never `+0.00%`.
+    expect(screen.getAllByText('0.00%')).toHaveLength(2)
+    expect(screen.queryByText('+0.00%')).not.toBeInTheDocument()
+  })
+
 })

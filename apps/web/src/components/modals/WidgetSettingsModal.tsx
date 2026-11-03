@@ -290,10 +290,10 @@ export function WidgetSettingsModal({
     if (!isOpen || !widget) return null;
 
     return (
-        <div data-tour="widget-settings-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
+        <div data-tour="widget-settings-modal" className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgb(2_6_23_/_0.72)] p-4 animate-in fade-in duration-200">
             <div
                 ref={dialogRef}
-                className="w-full max-w-2xl bg-[var(--bg-modal)] border border-[var(--border-default)] rounded-xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] flex flex-col overflow-hidden"
+                className="flex w-full max-w-2xl flex-col overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] shadow-lg"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="widget-settings-title"
@@ -302,12 +302,12 @@ export function WidgetSettingsModal({
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-default)] bg-[var(--bg-modal)]">
                     <div>
                         <h2 id="widget-settings-title" className="text-lg font-semibold text-[var(--text-primary)]">
-                            Settings: <span className="text-blue-400">{tradingViewMetadata?.name || widget.type}</span>
+                            Settings: <span className="text-[var(--color-accent-primary)]">{tradingViewMetadata?.name || widget.type}</span>
                         </h2>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                             {tradingViewMode ? (
                                 <>
-                                    <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-blue-200">
+                                    <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                                         TradingView Native
                                     </div>
                                     <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
@@ -325,7 +325,7 @@ export function WidgetSettingsModal({
                     <button
                         type="button"
                         onClick={onClose}
-                        className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+                        className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-md transition-colors"
                         aria-label="Close widget settings"
                     >
                         <X size={20} />
@@ -334,7 +334,7 @@ export function WidgetSettingsModal({
 
                 <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh]">
                     {isAdminManagedSystemDashboard ? (
-                        <div className={`rounded-lg border px-4 py-3 text-xs ${isWidgetSettingsReadOnly ? 'border-amber-500/20 bg-amber-500/8 text-amber-100/85' : 'border-blue-500/20 bg-blue-500/8 text-blue-100/85'}`}>
+                        <div className={`rounded-md border px-4 py-3 text-xs ${isWidgetSettingsReadOnly ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]' : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'}`}>
                             {isWidgetSettingsReadOnly
                                 ? 'This widget belongs to an admin-managed system dashboard. System dashboards are admin-only. Enable Admin Mode in System Dashboard Controls to edit the draft.'
                                 : 'You are editing the admin draft for a system dashboard. Save changes here, then use Save Draft or Publish Global in System Dashboard Controls to ship them.'}
@@ -355,7 +355,7 @@ export function WidgetSettingsModal({
                                 min="0"
                                 value={refreshInterval}
                                 onChange={(event) => setRefreshInterval(parseInt(event.target.value, 10) || 0)}
-                                className="bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500 w-32"
+                                className="w-32 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             />
                             <span className="text-xs text-[var(--text-muted)]">Set to 0 to disable</span>
                         </div>
@@ -376,7 +376,7 @@ export function WidgetSettingsModal({
                                             href={tradingViewMetadata.docsUrl}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-default)] px-3 py-2 text-xs font-medium text-blue-300 transition-colors hover:text-blue-200"
+                                            className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-3 py-2 text-xs font-medium text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                         >
                                             <ExternalLink size={13} />
                                             Official Docs
@@ -386,7 +386,7 @@ export function WidgetSettingsModal({
                             </div>
                             <div className="space-y-3">
                                 {tradingViewSections.map(({ section, fields }) => (
-                                    <details key={section} open className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/55">
+                                    <details key={section} open className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)]/55">
                                         <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-[var(--text-primary)]">
                                             {section}
                                         </summary>
@@ -396,7 +396,7 @@ export function WidgetSettingsModal({
 
                                                 if (field.type === 'boolean') {
                                                     return (
-                                                        <label key={field.key} htmlFor={fieldId} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] md:col-span-2">
+                                                        <label key={field.key} htmlFor={fieldId} className="flex items-center justify-between gap-4 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] md:col-span-2">
                                                             <div>
                                                                 <div>{field.label}</div>
                                                                 {field.description ? (
@@ -409,7 +409,7 @@ export function WidgetSettingsModal({
                                                                 checked={Boolean(draftConfig[field.key])}
                                                                 onChange={(event) => handleConfigValueChange(field.key, event.target.checked)}
                                                                 disabled={field.key === 'useLinkedSymbol' && !usesTradingViewWidgetSymbol(widget?.type)}
-                                                                className="h-4 w-4 rounded border-[var(--border-default)] bg-[var(--bg-primary)] text-blue-500 focus:ring-blue-500"
+                                                                className="h-4 w-4 rounded border-[var(--border-strong)] bg-[var(--bg-primary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
                                                             />
                                                         </label>
                                                     );
@@ -424,7 +424,7 @@ export function WidgetSettingsModal({
                                                                 value={String(draftConfig[field.key] ?? '')}
                                                                 onChange={(event) => handleConfigValueChange(field.key, event.target.value)}
                                                                 disabled={field.key === 'symbol' && linkedSymbolEnabled}
-                                                                className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                                className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                                             >
                                                                 <option value="">Default</option>
                                                                 {(field.options || []).map((option) => (
@@ -434,7 +434,7 @@ export function WidgetSettingsModal({
                                                             <div className="space-y-1">
                                                                 {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
                                                                 {field.key === 'symbol' && linkedSymbolEnabled ? (
-                                                                    <p className="text-xs text-amber-300">Linked Symbol is enabled, so this widget will follow the shared Global Markets symbol until Link Symbol is turned off.</p>
+                                                                    <p className="text-xs text-[var(--color-warning)]">Linked Symbol is enabled, so this widget will follow the shared Global Markets symbol until Link Symbol is turned off.</p>
                                                                 ) : null}
                                                             </div>
                                                         </label>
@@ -450,7 +450,7 @@ export function WidgetSettingsModal({
                                                                 value={toListText(draftConfig[field.key])}
                                                                 onChange={(event) => handleConfigValueChange(field.key, parseListText(event.target.value))}
                                                                 disabled={field.key === 'symbol' && linkedSymbolEnabled}
-                                                                className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-blue-500 resize-y"
+                                                                className="w-full resize-y rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                                                 rows={field.rows || 4}
                                                                 placeholder={field.placeholder || 'One item per line'}
                                                             />
@@ -464,7 +464,7 @@ export function WidgetSettingsModal({
                                                     return (
                                                         <label key={field.key} htmlFor={fieldId} className="space-y-2">
                                                             <span className="block text-sm font-medium text-[var(--text-secondary)]">{field.label}</span>
-                                                            <div className="flex items-center gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                                                            <div className="flex items-center gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
                                                                 <span
                                                                     className="h-8 w-8 rounded-md border border-[var(--border-default)]"
                                                                     style={{ background: colorValue || 'transparent' }}
@@ -494,13 +494,13 @@ export function WidgetSettingsModal({
                                                             value={String(draftConfig[field.key] ?? '')}
                                                             onChange={(event) => handleConfigValueChange(field.key, field.type === 'number' ? Number(event.target.value) : event.target.value)}
                                                             disabled={field.key === 'symbol' && linkedSymbolEnabled}
-                                                            className="w-full bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                            className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                                             placeholder={field.placeholder}
                                                         />
                                                         <div className="space-y-1">
                                                             {field.description ? <p className="text-xs text-[var(--text-muted)]">{field.description}</p> : null}
                                                             {field.key === 'symbol' && linkedSymbolEnabled ? (
-                                                                <p className="text-xs text-amber-300">Linked Symbol is enabled, so this widget will follow the shared Global Markets symbol until Link Symbol is turned off.</p>
+                                                                <p className="text-xs text-[var(--color-warning)]">Linked Symbol is enabled, so this widget will follow the shared Global Markets symbol until Link Symbol is turned off.</p>
                                                             ) : null}
                                                         </div>
                                                     </label>
@@ -514,7 +514,7 @@ export function WidgetSettingsModal({
                     ) : null}
 
                     <details className="border-t border-[var(--border-default)] pt-6">
-                        <summary className="cursor-pointer list-none rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/55 px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">
+                        <summary className="cursor-pointer list-none rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)]/55 px-4 py-3 text-sm font-medium text-[var(--text-secondary)]">
                             Advanced Configuration
                             <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">JSON for power users</span>
                         </summary>
@@ -528,7 +528,7 @@ export function WidgetSettingsModal({
                                 </label>
                                 <button
                                     onClick={handleReset}
-                                    className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                    className="flex items-center gap-1 text-xs text-[var(--color-accent-primary)] hover:text-[var(--text-primary)]"
                                     type="button"
                                 >
                                     <RotateCcw size={12} /> Reset
@@ -541,16 +541,16 @@ export function WidgetSettingsModal({
                                     setAdvancedConfig(event.target.value);
                                     setError(null);
                                 }}
-                                className={`w-full h-40 bg-[var(--bg-secondary)] border ${error ? 'border-red-500' : 'border-[var(--border-default)]'} rounded-lg p-3 text-sm font-mono text-[var(--text-secondary)] focus:outline-none focus:border-blue-500 resize-none`}
+                                className={`h-40 w-full resize-none rounded-md border bg-[var(--bg-secondary)] p-3 font-mono text-sm text-[var(--text-secondary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] ${error ? 'border-[var(--color-error)]' : 'border-[var(--border-strong)]'}`}
                             />
-                            {error ? <p className="text-xs text-red-400">{error}</p> : null}
+                            {error ? <p className="text-xs text-[var(--color-error)]">{error}</p> : null}
                             <p className="text-xs text-[var(--text-muted)]">
                                 {tradingViewMode
                                     ? 'This JSON is merged first, then the typed controls above win on the same keys. Use it for nested TradingView payloads and doc-only edge cases.'
                                     : 'Most users should leave this closed. Use it only for widget-specific properties that do not have controls yet.'}
                             </p>
                             {tradingViewMode && advancedConfigHints.length > 0 ? (
-                                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 px-3 py-2 text-xs text-[var(--text-secondary)]">
+                                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 px-3 py-2 text-xs text-[var(--text-secondary)]">
                                     {advancedConfigHints.map((hint) => (
                                         <div key={hint}>{hint}</div>
                                     ))}
@@ -562,21 +562,21 @@ export function WidgetSettingsModal({
                     {tradingViewMode ? (
                         <div className="border-t border-[var(--border-default)] pt-6 space-y-3">
                             <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
-                                <Lock size={14} className="text-blue-300" />
+                                <Lock size={14} className="text-[var(--text-secondary)]" />
                                 Runtime Payload Preview
                             </div>
                             <p className="text-xs text-[var(--text-muted)]">
                                 This shows the final TradingView payload after linked-symbol overrides, presets, and runtime transforms are applied.
                             </p>
                             {advancedConfigState.error ? (
-                                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                                <div className="rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--color-text-primary)]">
                                     Fix Advanced JSON to preview the final runtime payload: {advancedConfigState.error}
                                 </div>
                             ) : runtimePreviewConfig ? (
                                 <textarea
                                     readOnly
                                     value={JSON.stringify(runtimePreviewConfig, null, 2)}
-                                    className="h-44 w-full resize-none rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs font-mono text-[var(--text-secondary)] focus:outline-none"
+                                    className="h-44 w-full resize-none rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-3 font-mono text-xs text-[var(--text-secondary)] focus:outline-none"
                                 />
                             ) : null}
                             {runtimePreviewAttributes ? (
@@ -585,7 +585,7 @@ export function WidgetSettingsModal({
                                     <textarea
                                         readOnly
                                         value={JSON.stringify(runtimePreviewAttributes, null, 2)}
-                                        className="h-32 w-full resize-none rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 text-xs font-mono text-[var(--text-secondary)] focus:outline-none"
+                                        className="h-32 w-full resize-none rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-3 font-mono text-xs text-[var(--text-secondary)] focus:outline-none"
                                     />
                                 </div>
                             ) : null}
@@ -606,7 +606,7 @@ export function WidgetSettingsModal({
                         type="button"
                         onClick={handleSave}
                         disabled={isWidgetSettingsReadOnly}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900/30 disabled:text-white/60 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-900/20 flex items-center gap-2"
+                        className="flex items-center gap-2 rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <Save size={16} />
                         Save Changes

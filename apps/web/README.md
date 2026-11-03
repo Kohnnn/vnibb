@@ -1,22 +1,21 @@
-# VNIBB Web - Frontend Application
+# VniBB Web
 
 <div align="center">
 
-**Next.js Frontend for VNIBB Financial Platform**
+**Research cockpit for Vietnamese equities**
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Kohnnn/vnibb-web)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
 
-[Live Demo](https://vnibb.vercel.app) · [Report Bug](https://github.com/Kohnnn/vnibb-web/issues) · [Request Feature](https://github.com/Kohnnn/vnibb-web/issues)
+[Live app](https://web.vnibb.xyz) · [Report bug](https://github.com/Kohnnn/vnibb/issues) · [Request feature](https://github.com/Kohnnn/vnibb/issues)
 
 </div>
 
 ---
 
-## 📋 Overview
+## Overview
 
-Modern, responsive web application for Vietnamese stock market analysis. Built with Next.js 16 App Router and optimized for Vercel deployment.
+The VniBB web workspace: a modular research cockpit for Vietnamese equities, built with the Next.js App Router.
 
 ---
 
@@ -63,21 +62,20 @@ src/
 ## 🏃 Quick Start
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20.9+
 - pnpm (recommended)
 
 ### Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/Kohnnn/vnibb-web.git
-cd vnibb-web
+# Clone the monorepo
+git clone https://github.com/Kohnnn/vnibb.git
+cd vnibb/apps/web
 
 # Install dependencies
 pnpm install
 
-# Setup environment
-cp .env.example .env.local
+# Configure the required environment variables in .env.local (see below)
 
 # Start development server
 pnpm dev
@@ -89,11 +87,8 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🌐 Deployment
 
-### Deploy to Vercel (Recommended)
+The Vercel project is configured for this workspace in [`vercel.json`](./vercel.json). Deployments use the linked project; `vercel --prod` publishes to its configured production target.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Kohnnn/vnibb-web)
-
-Or via CLI:
 ```bash
 vercel --prod
 ```
@@ -127,7 +122,7 @@ Workspace docs:
 pnpm test
 
 # Type check
-pnpm type-check
+pnpm typecheck
 
 # Lint
 pnpm lint
@@ -144,16 +139,15 @@ MIT License - see [LICENSE](LICENSE)
 
 ---
 
-## 🔗 Related Repos
+## Related
 
-- [vnibb-api](https://github.com/Kohnnn/vnibb-api) - Backend API
-- [vnibb-widgets](https://github.com/Kohnnn/vnibb-widgets) - Widget library
-- [vnibb](https://github.com/Kohnnn/vnibb) - Main hub
+- [Repository](https://github.com/Kohnnn/vnibb) — monorepo root, backend service and docs
+- `/brand` route — live brand and channel reference in the app
 
 ---
 
 <div align="center">
 
-**Part of the [VNIBB](https://github.com/Kohnnn/vnibb) project**
+**Part of the [VniBB](https://github.com/Kohnnn/vnibb) project**
 
 </div>

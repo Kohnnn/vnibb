@@ -23,18 +23,18 @@ const GRANULARITY_OPTIONS: Array<{ value: SeasonalityGranularity; label: string;
 ]
 
 function formatPct(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a'
+  const body = Math.abs(value).toFixed(1)
+  const sign = Number(body) === 0 ? '' : value > 0 ? '+' : '-'
+  return `${sign}${body}%`
 }
 
 function getCellClass(value: number | null): string {
   if (value === null) return 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
-  if (value >= 8) return 'bg-emerald-500/60 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.22)]'
-  if (value >= 4) return 'bg-emerald-500/40 text-emerald-100'
-  if (value > 0) return 'bg-emerald-500/20 text-emerald-200'
-  if (value <= -8) return 'bg-rose-500/60 text-rose-100 shadow-[0_0_12px_rgba(244,63,94,0.22)]'
-  if (value <= -4) return 'bg-rose-500/40 text-rose-100'
-  return 'bg-rose-500/20 text-rose-200'
+  // A measured flat return is neither gain nor loss; the glow only marks extremes.
+  if (Number(value.toFixed(1)) === 0) return 'bg-[var(--bg-tertiary)] text-[var(--text-secondary)]'
+  if (value > 0) return 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
+  return 'bg-[var(--color-negative-bg)] text-[var(--color-negative)]'
 }
 
 function getRowLimit(granularity: SeasonalityGranularity): number {
@@ -186,7 +186,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
     <div className="flex h-full flex-col">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 py-1">
         <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
-          <CalendarDays size={12} className="text-cyan-400" />
+          <CalendarDays size={12} className="text-[var(--color-accent-primary)]" />
           <span>Seasonality Heatmap</span>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -198,7 +198,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                 onClick={() => setGranularity(option.value)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold transition-colors ${
                   granularity === option.value
-                    ? 'bg-cyan-500/20 text-cyan-200'
+                    ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]'
                 }`}
               >
@@ -214,7 +214,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                 onClick={() => setPeriod(option)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                   period === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]'
                 }`}
               >
@@ -238,15 +238,15 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
       <div className="mb-2 grid grid-cols-4 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Avg</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-emerald-300">{degraded ? '-' : stripWeekPrefix(payload?.best_period)}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-[var(--color-positive)]">{degraded ? '-' : stripWeekPrefix(payload?.best_period)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Worst Avg</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-rose-300">{degraded ? '-' : stripWeekPrefix(payload?.worst_period)}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-[var(--color-negative)]">{degraded ? '-' : stripWeekPrefix(payload?.worst_period)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Hit Rate</div>
-          <div className="mt-1 text-sm font-mono font-semibold text-cyan-300">{degraded ? '-' : formatPct(payload?.hit_rate_pct)}</div>
+          <div className="mt-1 text-sm font-mono font-semibold text-[var(--color-accent-primary)]">{degraded ? '-' : formatPct(payload?.hit_rate_pct)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Latest</div>
@@ -311,7 +311,7 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
                       className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-[var(--border-subtle)] font-mono ${getCellClass(value)}`}
                       title={buildCellTooltip(rowKey, column, granularity, startDateMap, value)}
                     >
-                      {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
+                      {compactCells ? '' : value === null ? 'n/a' : `${Number(value.toFixed(1)) === 0 ? '' : value > 0 ? '+' : '-'}${Math.abs(value).toFixed(1)}`}
                     </div>
                   )
                 })}
@@ -322,16 +322,16 @@ export function SeasonalityHeatmapWidget({ symbol, onDataChange }: SeasonalityHe
               className="grid gap-1 text-[10px]"
               style={{ gridTemplateColumns: `${compactCells ? '72px' : '64px'} repeat(${columns.length}, minmax(0, 1fr))` }}
             >
-              <div className="flex items-center font-semibold text-cyan-300">Avg</div>
+              <div className="flex items-center font-semibold text-[var(--color-accent-primary)]">Avg</div>
               {columns.map((column) => {
                 const value = payload?.averages?.[column] ?? null
                 return (
                   <div
                     key={`avg-${column}`}
-                    className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-cyan-500/20 font-mono ${getCellClass(value)}`}
+                    className={`flex ${compactCells ? 'h-4 min-w-4' : 'h-7'} items-center justify-center rounded border border-[var(--color-state-border)] font-mono ${getCellClass(value)}`}
                     title={`Average ${formatColumnTitle(column, granularity)}: ${formatPct(value)}`}
                   >
-                    {compactCells ? '' : value === null ? '-' : `${value >= 0 ? '+' : ''}${value.toFixed(1)}`}
+                    {compactCells ? '' : value === null ? 'n/a' : `${Number(value.toFixed(1)) === 0 ? '' : value > 0 ? '+' : '-'}${Math.abs(value).toFixed(1)}`}
                   </div>
                 )
               })}

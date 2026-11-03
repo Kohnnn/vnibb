@@ -726,6 +726,14 @@ registerWidget(
   ['manifold', 'ai', 'politics', 'recession', 'odds']
 );
 
+/**
+ * Every widget ID the registry can resolve. The library filters on this so a
+ * catalog-only or stale saved ID never becomes a dead tile.
+ */
+export function getRegisteredWidgetIds(): string[] {
+  return Array.from(widgetRegistry.keys());
+}
+
 // Run dev-only completeness check after every widget is registered.
 runDevCompletenessCheck();
 

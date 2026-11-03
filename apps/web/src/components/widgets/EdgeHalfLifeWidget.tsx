@@ -1,4 +1,5 @@
 'use client'
+import { EMPTY_VALUE } from '@/lib/units'
 
 import { useEffect, useMemo, useState } from 'react'
 import { TrendingDown } from 'lucide-react'
@@ -20,6 +21,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface EdgeHalfLifeWidgetProps {
   symbol: string
@@ -30,7 +32,7 @@ const WINDOW_OPTIONS = [21, 63, 126] as const
 type SharpeWindow = (typeof WINDOW_OPTIONS)[number]
 
 function fmt(value: number | null | undefined, digits = 2): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
   return value.toFixed(digits)
 }
 
@@ -100,7 +102,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <TrendingDown size={12} className="text-cyan-400" />
+          <TrendingDown size={12} className="text-[var(--color-accent-primary)]" />
           <span>Edge Half-Life</span>
           <span className="text-[10px] text-[var(--text-muted)]">rolling Sharpe, descriptive</span>
         </div>
@@ -111,7 +113,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
                 key={value}
                 type="button"
                 onClick={() => setWindow(value)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${window === value ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${window === value ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
               >
                 {value}D
               </button>
@@ -123,7 +125,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-violet-600/30 text-violet-200' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
               >
                 {option}
               </button>
@@ -151,19 +153,19 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
           <div className="mb-2 grid grid-cols-4 gap-2 px-1 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Current</div>
-              <div className={`font-mono ${Number(stats.current) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{fmt(stats.current)}</div>
+              <div className={`font-mono ${signedToneClass(stats.current)}`}>{fmt(stats.current)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Peak</div>
-              <div className="font-mono text-cyan-300">{fmt(stats.peak)}</div>
+              <div className="font-mono text-[var(--color-accent-primary)]">{fmt(stats.peak)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Decay</div>
-              <div className="font-mono text-amber-300">{stats.decayFromPeakPct === null ? '—' : `${fmt(stats.decayFromPeakPct, 1)}%`}</div>
+              <div className="font-mono text-[var(--color-warning)]">{stats.decayFromPeakPct === null ? EMPTY_VALUE : `${fmt(stats.decayFromPeakPct, 1)}%`}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Since Peak</div>
-              <div className="font-mono text-[var(--text-primary)]">{stats.daysSincePeak === null ? '—' : `${stats.daysSincePeak}d`}</div>
+              <div className="font-mono text-[var(--text-primary)]">{stats.daysSincePeak === null ? EMPTY_VALUE : `${stats.daysSincePeak}d`}</div>
             </div>
           </div>
 
@@ -188,7 +190,7 @@ export function EdgeHalfLifeWidget({ symbol, onDataChange }: EdgeHalfLifeWidgetP
                     }}
                     formatter={(value) => [Number(value).toFixed(2), 'Sharpe'] as [string, string]}
                   />
-                  <Line type="monotone" dataKey="sharpe" stroke="#38bdf8" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="sharpe" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </ChartMountGuard>

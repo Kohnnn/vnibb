@@ -194,7 +194,7 @@ const KIND_LABEL: Record<NotebookItemKind, string> = {
  * Render the whole notebook as source-preserving markdown. Each item keeps its
  * original source links; widget snapshots keep their provenance footer.
  */
-export function notebookToMarkdown(items: NotebookItem[], title = 'VNIBB Research Notebook'): string {
+export function notebookToMarkdown(items: NotebookItem[], title = 'VniBB Research Notebook'): string {
   const lines: string[] = []
   lines.push(`# ${title}`)
   lines.push('')

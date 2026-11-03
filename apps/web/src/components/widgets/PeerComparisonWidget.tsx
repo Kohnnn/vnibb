@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useComparison, usePeers } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
-import { exportPeers } from '@/lib/api';
+import { exportToCSV, exportToXLSX, type ExportProvenance } from '@/lib/exportWidget';
 import { EMPTY_VALUE, formatCompactValueForUnit, formatNumber, formatPercent, type UnitConfig } from '@/lib/units';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -297,9 +297,10 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
             empty: !hasData,
             apiGroup: '/comparison',
             endpoint: '/api/v1/comparison/stocks',
-            sourceLabel: 'VNIBB peer comparison',
+            sourceLabel: 'VniBB peer comparison',
             lastDataDate: null,
             fetchedAt: dataUpdatedAt || null,
+            period,
             derived: true,
             extra: { symbols: peers.length, period, metrics: normalizedMetrics.length, marketCaps: Object.fromEntries(Object.entries(comparisonData).map(([symbol, stock]) => [symbol, stock.marketCap])) },
         }))
@@ -325,17 +326,21 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
             const max = Math.max(...vals);
             const midpoint = vals.reduce((a, b) => a + b, 0) / vals.length;
             
+            // Position relative to the peer average is not a gain or a loss: a
+            // higher P/E is not "good". Above-average takes the brand accent,
+            // below-average takes slate, so the pair reads as two sides of one
+            // comparison rather than as profit and loss.
             if (value === midpoint) return 'transparent';
             if (value > midpoint) {
                 const range = max - midpoint;
-                if (range === 0) return 'rgba(34, 197, 94, 0.1)';
+                if (range === 0) return 'var(--color-state-bg)';
                 const intensity = Math.min((value - midpoint) / range, 1);
-                return `rgba(34, 197, 94, ${0.1 + intensity * 0.3})`;
+                return `color-mix(in srgb, var(--color-accent-primary) ${Math.round(10 + intensity * 30)}%, transparent)`;
             } else {
                 const range = midpoint - min;
-                if (range === 0) return 'rgba(239, 68, 68, 0.1)';
+                if (range === 0) return 'var(--color-state-bg)';
                 const intensity = Math.min((midpoint - value) / range, 1);
-                return `rgba(239, 68, 68, ${0.1 + intensity * 0.3})`;
+                return `color-mix(in srgb, var(--chart-slate) ${Math.round(10 + intensity * 30)}%, transparent)`;
             }
         };
     }, [allMetricValues]);
@@ -457,7 +462,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             {peers.map((sym, index) => (
                                 <th key={`${sym}-${index}`} className="text-right py-2 px-2 font-medium min-w-[104px]">
                                     <div className="flex flex-col">
-                                        <button type="button" onClick={() => handleSort(sym)} className="inline-flex items-center justify-end gap-1 font-bold text-[var(--text-primary)] hover:text-blue-300">
+                                        <button type="button" onClick={() => handleSort(sym)} className="inline-flex items-center justify-end gap-1 font-bold text-[var(--text-primary)] hover:text-[var(--color-accent-primary)]">
                                             <span>{sym}</span>
                                             {sortIndicator(sym)}
                                         </button>
@@ -467,9 +472,9 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                     </div>
                                 </th>
                             ))}
-                            <th className="text-right py-2 px-2 font-medium min-w-[84px] text-amber-400/80 border-l border-[var(--border-subtle)]">
+                            <th className="text-right py-2 px-2 font-medium min-w-[84px] text-[var(--text-secondary)] border-l border-[var(--border-subtle)]">
                                 <div className="flex flex-col">
-                                    <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-amber-300">
+                                    <button type="button" onClick={() => handleSort('sector')} className="inline-flex items-center justify-end gap-1 hover:text-[var(--text-primary)]">
                                     <span>Peer Avg</span>
                                         {sortIndicator('sector')}
                                     </button>
@@ -478,7 +483,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                         screener cohort, but this widget only renders the symbols
                                         the user loaded, so the column is labelled for what it
                                         actually averages (issue #106). */}
-                                    <span className="text-[8px] font-normal opacity-60" title="Arithmetic mean of the peers loaded in this widget, excluding values reported as N/A">
+                                    <span className="text-[8px] font-normal opacity-60" title="Arithmetic mean of the peers loaded in this widget, excluding values reported as n/a">
                                         Loaded peers only
                                     </span>
                                 </div>
@@ -497,7 +502,10 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                         const value = comparisonData[sym]?.metrics?.[metric.key];
                                         const isNumeric = typeof value === 'number';
 
-                                        // Highlighting logic (best/worst)
+                                        // Ordinal emphasis only: highest and lowest in the
+                                        // row, not "best" and "worst". A high P/E or a high
+                                        // market cap is not a gain, so this must not borrow
+                                        // the profit/loss tokens.
                                         let cellClass = "text-right px-2 font-mono";
                                         let cellStyle = {};
                                         
@@ -508,8 +516,8 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                                 const allValues = peers.map(s => comparisonData[s]?.metrics?.[metric.key]).filter(v => typeof v === 'number');
                                                 const min = Math.min(...allValues);
                                                 const max = Math.max(...allValues);
-                                                if (value === max && allValues.length > 1) cellClass += " text-green-400";
-                                                else if (value === min && allValues.length > 1) cellClass += " text-red-400";
+                                                if (value === max && allValues.length > 1) cellClass += " text-[var(--color-accent-primary)]";
+                                                else if (value === min && allValues.length > 1) cellClass += " text-[var(--text-muted)]";
                                                 else cellClass += " text-[var(--text-secondary)]";
                                             }
                                         }
@@ -526,8 +534,8 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                         );
 
                                     })}
-                                    <td className="text-right px-2 font-mono text-amber-400/60 border-l border-[var(--border-subtle)]">
-                                        {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format, unitConfig) : '-'}
+                                    <td className="text-right px-2 font-mono text-[var(--text-secondary)] border-l border-[var(--border-subtle)]">
+                                        {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format, unitConfig) : EMPTY_VALUE}
                                         {sectorAverageCounts?.[metric.key] ? (
                                             <span className="ml-1 text-[8px] text-[var(--text-muted)]">(n={sectorAverageCounts[metric.key]})</span>
                                         ) : null}
@@ -602,7 +610,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             <button
                                 key={`${p}-${index}`}
                                 onClick={() => setPeriod(p)}
-                                className={`px-2 py-0.5 rounded ${period === p ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
+                                className={`px-2 py-0.5 rounded ${period === p ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
                             >
                                 {p}
                             </button>
@@ -674,7 +682,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             >
                                 <span>{sym}</span>
                                 {peers.length > 2 && (
-                                    <button onClick={(event) => { event.stopPropagation(); removePeer(sym); }} className="opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity" aria-label={`Remove ${sym}`}>
+                                    <button onClick={(event) => { event.stopPropagation(); removePeer(sym); }} className="opacity-0 group-hover:opacity-100 hover:text-[var(--color-negative)] transition-opacity" aria-label={`Remove ${sym}`}>
                                         <X size={10} />
                                     </button>
                                 )}
@@ -718,12 +726,12 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                             value={saveSetName}
                                             onChange={(e) => setSaveSetName(e.target.value)}
                                             placeholder="Save current as..."
-                                            className="flex-1 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded px-2 py-1 text-[10px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-blue-500 outline-none"
+                                            className="flex-1 bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded px-2 py-1 text-[10px] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                                         />
                                         <button
                                             onClick={handleSaveSet}
                                             disabled={!saveSetName.trim()}
-                                            className="p-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded"
+                                            className="p-1 bg-[var(--color-state-bg)] hover:bg-[var(--color-state-bg)] disabled:opacity-50 rounded"
                                         >
                                             <Save size={12} />
                                         </button>
@@ -747,7 +755,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                                 </button>
                                                 <button
                                                     onClick={() => setSets((current) => current.filter((entry) => entry.id !== set.id))}
-                                                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 transition-opacity"
+                                                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-[var(--color-negative)] transition-opacity"
                                                 >
                                                     <Trash2 size={10} />
                                                 </button>
@@ -761,13 +769,13 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                     <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-subtle)]">
                         <button
                             onClick={() => setActiveTab('table')}
-                            className={`p-1.5 rounded transition-all ${activeTab === 'table' ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            className={`p-1.5 rounded transition-all ${activeTab === 'table' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                         >
                             <TableIcon size={14} />
                         </button>
                         <button
                             onClick={() => setActiveTab('radar')}
-                            className={`p-1.5 rounded transition-all ${activeTab === 'radar' ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                            className={`p-1.5 rounded transition-all ${activeTab === 'radar' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                         >
                             <LayoutGrid size={14} />
                         </button>
@@ -775,7 +783,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                     <button
                         onClick={() => setHeatmapEnabled(!heatmapEnabled)}
-                        className={`p-1.5 rounded transition-all border border-[var(--border-subtle)] ${heatmapEnabled ? 'bg-blue-600/20 text-blue-400 border-blue-500/50' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)]'}`}
+                        className={`p-1.5 rounded transition-all border border-[var(--border-subtle)] ${heatmapEnabled ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border-[var(--color-state-border)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)]'}`}
                         title="Toggle Heatmap"
                     >
                         <Grid3X3 size={14} />
@@ -785,7 +793,58 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                         <RefreshCw size={14} />
                     </button>
-                    <ExportButton onExport={async (f) => exportPeers(peers, { format: f })} variant="ghost" className="h-8 w-8 p-0" />
+                    <ExportButton
+                        onExport={async (format) => {
+                            const rows = peers.map((sym) => {
+                                const stock = comparisonData[sym];
+                                const cap = stock?.marketCap;
+                                const certified = cap?.inputs.find((input) => input.provenance?.status === 'available')?.provenance;
+                                // Flatten to one typed column per metric; anything that is
+                                // not a finite number stays null rather than becoming text
+                                // that a spreadsheet would sort as a string.
+                                const metrics: Record<string, number | null> = {};
+                                Object.entries(stock?.metrics ?? {}).forEach(([key, value]) => {
+                                    metrics[key] = typeof value === 'number' && Number.isFinite(value) ? value : null;
+                                });
+                                return {
+                                    symbol: sym,
+                                    period,
+                                    name: stock?.name ?? null,
+                                    ...metrics,
+                                    market_cap_status: cap?.status ?? null,
+                                    market_cap_reason: cap?.reason ?? null,
+                                    market_cap_source: certified?.source ?? null,
+                                    market_cap_as_of: certified?.as_of ?? null,
+                                };
+                            });
+                            const capConflicts = peers.filter((sym) => comparisonData[sym]?.marketCap.status === 'conflict');
+                            // `dataUpdatedAt` is React Query's fetch time, not the
+                            // source's observation date: it may only fill fetchedAt.
+                            const provenance: ExportProvenance = {
+                                widgetType: 'peer_comparison',
+                                widgetTitle: 'Peer Comparison',
+                                symbol,
+                                period,
+                                sourceLabel: 'VniBB comparison API',
+                                apiGroup: '/comparison',
+                                endpoint: `/api/v1/comparison?symbols=${encodeURIComponent(peers.join(','))}&period=${encodeURIComponent(period)}`,
+                                fetchedAt: dataUpdatedAt ? new Date(dataUpdatedAt) : null,
+                                coverage: peers.every((sym) => comparisonData[sym]) ? 'complete' : 'partial',
+                                warnings: [
+                                    'Metrics are provider-reported; market-cap conflicts are flagged in the widget, not resolved here.',
+                                    ...capConflicts.map((sym) => `${sym}: market cap sources conflict (no value exported).`),
+                                ],
+                            };
+                            const filename = `peers_${peers.join('-')}_${period}`;
+                            if (format === 'excel') {
+                                exportToXLSX(rows, filename, provenance);
+                            } else {
+                                exportToCSV(rows, filename, provenance);
+                            }
+                        }}
+                        variant="ghost"
+                        className="h-8 w-8 p-0"
+                    />
                 </div>
             </div>
 
@@ -800,7 +859,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             onChange={(e) => setNewPeer(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && addPeer(newPeer)}
                             placeholder="Enter ticker..."
-                            className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded pl-8 pr-2 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-blue-500 outline-none"
+                            className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded pl-8 pr-2 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:ring-1 focus:ring-[var(--focus-ring-color)] outline-none"
                             autoFocus
                         />
                     </div>
@@ -865,11 +924,12 @@ function formatCellValue(value: any, format: string, unitConfig: UnitConfig) {
     }
 }
 
+// Brand §20 categorical extension: peers carry no direction, so no green/red.
 const CHART_COLORS = [
-    '#3B82F6', // Blue
-    '#10B981', // Green
-    '#F59E0B', // Amber
-    '#EF4444', // Red
-    '#06B6D4', // Cyan
-    '#EC4899', // Pink
+    'var(--chart-blue)',
+    'var(--chart-slate)',
+    'var(--chart-cat-4)',
+    'var(--chart-cat-5)',
+    'var(--chart-cat-6)',
+    'var(--chart-cat-3)',
 ];

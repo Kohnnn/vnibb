@@ -3,7 +3,8 @@ import { PortfolioTrackerWidget } from './PortfolioTrackerWidget';
 import { exportToCSV, exportToJSON } from '@/lib/exportWidget';
 
 jest.mock('@tanstack/react-query', () => ({ useQueries: () => [] }));
-jest.mock('@/lib/hooks/usePortfolioPrices', () => ({ usePortfolioPrices: () => ({ prices: new Map(), isLoading: false, refetch: jest.fn() }) }));
+const mockPortfolioPrices = jest.fn(() => ({ prices: new Map(), isLoading: false, refetch: jest.fn() }));
+jest.mock('@/lib/hooks/usePortfolioPrices', () => ({ usePortfolioPrices: () => mockPortfolioPrices() }));
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }));
 jest.mock('@/lib/exportWidget', () => ({ exportToCSV: jest.fn(), exportToJSON: jest.fn() }));
 
@@ -21,6 +22,8 @@ describe('Holdings Tracker saved positions', () => {
     beforeEach(() => {
         window.localStorage.clear();
         jest.clearAllMocks();
+        // Default: no quotes. Each test that needs prices sets its own map.
+        mockPortfolioPrices.mockReturnValue({ prices: new Map(), isLoading: false, isError: false, refetch: jest.fn() } as never);
     });
     afterEach(() => jest.restoreAllMocks());
 
@@ -57,6 +60,89 @@ describe('Holdings Tracker saved positions', () => {
         fireEvent.click(screen.getByTitle('Export to CSV'));
         expect((jest.mocked(exportToCSV).mock.calls[0][0] as { section: string; quantity?: number }[]).filter(row => row.section === 'position').map(row => row.quantity)).toEqual([2]);
     });
+    // Brand §19: a measured flat session is `0.0%` with no direction glyph and
+    // no gain/loss hue. It previously rendered as an up arrow in gain green,
+    // which reads as a positive move that never happened.
+    it('renders a flat session with no arrow and no direction colour', () => {
+        mockPortfolioPrices.mockReturnValue({
+            prices: new Map([['FPT', {
+                symbol: 'FPT', currentPrice: 1000, change: 0, changePct: 0,
+                updatedAt: '2026-11-03T00:00:00Z', fetchedAt: 1793664000000, isLoading: false, error: null,
+            }]]),
+            isLoading: false,
+            isError: false,
+            refetch: jest.fn(),
+        } as never);
+        render(<PortfolioTrackerWidget />);
+        addPosition('2');
+
+        const row = screen.getByRole('row', { name: /FPT/ });
+        // Day change and P/L both print `0.0%` here, so key the assertion off the
+        // absent glyph and the muted ink rather than a single text node.
+        expect(within(row).queryByText(/↑|↓/)).not.toBeInTheDocument();
+        expect(within(row).getAllByText('0.0%').length).toBeGreaterThan(0);
+        // Direction ink lives on the cell wrappers, so check the whole row.
+        expect(row.querySelector('.text-\\[var\\(--color-positive\\)\\]')).toBeNull();
+        expect(row.querySelector('.text-\\[var\\(--color-negative\\)\\]')).toBeNull();
+    });
+
+    // 0.04% is a real move, but it renders as `0.0%`: showing an up arrow over
+    // unsigned digits would claim precision the display does not have.
+    it('drops the arrow when a real move rounds to 0.0%', () => {
+        mockPortfolioPrices.mockReturnValue({
+            prices: new Map([['FPT', {
+                symbol: 'FPT', currentPrice: 1000, change: 2, changePct: 0.04,
+                updatedAt: '2026-11-03T00:00:00Z', fetchedAt: 1793664000000, isLoading: false, error: null,
+            }]]),
+            isLoading: false,
+            isError: false,
+            refetch: jest.fn(),
+        } as never);
+        render(<PortfolioTrackerWidget />);
+        addPosition('2');
+
+        const row = screen.getByRole('row', { name: /FPT/ });
+        expect(within(row).getAllByText('0.0%').length).toBeGreaterThan(0);
+        expect(within(row).queryByText(/↑|↓/)).not.toBeInTheDocument();
+    });
+
+    // Regression: the old path divided an already-percent P/L by 100 and fed it
+    // to an `|v| <= 1 means ratio` heuristic, so a 150% gain printed +1.5%.
+    it('renders a P/L above 100% at its true magnitude', () => {
+        mockPortfolioPrices.mockReturnValue({
+            prices: new Map([['FPT', {
+                symbol: 'FPT', currentPrice: 2500, change: 0, changePct: 0,
+                updatedAt: '2026-11-03T00:00:00Z', fetchedAt: 1793664000000, isLoading: false, error: null,
+            }]]),
+            isLoading: false,
+            isError: false,
+            refetch: jest.fn(),
+        } as never);
+        render(<PortfolioTrackerWidget />);
+        addPosition('2');
+
+        const row = screen.getByRole('row', { name: /FPT/ });
+        expect(within(row).getByText('+150.0%')).toBeInTheDocument();
+        expect(within(row).queryByText('+1.5%')).not.toBeInTheDocument();
+    });
+
+    it('omits nonfinite day changes instead of showing NaN', () => {
+        mockPortfolioPrices.mockReturnValue({
+            prices: new Map([['FPT', {
+                symbol: 'FPT', currentPrice: 1000, change: null, changePct: Number.NaN,
+                updatedAt: '2026-11-03T00:00:00Z', fetchedAt: 1793664000000, isLoading: false, error: null,
+            }]]),
+            isLoading: false,
+            isError: false,
+            refetch: jest.fn(),
+        } as never);
+        render(<PortfolioTrackerWidget />);
+        addPosition('2');
+        expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/↑|↓/)).not.toBeInTheDocument();
+    });
+
+
     it('keeps an unsaved edit open so it can be retried after storage recovers', () => {
         render(<PortfolioTrackerWidget />);
         addPosition('2');

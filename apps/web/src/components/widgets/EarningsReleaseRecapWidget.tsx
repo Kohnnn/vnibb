@@ -10,9 +10,10 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useUnit } from '@/contexts/UnitContext';
 import { useCashFlow, useCompanyEvents, useCompanyNews, useEarningsQuality, useIncomeStatement } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatDate, formatRelativeTime } from '@/lib/format';
+import { formatDate, formatRelativeTime } from '@/lib/formatDate';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface EarningsReleaseRecapWidgetProps {
     id: string;
@@ -142,7 +143,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                 change: latestIncome.revenue && latestIncome.gross_profit && comparableIncome?.revenue && comparableIncome?.gross_profit
                     ? ((latestIncome.gross_profit / latestIncome.revenue) - (comparableIncome.gross_profit / comparableIncome.revenue)) * 100
                     : null,
-                formatter: (value: number | null) => formatPercent(value, { decimals: 1, input: 'percent', clamp: 'margin' }),
+                formatter: (value: number | null) => formatPercent(value, { decimals: 1, input: 'percent', unit: 'pp', clamp: 'margin' }),
             },
         ];
     }, [comparableIncome, latestIncome, unitConfig]);
@@ -159,22 +160,22 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             {
                 label: 'Revenue YoY',
                 value: yoyChange(latestIncome.revenue, comparableIncome?.revenue),
-                tone: 'text-cyan-300',
+                tone: 'text-[var(--color-accent-primary)]',
             },
             {
                 label: 'Net Income YoY',
                 value: yoyChange(latestIncome.net_income, comparableIncome?.net_income),
-                tone: 'text-emerald-300',
+                tone: 'text-[var(--color-positive)]',
             },
             {
                 label: 'EPS YoY',
                 value: yoyChange(latestIncome.eps, comparableIncome?.eps),
-                tone: 'text-blue-300',
+                tone: 'text-[var(--color-accent-primary)]',
             },
             {
                 label: 'Gross Margin Delta',
                 value: marginDelta,
-                tone: 'text-amber-300',
+                tone: 'text-[var(--color-warning)]',
             },
         ];
     }, [comparableIncome, latestIncome]);
@@ -264,7 +265,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                             <div key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
                                 <div className="text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">{item.label}</div>
                                 <div className={`mt-1 text-sm font-semibold ${item.tone}`}>
-                                    {formatPercent(item.value, { decimals: 1, input: 'percent', clamp: item.label.includes('Delta') ? 'margin' : 'yoy_change' })}
+                                    {formatPercent(item.value, { decimals: 1, input: 'percent', signed: true, unit: item.label.includes('Delta') ? 'pp' : '%', clamp: item.label.includes('Delta') ? 'margin' : 'yoy_change' })}
                                 </div>
                             </div>
                         ))}
@@ -304,8 +305,8 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                                     <td className="py-2 text-[var(--text-secondary)]">{row.label}</td>
                                                     <td className="py-2 text-right text-[var(--text-primary)]">{row.formatter(row.current)}</td>
                                                     <td className="py-2 text-right text-[var(--text-secondary)]">{row.formatter(row.previous)}</td>
-                                                    <td className={`py-2 text-right font-medium ${row.change !== null && row.change >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
-                                                        {row.change === null ? '-' : formatPercent(row.change, { decimals: 1, input: 'percent', clamp: row.label.includes('Margin') ? 'margin' : 'yoy_change' })}
+                                                    <td className={`py-2 text-right font-medium ${signedToneClass(row.change)}`}>
+                                                        {formatPercent(row.change, { decimals: 1, input: 'percent', signed: true, unit: row.label.includes('Margin') ? 'pp' : '%', clamp: row.label.includes('Margin') ? 'margin' : 'yoy_change' })}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -367,7 +368,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                             href={news.url || '#'}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="block rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 transition-colors hover:border-blue-500/30"
+                                            className="block rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 transition-colors hover:border-[var(--color-state-border)]"
                                         >
                                             <div className="font-medium text-[var(--text-primary)]">{news.title}</div>
                                             <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">

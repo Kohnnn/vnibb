@@ -210,7 +210,7 @@ export const DropdownMenuContent = ({ children, className = '', align = 'center'
                 else if ((event.target as HTMLElement).closest('[role="menu"]') === event.currentTarget) navigateMenu(event, event.currentTarget);
             }}
             className={cn(
-                'z-[140] min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-color)] bg-[var(--bg-elevated)] p-1 text-[var(--text-primary)] shadow-xl ring-1 ring-[rgba(0,0,0,0.15)] animate-in fade-in-80 zoom-in-95',
+                'z-[140] min-w-[8rem] overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-1 text-[var(--text-primary)] shadow-xl animate-in fade-in-80 zoom-in-95',
                 className
             )}>
             {children}
@@ -233,7 +233,7 @@ export const DropdownMenuItem = ({ children, onClick, onKeyDown, className, disa
         <div {...props} role="menuitem" tabIndex={-1} aria-disabled={disabled || undefined}
             data-disabled={disabled ? '' : undefined}
             className={cn(
-                'relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+                'relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:bg-[var(--bg-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
                 className
             )}
             onKeyDown={event => {
@@ -261,7 +261,7 @@ export const DropdownMenuCheckboxItem = ({ children, checked, onCheckedChange, c
         <div {...props} role="menuitemcheckbox" tabIndex={-1} aria-checked={!!checked} aria-disabled={disabled || undefined}
             data-disabled={disabled ? '' : undefined}
             className={cn(
-                'relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+                'relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:bg-[var(--bg-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
                 className
             )}
             onKeyDown={event => {
@@ -285,7 +285,7 @@ export const DropdownMenuLabel = ({ children, className }: React.HTMLAttributes<
 );
 
 export const DropdownMenuSeparator = ({ className }: React.HTMLAttributes<HTMLDivElement>) => (
-    <div role="separator" className={cn('-mx-1 my-1 h-px bg-[var(--border-color)]', className)} />
+    <div role="separator" className={cn('-mx-1 my-1 h-px bg-[var(--border-subtle)]', className)} />
 );
 
 export const DropdownMenuSub = ({ children }: { children: React.ReactNode }) => {
@@ -309,8 +309,8 @@ export const DropdownMenuSubTrigger = ({ children, className, onClick, onKeyDown
             aria-expanded={!!sub?.isOpen} aria-controls={sub?.contentId} aria-disabled={disabled || undefined}
             data-disabled={disabled ? '' : undefined}
             className={cn(
-                'flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
-                sub?.isOpen && 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]', className
+                'flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:bg-[var(--bg-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+                sub?.isOpen && 'bg-[var(--bg-hover)] text-[var(--text-primary)]', className
             )}
             onClick={event => {
                 event.stopPropagation();
@@ -350,7 +350,7 @@ export const DropdownMenuSubContent = ({ children, className, onKeyDown, ...prop
     if (!sub?.isOpen) return null;
     return (
         <div {...props} id={sub.contentId} ref={ref} role="menu"
-            className={cn('min-w-[8rem] rounded-md border border-[var(--border-color)] bg-[var(--bg-elevated)] p-1 pl-3 text-[var(--text-primary)] shadow-inner', className)}
+            className={cn('min-w-[8rem] rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-1 pl-3 text-[var(--text-primary)] shadow-lg', className)}
             onKeyDown={event => {
                 onKeyDown?.(event);
                 if (event.defaultPrevented) return;

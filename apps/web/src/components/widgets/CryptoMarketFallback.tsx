@@ -110,7 +110,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
           <div className="flex items-center gap-2">
-            <Coins size={12} className="text-amber-300" />
+            <Coins size={12} className="text-[var(--color-warning)]" />
             <span>Top {coins.length} by market cap · CoinGecko</span>
           </div>
           <WidgetMeta updatedAt={sourceUpdatedAt} fetchedAt={fetchedAt} note="TradingView fallback" align="right" />
@@ -161,7 +161,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
                       </td>
                       <td
                         className={`whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums ${
-                          isUp ? 'text-emerald-300' : 'text-rose-300'
+                          isUp ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'
                         }`}
                         style={{ minWidth: 88 }}
                       >

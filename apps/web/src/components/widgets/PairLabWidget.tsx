@@ -22,6 +22,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
+import { EMPTY_VALUE } from '@/lib/units'
 
 interface PairLabWidgetProps {
   symbol: string
@@ -29,7 +30,7 @@ interface PairLabWidgetProps {
 }
 
 function fmt(value: number | null | undefined, digits = 2): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
   return value.toFixed(digits)
 }
 
@@ -142,7 +143,7 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between gap-2 px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <GitCompareArrows size={12} className="text-cyan-400" />
+          <GitCompareArrows size={12} className="text-[var(--color-accent-primary)]" />
           <span>Pair Lab</span>
           <span className="text-[10px] text-[var(--text-muted)]">{upperSymbol} vs {effectivePair || '?'}</span>
         </div>
@@ -152,7 +153,7 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
               key={option}
               type="button"
               onClick={() => setPeriod(option)}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
               {option}
             </button>
@@ -172,12 +173,12 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
           value={pairInput}
           onChange={(event) => setPairInput(event.target.value)}
           placeholder="Compare with… (e.g. VNM)"
-          className="h-7 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-400/50"
+          className="h-7 flex-1 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
         />
         <button
           type="submit"
           disabled={!pairInput.trim()}
-          className="h-7 rounded-md border border-blue-400/30 bg-blue-400/10 px-2 text-[10px] font-black uppercase text-blue-100 hover:bg-blue-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-7 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 text-[10px] font-black uppercase text-[var(--color-accent-primary)] hover:bg-[var(--color-state-bg)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           Compare
         </button>
@@ -190,14 +191,14 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
             <button
               type="button"
               onClick={() => setHedgeMode('one_to_one')}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${hedgeMode === 'one_to_one' ? 'bg-violet-600/30 text-violet-200' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${hedgeMode === 'one_to_one' ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
               1:1 (client)
             </button>
             <button
               type="button"
               onClick={() => setHedgeMode('ols')}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${hedgeMode === 'ols' ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${hedgeMode === 'ols' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
               OLS (backend)
             </button>
@@ -242,15 +243,15 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
           <div className="mb-2 grid grid-cols-4 gap-2 px-1 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Corr 63D</div>
-              <div className="font-mono text-cyan-300">{fmt(stats?.currentCorrelation)}</div>
+              <div className="font-mono text-[var(--color-accent-primary)]">{fmt(stats?.currentCorrelation)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Spread Z</div>
-              <div className={`font-mono ${Math.abs(stats?.currentSpreadZ ?? 0) >= 2 ? 'text-amber-300' : 'text-[var(--text-primary)]'}`}>{fmt(stats?.currentSpreadZ)}</div>
+              <div className={`font-mono ${Math.abs(stats?.currentSpreadZ ?? 0) >= 2 ? 'text-[var(--color-warning)]' : 'text-[var(--text-primary)]'}`}>{fmt(stats?.currentSpreadZ)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Half-Life</div>
-              <div className="font-mono text-violet-300">{stats?.halfLifeDays === null ? '—' : `${fmt(stats?.halfLifeDays, 1)}d`}</div>
+              <div className="font-mono text-[var(--color-accent-primary)]">{stats?.halfLifeDays === null ? EMPTY_VALUE : `${fmt(stats?.halfLifeDays, 1)}d`}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Aligned</div>
@@ -344,7 +345,7 @@ function PairBackendPanel({
 }) {
   if (notDeployed) {
     return (
-      <div className="mx-1 mb-2 rounded border border-amber-500/25 bg-amber-500/5 px-2 py-1 text-[9px] leading-3 text-amber-200/90">
+      <div className="mx-1 mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[9px] leading-3 text-[var(--text-secondary)]/90">
         OLS hedge-ratio diagnostics aren&apos;t available yet — the backend endpoint hasn&apos;t been deployed.
         Showing the client 1:1 spread below. Switch back to 1:1 to hide this notice.
       </div>
@@ -356,27 +357,27 @@ function PairBackendPanel({
         {error ? (
           <>
             <span>OLS diagnostics failed: {error instanceof Error ? error.message : error}</span>
-            <button type="button" onClick={onRetry} className="ml-2 text-blue-300 underline hover:text-blue-200">Retry OLS</button>
+            <button type="button" onClick={onRetry} className="ml-2 text-[var(--color-accent-primary)] underline hover:text-[var(--color-accent-primary)]">Retry OLS</button>
           </>
         ) : 'Computing OLS hedge ratio…'}
       </div>
     )
   }
   return (
-    <div className="mx-1 mb-2 rounded-md border border-blue-500/25 bg-blue-500/5 p-2">
+    <div className="mx-1 mb-2 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2">
       <div className="mb-1 grid grid-cols-4 gap-2 text-[10px]">
         <div>
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Hedge β</div>
-          <div className="font-mono text-blue-200">{fmt(payload.hedge_ratio_ols)}</div>
+          <div className="font-mono text-[var(--color-accent-primary)]">{fmt(payload.hedge_ratio_ols)}</div>
         </div>
         <div>
           <div className="text-[var(--text-muted)] uppercase tracking-widest">ADF t</div>
-          <div className="font-mono text-violet-200">{fmt(payload.adf_tstat)}</div>
+          <div className="font-mono text-[var(--color-accent-primary)]">{fmt(payload.adf_tstat)}</div>
         </div>
         <div>
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Half-life</div>
-          <div className="font-mono text-cyan-200">
-            {payload.half_life_days === null ? '—' : `${fmt(payload.half_life_days, 1)}d`}
+          <div className="font-mono text-[var(--color-accent-primary)]">
+            {payload.half_life_days === null ? EMPTY_VALUE : `${fmt(payload.half_life_days, 1)}d`}
           </div>
         </div>
         <div>

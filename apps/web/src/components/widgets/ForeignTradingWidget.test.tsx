@@ -49,7 +49,7 @@ describe('ForeignTradingWidget volumes', () => {
     for (const [date, volumes] of [
       ['2026-05-28', ['0', '0']],
       ['2026-05-27', ['1.0K', '0']],
-      ['2026-05-26', ['-', '-']],
+      ['2026-05-26', ['n/a', 'n/a']],
     ] as const) {
       const row = screen.getByText(date).parentElement!.parentElement!;
       const volumeCells = Array.from(row.children).slice(1, 3);

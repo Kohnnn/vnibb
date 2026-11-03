@@ -11,6 +11,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import Link from 'next/link';
+import { VNIBB_BRAND_DESCRIPTOR, VNIBB_BRAND_NAME, VniBBLogo } from '@/components/brand/VniBBLogo';
 
 function LoginForm() {
     const router = useRouter();
@@ -135,24 +136,27 @@ function LoginForm() {
     };
 
     return (
-        <div className="max-w-md w-full space-y-8 p-8 bg-zinc-900 rounded-lg border border-zinc-800">
+        <div className="max-w-md w-full space-y-8 p-8 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border-default)]">
             <div>
-                <h2 className="text-3xl font-bold text-center text-white">
-                    Sign in to VNIBB
+                <div className="flex justify-center">
+                    <VniBBLogo width={144} />
+                </div>
+                <h2 className="mt-4 text-3xl font-bold text-center text-[var(--color-text-primary)]">
+                    Sign in to {VNIBB_BRAND_NAME}
                 </h2>
-                <p className="mt-2 text-center text-sm text-zinc-400">
-                    Vietnam stock market analytics dashboard
+                <p className="mt-2 text-center text-sm text-[var(--color-text-secondary)]">
+                    {VNIBB_BRAND_DESCRIPTOR}
                 </p>
             </div>
 
             {error && (
-                <div className="bg-red-500/10 border border-red-500/50 text-red-500 px-4 py-3 rounded">
+                <div role="alert" className="bg-[var(--color-state-bg)] border border-[var(--color-state-border)] text-[var(--color-text-primary)] px-4 py-3 rounded">
                     {error}
                 </div>
             )}
 
             {magicLinkSent && (
-                <div className="bg-green-500/10 border border-green-500/50 text-green-500 px-4 py-3 rounded">
+                <div className="bg-[var(--color-state-bg)] border border-[var(--color-state-border)] text-[var(--color-text-primary)] px-4 py-3 rounded">
                     Check your email for the magic link!
                 </div>
             )}
@@ -162,7 +166,7 @@ function LoginForm() {
                 <button
                     onClick={handleGoogleLogin}
                     disabled={loading}
-                    className="w-full flex items-center justify-center gap-3 py-3 px-4 border border-zinc-600 rounded-md shadow-sm text-sm font-medium text-white bg-zinc-800 hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-center gap-3 py-3 px-4 border border-[var(--color-border-strong)] rounded-md shadow-sm text-sm font-medium text-[var(--color-text-primary)] bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-elevated)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-color)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                     <svg className="w-5 h-5" viewBox="0 0 24 24">
                         <path
@@ -191,7 +195,7 @@ function LoginForm() {
                 <div>
                     <button
                         onClick={handleGuestLogin}
-                        className="w-full flex items-center justify-center gap-2 py-2 px-4 text-sm font-medium text-zinc-400 hover:text-white transition-colors"
+                        className="w-full flex items-center justify-center gap-2 py-2 px-4 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                     >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -204,16 +208,16 @@ function LoginForm() {
 
             <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-zinc-700"></div>
+                    <div className="w-full border-t border-[var(--color-border-default)]"></div>
                 </div>
                 <div className="relative flex justify-center text-sm">
-                    <span className="px-2 bg-zinc-900 text-zinc-500">or sign in with email</span>
+                    <span className="px-2 bg-[var(--color-bg-secondary)] text-[var(--color-text-muted)]">or sign in with email</span>
                 </div>
             </div>
 
             <form onSubmit={useMagicLink ? handleMagicLink : handleEmailLogin} className="space-y-4">
                 <div>
-                    <label htmlFor="email" className="block text-sm font-medium text-zinc-300">
+                    <label htmlFor="email" className="block text-sm font-medium text-[var(--color-text-secondary)]">
                         Email address
                     </label>
                     <input
@@ -224,14 +228,14 @@ function LoginForm() {
                         required
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        className="mt-1 block w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="mt-1 block w-full px-3 py-2 bg-[var(--color-bg-tertiary)] border border-[var(--color-border-strong)] rounded-md text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-color)] focus:border-transparent"
                         placeholder="you@example.com"
                     />
                 </div>
 
                 {!useMagicLink && (
                     <div>
-                        <label htmlFor="password" className="block text-sm font-medium text-zinc-300">
+                        <label htmlFor="password" className="block text-sm font-medium text-[var(--color-text-secondary)]">
                             Password
                         </label>
                         <input
@@ -242,7 +246,7 @@ function LoginForm() {
                             required
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="mt-1 block w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-md text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="mt-1 block w-full px-3 py-2 bg-[var(--color-bg-tertiary)] border border-[var(--color-border-strong)] rounded-md text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-color)] focus:border-transparent"
                             placeholder="••••••••"
                         />
                     </div>
@@ -252,7 +256,7 @@ function LoginForm() {
                     <button
                         type="button"
                         onClick={() => setUseMagicLink(!useMagicLink)}
-                        className="text-sm text-blue-400 hover:text-blue-300"
+                        className="text-sm text-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)]"
                     >
                         {useMagicLink ? 'Use password instead' : 'Use magic link'}
                     </button>
@@ -261,25 +265,25 @@ function LoginForm() {
                 <button
                     type="submit"
                     disabled={loading}
-                    className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-[var(--color-on-accent)] bg-[var(--color-accent-fill)] hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-color)] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {loading ? 'Loading...' : useMagicLink ? 'Send magic link' : 'Sign in'}
                 </button>
             </form>
 
-            <p className="text-center text-sm text-zinc-400">
+            <p className="text-center text-sm text-[var(--color-text-secondary)]">
                 Don't have an account?{' '}
-                <Link href="/signup" className="font-medium text-blue-400 hover:text-blue-300">
+                <Link href="/signup" className="font-medium text-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)]">
                     Sign up
                 </Link>
             </p>
 
             {/* Admin Login - Development Only */}
             {canAdminLogin && (
-                <div className="pt-4 border-t border-zinc-800">
+                <div className="pt-4 border-t border-[var(--color-border-default)]">
                     <button
                         onClick={handleAdminLogin}
-                        className="w-full flex items-center justify-center gap-2 py-2 px-4 text-xs font-medium text-orange-400/60 hover:text-orange-400 border border-dashed border-orange-500/30 rounded transition-colors"
+                        className="w-full flex items-center justify-center gap-2 py-2 px-4 text-xs font-medium text-[var(--color-warning)] hover:text-[var(--color-text-primary)] border border-dashed border-[var(--color-border-strong)] rounded transition-colors"
                     >
                         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -295,10 +299,10 @@ function LoginForm() {
 
 function LoginLoading() {
     return (
-        <div className="max-w-md w-full space-y-8 p-8 bg-zinc-900 rounded-lg border border-zinc-800">
+        <div className="max-w-md w-full space-y-8 p-8 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border-default)]">
             <div className="animate-pulse">
-                <div className="h-8 bg-zinc-800 rounded w-3/4 mx-auto mb-4"></div>
-                <div className="h-4 bg-zinc-800 rounded w-1/2 mx-auto"></div>
+                <div className="h-8 bg-[var(--color-bg-tertiary)] rounded w-3/4 mx-auto mb-4"></div>
+                <div className="h-4 bg-[var(--color-bg-tertiary)] rounded w-1/2 mx-auto"></div>
             </div>
         </div>
     );
@@ -306,7 +310,7 @@ function LoginLoading() {
 
 export default function LoginPage() {
     return (
-        <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg-primary)]">
             <Suspense fallback={<LoginLoading />}>
                 <LoginForm />
             </Suspense>

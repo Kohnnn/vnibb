@@ -8,7 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { newsObservationProvenance } from '@/lib/newsTime';
 import {
@@ -151,7 +151,7 @@ function getNumberConfig(config: Record<string, unknown> | undefined, key: strin
 function chipClass(active: boolean) {
   return `rounded-md px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
     active
-      ? 'bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/30'
+      ? 'bg-[var(--color-state-bg)] text-[var(--text-secondary)] ring-1 ring-[var(--color-state-border)]'
       : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
   }`;
 }
@@ -159,7 +159,7 @@ function chipClass(active: boolean) {
 function mapViewClass(active: boolean) {
   return `rounded border px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${
     active
-      ? 'border-amber-300/50 bg-amber-300/15 text-amber-100'
+      ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]'
       : 'border-white/10 bg-black/20 text-white/50 hover:border-white/25 hover:text-white'
   }`;
 }
@@ -187,13 +187,15 @@ function markerRadius(articleCount: number) {
   return 5;
 }
 
+// Categories are peer topics, not directions: focal blue for markets, then the
+// documented categorical extension. Active state uses the brand accent dimmed.
 function markerTone(bucket: WorldNewsMapBucket, active: boolean) {
-  if (active) return { fill: '#fbbf24', stroke: '#fffbeb', glow: 'rgba(251,191,36,0.7)' };
-  if (bucket.article_count === 0) return { fill: '#64748b', stroke: '#cbd5e1', glow: 'rgba(148,163,184,0.35)' };
-  if (bucket.top_category === 'markets') return { fill: '#38bdf8', stroke: '#e0f2fe', glow: 'rgba(56,189,248,0.55)' };
-  if (bucket.top_category === 'technology') return { fill: '#a78bfa', stroke: '#ede9fe', glow: 'rgba(167,139,250,0.55)' };
-  if (bucket.top_category === 'business') return { fill: '#34d399', stroke: '#d1fae5', glow: 'rgba(52,211,153,0.55)' };
-  return { fill: '#fb7185', stroke: '#ffe4e6', glow: 'rgba(251,113,133,0.55)' };
+  if (active) return { fill: 'var(--chart-blue)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-blue) 70%, transparent)' };
+  if (bucket.article_count === 0) return { fill: 'var(--text-muted)', stroke: 'var(--border-default)', glow: 'color-mix(in srgb, var(--text-muted) 35%, transparent)' };
+  if (bucket.top_category === 'markets') return { fill: 'var(--chart-blue)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-blue) 55%, transparent)' };
+  if (bucket.top_category === 'technology') return { fill: 'var(--chart-slate)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-slate) 55%, transparent)' };
+  if (bucket.top_category === 'business') return { fill: 'var(--chart-cat-4)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-cat-4) 55%, transparent)' };
+  return { fill: 'var(--chart-cat-5)', stroke: 'var(--color-on-accent)', glow: 'color-mix(in srgb, var(--chart-cat-5) 55%, transparent)' };
 }
 
 function formatCategory(value: string | null) {
@@ -214,8 +216,8 @@ function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[]
   if (failedFeeds.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[10px] text-amber-100/85">
-      <div className="font-black uppercase tracking-[0.14em] text-amber-200">
+    <div className="mt-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-[var(--color-warning)]">
+      <div className="font-black uppercase tracking-[0.14em] text-[var(--text-secondary)]">
         {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
       </div>
       <div className="mt-1 space-y-1">
@@ -429,7 +431,7 @@ function WorldNewsMapWidgetComponent({
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              <Globe2 className="h-3 w-3 text-amber-300" />
+              <Globe2 className="h-3 w-3 text-[var(--color-warning)]" />
               Live Coverage Map
             </div>
             <WidgetMeta
@@ -472,19 +474,19 @@ function WorldNewsMapWidgetComponent({
               value={customUrlInput}
               onChange={(event) => setCustomUrlInput(event.target.value)}
               placeholder="Ask a custom RSS feed..."
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-amber-400/50"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
             <input
               aria-label="Custom RSS source name"
               value={customNameInput}
               onChange={(event) => setCustomNameInput(event.target.value)}
               placeholder="Source name"
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-amber-400/50"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
             <div className="flex gap-1">
               <button
                 type="submit"
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-amber-400/30 bg-amber-400/10 px-2 text-[10px] font-black uppercase text-amber-100 hover:bg-amber-400/20"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 text-[10px] font-black uppercase text-[var(--color-warning)] hover:bg-[var(--color-state-bg)]"
               >
                 <Radio className="h-3 w-3" />
                 Use Feed
@@ -507,16 +509,16 @@ function WorldNewsMapWidgetComponent({
               )}
             </div>
           </form>
-          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
+          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-[var(--color-negative)]">{customError}</div>}
           {!customError && customNotice && (
-            <div className="mt-1 text-[10px] font-semibold text-emerald-300">{customNotice}</div>
+            <div className="mt-1 text-[10px] font-semibold text-[var(--color-positive)]">{customNotice}</div>
           )}
           {customFeedFailure ? (
-            <div role="alert" className="mt-1 truncate text-[10px] text-amber-200/90">
+            <div role="alert" className="mt-1 truncate text-[10px] text-[var(--text-secondary)]/90">
               Custom RSS failed {formatFailedFeedTime(customFeedFailure.failed_at)}: {customFeedFailure.reason}
             </div>
           ) : customFeed ? (
-            <div className="mt-1 truncate text-[10px] text-amber-200/80">
+            <div className="mt-1 truncate text-[10px] text-[var(--text-secondary)]/80">
               Custom RSS active: {customFeed.name || customFeed.url}
             </div>
           ) : null}
@@ -542,7 +544,7 @@ function WorldNewsMapWidgetComponent({
                 <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:34px_34px]" />
 
                 <div className="absolute left-3 top-3 z-10 rounded border border-white/10 bg-black/35 px-2 py-1 backdrop-blur">
-                  <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                  <div className="flex items-center gap-1 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                     <Layers3 className="h-3 w-3" />
                     Live Map
                   </div>
@@ -685,10 +687,10 @@ function WorldNewsMapWidgetComponent({
 
                 <div className="absolute bottom-3 left-3 right-3 z-10 flex flex-wrap items-center gap-2 rounded border border-white/10 bg-black/30 px-2 py-1 text-[10px] uppercase text-white/55 backdrop-blur">
                   <span className="font-black text-white/75">Marker color</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-400" /> Markets</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-400" /> Business</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-violet-400" /> Tech</span>
-                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-400" /> Geo</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-accent-primary)]" /> Markets</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-positive-bg)]" /> Business</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-state-bg)]" /> Tech</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--color-negative-bg)]" /> Geo</span>
                   <span className="ml-auto">Reference style: graticule + live markers</span>
                 </div>
               </div>
@@ -698,7 +700,7 @@ function WorldNewsMapWidgetComponent({
                   <div>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-200">
+                        <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                           {selectedBucket.region}
                         </div>
                         <h3 className="mt-1 text-lg font-black leading-tight text-white">
@@ -721,15 +723,15 @@ function WorldNewsMapWidgetComponent({
                         top topic
                       </div>
                       {selectedBucket.failed_feed_count > 0 ? (
-                        <div className="col-span-2 border-t border-amber-400/20 pt-2 text-amber-200">
-                          <div className="font-black text-amber-100">{selectedBucket.failed_feed_count}</div>
+                        <div className="col-span-2 border-t border-[var(--color-state-border)] pt-2 text-[var(--text-secondary)]">
+                          <div className="font-black text-[var(--color-warning)]">{selectedBucket.failed_feed_count}</div>
                           failed feed{selectedBucket.failed_feed_count === 1 ? '' : 's'} in this geography
                         </div>
                       ) : null}
                     </div>
 
                     {(selectedBucket.failed_feeds || []).length > 0 ? (
-                      <div className="mt-3 rounded border border-amber-400/20 bg-amber-400/10 p-2 text-[10px] text-amber-100/85">
+                      <div className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-[var(--color-warning)]">
                         {(selectedBucket.failed_feeds || []).slice(0, 3).map((feed) => (
                           <div key={`${feed.source_id}-${feed.feed_url}`} className="truncate">
                             {feed.source} failed {formatFailedFeedTime(feed.failed_at)}: {feed.reason}
@@ -753,7 +755,7 @@ function WorldNewsMapWidgetComponent({
                             href={article.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="group flex items-start gap-2 text-xs font-bold leading-snug text-white hover:text-amber-200"
+                            className="group flex items-start gap-2 text-xs font-bold leading-snug text-white hover:text-[var(--text-secondary)]"
                           >
                             <span className="line-clamp-3 flex-1">{article.title}</span>
                             <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
@@ -765,7 +767,7 @@ function WorldNewsMapWidgetComponent({
                               href={article.source_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-auto hover:text-amber-200"
+                              className="ml-auto hover:text-[var(--text-secondary)]"
                             >
                               Source
                             </a>
@@ -773,7 +775,7 @@ function WorldNewsMapWidgetComponent({
                               href={article.feed_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex items-center gap-1 hover:text-emerald-200"
+                              className="flex items-center gap-1 hover:text-[var(--color-positive)]"
                             >
                               <Rss className="h-2.5 w-2.5" />
                               Feed

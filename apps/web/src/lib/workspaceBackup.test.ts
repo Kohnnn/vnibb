@@ -130,8 +130,8 @@ describe('personal workspace backup', () => {
         expect(() => parseWorkspaceBackup('{oops')).toThrow(/not valid JSON/);
         expect(() => parseWorkspaceBackup(JSON.stringify({ ...backup, version: 2 }))).toThrow(/version/);
         const broken: typeof backup = JSON.parse(JSON.stringify(backup));
-        broken.dashboards[0].tabs[0].widgets[0].type = 'unknown_future_widget' as typeof broken.dashboards[0]['tabs'][0]['widgets'][0]['type'];
-        expect(() => parseWorkspaceBackup(JSON.stringify(broken))).toThrow(/unknown widget/);
+        // Unknown widget types are retained, not rejected: the tile shows the
+        // unsupported state and the saved ID/config survive (see below).
         broken.dashboards[0].tabs[0].widgets[0].type = 'price_chart';
         broken.dashboards[0].folderId = 'missing';
         expect(() => parseWorkspaceBackup(JSON.stringify(broken))).toThrow(/references/);
@@ -203,5 +203,36 @@ describe('personal workspace backup', () => {
         const result = importWorkspaceBackup(state, backup, () => ++calls <= 1 ? 'collision' : `new-${calls}`);
         expect(result.folders.map((folder) => folder.id)).toEqual(expect.arrayContaining(['folder-import-collision', 'folder-import-new-2']));
         expect(result.dashboards[1]).toBe(original.dashboards[1]);
+    });
+});
+
+describe('unknown saved widget types', () => {
+    it('keeps an unsupported widget through backup and restore instead of rejecting it', () => {
+        const withUnknown: DashboardState = {
+            ...original,
+            dashboards: original.dashboards.map((dashboard) => dashboard.id !== '101' ? dashboard : {
+                ...dashboard,
+                tabs: dashboard.tabs.map((tab) => tab.id !== 'tab-a' ? tab : {
+                    ...tab,
+                    widgets: [...tab.widgets, {
+                        id: 'widget-retired', tabId: 'tab-a', type: 'retired_widget' as never,
+                        config: { symbol: 'FPT', savedFlag: true },
+                        layout: { i: 'layout-retired', x: 0, y: 0, w: 4, h: 4 },
+                    }],
+                }),
+            }),
+        };
+
+        const backup = createWorkspaceBackup(withUnknown);
+        const parsed = parseWorkspaceBackup(JSON.stringify(backup));
+        const restored = importWorkspaceBackup({ ...original, dashboards: [] }, parsed);
+        // Import remaps IDs by design; match on the retained type and config.
+        const widget = restored.dashboards
+            .flatMap((dashboard) => dashboard.tabs)
+            .flatMap((tab) => tab.widgets)
+            .find((item) => (item.type as string) === 'retired_widget');
+        expect(widget).toBeDefined();
+        expect(widget!.id).not.toBe('widget-retired');
+        expect(widget!.config).toEqual({ symbol: 'FPT', savedFlag: true });
     });
 });

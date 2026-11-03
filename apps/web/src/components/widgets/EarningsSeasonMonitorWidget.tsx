@@ -9,9 +9,9 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useEarningsSeason } from '@/lib/queries';
-import { formatCompact } from '@/lib/format';
-import { formatNumber, formatPercent } from '@/lib/units';
-import { formatRelativeTime } from '@/lib/format';
+
+import { formatLargeNumber, formatNumber, formatPercent } from '@/lib/units';
+import { formatRelativeTime } from '@/lib/formatDate';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import type { WidgetGroupId } from '@/types/widget';
 
@@ -31,10 +31,10 @@ type SignalFilter = (typeof SIGNALS)[number];
 type SortMode = 'newest' | 'score' | 'revenue' | 'earnings';
 
 function signalTone(signal: string): string {
-  if (signal === 'High Conviction') return 'text-emerald-300 border-emerald-500/20 bg-emerald-500/10';
-  if (signal === 'Watch') return 'text-cyan-300 border-cyan-500/20 bg-cyan-500/10';
-  if (signal === 'Mixed') return 'text-amber-300 border-amber-500/20 bg-amber-500/10';
-  return 'text-rose-300 border-rose-500/20 bg-rose-500/10';
+  if (signal === 'High Conviction') return 'text-[var(--color-positive)] border-[var(--color-state-border)] bg-[var(--color-positive-bg)]';
+  if (signal === 'Watch') return 'text-[var(--color-accent-primary)] border-[var(--color-state-border)] bg-[var(--color-state-bg)]';
+  if (signal === 'Mixed') return 'text-[var(--color-warning)] border-[var(--color-state-border)] bg-[var(--color-state-bg)]';
+  return 'text-[var(--color-negative)] border-[var(--color-state-border)] bg-[var(--color-negative-bg)]';
 }
 
 export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataChange }: EarningsSeasonMonitorWidgetProps) {
@@ -92,7 +92,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
         empty: !hasData,
         apiGroup: '/market',
         endpoint: `/market/earnings-season?limit=24${exchange === 'ALL' ? '' : `&exchange=${exchange}`}`,
-        sourceLabel: 'VNIBB stored income statements',
+        sourceLabel: 'VniBB stored income statements',
         // Row `period` is a fiscal label and `updated_at` is a store timestamp, so there is
         // no source observation date; the max store receipt is routed to fetchedAt.
         lastDataDate: null,
@@ -102,7 +102,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
           count: filteredRows.length,
           resultCount: data?.count ?? rows.length,
           latestDate,
-          source: 'VNIBB stored income statements',
+          source: 'VniBB stored income statements',
           yoyCoverage: { available: yoyCoverage, total: rows.length },
         },
       }),
@@ -122,7 +122,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <CalendarClock className="h-4 w-4 text-blue-400" />
+              <CalendarClock className="h-4 w-4 text-[var(--color-accent-primary)]" />
               <div>
                 <div className="text-xs font-semibold text-[var(--text-primary)]">{data?.season || 'Latest quarterly releases'}</div>
                 <div className="text-[10px] text-[var(--text-muted)]">Cross-check new quarterly statements and prioritize follow-up names.</div>
@@ -143,7 +143,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
                 key={option}
                 type="button"
                 onClick={() => setExchange(option)}
-                className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${exchange === option ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                className={`rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${exchange === option ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]' : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
               >
                 {option}
               </button>
@@ -186,13 +186,13 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
             </label>
           </div>
 
-          {sourceError ? <div className="mt-2 text-[10px] text-amber-300">Source warning: {sourceError}</div> : null}
+          {sourceError ? <div className="mt-2 text-[10px] text-[var(--color-warning)]">Source warning: {sourceError}</div> : null}
           {hasData ? <div className="mt-2 text-[10px] text-[var(--text-muted)]">YoY available for {yoyCoverage} of {rows.length} results. Missing fields are unavailable from stored comparable statements.</div> : null}
 
           <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
-            <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-cyan-300" />
-            <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-emerald-300" />
-            <SummaryCard label="High Conviction" value={summary.highConviction} tone="text-amber-300" />
+            <SummaryCard label="Revenue Up" value={summary.positiveRevenue} tone="text-[var(--color-accent-primary)]" />
+            <SummaryCard label="Earnings Up" value={summary.positiveEarnings} tone="text-[var(--color-positive)]" />
+            <SummaryCard label="High Conviction" value={summary.highConviction} tone="text-[var(--color-warning)]" />
           </div>
         </div>
 
@@ -214,7 +214,7 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
                   key={`${row.symbol}-${row.period}`}
                   type="button"
                   onClick={() => setLinkedSymbol(row.symbol)}
-                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-tertiary)]/60"
+                  className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-left transition-colors hover:border-[var(--color-state-border)] hover:bg-[var(--bg-tertiary)]/60"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -235,17 +235,17 @@ export function EarningsSeasonMonitorWidget({ id, widgetGroup, onRemove, onDataC
                   </div>
 
                   <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
-                    <Metric label="Revenue YoY" value={formatPercent(row.revenue_yoy, { decimals: 1, input: 'percent', clamp: 'yoy_change' })} />
-                    <Metric label="Earnings YoY" value={formatPercent(row.earnings_yoy, { decimals: 1, input: 'percent', clamp: 'yoy_change' })} />
+                    <Metric label="Revenue YoY" value={formatPercent(row.revenue_yoy, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} />
+                    <Metric label="Earnings YoY" value={formatPercent(row.earnings_yoy, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })} />
                     <Metric label="Gross Margin" value={formatPercent(row.gross_margin, { decimals: 1, input: 'percent', clamp: 'margin' })} />
-                    <Metric label="Margin Delta" value={formatPercent(row.gross_margin_delta, { decimals: 1, input: 'percent', clamp: 'margin' })} />
+                    <Metric label="Margin Delta" value={formatPercent(row.gross_margin_delta, { decimals: 1, input: 'percent', signed: true, unit: 'pp', clamp: 'margin' })} />
                     <Metric label="EPS" value={formatNumber(row.eps, { decimals: 2 })} />
                   </div>
 
                   <div className="mt-3 flex items-center justify-between text-[10px] text-[var(--text-muted)]">
                     <div className="flex items-center gap-3">
-                      <span>Revenue {formatCompact(row.revenue, 1)}</span>
-                      <span>Net Income {formatCompact(row.net_income, 1)}</span>
+                      <span>Revenue {formatLargeNumber(row.revenue, { decimals: 1 })}</span>
+                      <span>Net Income {formatLargeNumber(row.net_income, { decimals: 1 })}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {typeof row.score === 'number' ? <span>Score {row.score.toFixed(1)}</span> : null}

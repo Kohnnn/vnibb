@@ -7,6 +7,7 @@ import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/Virtua
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { priceColorClass } from '@/lib/priceColor';
 import { memo, useEffect, useMemo } from 'react';
 
 interface IntradayTradesWidgetProps {
@@ -18,7 +19,7 @@ interface IntradayTradesWidgetProps {
 }
 
 function formatTime(timeStr: string | null | undefined): string {
-    if (!timeStr) return '-';
+    if (!timeStr) return 'n/a';
     const parts = timeStr.split(':');
     if (parts.length >= 2) {
         return `${parts[0]}:${parts[1]}:${parts[2]?.split('.')[0] || '00'}`;
@@ -27,12 +28,14 @@ function formatTime(timeStr: string | null | undefined): string {
 }
 
 function formatPrice(price: number | null | undefined): string {
-    if (!price) return '-';
+    // A printed price of 0 is a real reading, not a missing one.
+    if (price === null || price === undefined || !Number.isFinite(price)) return 'n/a';
     return price.toLocaleString('vi-VN');
 }
 
 function formatVolume(vol: number | null | undefined): string {
-    if (!vol) return '-';
+    // Zero volume is a measured zero (a no-fill print), not missing data.
+    if (vol === null || vol === undefined || !Number.isFinite(vol)) return 'n/a';
     return vol.toLocaleString('vi-VN');
 }
 
@@ -107,14 +110,18 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                 const isSell = row.match_type?.toUpperCase().includes('SD') ||
                     row.match_type?.toUpperCase().includes('S');
 
+                // Side is trading direction, so it uses the shared direction
+                // tokens (which follow colour-vision mode). The B/S letter is
+                // the primary signal; colour only reinforces it.
+                const sideClass = isBuy ? priceColorClass(1) : isSell ? priceColorClass(-1) : priceColorClass(null);
                 return (
                     <div className="flex justify-center">
-                        {isBuy ? (
-                            <span className="text-[10px] font-black text-green-500 bg-green-500/10 px-1 rounded">B</span>
-                        ) : isSell ? (
-                            <span className="text-[10px] font-black text-red-500 bg-red-500/10 px-1 rounded">S</span>
+                        {isBuy || isSell ? (
+                            <span className={`text-[10px] font-black px-1 rounded ${sideClass} ${isBuy ? 'bg-price-up' : 'bg-price-down'}`}>
+                                {isBuy ? 'B' : 'S'}
+                            </span>
                         ) : (
-                            <span className="text-[var(--text-muted)]">-</span>
+                            <span className="text-[var(--text-muted)]">n/a</span>
                         )}
                     </div>
                 );
@@ -214,7 +221,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                             Total {trades.length.toLocaleString()} Ticks
                         </div>
                         <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-positive-bg)] animate-pulse" />
                             <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Live</span>
                         </div>
                     </div>

@@ -14,6 +14,7 @@ import { useRatioHistory } from '@/lib/queries';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import type { RatioHistoryResponse } from '@/types/equity';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface ValuationBandWidgetProps {
   id: string;
@@ -22,12 +23,15 @@ interface ValuationBandWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+// Documented extension of the two-hue series rule (§20): P/E is the focal blue
+// series, the rest are Slate variants. Valuation multiples are not directions,
+// so no green/red.
 const METRIC_OPTIONS = [
-  { key: 'pe', label: 'P/E', color: '#38bdf8' },
-  { key: 'pb', label: 'P/B', color: '#22c55e' },
-  { key: 'ps', label: 'P/S', color: '#f59e0b' },
-  { key: 'ev_ebitda', label: 'EV/EBITDA', color: '#f97316' },
-  { key: 'ev_sales', label: 'EV/Sales', color: '#e11d48' },
+  { key: 'pe', label: 'P/E', color: 'var(--chart-blue)' },
+  { key: 'pb', label: 'P/B', color: 'var(--chart-slate)' },
+  { key: 'ps', label: 'P/S', color: 'color-mix(in srgb, var(--chart-slate) 65%, transparent)' },
+  { key: 'ev_ebitda', label: 'EV/EBITDA', color: 'color-mix(in srgb, var(--chart-blue) 55%, var(--chart-slate))' },
+  { key: 'ev_sales', label: 'EV/Sales', color: 'color-mix(in srgb, var(--chart-slate) 40%, transparent)' },
 ] as const;
 
 function average(values: number[]): number | null {
@@ -43,7 +47,7 @@ function std(values: number[]): number {
 }
 
 function formatMetric(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE;
   return value.toFixed(2);
 }
 
@@ -147,7 +151,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
                 onClick={() => setMetric(option.key)}
                 className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
                   metric === option.key
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
@@ -161,12 +165,12 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             isCached={isFallback}
             isFetching={isFetching && hasData}
             note={`Annual · ${seriesValues.length} positive observations · descriptive only`}
-            sourceLabel="VNIBB ratio history"
+            sourceLabel="VniBB ratio history"
             align="right"
           />
         </div>
         {isFallback && (
-          <div role="alert" className="mb-2 text-[10px] text-amber-300">
+          <div role="alert" className="mb-2 text-[10px] text-[var(--color-warning)]">
             {error?.message} Showing previously received ratio history.{' '}
             <button type="button" onClick={() => refetch()}>Retry</button>
           </div>
@@ -201,15 +205,15 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">1σ Band</div>
                 <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                  {mean !== null ? `${formatMetric(sigma1Lower)} - ${formatMetric(sigma1Upper)}` : '—'}
+                  {mean !== null ? `${formatMetric(sigma1Lower)} - ${formatMetric(sigma1Upper)}` : EMPTY_VALUE}
                 </div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">2σ Band / Percentile</div>
                 <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
-                  {mean !== null ? `${formatMetric(sigma2Lower)} - ${formatMetric(sigma2Upper)}` : '—'}
+                  {mean !== null ? `${formatMetric(sigma2Lower)} - ${formatMetric(sigma2Upper)}` : EMPTY_VALUE}
                 </div>
-                <div className="mt-1 text-xs font-semibold text-cyan-300">{percentile === null ? '—' : `${percentile}% percentile`}</div>
+                <div className="mt-1 text-xs font-semibold text-[var(--color-accent-primary)]">{percentile === null ? EMPTY_VALUE : `${percentile}% percentile`}</div>
               </div>
             </div>
 

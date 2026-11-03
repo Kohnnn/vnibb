@@ -1,6 +1,24 @@
-import { buildGrowthBridgeRows, growthComparisonLabel } from './financialDiscovery'
+import { buildGrowthBridgeRows, buildTTMSnapshotCards, growthComparisonLabel } from './financialDiscovery'
 import { convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatRawValuePlain, formatUnitValuePlain, percentChangeDetail, resolveUnitScale } from './units'
 
+describe('TTM snapshot cards', () => {
+  const units = { display: 'auto', decimalPlaces: 2, currency: 'VND' } as const
+
+  it('returns no cards when every statement metric is unavailable', () => {
+    expect(buildTTMSnapshotCards({}, units)).toEqual([])
+    expect(buildTTMSnapshotCards({
+      income: { revenue: 'n/a', gross_profit: 'n/a', operating_income: 'n/a', net_income: 'n/a' },
+      balance: { total_assets: 'n/a', total_equity: 'n/a' },
+      cash_flow: { operating_cash_flow: 'n/a', free_cash_flow: 'n/a' },
+    }, units)).toEqual([])
+  })
+
+  it('shows only populated metrics when a snapshot is partial', () => {
+    expect(buildTTMSnapshotCards({ income: { revenue: 1_500_000 } }, units)).toEqual([
+      { label: 'Revenue', value: '1.50M' },
+    ])
+  })
+})
 describe('financial growth classification', () => {
   test('formats fiscal-period USD values without converting chart ticks twice', () => {
     const config = { display: 'USD', decimalPlaces: 2, currency: 'VND', usdVndRatesByYear: { '2024': 25_000, '2025': 25_500 } } as const

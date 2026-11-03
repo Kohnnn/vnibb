@@ -21,7 +21,7 @@ interface OfficersManagementWidgetProps {
 }
 
 function formatShares(shares: number | null | undefined): string {
-    if (!shares) return '-';
+    if (!shares) return 'n/a';
     if (shares >= 1e6) return `${(shares / 1e6).toFixed(2)}M`;
     if (shares >= 1e3) return `${(shares / 1e3).toFixed(1)}K`;
     return shares.toLocaleString();
@@ -96,8 +96,8 @@ export function OfficersManagementWidget({ symbol, onDataChange }: OfficersManag
                             key={index}
                             className="flex items-start gap-2 rounded bg-[var(--bg-secondary)] p-2 hover:bg-[var(--bg-tertiary)]"
                         >
-                            <div className="p-1.5 bg-blue-500/10 rounded-full">
-                                <UserCircle size={16} className="text-blue-400" />
+                            <div className="p-1.5 bg-[var(--color-state-bg)] rounded-full">
+                                <UserCircle size={16} className="text-[var(--color-accent-primary)]" />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <p className="break-words whitespace-normal text-sm font-medium text-[var(--text-primary)]">

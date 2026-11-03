@@ -8,7 +8,7 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useDerivativesContracts } from '@/lib/queries';
-import { formatDate } from '@/lib/format';
+import { formatDate } from '@/lib/formatDate';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface DerivativesContractsBoardWidgetProps {
@@ -51,7 +51,7 @@ export function DerivativesContractsBoardWidget({
       empty: !hasData,
       apiGroup: '/derivatives',
       endpoint: '/api/v1/derivatives/contracts',
-      sourceLabel: 'VNIBB derivatives contracts',
+      sourceLabel: 'VniBB derivatives contracts',
       lastDataDate: null,
       fetchedAt: contractsQuery.dataUpdatedAt,
       extra: { count: contractsQuery.data?.count ?? contracts.length },
@@ -77,7 +77,7 @@ export function DerivativesContractsBoardWidget({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Filter contracts..."
-                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               />
             </div>
             <WidgetMeta

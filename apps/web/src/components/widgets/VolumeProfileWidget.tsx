@@ -196,7 +196,7 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
       <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <BarChart2 size={12} className="text-cyan-400" />
+          <BarChart2 size={12} className="text-[var(--color-accent-primary)]" />
           <span>{period} Volume Profile</span>
         </div>
       </div>
@@ -224,7 +224,7 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <BarChart2 size={12} className="text-cyan-400" />
+          <BarChart2 size={12} className="text-[var(--color-accent-primary)]" />
           <span>Volume Profile</span>
         </div>
         <div className="flex items-center gap-2">
@@ -234,7 +234,7 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -254,15 +254,15 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Point of Control · price level with the highest traded volume in the lookback window. VND/share.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">POC <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-cyan-300 font-mono">{pocPrice != null ? pocPrice.toFixed(2) : '-'}</div>
+          <div className="text-[var(--color-accent-primary)] font-mono">{pocPrice != null ? pocPrice.toFixed(2) : '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area High · upper bound of the price range that contained 70% of volume.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">VAH <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-emerald-300 font-mono">{vahPrice != null ? vahPrice.toFixed(2) : '-'}</div>
+          <div className="text-[var(--color-positive)] font-mono">{vahPrice != null ? vahPrice.toFixed(2) : '-'}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="Value Area Low · lower bound of the price range that contained 70% of volume.">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">VAL <span className="ml-1 text-[8px] normal-case tracking-normal opacity-60">VND/share</span></div>
-          <div className="text-amber-300 font-mono">{valPrice != null ? valPrice.toFixed(2) : '-'}</div>
+          <div className="text-[var(--color-warning)] font-mono">{valPrice != null ? valPrice.toFixed(2) : '-'}</div>
         </div>
       </div>
 
@@ -286,9 +286,9 @@ export function VolumeProfileWidget({ symbol, onDataChange }: VolumeProfileWidge
                   <div
                     className={`h-full ${
                       isPOC
-                        ? 'bg-cyan-500'
+                        ? 'bg-[var(--color-state-bg)]'
                         : isInValueArea
-                          ? 'bg-emerald-500/70'
+                          ? 'bg-[var(--color-positive-bg)]'
                           : 'bg-[var(--text-muted)]/45'
                     }`}
                     style={{ width: `${Math.max(2, widthPct)}%` }}

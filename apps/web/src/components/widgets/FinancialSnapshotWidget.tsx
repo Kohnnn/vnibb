@@ -829,7 +829,7 @@ function FinancialSnapshotWidgetComponent({ id, symbol, config, hideHeader, onRe
                                         // section still has other values: the table below would show
                                         // the populated periods and hide that one period is missing
                                         // rather than zero (#103).
-                                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                                        <div className="mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                                             {sectionUnavailableNotes[section.id]}
                                         </div>
                                     )}

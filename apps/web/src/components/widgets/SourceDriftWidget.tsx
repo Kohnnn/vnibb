@@ -5,6 +5,7 @@ import { GitCompare } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
 import { ConsensusStrip } from './prediction-market-ui';
+import { EMPTY_VALUE } from '@/lib/units'
 
 /**
  * Source Drift.
@@ -64,11 +65,11 @@ function topicLabel(topic: Topic): string {
 }
 
 function pct(value: number | null): string {
-    return value === null ? '—' : `${Math.round(value * 100)}%`;
+    return value === null ? EMPTY_VALUE : `${Math.round(value * 100)}%`;
 }
 
 function gapText(gap: number | null): string {
-    if (gap === null) return 'Gap —';
+    if (gap === null) return `Gap ${EMPTY_VALUE}`;
     const pp = Math.abs(gap * 100);
     const direction = gap > 0 ? 'Poly higher' : gap < 0 ? 'Kalshi higher' : 'Aligned';
     return `Gap ${pp.toFixed(1)}pp · ${direction}`;
@@ -137,12 +138,12 @@ export function SourceDriftWidget() {
                         className="flex flex-col gap-2 rounded-lg border border-default bg-[var(--bg-tertiary)] p-3"
                     >
                         <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.16em]">
-                            <span className="text-blue-300">{topicLabel(row.topic)}</span>
+                            <span className="text-[var(--color-accent-primary)]">{topicLabel(row.topic)}</span>
                             <span className="text-[var(--text-muted)]">{gapText(row.gap)}</span>
                         </div>
                         <ConsensusStrip rows={rows} />
                         {missing && (
-                            <div className="mt-1 text-[10px] text-amber-300">
+                            <div className="mt-1 text-[10px] text-[var(--color-warning)]">
                                 Missing source data
                             </div>
                         )}

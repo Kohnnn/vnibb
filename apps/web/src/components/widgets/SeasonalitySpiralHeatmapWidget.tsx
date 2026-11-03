@@ -32,19 +32,24 @@ const SPIRAL_GRANULARITY_OPTIONS: Array<{
 const MONTH_INITIALS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
 
 function formatPct(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '-'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a'
+  // Brand §19: the sign follows the rendered digits, so -0.04 at 1dp is `0.0%`.
+  const body = Math.abs(value).toFixed(1)
+  const sign = Number(body) === 0 ? '' : value > 0 ? '+' : '-'
+  return `${sign}${body}%`
 }
 
 /**
- * Recalibrated divergent red/green color scale. Daily returns are
- * typically <= 2% so the previous 1/4/8 thresholds left almost every
- * daily cell in the lightest opacity bucket and reading nearly grey.
- * The new bucketing emphasizes <= 2% changes which is where the
- * day-to-day signal lives.
+ * Signed-return ramp. The thresholds stay tuned to the observed distribution
+ * (daily returns rarely exceed 2%), but the hue comes from the direction
+ * tokens, so colour-vision mode can swap it: the previous fixed green/rose
+ * rgba() values bypassed the swap and stayed green/red in colourblind mode.
+ * Missing periods get their own neutral tint instead of a zero-return green.
  */
 function getFill(value: number | null | undefined, granularity: SpiralGranularity): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'rgba(71,85,105,0.42)'
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return 'color-mix(in srgb, var(--text-muted) 42%, transparent)'
+  }
 
   // Daily uses tighter bands; weekly uses wider bands matching typical
   // weekly return distributions (-6% to +6%).
@@ -52,16 +57,18 @@ function getFill(value: number | null | undefined, granularity: SpiralGranularit
     ? [0.2, 0.5, 1.0, 2.0]
     : [0.5, 1.5, 3.0, 6.0]
 
-  if (value >= bands[3]) return 'rgba(16,185,129,0.95)'
-  if (value >= bands[2]) return 'rgba(16,185,129,0.78)'
-  if (value >= bands[1]) return 'rgba(16,185,129,0.56)'
-  if (value >= bands[0]) return 'rgba(16,185,129,0.36)'
-  if (value > 0) return 'rgba(16,185,129,0.22)'
-  if (value <= -bands[3]) return 'rgba(244,63,94,0.95)'
-  if (value <= -bands[2]) return 'rgba(244,63,94,0.78)'
-  if (value <= -bands[1]) return 'rgba(244,63,94,0.56)'
-  if (value <= -bands[0]) return 'rgba(244,63,94,0.36)'
-  return 'rgba(244,63,94,0.22)'
+  // Direction follows the digits the cell actually prints. -0.04 renders as
+  // `0.0%`, so it must take the flat swatch, not a loss tint that contradicts
+  // the label and disagrees with the month heatmap.
+  const shown = Number(value.toFixed(1))
+  if (shown === 0) return 'color-mix(in srgb, var(--text-muted) 30%, transparent)'
+  const strength = (shown >= bands[3] || shown <= -bands[3]) ? 95
+    : (shown >= bands[2] || shown <= -bands[2]) ? 78
+    : (shown >= bands[1] || shown <= -bands[1]) ? 56
+    : (shown >= bands[0] || shown <= -bands[0]) ? 36
+    : 22
+  const token = shown > 0 ? '--color-positive' : '--color-negative'
+  return `color-mix(in srgb, var(${token}) ${strength}%, transparent)`
 }
 
 function dayOfYear(date: Date): number {
@@ -349,7 +356,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
     <div className="flex h-full flex-col">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 py-1">
         <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
-          <CalendarDays size={12} className="text-cyan-400" />
+          <CalendarDays size={12} className="text-[var(--color-accent-primary)]" />
           <span>Spiral Heatmap</span>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -361,7 +368,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                 onClick={() => setGranularity(option.value)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold transition-colors ${
                   granularity === option.value
-                    ? 'bg-cyan-500/20 text-cyan-200'
+                    ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]'
                 }`}
               >
@@ -377,7 +384,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                 onClick={() => setPeriod(option)}
                 className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                   period === option
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]'
                 }`}
               >
@@ -397,7 +404,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
       </div>
       <QuantWarningBanner warning={quantWarning} className="mb-2" />
 
-      <div className="flex-1 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[radial-gradient(circle_at_center,rgba(14,165,233,0.08),transparent_60%)]">
+      <div className="flex-1 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[radial-gradient(circle_at_center,var(--color-state-bg),transparent_60%)]">
         {timedOut && isLoading && !hasData ? (
           <WidgetError
             title="Loading timed out"
@@ -424,24 +431,26 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
         ) : (
           <div className="flex h-full flex-col">
             <div className="flex-1 overflow-auto">
+              {/* Token surfaces: the previous fixed dark disc left the light
+                  theme's ink labels unreadable, and a fixed separator stroke
+                  vanished on dark. */}
               <svg
                 viewBox={`0 0 ${viewBoxSize.side} ${viewBoxSize.side}`}
                 className="mx-auto h-full min-h-[340px] max-h-[720px] w-full max-w-[760px]"
               >
-                {/* Center disc with granularity label */}
                 <circle
                   cx={viewBoxSize.center}
                   cy={viewBoxSize.center}
                   r="22"
-                  fill="rgba(15,23,42,0.78)"
-                  stroke="rgba(148,163,184,0.35)"
+                  fill="var(--bg-secondary)"
+                  stroke="var(--border-subtle)"
                   strokeWidth="0.6"
                 />
                 <text
                   x={viewBoxSize.center}
                   y={viewBoxSize.center - 1}
                   textAnchor="middle"
-                  className="fill-slate-200 text-[8px] font-bold uppercase tracking-[0.18em]"
+                  className="fill-[var(--color-text-primary)] text-[8px] font-bold uppercase tracking-[0.18em]"
                 >
                   {granularityConfig.centerLabel}
                 </text>
@@ -449,7 +458,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                   x={viewBoxSize.center}
                   y={viewBoxSize.center + 9}
                   textAnchor="middle"
-                  className="fill-slate-400 text-[6px]"
+                  className="fill-[var(--color-text-muted)] text-[6px]"
                 >
                   by year
                 </text>
@@ -462,7 +471,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                     y={marker.y}
                     textAnchor="middle"
                     dominantBaseline="middle"
-                    className="fill-slate-400 text-[7px] font-semibold"
+                    className="fill-[var(--color-text-muted)] text-[7px] font-semibold"
                   >
                     {marker.label}
                   </text>
@@ -474,7 +483,7 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                     key={segment.id}
                     d={segment.pathD}
                     fill={getFill(segment.value, granularity)}
-                    stroke="rgba(15,23,42,0.4)"
+                    stroke="var(--border-subtle)"
                     strokeWidth="0.3"
                   >
                     <title>{formatTooltip(segment, granularity)}</title>
@@ -489,8 +498,8 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                       y={marker.y}
                       textAnchor="middle"
                       dominantBaseline="middle"
-                      className="fill-slate-300 text-[7px] font-bold"
-                      style={{ paintOrder: 'stroke', stroke: 'rgba(15,23,42,0.85)', strokeWidth: 2 }}
+                      className="fill-[var(--color-text-secondary)] text-[7px] font-bold"
+                      style={{ paintOrder: 'stroke', stroke: 'var(--bg-primary)', strokeWidth: 2 }}
                     >
                       {marker.year}
                     </text>
@@ -503,8 +512,8 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
                     cx={geometry.segments[geometry.segments.length - 1].cx}
                     cy={geometry.segments[geometry.segments.length - 1].cy}
                     r="3"
-                    fill="rgba(56,189,248,1)"
-                    stroke="rgba(15,23,42,0.85)"
+                    fill="var(--color-accent-primary)"
+                    stroke="var(--bg-primary)"
                     strokeWidth="0.7"
                   />
                 )}
@@ -512,12 +521,14 @@ export function SeasonalitySpiralHeatmapWidget({ symbol, onDataChange }: Seasona
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
               <span>
-                Same calendar position across years aligns on the same angle. Outer rings are newer years; inner ring is the oldest. Cyan dot marks the latest period.
+                Same calendar position across years aligns on the same angle. Outer rings are newer years; inner ring is the oldest. The accent dot marks the latest period.
               </span>
               <div className="flex items-center gap-2">
-                <span className="h-2.5 w-5 rounded bg-rose-500/70" /> negative
-                <span className="h-2.5 w-5 rounded bg-slate-500/60" /> flat/missing
-                <span className="h-2.5 w-5 rounded bg-emerald-500/70" /> positive
+              {/* Swatches match the cell ramp, including distinct flat and missing states. */}
+              <span className="h-2.5 w-5 rounded" style={{ background: getFill(-1, granularity) }} /> negative
+              <span className="h-2.5 w-5 rounded" style={{ background: getFill(0, granularity) }} /> flat
+              <span className="h-2.5 w-5 rounded" style={{ background: getFill(null, granularity) }} /> missing
+              <span className="h-2.5 w-5 rounded" style={{ background: getFill(1, granularity) }} /> positive
               </div>
             </div>
           </div>

@@ -74,7 +74,7 @@ export function WorldIndicesWidget({ onDataChange }: { onDataChange?: (data: Wid
                                 </div>
                                 <div className="text-right">
                                     <div className="text-xs font-mono text-[var(--text-primary)]">{formatValue(row.value)}</div>
-                                    <div className={`text-[11px] flex items-center justify-end gap-1 ${isUp ? 'text-green-400' : isDown ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
+                                    <div className={`text-[11px] flex items-center justify-end gap-1 ${isUp ? 'text-[var(--color-positive)]' : isDown ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]'}`}>
                                         {isUp ? <TrendingUp size={10} /> : isDown ? <TrendingDown size={10} /> : null}
                                         {change == null ? '--' : `${isUp ? '+' : ''}${change.toFixed(2)}%`}
                                     </div>

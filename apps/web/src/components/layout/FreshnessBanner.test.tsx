@@ -177,4 +177,17 @@ describe('FreshnessBanner', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/freshness status unavailable/i);
     expect(screen.getByRole('status')).not.toHaveTextContent(/report fresh data/i);
   });
+
+  it('degrades instead of throwing when the payload has no buckets', () => {
+    // Regression: `data.buckets.filter` threw and the route error boundary
+    // replaced the whole /dashboard view.
+    mockUseMarketFreshness.mockReturnValue({
+      data: { timestamp: '2026-07-15T00:00:00Z', overall: 'fresh' },
+      isLoading: false,
+      isError: false,
+    } as unknown as UseQueryResult<FreshnessResponse, Error>);
+
+    expect(() => render(<FreshnessBanner />)).not.toThrow();
+    expect(screen.getByRole('status')).toHaveTextContent(/freshness status unavailable/i);
+  });
 });

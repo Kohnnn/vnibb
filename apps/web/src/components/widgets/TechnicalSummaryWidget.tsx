@@ -14,6 +14,7 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { Timeframe } from '@/types/technical';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface TechnicalSummaryWidgetProps {
     id: string;
@@ -35,9 +36,9 @@ function formatTechnicalValue(value: number | null | undefined, decimals = 2): s
 function getSignalColor(signal: string): string {
     switch (signal?.toLowerCase()) {
         case 'strong_buy':
-        case 'buy': return 'text-green-400';
+        case 'buy': return 'text-[var(--color-positive)]';
         case 'strong_sell':
-        case 'sell': return 'text-red-400';
+        case 'sell': return 'text-[var(--color-negative)]';
         default: return 'text-[var(--text-secondary)]';
     }
 }
@@ -45,18 +46,18 @@ function getSignalColor(signal: string): string {
 function getSignalBg(signal: string): string {
     switch (signal?.toLowerCase()) {
         case 'strong_buy':
-        case 'buy': return 'bg-green-500/20';
+        case 'buy': return 'bg-[var(--color-positive-bg)]';
         case 'strong_sell':
-        case 'sell': return 'bg-red-500/20';
+        case 'sell': return 'bg-[var(--color-negative-bg)]';
         default: return 'bg-[var(--bg-tertiary)]';
     }
 }
 
 function getTrendColor(strength: string): string {
     switch (strength) {
-        case 'very_strong': return 'text-blue-400';
-        case 'strong': return 'text-cyan-400';
-        case 'moderate': return 'text-yellow-400';
+        case 'very_strong': return 'text-[var(--color-accent-primary)]';
+        case 'strong': return 'text-[var(--color-accent-primary)]';
+        case 'moderate': return 'text-[var(--color-warning)]';
         case 'weak': return 'text-[var(--text-secondary)]';
         default: return 'text-[var(--text-muted)]';
     }
@@ -212,12 +213,12 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
                         note={`${timeframeLabel} · ${finite(ta?.data_quality?.bars) ?? 'unknown'} bars · ${ta?.data_quality?.status ?? 'quality not reported'} · aggregated indicators, not advice`}
-                        sourceLabel="VNIBB technical analysis"
+                        sourceLabel="VniBB technical analysis"
                         align="right"
                     />
 
                     {dataQualityIssues.length ? (
-                        <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-100">
+                        <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-[10px] leading-4 text-[var(--color-warning)]">
                             <div className="font-bold uppercase tracking-[0.14em]">Data quality</div>
                             <div className="mt-1">{dataQualityIssues.slice(0, 2).join(' ')}</div>
                         </div>
@@ -225,7 +226,7 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
 
                     {/* Signal Indicator */}
                     <Card className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2.5 flex flex-col items-center justify-center relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500/50 to-transparent opacity-30" />
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[var(--color-accent-primary)] to-transparent opacity-30" />
                         <div className="text-[10px] text-[var(--text-muted)] uppercase font-semibold mb-1 tracking-tighter">Overall Signal</div>
                         <Badge variant="outline" className={`text-sm py-0.5 px-3 font-bold border-none ${getSignalBg(overallSignal)} ${getSignalColor(overallSignal)}`}>
                             {overallSignal.replace('_', ' ').toUpperCase()}
@@ -238,27 +239,27 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                             </div>
                         </div>
                         <div className="mt-3 grid w-full grid-cols-3 gap-2 text-[10px] font-mono">
-                            <div className="flex flex-col items-center rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5">
-                                <span className="text-green-400 font-bold">{buyCount}</span>
+                            <div className="flex flex-col items-center rounded-md border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-2 py-1.5">
+                                <span className="text-[var(--color-positive)] font-bold">{buyCount}</span>
                                 <span className="text-[var(--text-muted)]">Buy</span>
                             </div>
-                            <div className="flex flex-col items-center rounded-md border border-slate-500/20 bg-slate-500/10 px-2 py-1.5">
+                            <div className="flex flex-col items-center rounded-md border border-[var(--color-border-default)] text-[var(--color-text-muted)] px-2 py-1.5">
                                 <span className="text-[var(--text-secondary)] font-bold">{neutralCount}</span>
                                 <span className="text-[var(--text-muted)]">Neutral</span>
                             </div>
-                            <div className="flex flex-col items-center rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1.5">
-                                <span className="text-red-400 font-bold">{sellCount}</span>
+                            <div className="flex flex-col items-center rounded-md border border-[var(--color-state-border)] bg-[var(--color-negative-bg)] px-2 py-1.5">
+                                <span className="text-[var(--color-negative)] font-bold">{sellCount}</span>
                                 <span className="text-[var(--text-muted)]">Sell</span>
                             </div>
                         </div>
                         <div className="mt-2 flex items-center gap-2 text-[9px]">
                             <span className="text-[var(--text-muted)]">Trend Strength: </span>
                             <span className={`${getTrendColor(signals?.trend_strength || '')} font-bold capitalize`}>
-                                {(signals?.trend_strength || 'N/A').replace('_', ' ')}
+                                {(signals?.trend_strength || 'n/a').replace('_', ' ')}
                             </span>
                             <span className="text-[var(--text-muted)]">| Bias:</span>
-                            <span className={signalBias >= 0 ? 'font-bold text-emerald-400' : 'font-bold text-rose-400'}>
-                                {signalBias >= 0 ? '+' : ''}{signalBias}
+                            <span className={`font-bold ${signedToneClass(signalBias)}`}>
+                                {signalBias > 0 ? '+' : ''}{signalBias}
                             </span>
                         </div>
                     </Card>
@@ -324,18 +325,18 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                             <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Levels</span>
                         </div>
                         <div className="space-y-1 text-left">
-                            <div className="flex justify-between items-center p-1.5 rounded bg-red-950/10 border-l-2 border-red-500/50">
+                            <div className="flex justify-between items-center p-1.5 rounded bg-[var(--color-negative-bg)] border-l-2 border-[var(--color-state-border)]">
                                 <span className="text-[10px] text-[var(--text-secondary)] font-bold uppercase">Resistance</span>
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-[var(--text-primary)] font-mono">{formatTechnicalValue(supportResistance?.nearest_resistance)}</span>
-                                    <span className="text-[9px] text-red-400">{finite(supportResistance?.resistance_proximity_pct) !== null ? `+${formatTechnicalValue(supportResistance?.resistance_proximity_pct, 1)}%` : '--'}</span>
+                                    <span className="text-[9px] text-[var(--color-negative)]">{finite(supportResistance?.resistance_proximity_pct) !== null ? `+${formatTechnicalValue(supportResistance?.resistance_proximity_pct, 1)}%` : '--'}</span>
                                 </div>
                             </div>
-                            <div className="flex justify-between items-center p-1.5 rounded bg-green-950/10 border-l-2 border-green-500/50">
+                            <div className="flex justify-between items-center p-1.5 rounded bg-[var(--color-positive-bg)] border-l-2 border-[var(--color-state-border)]">
                                 <span className="text-[10px] text-[var(--text-secondary)] font-bold uppercase">Support</span>
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-[var(--text-primary)] font-mono">{formatTechnicalValue(supportResistance?.nearest_support)}</span>
-                                    <span className="text-[9px] text-green-400">{finite(supportResistance?.support_proximity_pct) !== null ? `-${formatTechnicalValue(supportResistance?.support_proximity_pct, 1)}%` : '--'}</span>
+                                    <span className="text-[9px] text-[var(--color-positive)]">{finite(supportResistance?.support_proximity_pct) !== null ? `-${formatTechnicalValue(supportResistance?.support_proximity_pct, 1)}%` : '--'}</span>
                                 </div>
                             </div>
                         </div>

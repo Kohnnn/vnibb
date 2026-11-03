@@ -489,7 +489,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
       empty: activeMode === 'rss' ? !(rssQuery.data?.data?.length) : !activeUrl,
       apiGroup: activeMode === 'rss' ? '/equity' : 'local',
       endpoint: activeMode === 'rss' && rssSource ? `/api/v1/research/rss/${rssSource}` : activeUrl,
-      sourceLabel: activeMode === 'rss' ? 'VNIBB research RSS' : 'External research link',
+      sourceLabel: activeMode === 'rss' ? 'VniBB research RSS' : 'External research link',
       extra: { symbol: normalizedSymbol || null, mode: activeMode, saved: Boolean(activeSavedSite) },
     }))
   }, [activeMode, activeSavedSite, activeUrl, normalizedSymbol, onDataChange, rssQuery.data?.data?.length, rssSource])
@@ -510,7 +510,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                 setActiveSourceId(event.target.value)
                 setActiveSavedSiteId(null)
               }}
-              className="min-w-[210px] rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              className="min-w-[210px] rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               aria-label="Select research source"
             >
               {(Object.keys(groupedSources) as SourceCategory[]).map((category) => (
@@ -527,7 +527,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
             <button
               type="button"
               onClick={bookmarkCurrent}
-              className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:border-blue-500/40 hover:text-[var(--text-primary)]"
+              className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:border-[var(--color-state-border)] hover:text-[var(--text-primary)]"
             >
               <BookmarkPlus size={13} />
               Bookmark
@@ -536,7 +536,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
             <button
               type="button"
               onClick={() => openExternal(activeUrl)}
-              className="inline-flex items-center gap-1 rounded border border-blue-500/50 bg-blue-600/10 px-2 py-1.5 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-600/20"
+              className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1.5 text-xs font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)]"
             >
               <ExternalLink size={13} />
               Open in Tab
@@ -567,7 +567,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
               value={customTitle}
               onChange={(event) => setCustomTitle(event.target.value)}
               placeholder="Custom title"
-              className="w-36 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              className="w-36 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               aria-label="Custom source title"
             />
             <input
@@ -580,20 +580,20 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                 }
               }}
               placeholder="https://custom-site.example"
-              className="min-w-[240px] flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500/50"
+              className="min-w-[240px] flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               aria-label="Custom source URL"
             />
             <button
               type="button"
               onClick={addCustomSite}
-              className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-xs font-semibold text-white transition-colors hover:bg-blue-500"
+              className="inline-flex items-center gap-1 rounded bg-[var(--color-accent-fill)] px-2 py-1 text-xs font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-fill)]"
             >
               <Plus size={12} />
               Add URL
             </button>
           </div>
 
-          {inlineNotice && <div className="mt-2 text-[11px] text-blue-300">{inlineNotice}</div>}
+          {inlineNotice && <div className="mt-2 text-[11px] text-[var(--color-accent-primary)]">{inlineNotice}</div>}
         </div>
 
         <div className="grid h-full grid-cols-1 lg:grid-cols-[250px_1fr]">
@@ -614,8 +614,8 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                       className={cn(
                         'flex items-center gap-2 rounded border px-2 py-1.5',
                         isActive
-                          ? 'border-blue-500/50 bg-blue-600/10'
-                          : 'border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-blue-500/30'
+                          ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]'
+                          : 'border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--color-state-border)]'
                       )}
                     >
                       <button
@@ -631,7 +631,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                       <button
                         type="button"
                         onClick={() => removeSavedSite(site.id)}
-                        className="rounded p-1 text-[var(--text-muted)] transition-colors hover:text-red-400"
+                        className="rounded p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--color-negative)]"
                         aria-label={`Delete saved source ${site.title}`}
                       >
                         <Trash2 size={12} />
@@ -698,7 +698,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                                   setActiveSavedSiteId(null)
                                   openExternal(sourceUrl)
                                 }}
-                                className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:border-blue-500/40 hover:text-[var(--text-primary)]"
+                                className="inline-flex items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:border-[var(--color-state-border)] hover:text-[var(--text-primary)]"
                               >
                                 <ExternalLink size={12} />
                                 {source.label}
@@ -723,7 +723,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                     ) : rssQuery.error ? (
                       <WidgetError error={rssQuery.error as Error} onRetry={() => rssQuery.refetch()} />
                     ) : rssQuery.data?.error ? (
-                      <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      <div className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                         RSS feed temporarily unavailable for {rssSource}. You can still open the source directly.
                       </div>
                     ) : !rssQuery.data || rssQuery.data.count === 0 ? (
@@ -737,7 +737,7 @@ export function ResearchBrowserWidget({ id, symbol, config, onRemove, onDataChan
                             target="_blank"
                             rel="noreferrer"
                             onClick={() => markVisited(item.url)}
-                            className="block rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 transition-colors hover:border-blue-500/40"
+                            className="block rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 transition-colors hover:border-[var(--color-state-border)]"
                           >
                             <div className="line-clamp-2 text-xs font-semibold text-[var(--text-primary)]">
                               {item.title}

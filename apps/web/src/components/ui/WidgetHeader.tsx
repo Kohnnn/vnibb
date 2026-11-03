@@ -47,7 +47,7 @@ export function WidgetHeader({
 
   return (
     <div className={cn(
-      "flex items-center justify-between px-3 py-2",
+      "flex items-center justify-between gap-2 px-3 py-2",
       "border-b border-[var(--border-subtle)] bg-[var(--bg-widget-header)]/70",
       "shrink-0",
       className
@@ -68,7 +68,7 @@ export function WidgetHeader({
       </div>
 
       {/* Right: Actions & Controls */}
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div className="flex max-w-[65%] items-center gap-0.5 overflow-x-auto sm:max-w-none">
         {/* Symbol Link Toggle */}
         {showLinkToggle && widgetId && (
           <LinkToggleButton widgetId={widgetId} />
@@ -138,7 +138,7 @@ export function WidgetHeader({
               trackWidgetAction('close')
               onClose()
             }}
-            className="p-1.5 text-[var(--text-muted)] hover:text-red-400 hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors"
+            className="rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
             title="Remove widget"
           >
             <X className="w-3.5 h-3.5" />

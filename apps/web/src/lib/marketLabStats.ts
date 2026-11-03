@@ -1,4 +1,5 @@
 'use client'
+import { EMPTY_VALUE } from '@/lib/units'
 
 /**
  * Client-side descriptive market statistics for the Quant Market Lab widget.
@@ -284,11 +285,11 @@ export function computeMarketLabStats(symbol: string, bars: MarketLabBar[]): Mar
 }
 
 export function marketLabStatsToRows(stats: MarketLabStats): Array<Record<string, string | number>> {
-  const fmt = (value: number | null, digits = 2): string => (value === null ? '—' : value.toFixed(digits))
+  const fmt = (value: number | null, digits = 2): string => (value === null ? EMPTY_VALUE : value.toFixed(digits))
   return [
     { metric: 'Bars', value: stats.barCount },
-    { metric: 'Start', value: stats.startDate ?? '—' },
-    { metric: 'End', value: stats.endDate ?? '—' },
+    { metric: 'Start', value: stats.startDate ?? EMPTY_VALUE },
+    { metric: 'End', value: stats.endDate ?? EMPTY_VALUE },
     { metric: 'Annualized return %', value: fmt(stats.annualizedReturnPct) },
     { metric: 'Annualized volatility %', value: fmt(stats.annualizedVolPct) },
     { metric: 'Sharpe (rf=0)', value: fmt(stats.sharpe) },

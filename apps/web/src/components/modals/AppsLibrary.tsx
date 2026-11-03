@@ -45,15 +45,6 @@ const CATEGORY_ICONS: Record<DashboardTemplateCategory, typeof Activity> = {
     global: Globe,
 };
 
-const CATEGORY_STYLES: Record<DashboardTemplateCategory, string> = {
-    market: 'from-blue-500/15 via-cyan-500/5 to-emerald-500/10',
-    fundamentals: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
-    technical: 'from-emerald-500/15 via-teal-500/5 to-cyan-500/10',
-    quant: 'from-fuchsia-500/15 via-violet-500/5 to-cyan-500/10',
-    research: 'from-slate-200/10 via-slate-400/5 to-blue-500/10',
-    global: 'from-violet-500/15 via-fuchsia-500/5 to-cyan-500/10',
-};
-
 function getTemplateWidgetLabel(type: string): string {
     return getWidgetDefinition(type)?.name || type.replace(/_/g, ' ');
 }
@@ -107,7 +98,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div
-                className="absolute inset-0 bg-slate-950/60"
+                className="absolute inset-0 bg-[rgb(2_6_23_/_0.72)]"
                 role="button"
                 tabIndex={0}
                 aria-label="Close apps library"
@@ -120,18 +111,18 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                 onClick={onClose}
             />
 
-            <div className="relative flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[0_24px_80px_rgba(15,23,42,0.35)]">
+            <div className="relative flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] shadow-lg">
                 <div className="flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-surface)] px-5 py-4">
                     <div>
                         <h2 className="flex items-center gap-2 text-base font-semibold text-[var(--text-primary)]">
-                            <Layout size={18} className="text-blue-500" />
+                            <Layout size={18} className="text-[var(--color-accent-primary)]" />
                             Workspace Templates
                         </h2>
                         <p className="mt-1 text-xs text-[var(--text-muted)]">Launch curated workspaces from one canonical template library.</p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="rounded-full p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        className="rounded-md p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         aria-label="Close apps library"
                     >
                         <X size={18} />
@@ -148,17 +139,17 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                 value={searchQuery}
                                 aria-label="Search templates"
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-blue-500/50"
+                                className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             />
                         </div>
                         <div className="flex flex-wrap gap-2">
                             <button
                                 onClick={() => setSelectedCategory('all')}
                                 className={cn(
-                                    'rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all',
+                                    'rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]',
                                     selectedCategory === 'all'
-                                        ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                                        : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                        ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
+                                        : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                                 )}
                             >
                                 All Templates
@@ -170,10 +161,10 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                         key={category.id}
                                         onClick={() => setSelectedCategory(category.id)}
                                         className={cn(
-                                            'flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all',
+                                            'flex items-center gap-2 rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]',
                                             selectedCategory === category.id
-                                                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                                                : 'bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                                                ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
+                                                : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                                         )}
                                     >
                                         <Icon size={12} />
@@ -192,12 +183,11 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                             <button
                                 key={template.id}
                                 onClick={() => handleApplyTemplate(template)}
-                                className="group flex flex-col rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 text-left transition-all hover:border-blue-500/40 hover:bg-[var(--bg-hover)]"
+                                className="group flex flex-col rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-4 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-secondary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             >
                                 <div
                                     className={cn(
-                                        'relative mb-4 aspect-[16/8] overflow-hidden rounded-xl border border-[var(--border-default)] bg-gradient-to-br',
-                                        CATEGORY_STYLES[template.category]
+                                        'relative mb-4 aspect-[16/8] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]'
                                     )}
                                 >
                                     <div className="absolute inset-0 p-3">
@@ -205,7 +195,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                             {template.widgets.slice(0, 3).map((widget, index) => (
                                                 <div
                                                     key={`${template.id}-box-${index}`}
-                                                    className="h-6 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/85"
+                                                    className="h-6 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]"
                                                 />
                                             ))}
                                         </div>
@@ -213,7 +203,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                             {template.widgets.slice(0, 4).map((widget) => (
                                                 <span
                                                     key={`${template.id}-${widget.type}`}
-                                                    className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)]/90 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--text-secondary)]"
+                                                    className="rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--text-secondary)]"
                                                 >
                                                     {getTemplateWidgetLabel(widget.type)}
                                                 </span>
@@ -223,7 +213,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                 </div>
 
                                 <div className="mb-2 flex items-center gap-2">
-                                    <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                    <span className="inline-flex items-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                                         {DASHBOARD_TEMPLATE_CATEGORIES.find((category) => category.id === template.category)?.label || template.category}
                                     </span>
                                     <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
@@ -231,7 +221,7 @@ export function AppsLibrary({ isOpen, onClose, onSelectTemplate }: AppsLibraryPr
                                     </span>
                                 </div>
 
-                                <h3 className="text-sm font-bold text-[var(--text-primary)] transition-colors group-hover:text-blue-400">
+                                <h3 className="text-sm font-bold text-[var(--text-primary)] transition-colors group-hover:text-[var(--color-accent-primary)]">
                                     {template.name}
                                 </h3>
                                 <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">

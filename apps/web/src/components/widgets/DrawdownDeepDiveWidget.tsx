@@ -33,8 +33,11 @@ interface DrawdownEpisode {
 const EMPTY_CANDLES: OHLCData[] = []
 
 function formatPct(value: number): string {
-  if (!Number.isFinite(value)) return '-'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+  if (!Number.isFinite(value)) return 'n/a'
+  // Brand §19: the sign follows the rendered digits, so -0.04 at 1dp is `0.0%`.
+  const body = Math.abs(value).toFixed(1)
+  const sign = Number(body) === 0 ? '' : value > 0 ? '+' : '-'
+  return `${sign}${body}%`
 }
 
 function shortDate(value: string): string {
@@ -194,7 +197,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
     <div className="h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ShieldAlert size={12} className="text-amber-400" />
+          <ShieldAlert size={12} className="text-[var(--color-warning)]" />
           <span>Drawdown Deep Dive</span>
         </div>
         <div className="flex items-center gap-2">
@@ -204,7 +207,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -226,15 +229,15 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
       <div className="mb-2 grid grid-cols-3 gap-2 text-[10px]">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="uppercase tracking-widest text-[var(--text-muted)]">Current DD</div>
-          <div className="font-mono text-amber-200">{formatPct(currentDrawdown)}</div>
+          <div className="font-mono text-[var(--text-secondary)]">{formatPct(currentDrawdown)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="uppercase tracking-widest text-[var(--text-muted)]">Max DD</div>
-          <div className="font-mono text-red-300">{formatPct(maxDrawdown)}</div>
+          <div className="font-mono text-[var(--color-negative)]">{formatPct(maxDrawdown)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="uppercase tracking-widest text-[var(--text-muted)]">Avg Recovery</div>
-          <div className="font-mono text-cyan-300">{avgRecovery > 0 ? `${Math.round(avgRecovery)}d` : '-'}</div>
+          <div className="font-mono text-[var(--color-accent-primary)]">{avgRecovery > 0 ? `${Math.round(avgRecovery)}d` : '-'}</div>
         </div>
       </div>
 
@@ -247,7 +250,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
               <div key={`${point.time}-${index}`} className="flex items-center gap-2">
                 <div className="w-14 shrink-0 text-[var(--text-muted)]">{shortDate(point.time).slice(5)}</div>
                 <div className="h-3 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
-                  <div className="h-full bg-rose-500/60" style={{ width: `${Math.max(widthPct, 2)}%` }} />
+                  <div className="h-full bg-[var(--color-negative)]" style={{ width: `${Math.max(widthPct, 2)}%` }} />
                 </div>
                 <div className="w-12 text-right font-mono text-[var(--text-primary)]">{point.drawdownPct.toFixed(1)}%</div>
               </div>
@@ -277,7 +280,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
             <div key={`${episode.troughDate}-${index}`} className="rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px]">
               <div className="flex items-center justify-between">
                 <span className="text-[var(--text-secondary)]">Peak {shortDate(episode.peakDate)}</span>
-                <span className="font-mono text-red-300">{formatPct(episode.depthPct)}</span>
+                <span className="font-mono text-[var(--color-negative)]">{formatPct(episode.depthPct)}</span>
               </div>
               <div className="mt-1 flex items-center justify-between text-[var(--text-muted)]">
                 <span>Trough {shortDate(episode.troughDate)}</span>
@@ -294,7 +297,7 @@ export function DrawdownDeepDiveWidget({ symbol, onDataChange }: DrawdownDeepDiv
       )}
 
       {activeEpisode && activeEpisode.daysToRecovery == null && (
-        <div className="pt-2 text-right text-[10px] text-amber-300">
+        <div className="pt-2 text-right text-[10px] text-[var(--color-warning)]">
           Current episode active since {shortDate(activeEpisode.peakDate)}.
         </div>
       )}

@@ -9,13 +9,21 @@
  * light theme in `app/globals.css`.
  */
 
-export type PriceDirection = 'up' | 'down' | 'flat';
+/**
+ * Direction of a measured change, or `none` when there is no measurement.
+ *
+ * `none` (null / undefined / non-finite) is not the same state as `flat` (a
+ * measured zero): a missing value must render `n/a` and never get a direction
+ * colour or arrow. Collapsing the two is what made missing prices look flat.
+ */
+export type PriceDirection = 'up' | 'down' | 'flat' | 'none';
 
 /** Classify a numeric change (or null) into a direction. */
 export function priceDirection(change: number | null | undefined): PriceDirection {
-  if (change === null || change === undefined || Number.isNaN(change) || change === 0) {
-    return 'flat';
+  if (change === null || change === undefined || !Number.isFinite(change)) {
+    return 'none';
   }
+  if (change === 0) return 'flat';
   return change > 0 ? 'up' : 'down';
 }
 
@@ -49,6 +57,7 @@ export function priceBgVar(direction: PriceDirection): string {
  */
 export function priceColorClass(change: number | null | undefined): string {
   const dir = priceDirection(change);
+  if (dir === 'none') return 'price-missing';
   return dir === 'up' ? 'price-up' : dir === 'down' ? 'price-down' : 'price-flat';
 }
 
@@ -57,8 +66,28 @@ export function priceColor(change: number | null | undefined): string {
   return priceColorVar(priceDirection(change));
 }
 
-/** Directional glyph so direction is conveyed by shape, not color alone (a11y). */
+/**
+ * Text class for a signed figure: gain, loss, ink for a measured zero and muted
+ * for a missing reading (brand §13 `financialSemantics`: zero is `ink`).
+ *
+ * Use this instead of `change >= 0 ? gain : loss`, which paints a real zero as
+ * a gain and a null as a loss.
+ */
+export function signedToneClass(change: number | null | undefined): string {
+  const dir = priceDirection(change);
+  if (dir === 'none') return 'text-[var(--text-muted)]';
+  if (dir === 'flat') return 'text-[var(--text-primary)]';
+  return dir === 'up' ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]';
+}
+
+
+/**
+ * Directional glyph so direction is conveyed by shape, not color alone (a11y).
+ * Missing values get an empty string: `n/a` already says there is no reading,
+ * and a dash would read as a measured flat.
+ */
 export function priceArrow(change: number | null | undefined): string {
   const dir = priceDirection(change);
+  if (dir === 'none') return '';
   return dir === 'up' ? '\u25B2' : dir === 'down' ? '\u25BC' : '\u2013'; // ▲ ▼ –
 }

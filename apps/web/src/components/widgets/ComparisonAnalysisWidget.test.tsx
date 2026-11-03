@@ -147,7 +147,10 @@ describe('ComparisonAnalysisWidget primary ticker synchronization', () => {
     expect(screen.queryByText('P/E')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Q2' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('Period: Q2')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '3M' })).toHaveClass('bg-blue-600')
+    // aria-pressed, not just styling: an inert button would still look selected.
+    expect(screen.getByRole('button', { name: '3M' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '1M' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '3M' })).toHaveClass('bg-[var(--color-state-bg)]')
   })
 
   test('promotes an existing peer without duplicates and preserves peers for equivalent normalized symbols', async () => {

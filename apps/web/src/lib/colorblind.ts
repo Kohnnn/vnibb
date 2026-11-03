@@ -3,11 +3,8 @@
  * colorblind palette swap is currently active so individual widgets don't
  * have to hardcode Tailwind class concatenation that drifts over time.
  *
- * The actual color tokens live in src/app/globals.css under the
- * :root[data-color-mode='colorblind'] selector. Components that previously
- * used Tailwind's text-emerald-* / bg-emerald-* / border-emerald-* classes
- * now have those remapped to the canonical positive/negative tokens (so
- * Phase 3 / DEF-03 fix actually takes effect in production).
+ * The color tokens live in src/app/globals.css and are redefined when
+ * colorblind mode is active.
  */
 
 import { useEffect, useState } from 'react';
@@ -44,15 +41,14 @@ export function useColorblind(): boolean {
 /**
  * Class fragment for positive (up) / negative (down) intent that is
  * automatically swapped with the colorblind-friendly palette. Prefer this
- * over hard-coding `text-emerald-400` so QA DEF-03 stays green on
- * regression tests.
+ * over any hard-coded palette class so the swap keeps working.
  */
-export function colorblindClass(intent: 'positive' | 'negative' | 'warning', suffix = '400'): string {
-    if (intent === 'positive') {
-        return `text-emerald-${suffix}`;
-    }
-    if (intent === 'negative') {
-        return `text-red-${suffix}`;
-    }
-    return `text-amber-${suffix}`;
+const INTENT_CLASS = {
+    positive: 'text-[var(--color-positive)]',
+    negative: 'text-[var(--color-negative)]',
+    warning: 'text-[var(--color-warning)]',
+} as const;
+
+export function colorblindClass(intent: 'positive' | 'negative' | 'warning'): string {
+    return INTENT_CLASS[intent];
 }

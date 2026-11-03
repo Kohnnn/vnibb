@@ -1,13 +1,12 @@
 'use client';
 
-import { colorblindClass } from './colorblind';
 
 /**
  * ProbabilityGauge — semi-circle gauge for KPI tiles.
  *
  * Used in the redesigned MacroCalibrationWidget to show CPI / Fed /
- * Recession probability with the colour shifting from red through amber
- * to emerald as the value rises.
+ * Recession probability. A probability is not a gain or a loss, so the arc
+ * uses the accent and the number carries the reading.
  */
 
 export interface ProbabilityGaugeProps {
@@ -18,17 +17,6 @@ export interface ProbabilityGaugeProps {
     readonly caption?: string;
 }
 
-function toneClass(value: number): string {
-    if (value >= 0.66) return colorblindClass('positive');
-    if (value >= 0.33) return colorblindClass('warning');
-    return colorblindClass('negative');
-}
-
-function fillColour(value: number): string {
-    if (value >= 0.66) return 'var(--cb-positive, #34d399)';
-    if (value >= 0.33) return 'var(--cb-warning, #fbbf24)';
-    return 'var(--cb-negative, #f87171)';
-}
 
 function arcPath(value: number, size: number, stroke: number): { d: string; cx: number; cy: number; r: number } {
     const clamped = Math.max(0, Math.min(1, value));
@@ -78,7 +66,7 @@ export function ProbabilityGauge({
                 <path
                     d={arc.d}
                     fill="none"
-                    stroke={fillColour(value)}
+                    stroke="var(--color-accent-primary)"
                     strokeWidth={stroke}
                     strokeLinecap="round"
                 />
@@ -105,7 +93,7 @@ export function ProbabilityGauge({
                 )}
             </svg>
             {(sublabel || caption) && (
-                <div className={`text-[11px] ${toneClass(value)}`}>
+                <div className="text-[11px] text-[var(--text-secondary)]">
                     {sublabel ?? caption}
                 </div>
             )}

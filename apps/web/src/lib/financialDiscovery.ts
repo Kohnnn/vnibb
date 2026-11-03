@@ -1,9 +1,8 @@
-import { convertFinancialValueForUnit, formatUnitValuePlain, resolveUnitScale, type UnitConfig } from '@/lib/units'
+import { EMPTY_VALUE, convertFinancialValueForUnit, formatUnitValuePlain, resolveUnitScale, type UnitConfig } from '@/lib/units'
 
 export interface TTMSnapshotMetricCard {
   label: string
   value: string
-  tone: string
 }
 
 function readNumber(source: Record<string, any> | null | undefined, ...keys: string[]) {
@@ -39,53 +38,45 @@ export function buildTTMSnapshotCards(
   const scale = resolveUnitScale(convertedValues, unitConfig)
   const formatValue = (value: number | null | undefined) => {
     const formatted = formatUnitValuePlain(value, scale, unitConfig)
-    return formatted === '—' || !scale.suffix ? formatted : `${formatted}${scale.suffix}`
+    return formatted === EMPTY_VALUE || !scale.suffix ? formatted : `${formatted}${scale.suffix}`
   }
 
   const cards: TTMSnapshotMetricCard[] = [
     {
       label: 'Revenue',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'revenue'), unitConfig, incomePeriod)),
-      tone: 'text-blue-300',
     },
     {
       label: 'Gross Profit',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'gross_profit'), unitConfig, incomePeriod)),
-      tone: 'text-emerald-300',
     },
     {
       label: 'Operating Income',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'operating_income'), unitConfig, incomePeriod)),
-      tone: 'text-cyan-300',
     },
     {
       label: 'Net Income',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.income, 'net_income'), unitConfig, incomePeriod)),
-      tone: 'text-violet-300',
     },
     {
       label: 'Operating CF',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.cash_flow, 'operating_cash_flow'), unitConfig, cashPeriod)),
-      tone: 'text-amber-300',
     },
     {
       label: 'Free Cash Flow',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.cash_flow, 'free_cash_flow'), unitConfig, cashPeriod)),
-      tone: 'text-orange-300',
     },
     {
       label: 'Total Assets',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.balance, 'total_assets'), unitConfig, balancePeriod)),
-      tone: 'text-slate-200',
     },
     {
       label: 'Equity',
       value: formatValue(convertFinancialValueForUnit(readNumber(payload.balance, 'total_equity', 'equity'), unitConfig, balancePeriod)),
-      tone: 'text-pink-300',
     },
   ]
 
-  return cards.filter((card) => card.value !== '—')
+  return cards.filter((card) => card.value !== EMPTY_VALUE)
 }
 
 interface GrowthComparisonLabel {

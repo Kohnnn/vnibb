@@ -9,11 +9,12 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 import { getMarketState } from '@/lib/marketHours';
 import { memo, useEffect, useMemo, useState } from 'react';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
+import { EMPTY_VALUE } from '@/lib/units';
 type WindowOption = '1M' | '3M' | '6M' | '1Y';
 
 const WINDOW_OPTIONS: WindowOption[] = ['1M', '3M', '6M', '1Y'];
@@ -34,7 +35,7 @@ interface ForeignTradingWidgetProps {
 }
 
 function formatVolume(vol: number | null | undefined): string {
-    if (vol == null) return '-';
+    if (vol == null) return 'n/a';
     if (Math.abs(vol) >= 1e6) return `${(vol / 1e6).toFixed(2)}M`;
     if (Math.abs(vol) >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
     return vol.toLocaleString();
@@ -79,8 +80,8 @@ function getNetFlowLabel(net: number | null): string {
 
 function getNetFlowClass(net: number | null): string {
     if (net === null) return 'text-[var(--text-muted)]';
-    if (net > 0) return 'text-green-400';
-    if (net < 0) return 'text-red-400';
+    if (net > 0) return 'text-[var(--color-positive)]';
+    if (net < 0) return 'text-[var(--color-negative)]';
     return 'text-[var(--text-muted)]';
 }
 
@@ -121,7 +122,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             id: 'buy',
             header: 'Buy',
             accessor: (row) => (
-                <span className="text-green-500 font-mono">{formatVolume(row.buy_volume)}</span>
+                <span className="text-[var(--color-positive)] font-mono">{formatVolume(row.buy_volume)}</span>
             ),
             align: 'right',
             width: 70,
@@ -130,7 +131,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             id: 'sell',
             header: 'Sell',
             accessor: (row) => (
-                <span className="text-red-500 font-mono">{formatVolume(row.sell_volume)}</span>
+                <span className="text-[var(--color-negative)] font-mono">{formatVolume(row.sell_volume)}</span>
             ),
             align: 'right',
             width: 70,
@@ -209,7 +210,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         if (marketState.phase === 'weekend' && snapshotAgeHours !== null && snapshotAgeHours <= 96) {
             return {
                 status: 'live',
-                label: `Last trading day · ${formattedLastSync ?? '—'}`,
+                label: `Last trading day · ${formattedLastSync ?? EMPTY_VALUE}`,
                 detail: 'Foreign trading reports settle T+0 from HOSE. Showing the most recent trading day; live updates resume Monday at 09:00 ICT.',
             };
         }
@@ -228,7 +229,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         if (snapshotAgeHours >= 12) {
             return {
                 status: 'stale',
-                label: `Stale · last sync ${formattedLastSync ?? '—'}`,
+                label: `Stale · last sync ${formattedLastSync ?? EMPTY_VALUE}`,
                 detail: 'Foreign trading data has not refreshed in over 12 hours. Use Refresh to retry.',
             };
         }
@@ -291,7 +292,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                                 className={cn(
                                     'rounded px-1.5 py-0.5 text-[10px] font-semibold',
                                     flowWindow === option
-                                        ? 'bg-blue-600 text-white'
+                                        ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                                         : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                 )}
                             >
@@ -322,16 +323,16 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
 
                 <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <Globe size={12} className="text-blue-500" />
+                        <Globe size={12} className="text-[var(--color-accent-primary)]" />
                         <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Net Position</span>
                     </div>
                     <div
                         className={cn(
                             'text-xs font-black px-2 py-0.5 rounded',
                             windowNet !== null && windowNet > 0
-                                ? 'bg-green-500/10 text-green-400'
+                                ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
                                 : windowNet !== null && windowNet < 0
-                                    ? 'bg-red-500/10 text-red-400'
+                                    ? 'bg-[var(--color-negative-bg)] text-[var(--color-negative)]'
                                     : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)]'
                         )}
                     >

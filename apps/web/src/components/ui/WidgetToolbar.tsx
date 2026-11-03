@@ -78,22 +78,41 @@ export function WidgetToolbar({
     const container = header?.parentElement;
     if (!header || !container || typeof ResizeObserver === 'undefined') return;
 
+    // Compact mode removes the controls it was measured from, so re-measuring
+    // from the compact DOM would shrink `requiredWidth`, flip back to expanded
+    // and oscillate. Measure the expanded width into a ref and keep the compact
+    // threshold stable while compacted.
+    //
+    // Deps are intentionally empty: `parameters`, `actions`, `groupSelector` and
+    // `tickerSelector` are inline JSX recreated every parent render, so depending
+    // on them re-runs this effect (and rebuilds the ResizeObserver) every render.
+    // The container/leading/trailing resize signals below cover real size changes.
     const measure = () => {
       const width = container.getBoundingClientRect().width;
       if (!width) return;
-      if (!isCompact) {
-        requiredWidth.current = Math.ceil((leadingRef.current?.scrollWidth ?? 0) +
-          (trailingRef.current?.scrollWidth ?? 0) + 24);
+      const current = leadingRef.current;
+      const trailing = trailingRef.current;
+      if (!current && !trailing) return;
+      const compacted = compactTriggerRef.current;
+      const expanded = Math.ceil(
+        (current?.scrollWidth ?? 0) + (trailing?.scrollWidth ?? 0) + 24 +
+        (compacted && compacted.offsetParent ? Math.ceil(compacted.getBoundingClientRect().width) : 0)
+      );
+      if (expanded > requiredWidth.current || width >= requiredWidth.current) {
+        requiredWidth.current = expanded;
       }
-      setIsCompact(width < requiredWidth.current);
+      setIsCompact((previous) => {
+        const next = width < requiredWidth.current;
+        return next === previous ? previous : next;
+      });
     };
+    measure();
     const observer = new ResizeObserver(measure);
     observer.observe(container);
     if (leadingRef.current) observer.observe(leadingRef.current);
     if (trailingRef.current) observer.observe(trailingRef.current);
-    measure();
     return () => observer.disconnect();
-  }, [isCompact, title, parameters, actions, groupSelector, tickerSelector]);
+  }, []);
 
   useEffect(() => {
     if (!isCompact) setIsPanelOpen(false);
@@ -154,7 +173,7 @@ export function WidgetToolbar({
           <Info size={12} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="left" className="z-[120] mt-2 w-[min(28rem,calc(100vw-2rem))] max-h-[70vh] overflow-y-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-modal)] p-3 text-left shadow-2xl">
+      <PopoverContent align="left" className="z-[120] mt-2 max-h-[70vh] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] p-3 text-left shadow-lg">
         <div className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{title}</div>
         {(['purpose', 'calculation', 'interpretation'] as const).map(key => (
           <div key={key} className="mb-2 text-xs text-[var(--text-secondary)]"><strong className="capitalize">{key}: </strong>{description[key]}</div>
@@ -166,14 +185,14 @@ export function WidgetToolbar({
     </Popover>
   );
 
-  const controlClass = 'rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]';
+  const controlClass = 'rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]';
   const command = (label: string, handler: () => void, icon: React.ReactNode) => (
     <button type="button" onClick={() => { setIsPanelOpen(false); handler(); }} title={label} aria-label={label} className={controlClass}>{icon}</button>
   );
   const refresh = onRefresh && command('Refresh widget', onRefresh, <RefreshCw size={12} />);
   const agent = onCopilot && command('Open VniAgent', onCopilot, <Sparkles size={12} />);
   const settings = onSettings && (
-    <button type="button" onClick={() => { if (isCompact) compactTriggerRef.current?.focus(); setIsPanelOpen(false); onSettings(); }} data-tour="widget-settings-trigger" title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'} aria-label="Widget settings" className={shouldHighlightSettings ? `${controlClass} border border-blue-500/30 bg-blue-500/12 text-blue-300` : controlClass}>
+    <button type="button" onClick={() => { if (isCompact) compactTriggerRef.current?.focus(); setIsPanelOpen(false); onSettings(); }} data-tour="widget-settings-trigger" title={shouldHighlightSettings ? 'TradingView settings' : 'Settings'} aria-label="Widget settings" className={shouldHighlightSettings ? `${controlClass} border border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]` : controlClass}>
       <Settings size={12} />
     </button>
   );
@@ -201,7 +220,7 @@ export function WidgetToolbar({
         {isCompact && <button ref={compactTriggerRef} type="button" aria-label={`More controls for ${title}`} aria-expanded={isPanelOpen} aria-controls={isPanelOpen ? panelId : undefined} onClick={() => setIsPanelOpen(open => !open)} className={controlClass}><MoreHorizontal size={16} /></button>}
       </div>
       {isCompact && isPanelOpen && typeof document !== 'undefined' && createPortal(
-        <div ref={compactPanelRef} id={panelId} role="dialog" aria-label={`${title} controls`} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()} style={{ top: panelPosition.top, right: panelPosition.right }} className="fixed z-[120] max-h-[min(70vh,32rem)] w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)] p-3 text-[var(--text-primary)] shadow-2xl">
+        <div ref={compactPanelRef} id={panelId} role="dialog" aria-label={`${title} controls`} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()} style={{ top: panelPosition.top, right: panelPosition.right }} className="fixed z-[120] max-h-[min(70vh,32rem)] w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] p-3 text-[var(--text-primary)] shadow-lg">
           <div className="mb-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-2"><span className="truncate text-xs font-semibold" title={title}>{title}</span><button type="button" aria-label="Close widget controls" onClick={() => { setIsPanelOpen(false); compactTriggerRef.current?.focus(); }}><X size={14} /></button></div>
           <div className="flex flex-wrap items-center gap-2">{group}{ticker}{guide}{healthChip}</div>
           {(compactParameters || parameters) && <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-2">{compactParameters || parameters}</div>}

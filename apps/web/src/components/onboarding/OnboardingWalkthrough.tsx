@@ -349,7 +349,7 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
         ? presentation?.finalTitle
         : currentStep?.title
   const description = stage === 'goal'
-    ? 'VNIBB will open the working view first, then show the two or three controls that matter for that workflow.'
+    ? 'VniBB will open the working view first, then show the two or three controls that matter for that workflow.'
     : stage === 'ticker'
       ? 'Search a popular Vietnam stock or enter its three-character symbol.'
       : isFinalStep
@@ -358,36 +358,36 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
 
   return createPortal(
     <div className="pointer-events-none fixed inset-0 z-[140]">
-      <div className={highlightStyle ? 'pointer-events-auto fixed inset-0' : 'pointer-events-auto fixed inset-0 bg-[rgba(2,6,23,0.76)] backdrop-blur-[2px]'} />
-      {highlightStyle ? <div aria-hidden="true" className="pointer-events-none fixed rounded-xl border border-sky-300/70 bg-transparent shadow-[0_0_0_9999px_rgba(2,6,23,0.74),0_0_36px_rgba(56,189,248,0.18)] transition-all duration-300" style={highlightStyle} /> : null}
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="VNIBB walkthrough" className="pointer-events-auto fixed max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-[var(--border-default)] bg-[rgba(9,14,24,0.98)] p-5 text-left text-[var(--text-primary)] shadow-[0_24px_90px_rgba(2,6,23,0.55)] animate-in fade-in zoom-in-95 duration-200" style={panelStyle}>
+      <div className={highlightStyle ? 'pointer-events-auto fixed inset-0' : 'pointer-events-auto fixed inset-0 bg-[rgb(2_6_23_/_0.76)]'} />
+      {highlightStyle ? <div aria-hidden="true" className="pointer-events-none fixed rounded-md border-2 border-[var(--focus-ring-color)] bg-transparent shadow-[0_0_0_9999px_rgb(2_6_23_/_0.74)] transition-all duration-300" style={highlightStyle} /> : null}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="VniBB walkthrough" className="pointer-events-auto fixed max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-5 text-left text-[var(--text-primary)] shadow-lg animate-in fade-in zoom-in-95 duration-200" style={panelStyle}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-sky-200/80">
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-muted)]">
               <Sparkles size={12} />
-              VNIBB quick start
+              VniBB quick start
             </div>
-            <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-50">{title}</h2>
+            <h2 className="mt-2 text-lg font-semibold tracking-tight text-[var(--text-primary)]">{title}</h2>
           </div>
-          <button type="button" onClick={stage === 'guide' ? () => finish() : closeAndRestoreFocus} className="min-h-9 min-w-9 rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-100" aria-label="Close walkthrough">
+          <button type="button" onClick={stage === 'guide' ? () => finish() : closeAndRestoreFocus} className="min-h-9 min-w-9 rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Close walkthrough">
             <X size={16} />
           </button>
         </div>
-        <p className="mt-3 max-w-[48ch] text-sm leading-6 text-slate-300">{description}</p>
+        <p className="mt-3 max-w-[48ch] text-sm leading-6 text-[var(--text-secondary)]">{description}</p>
 
         {stage === 'goal' ? (
-          <div className="mt-5 divide-y divide-white/8 border-y border-white/8">
+          <div className="mt-5 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
             {ONBOARDING_GOALS.map((goal, index) => {
               const goalPresentation = GOAL_PRESENTATION[goal.id]
               const Icon = goalPresentation.icon
               return (
-                <button key={goal.id} type="button" data-walkthrough-initial-focus={index === 0 ? 'true' : undefined} onClick={() => chooseGoal(goal.id)} className="group grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 py-4 text-left transition-colors hover:text-sky-100">
-                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/[0.045] text-slate-300 transition-colors group-hover:bg-sky-400/10 group-hover:text-sky-200"><Icon size={18} /></span>
+                <button key={goal.id} type="button" data-walkthrough-initial-focus={index === 0 ? 'true' : undefined} onClick={() => chooseGoal(goal.id)} className="group grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 py-4 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">
+                  <span className="grid h-10 w-10 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors group-hover:border-[var(--border-strong)] group-hover:text-[var(--text-primary)]"><Icon size={18} /></span>
                   <span>
-                    <span className="block text-sm font-semibold text-slate-100">{goal.label}</span>
-                    <span className="mt-1 block text-xs leading-5 text-slate-400">{goalPresentation.detail}</span>
+                    <span className="block text-sm font-semibold text-[var(--text-primary)]">{goal.label}</span>
+                    <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">{goalPresentation.detail}</span>
                   </span>
-                  <ArrowRight size={16} className="text-slate-600 transition-transform group-hover:translate-x-1 group-hover:text-sky-300" />
+                  <ArrowRight size={16} className="text-[var(--text-muted)] transition-transform group-hover:translate-x-1 group-hover:text-[var(--color-accent-primary)]" />
                 </button>
               )
             })}
@@ -396,49 +396,49 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
 
         {stage === 'ticker' ? (
           <form className="mt-5" onSubmit={(event) => { event.preventDefault(); submitTicker() }}>
-            <label htmlFor="walkthrough-ticker" className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Vietnam ticker</label>
-            <div className="mt-2 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 focus-within:border-sky-400/60">
-              <Search size={16} className="text-slate-500" />
-              <input id="walkthrough-ticker" data-walkthrough-initial-focus="true" value={tickerInput} onChange={(event) => { setTickerInput(event.target.value.toUpperCase()); setRouteError('') }} autoComplete="off" className="min-h-12 w-full bg-transparent text-sm font-semibold uppercase tracking-[0.08em] text-slate-50 outline-none placeholder:normal-case placeholder:font-normal placeholder:tracking-normal placeholder:text-slate-600" placeholder="Search FPT, VNM, MBB..." />
+            <label htmlFor="walkthrough-ticker" className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">Vietnam ticker</label>
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 focus-within:ring-2 focus-within:ring-[var(--focus-ring-color)]">
+              <Search size={16} className="text-[var(--text-muted)]" />
+              <input id="walkthrough-ticker" data-walkthrough-initial-focus="true" value={tickerInput} onChange={(event) => { setTickerInput(event.target.value.toUpperCase()); setRouteError('') }} autoComplete="off" className="min-h-12 w-full bg-transparent text-sm font-semibold uppercase tracking-[0.08em] text-[var(--text-primary)] outline-none placeholder:normal-case placeholder:font-normal placeholder:tracking-normal placeholder:text-[var(--text-muted)]" placeholder="Search FPT, VNM, MBB..." />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {suggestions.map((stock) => (
-                <button key={stock.symbol} type="button" onClick={() => { setTickerInput(stock.symbol); setRouteError('') }} className={tickerInput === stock.symbol ? 'rounded-lg border border-sky-400/50 bg-sky-400/10 px-3 py-2 text-left' : 'rounded-lg border border-white/8 px-3 py-2 text-left transition-colors hover:border-white/20 hover:bg-white/[0.035]'}>
-                  <span className="block text-xs font-bold text-slate-100">{stock.symbol}</span>
-                  <span className="mt-0.5 block truncate text-[10px] text-slate-500">{stock.name}</span>
+                <button key={stock.symbol} type="button" onClick={() => { setTickerInput(stock.symbol); setRouteError('') }} className={tickerInput === stock.symbol ? 'rounded-md border border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] px-3 py-2 text-left' : 'rounded-md border border-[var(--border-default)] px-3 py-2 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)]'}>
+                  <span className="block text-xs font-bold text-[var(--text-primary)]">{stock.symbol}</span>
+                  <span className="mt-0.5 block truncate text-[10px] text-[var(--text-muted)]">{stock.name}</span>
                 </button>
               ))}
             </div>
-            {routeError ? <p role="alert" className="mt-3 text-xs font-medium text-amber-300">{routeError}</p> : null}
+            {routeError ? <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-warning)]">{routeError}</p> : null}
             <div className="mt-5 flex items-center justify-between gap-3">
-              <button type="button" onClick={() => { setStage('goal'); setSelectedGoal(null); setRouteError('') }} className="inline-flex min-h-10 items-center gap-1.5 px-1 text-xs font-semibold text-slate-400 hover:text-slate-100"><ArrowLeft size={14} />Back</button>
-              <button type="submit" className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-sky-400 px-4 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-sky-300">Open {presentation?.result}<ArrowRight size={14} /></button>
+              <button type="button" onClick={() => { setStage('goal'); setSelectedGoal(null); setRouteError('') }} className="inline-flex min-h-10 items-center gap-1.5 px-1 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><ArrowLeft size={14} />Back</button>
+              <button type="submit" className="inline-flex min-h-10 items-center gap-2 rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-xs font-bold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]">Open {presentation?.result}<ArrowRight size={14} /></button>
             </div>
           </form>
         ) : null}
 
-        {stage === 'goal' && routeError ? <p role="alert" className="mt-3 text-xs font-medium text-amber-300">{routeError}</p> : null}
+        {stage === 'goal' && routeError ? <p role="alert" className="mt-3 text-xs font-medium text-[var(--color-warning)]">{routeError}</p> : null}
 
         {stage === 'guide' ? (
           <>
             <div className="mt-5 flex items-center gap-1.5">
-              {guidanceSteps.map((step, index) => <span key={step.id} className={index === stepIndex ? 'h-1.5 flex-1 rounded-full bg-sky-300' : index < stepIndex || isFinalStep ? 'h-1.5 flex-1 rounded-full bg-sky-400/55' : 'h-1.5 flex-1 rounded-full bg-white/10'} />)}
-              <span className="ml-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{progressLabel}</span>
+              {guidanceSteps.map((step, index) => <span key={step.id} className={index === stepIndex ? 'h-1.5 flex-1 rounded-full bg-[var(--color-accent-primary)]' : index < stepIndex || isFinalStep ? 'h-1.5 flex-1 rounded-full bg-[var(--color-accent-secondary)]' : 'h-1.5 flex-1 rounded-full bg-[var(--bg-tertiary)]'} />)}
+              <span className="ml-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{progressLabel}</span>
             </div>
             {isFinalStep ? (
-              <div className="mt-5 flex items-center gap-3 border-y border-white/8 py-4">
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-emerald-400/10 text-emerald-300"><Check size={18} /></span>
+              <div className="mt-5 flex items-center gap-3 border-y border-[var(--border-subtle)] py-4">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-info)]"><Check size={18} /></span>
                 <div>
-                  <p className="text-sm font-semibold text-slate-100">Outcome opened</p>
-                  <p className="mt-0.5 text-xs leading-5 text-slate-400">You can restart this guide from Settings.</p>
+                  <p className="text-sm font-semibold text-[var(--text-primary)]">Outcome opened</p>
+                  <p className="mt-0.5 text-xs leading-5 text-[var(--text-muted)]">You can restart this guide from Settings.</p>
                 </div>
               </div>
             ) : null}
             <div className="mt-5 flex items-center justify-between gap-3">
-              <button type="button" onClick={() => finish()} className="min-h-9 text-xs font-semibold text-slate-400 transition-colors hover:text-white">Exit tour</button>
+              <button type="button" onClick={() => finish()} className="min-h-9 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">Exit tour</button>
               <div className="flex items-center gap-2">
-                {!isFinalStep && stepIndex > 0 ? <button type="button" onClick={() => setStepIndex((current) => current - 1)} className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5"><ArrowLeft size={14} />Back</button> : null}
-                <button type="button" data-walkthrough-initial-focus="true" onClick={() => isFinalStep ? finish(selectedGoal !== 'scan_market') : setStepIndex((current) => current + 1)} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-sky-400 px-3 py-2 text-xs font-bold text-slate-950 transition-colors hover:bg-sky-300">
+                {!isFinalStep && stepIndex > 0 ? <button type="button" onClick={() => setStepIndex((current) => current - 1)} className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-strong)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"><ArrowLeft size={14} />Back</button> : null}
+                <button type="button" data-walkthrough-initial-focus="true" onClick={() => isFinalStep ? finish(selectedGoal !== 'scan_market') : setStepIndex((current) => current + 1)} className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-xs font-bold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]">
                   {isFinalStep ? <><Check size={14} />{presentation?.finalAction}</> : <>Next<ArrowRight size={14} /></>}
                 </button>
               </div>
@@ -446,8 +446,8 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
           </>
         ) : stage === 'goal' ? (
           <div className="mt-5 flex items-center justify-between gap-3">
-            <button type="button" onClick={closeAndRestoreFocus} className="min-h-9 text-xs font-semibold text-slate-400 transition-colors hover:text-white">Skip for now</button>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">{progressLabel}</span>
+            <button type="button" onClick={closeAndRestoreFocus} className="min-h-9 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]">Skip for now</button>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{progressLabel}</span>
           </div>
         ) : null}
       </div>

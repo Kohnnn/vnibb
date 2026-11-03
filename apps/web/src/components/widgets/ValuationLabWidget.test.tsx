@@ -33,7 +33,7 @@ describe('ValuationLabWidget price-unit comparison', () => {
       fireEvent.change(screen.getByLabelText(/Shares outstanding/i), { target: { value: '100' } });
 
       expect(within(screen.getByText('Current price').parentElement!).getByText('57.30')).toBeInTheDocument();
-      expect(within(screen.getByText('Upside').parentElement!).getByText('—')).toBeInTheDocument();
+      expect(within(screen.getByText('Upside').parentElement!).getByText('n/a')).toBeInTheDocument();
       expect(screen.queryByText(/Reverse DCF/)).not.toBeInTheDocument();
       expect(screen.getByText(/excluded from upside and reverse DCF/)).toBeInTheDocument();
 
@@ -51,7 +51,7 @@ describe('ValuationLabWidget price-unit comparison', () => {
 
     expect(within(screen.getByText('Current price').parentElement!).getByText('57.30')).toBeInTheDocument();
     const upsideText = within(screen.getByText('Upside').parentElement!).getByText(/%/).textContent ?? '';
-    expect(upsideText).not.toBe('—');
+    expect(upsideText).not.toBe('n/a');
     expect(screen.getByText(/Reverse DCF/)).toBeInTheDocument();
     expect(screen.queryByText(/excluded from upside and reverse DCF/)).not.toBeInTheDocument();
   });

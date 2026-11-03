@@ -5,10 +5,11 @@
 import { useEffect, useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Globe, Building2 } from 'lucide-react';
 import { useBlockTrades } from '@/lib/queries';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { priceColorClass } from '@/lib/priceColor';
 
 interface BlockTradeWidgetProps {
   symbol?: string;
@@ -18,7 +19,8 @@ interface BlockTradeWidgetProps {
 }
 
 function formatCurrency(value: number | null | undefined): string {
-  if (!value) return '-';
+  // Zero is a measured value (a VND0 print), not a missing one.
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
   if (value >= 1e9) return `VND${(value / 1e9).toFixed(1)}bn`;
   if (value >= 1e6) return `VND${(value / 1e6).toFixed(1)}mn`;
   if (value >= 1e3) return `VND${(value / 1e3).toFixed(1)}k`;
@@ -42,7 +44,7 @@ function getNetBlockTradeLabel(value: number): string {
 }
 
 function formatNetBlockTradeValue(value: number): string {
-  return value === 0 ? 'VND0' : formatCurrency(Math.abs(value));
+  return formatCurrency(Math.abs(value));
 }
 
 export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps) {
@@ -103,7 +105,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
       {/* Header */}
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs">
-          <AlertTriangle size={12} className="text-yellow-400" />
+          <AlertTriangle size={12} className="text-[var(--color-warning)]" />
           <span className="text-[var(--text-muted)]">{filteredTrades.length} block trades</span>
         </div>
         <div className="flex items-center gap-2">
@@ -138,7 +140,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
         <select
           value={minThreshold}
           onChange={(e) => setMinThreshold(Number(e.target.value))}
-          className="flex-1 px-2 py-1 text-[10px] bg-[var(--bg-secondary)] text-[var(--text-secondary)] rounded border border-[var(--border-color)] focus:border-blue-500 focus:outline-none"
+          className="flex-1 px-2 py-1 text-[10px] bg-[var(--bg-secondary)] text-[var(--text-secondary)] rounded border border-[var(--border-color)] focus:border-[var(--color-state-border)] focus:outline-none"
         >
           <option value={5}>VND 5bn+</option>
           <option value={10}>VND 10bn+</option>
@@ -154,16 +156,16 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
           <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Buy</div>
-              <div className="text-green-400 font-medium">{formatCurrency(totalBuyValue)}</div>
+              <div className={`${priceColorClass(1)} font-medium`}>{formatCurrency(totalBuyValue)}</div>
             </div>
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Sell</div>
-              <div className="text-red-400 font-medium">{formatCurrency(totalSellValue)}</div>
+              <div className={`${priceColorClass(-1)} font-medium`}>{formatCurrency(totalSellValue)}</div>
             </div>
             <div>
               <div className="text-[var(--text-muted)] mb-0.5">Net</div>
-              <div className={`font-medium ${netValue > 0 ? 'text-green-400' : netValue < 0 ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
-                {getNetBlockTradeLabel(netValue)} {netValue > 0 ? '+' : ''}{formatNetBlockTradeValue(netValue)}
+              <div className={`font-medium ${priceColorClass(netValue)}`}>
+                {getNetBlockTradeLabel(netValue)} {netValue > 0 ? '+' : netValue < 0 ? '-' : ''}{formatNetBlockTradeValue(netValue)}
               </div>
             </div>
           </div>
@@ -191,8 +193,10 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
               const isSell = trade.side === 'SELL';
               const SideIcon = isBuy ? TrendingUp : isSell ? TrendingDown : AlertTriangle;
               const sideLabel = isBuy ? 'Buy block' : isSell ? 'Sell block' : 'Unknown side';
-              const sideColor = isBuy ? 'text-green-400' : isSell ? 'text-red-400' : 'text-yellow-400';
-              const bgColor = isBuy ? 'bg-green-500/5' : isSell ? 'bg-red-500/5' : 'bg-yellow-500/5';
+              // Direction tokens follow colour-vision mode; the Buy/Sell label
+              // and arrow icon carry the reading without relying on hue.
+              const sideColor = isBuy ? priceColorClass(1) : isSell ? priceColorClass(-1) : 'text-[var(--text-muted)]';
+              const bgColor = isBuy ? 'bg-price-up' : isSell ? 'bg-price-down' : 'bg-[var(--bg-secondary)]';
 
               return (
                 <div
@@ -207,10 +211,10 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
                         {sideLabel}
                       </span>
                       {trade.is_foreign && (
-                        <Globe size={10} className="text-blue-400" />
+                        <Globe size={10} className="text-[var(--color-accent-primary)]" />
                       )}
                       {trade.is_proprietary && (
-                        <Building2 size={10} className="text-cyan-400" />
+                        <Building2 size={10} className="text-[var(--color-accent-primary)]" />
                       )}
                     </div>
                     <span className={`text-xs font-medium ${sideColor}`}>
@@ -224,7 +228,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
                     <span>{formatTime(trade.trade_time)}</span>
                   </div>
                   {trade.volume_ratio !== null && trade.volume_ratio > 1 && (
-                    <div className="mt-1 text-[10px] text-yellow-400">
+                    <div className="mt-1 text-[10px] text-[var(--color-warning)]">
                       {trade.volume_ratio.toFixed(1)}x avg volume
                     </div>
                   )}
@@ -240,11 +244,11 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
         <div className="mt-2 pt-2 border-t border-[var(--border-color)]">
           <div className="flex items-center gap-3 text-[10px] text-[var(--text-muted)]">
             <div className="flex items-center gap-1">
-              <Globe size={10} className="text-blue-400" />
+              <Globe size={10} className="text-[var(--color-accent-primary)]" />
               <span>Foreign</span>
             </div>
             <div className="flex items-center gap-1">
-              <Building2 size={10} className="text-cyan-400" />
+              <Building2 size={10} className="text-[var(--color-accent-primary)]" />
               <span>Proprietary</span>
             </div>
           </div>

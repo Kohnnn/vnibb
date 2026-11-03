@@ -1,17 +1,27 @@
 /**
- * VNIBB Design Tokens — CANONICAL SOURCE OF TRUTH
+ * VniBB Design Tokens — CANONICAL SOURCE OF TRUTH
  *
  * This is the single authoritative token file. Values reflect the *effective*
  * rendered palette (the historical cascade of design-tokens.css overridden by
- * variables.css). `styles/variables.css` is now a thin compat shim and
- * `styles/tokens.css` has been removed (it was never imported).
+ * variables.css). `styles/variables.css` is now a thin compat shim; the
+ * TypeScript token modules (`lib/design.ts`, `styles/tokens.ts`) were deleted
+ * in #198 — CSS is the only colour source, `lib/priceColor.ts` the only
+ * direction helper.
  *
  * Layering:
  *   1. This file defines `--color-*`, fonts, spacing, radius, semantic, and
- *      premium widget tokens for the DARK theme (the default).
- *   2. `globals.css` re-aliases these into the stable `--bg-*` / `--text-*`
- *      public API that components consume, and defines LIGHT overrides plus
- *      colorblind (`[data-color-mode='colorblind']`) remaps.
+ *      widget tokens for the DARK theme (the default).
+ *   2. The light brand palette (VniBB v1.1: Ink / Paper / Slate / Rule /
+ *      Accent blue) lives HERE in the `html[data-theme="light"]` / `.light`
+ *      block — the selectors the pre-hydration script in `app/layout.tsx`
+ *      already sets, so there is no second brand layer.
+ *   3. `globals.css` re-aliases these into the stable `--bg-*` / `--text-*`
+ *      public API that components consume, plus colorblind
+ *      (`[data-color-mode='colorblind']`) remaps.
+ *
+ * Radius: widgets use 4 px corners (brand pack §"Rules and corners"). The
+ * 16 px widget radius, glass backgrounds and glow shadows were retired in
+ * ticket #197; do not reintroduce them.
  */
 
 :root {
@@ -24,26 +34,43 @@
 
   --color-border-default: #2A2A30;
   --color-border-subtle: #212126;
-  --color-border-strong: #3A3A42;
+  /* Essential control boundary (#197): >=3:1 on every dark surface
+     (#0A0E17 4.45, #111827 4.09, #1F2937 3.38, #212126 3.69), still
+     subordinate to --color-text-secondary #9CA3AF. */
+  --color-border-strong: #707A8A;
 
   --color-text-primary: #f9fafb;
   --color-text-secondary: #9ca3af;
-  --color-text-tertiary: #6B7280;
+  --color-text-tertiary: #929aa8;
   --color-text-muted: #929aa8;
 
   --color-accent-primary: #3B82F6;
   --color-accent-secondary: #60A5FA;
   --color-accent-hover: #2563EB;
+  /* Solid accent fill behind --color-on-accent. Accent-primary itself is
+     #3B82F6, which is only 3.68:1 against white; a filled button needs >=4.5:1,
+     so fills use this darker step (6.1:1). It is a step below `-hover`, so a
+     filled control still changes on hover instead of pinning to one colour. */
+  --color-accent-fill: #1D4ED8;
+  /* Text/icon on a filled accent surface (#198). */
+  --color-on-accent: #ffffff;
 
-  --color-success: #22c55e;
-  --color-warning: #F59E0B;
-  --color-error: #EF4444;
+  /* ---- System states (saved / loading / warning / failed) ----
+     Never red or green: those are reserved for financial direction.
+     `--color-info` is the neutral/blue system accent; warning sits on the
+     accent ramp so it reads as "attention", not "loss". */
+  --color-success: var(--color-accent-primary);
+  --color-warning: var(--color-accent-secondary);
+  --color-error: var(--color-accent-primary);
+  --color-info: var(--color-accent-primary);
+  --color-state-bg: color-mix(in srgb, var(--color-accent-primary) 16%, transparent);
+  --color-state-border: color-mix(in srgb, var(--color-accent-primary) 45%, transparent);
 
   /* ---- Semantic up/down (financial direction) ---- */
   /* Single source for gain/loss coloring. Consume via lib/priceColor.ts or the
      var(--color-positive)/var(--color-negative) tokens. Brightened for strong
-     visibility against the dark background; light-theme overrides live in
-     globals.css. */
+     visibility against the dark background; light-theme overrides live in the
+     light block below. */
   --color-positive: #2ee06a;
   --color-positive-muted: #6ee79a;
   --color-positive-bg: rgba(46, 224, 106, 0.16);
@@ -51,12 +78,20 @@
   --color-negative-muted: #ff8a8a;
   --color-negative-bg: rgba(255, 90, 90, 0.16);
   --color-neutral: #aab4c2;
+  /* Probability-band tones. These were referenced as `var(--cb-*, #hex)` in
+     prediction-market-ui without ever being defined, so the hardcoded hex
+     always won and color-vision mode could not reach them. Tone here means a
+     band, not a direction: warning stays neutral/blue per brand §13. */
+  --cb-positive: var(--color-positive);
+  --cb-warning: var(--color-accent-primary);
+  --cb-negative: var(--color-negative);
 
   /* ---- Typography ---- */
-  /* Real loaded fonts are Geist (next/font local). The geist vars are attached
-     to <body>; these tokens reference them with safe fallbacks. */
-  --font-family: var(--font-geist-sans), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: var(--font-geist-mono), 'JetBrains Mono', 'Fira Code', monospace;
+  /* Real loaded fonts are Inter / IBM Plex Mono (next/font local, mounted on
+     <html>). The next/font vars are attached to <html> so these :root tokens
+     resolve; the fallback stack MUST stay inside var() (see #195). */
+  --font-family: var(--font-inter, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  --font-mono: var(--font-plex-mono, 'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', monospace);
   /* Back-compat alias (was defined in variables.css). */
   --font-sans: var(--font-family);
 
@@ -86,6 +121,17 @@
   --radius-lg: 8px;
   --radius-xl: 12px;
 
+  /* ---- Controls & focus ----
+     36 px desktop control height, 44 px on touch pointers. Focus is a 2 px
+     ring with 2 px offset (brand pack §"Keyboard focus"). */
+  --control-height: 36px;
+  --control-height-sm: 28px;
+  --control-height-lg: 44px;
+  --touch-target-size: 44px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--color-accent-primary);
+
   /* ---- Shadows ---- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
@@ -100,26 +146,159 @@
   --chart-green: var(--color-positive);
   --chart-red: var(--color-negative);
   --chart-blue: #3b82f6;
-  --chart-cyan: #06b6d4;
-  --chart-orange: #f97316;
+  /* Comparison series (benchmarks, peers, overlays): Slate, never a focal
+     series and never a state colour. */
+  --chart-slate: #5B6573;
+  /* Corporate-action marker hues (brand §20 categorical extension). Each pair
+     clears 4.5:1 for the 10 px marker label against its own theme's surface:
+     pastels on the dark chart, deeper tones on Paper and inside a light PNG
+     export, where the pastels measured 1.8-2.7:1. */
+  --chart-event-dividend: #f59e0b;
+  --chart-event-split: #a78bfa;
+  --chart-event-rights: #22d3ee;
+  /* Documented categorical extension (brand §20): "additional categorical
+     palettes require a documented extension; do not improvise rainbow series."
+     Used only where slices carry no focal/comparison relation - sector, peer
+     and portfolio breakdowns. Everything else uses blue + Slate. */
+  --chart-cat-3: color-mix(in srgb, #5B6573 78%, #FFFFFF);
+  --chart-cat-4: color-mix(in srgb, #3b82f6 55%, #FFFFFF);
+  --chart-cat-5: color-mix(in srgb, #3b82f6 45%, #5B6573);
+  --chart-cat-6: color-mix(in srgb, #8FA0B5 80%, #3b82f6);
 
-  /* ---- Premium Widget Tokens ---- */
+  /* ---- Widget Tokens (solid surfaces; no glass, no glow) ---- */
   --widget-bg-solid: #12121a;
-  --widget-bg-glass: rgba(18, 18, 26, 0.95);
-  --widget-border-default: rgba(255, 255, 255, 0.06);
-  --widget-border-hover: rgba(59, 130, 246, 0.25);
-  --widget-border-active: rgba(59, 130, 246, 0.5);
+  --widget-border-default: #2A2A30;
+  --widget-border-hover: color-mix(in srgb, var(--color-accent-primary) 45%, transparent);
+  --widget-border-active: var(--color-accent-primary);
 
-  --widget-shadow-default: 0 4px 24px rgba(0, 0, 0, 0.4);
-  --widget-shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --widget-shadow-glow: 0 0 40px rgba(59, 130, 246, 0.15);
+  --widget-shadow-default: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --widget-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.45);
 
-  --widget-radius: 16px;
-  --widget-radius-inner: 12px;
+  --widget-radius: 4px;
+  --widget-radius-inner: 4px;
 
   /* ---- Animation Tokens ---- */
   --ease-premium: cubic-bezier(0.4, 0, 0.2, 1);
   --duration-fast: 150ms;
   --duration-normal: 250ms;
   --duration-slow: 400ms;
+}
+
+/* ============================================================
+   LIGHT THEME — VniBB brand pack v1.1
+   Ink #0A0A0A · Paper #FFFFFF · Slate #5B6573 · Rule #D9DDE3
+   Accent #0B3D91 · Gain #1E7B4F · Loss #B3261E
+
+   Contrast on Paper (sRGB relative luminance, measured):
+     Ink 19.80:1 · Slate 5.91:1 · Accent 10.04:1 · Gain 5.25:1 · Loss 6.54:1
+   Rule is 1.36:1 — decorative only. Essential control boundaries use Slate
+   (--color-border-strong), which is ≥3:1 on every light surface.
+   ============================================================ */
+html.light,
+html[data-theme="light"],
+:root.light,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Brand primitives (light only; dark keeps its runtime palette). */
+  --color-ink: #0A0A0A;
+  --color-paper: #FFFFFF;
+  --color-slate: #5B6573;
+  --color-rule: #D9DDE3;
+  --color-accent-brand: #0B3D91;
+
+  /* Surfaces: Paper, with a faint neutral tint for recessed rows/headers. */
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #FFFFFF;
+  --color-bg-tertiary: #F2F4F7;
+  --color-bg-elevated: #FFFFFF;
+
+  /* Borders: Rule is decorative; Slate marks essential control boundaries. */
+  --color-border-default: #D9DDE3;
+  --color-border-subtle: #E8ECF1;
+  --color-border-strong: #5B6573;
+
+  /* Text: Ink primary, Slate secondary/muted (5.91:1 and 5.36:1 on #F2F4F7). */
+  --color-text-primary: #0A0A0A;
+  --color-text-secondary: #5B6573;
+  --color-text-tertiary: #5B6573;
+  --color-text-muted: #5B6573;
+
+  /* Interaction: brand blue. Hover darkens; secondary is a lighter tint. */
+  --color-accent-primary: #0B3D91;
+  --color-accent-secondary: #1A56B8;
+  --color-accent-hover: #082E6E;
+  --color-on-accent: #ffffff;
+  /* Solid accent fill: brand blue is already 10.04:1 against white. */
+  --color-accent-fill: #0B3D91;
+
+  /* System states: neutral/blue only. */
+  --color-success: var(--color-accent-primary);
+  --color-warning: var(--color-accent-primary);
+  --color-error: var(--color-accent-primary);
+  --color-info: var(--color-accent-primary);
+  --color-state-bg: color-mix(in srgb, var(--color-accent-primary) 8%, transparent);
+  --color-state-border: color-mix(in srgb, var(--color-accent-primary) 40%, transparent);
+
+  /* Financial direction. */
+  --color-positive: #1E7B4F;
+  --color-positive-muted: #1E7B4F;
+  --color-positive-bg: color-mix(in srgb, #1E7B4F 10%, transparent);
+  --color-negative: #B3261E;
+  --color-negative-muted: #B3261E;
+  --color-negative-bg: color-mix(in srgb, #B3261E 10%, transparent);
+  --color-neutral: #0A0A0A;
+  --cb-positive: var(--color-positive);
+  --cb-warning: var(--color-accent-primary);
+  --cb-negative: var(--color-negative);
+
+  --focus-ring-color: #0B3D91;
+
+  /* Widget surfaces: solid Paper with Rule hairlines. */
+  --widget-bg-solid: #FFFFFF;
+  --widget-border-default: #D9DDE3;
+  --widget-border-hover: #5B6573;
+  --widget-border-active: #0B3D91;
+  --widget-shadow-default: 0 1px 2px rgba(10, 10, 10, 0.06);
+  --widget-shadow-hover: 0 4px 12px rgba(10, 10, 10, 0.10);
+
+  --chart-blue: #0B3D91;
+  --chart-slate: #5B6573;
+  --chart-event-dividend: #B45309;
+  --chart-event-split: #6D28D9;
+  --chart-event-rights: #0E7490;
+  --chart-cat-3: color-mix(in srgb, #5B6573 70%, #FFFFFF);
+  --chart-cat-4: color-mix(in srgb, #0B3D91 55%, #FFFFFF);
+  --chart-cat-5: color-mix(in srgb, #0B3D91 45%, #5B6573);
+  --chart-cat-6: color-mix(in srgb, #5B6573 45%, #FFFFFF);
+}
+
+/* Density scales control height only; colours and radii stay fixed. */
+html[data-density="compact"] {
+  --control-height: 28px;
+  --control-height-sm: 24px;
+  --control-height-lg: 36px;
+  --widget-padding: 8px;
+}
+
+html[data-density="spacious"] {
+  --control-height: 44px;
+  --control-height-sm: 36px;
+  --control-height-lg: 48px;
+  --widget-padding: 16px;
+}
+
+/* Touch pointers get 44 px controls (brand pack: 36 px desktop, 44 px touch).
+   Declared AFTER the density rules so a saved compact density can never shrink
+   a touch target below 44 px (#197). */
+@media (pointer: coarse) {
+  :root,
+  html.light,
+  html[data-theme="light"],
+  html[data-density="compact"],
+  html[data-density="spacious"] {
+    --control-height: 44px;
+    --control-height-sm: 36px;
+    --control-height-lg: 48px;
+  }
 }

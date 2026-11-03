@@ -51,7 +51,7 @@ export function ResearchSourceCard({
           handleOpen()
         }
       }}
-      className="group rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 transition-all hover:-translate-y-0.5 hover:border-blue-500/40 hover:shadow-[0_12px_28px_rgba(37,99,235,0.12)]"
+      className="group rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 transition-all hover:-translate-y-0.5 hover:border-[var(--color-state-border)] hover:shadow-[var(--widget-shadow-hover)]"
       aria-label={`Open ${source.label} in a new tab`}
     >
       <div className="flex items-start gap-3">
@@ -92,7 +92,7 @@ export function ResearchSourceCard({
                 onCopyUrl(source.url)
               }
             }}
-            className="rounded border border-[var(--border-color)] p-2 text-[var(--text-muted)] transition-colors hover:border-blue-500/40 hover:text-[var(--text-primary)]"
+            className="rounded border border-[var(--border-color)] p-2 text-[var(--text-muted)] transition-colors hover:border-[var(--color-state-border)] hover:text-[var(--text-primary)]"
             title="Copy URL"
             aria-label="Copy source URL"
           >
@@ -104,7 +104,7 @@ export function ResearchSourceCard({
               event.stopPropagation()
               handleOpen()
             }}
-            className="inline-flex items-center gap-1 rounded border border-blue-500/50 bg-blue-600/10 px-2.5 py-2 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-600/20"
+            className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-xs font-semibold text-[var(--color-accent-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
             aria-label={`Open ${source.label}`}
           >
             <ExternalLink size={13} />

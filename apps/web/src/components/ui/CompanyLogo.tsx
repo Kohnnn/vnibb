@@ -118,7 +118,7 @@ export function CompanyLogo({ symbol, name, website, size = 20, className }: Com
   if (!domain || sourceIndex >= sources.length) {
     return (
       <div
-        className={`inline-flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[10px] font-black text-[var(--accent-blue)] ${className ?? ''}`.trim()}
+        className={`inline-flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--accent-blue)] ${className ?? ''}`.trim()}
         style={{ width: size, height: size }}
         title={name || symbol}
       >

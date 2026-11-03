@@ -46,7 +46,7 @@ export function SearchBar({
                 value={value}
                 onChange={(event) => setValue(event.target.value)}
                 placeholder={placeholder}
-                className="w-full rounded-md border border-default bg-[var(--bg-tertiary)] py-1 pl-7 pr-7 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500/60 focus:outline-none"
+                className="w-full rounded-md border border-default bg-[var(--bg-tertiary)] py-1 pl-7 pr-7 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)] focus:outline-none"
                 aria-label={placeholder}
             />
             {value.length > 0 && (

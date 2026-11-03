@@ -66,9 +66,9 @@ const METRIC_GROUPS = [
 ] as const;
 
 function formatMetricValue(metricKey: string, value: number | string | null | undefined) {
-  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return 'N/A';
+  if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) return 'n/a';
   const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return 'N/A';
+  if (!Number.isFinite(numeric)) return 'n/a';
   if (PERCENT_KEYS.has(metricKey)) return formatPercent(numeric, { decimals: 2, input: 'percent' });
   if (RATIO_KEYS.has(metricKey)) return formatNumber(numeric, { decimals: 2 });
   return formatNumber(numeric, { decimals: 2 });
@@ -101,10 +101,10 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
   const latestCards = useMemo(() => {
     if (!latest) return [];
     return [
-      { key: 'loan_to_deposit', icon: Landmark, accent: 'text-sky-300' },
-      { key: 'nim', icon: TrendingUp, accent: 'text-emerald-300' },
-      { key: 'credit_cost', icon: ShieldCheck, accent: 'text-amber-300' },
-      { key: 'equity_to_assets', icon: Building2, accent: 'text-cyan-300' },
+      { key: 'loan_to_deposit', icon: Landmark, accent: 'text-[var(--color-accent-primary)]' },
+      { key: 'nim', icon: TrendingUp, accent: 'text-[var(--color-accent-secondary)]' },
+      { key: 'credit_cost', icon: ShieldCheck, accent: 'text-[var(--color-warning)]' },
+      { key: 'equity_to_assets', icon: Building2, accent: 'text-[var(--color-accent-primary)]' },
     ].map((item) => ({
       ...item,
       value: latest[item.key as keyof typeof latest] as number | null | undefined,
@@ -193,7 +193,7 @@ function BankMetricsWidgetComponent({ id, symbol, onRemove, onDataChange }: Bank
             fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasBankData}
             note={note}
-            sourceLabel="VNIBB ratio feed"
+            sourceLabel="VniBB ratio feed"
             align="right"
           />
         </div>

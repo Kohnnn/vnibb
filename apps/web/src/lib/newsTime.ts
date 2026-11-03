@@ -1,4 +1,4 @@
-import { parseFlexibleDate } from './format'
+import { parseFlexibleDate } from './formatDate'
 
 export function normalizeNewsTimestamp(value: unknown): string | null {
   if (value === null || value === undefined) return null

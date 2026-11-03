@@ -36,7 +36,7 @@ export function MobileNav({
                     });
                     setIsOpen(true);
                 }}
-                className="lg:hidden fixed top-4 left-4 z-40 p-2 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                className="fixed left-4 top-4 z-40 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] lg:hidden"
                 aria-label="Open menu"
             >
                 <Menu size={24} />
@@ -46,7 +46,7 @@ export function MobileNav({
                 <>
                     <button
                         type="button"
-                        className="fixed inset-0 z-50 bg-[rgba(0,0,0,0.6)] transition-opacity lg:hidden"
+                        className="fixed inset-0 z-50 bg-[rgb(2_6_23_/_0.72)] transition-opacity lg:hidden"
                         aria-label="Close navigation overlay"
                         onClick={() => closeMenu('overlay_click')}
                     />
@@ -56,12 +56,12 @@ export function MobileNav({
                         aria-modal="true"
                         aria-label="Navigation menu"
                         tabIndex={-1}
-                        className="lg:hidden fixed top-0 left-0 h-full w-72 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] z-50 transform transition-transform duration-300 ease-in-out translate-x-0"
+                        className="fixed left-0 top-0 z-50 h-full w-[min(18rem,calc(100vw-3rem))] translate-x-0 border-r border-[var(--border-strong)] bg-[var(--bg-secondary)] transition-transform duration-300 ease-in-out lg:hidden"
                     >
                         <button
                             type="button"
                             onClick={() => closeMenu('close_button')}
-                            className="absolute top-4 right-4 p-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                            className="absolute right-4 top-4 rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             aria-label="Close menu"
                         >
                             <X size={20} />

@@ -657,7 +657,7 @@ export function WidgetWrapper({
                 }
                 break;
             case 'png':
-                await exportToPNG(id, filename);
+                await exportToPNG(id, filename, provenance);
                 break;
         }
     };
@@ -694,7 +694,7 @@ export function WidgetWrapper({
             <div
                 className={cn(
                     "widget-card-premium h-full min-h-0 flex flex-col overflow-visible",
-                    isEditing ? 'ring-2 ring-blue-500/40' : '',
+                    isEditing ? 'ring-2 ring-[var(--color-state-border)]' : '',
                     isMaximized ? 'opacity-0 pointer-events-none' : ''
                 )}
                 style={{
@@ -731,12 +731,12 @@ export function WidgetWrapper({
                             <button
                                 type="button"
                                 onClick={() => setIsTickerDropdownOpen(true)}
-                                className="inline-flex items-center gap-1 rounded border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-blue-300 transition-colors hover:bg-blue-500/20 hover:text-blue-200"
+                                className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]"
                                 title="Select widget ticker"
                             >
                                 <span>{displaySymbol}</span>
                                 {exchangeBadge && (
-                                    <span className="rounded bg-blue-900/30 px-1 text-[9px] text-blue-200/80">
+                                    <span className="rounded bg-[var(--color-state-bg)] px-1 text-[9px] text-[var(--color-accent-primary)]">
                                         {exchangeBadge}
                                     </span>
                                 )}
@@ -887,8 +887,8 @@ export function WidgetWrapper({
                     <div className={cn(
                         'border-b px-3 py-2 text-[10px] leading-4',
                         layoutInsight.severity === 'warning'
-                            ? 'border-amber-500/20 bg-amber-500/8 text-amber-100/90'
-                            : 'border-blue-500/20 bg-blue-500/8 text-blue-100/85'
+                            ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]'
+                            : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                     )}>
                         <span className="font-semibold uppercase tracking-[0.16em]">
                             {layoutInsight.kind === 'compacted_sparse' ? 'Sparse State' : 'Layout Fit'}

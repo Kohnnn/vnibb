@@ -154,7 +154,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
                       aria-pressed={chartMode === option.value}
                       className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold transition-colors ${
                         chartMode === option.value
-                          ? 'bg-sky-500/15 text-sky-200'
+                          ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                       }`}
                     >
@@ -200,7 +200,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
             </div>
 
             <WidgetMeta
-              sourceLabel={exchange || 'VNIBB'}
+              sourceLabel={exchange || 'VniBB'}
               note={`${selectedTimeframe} lightweight chart`}
               updatedAt={null}
               fetchedAt={metricsUpdatedAt}
@@ -220,7 +220,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
             height={220}
           />
           <div className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-[var(--text-muted)]">
-            Lightweight TradingView-style chart using live VNIBB data without local chart caching
+            Lightweight TradingView-style chart using live VniBB data without local chart caching
           </div>
         </div>
 
@@ -247,10 +247,10 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
           ) : (
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               {[
-                { label: 'P/E', value: formatRatio(snapshotMetrics.pe), tone: 'border-sky-500/15 bg-sky-500/[0.06]' },
-                { label: 'P/B', value: formatRatio(snapshotMetrics.pb), tone: 'border-cyan-500/15 bg-cyan-500/[0.06]' },
-                { label: 'ROE', value: formatPercent(snapshotMetrics.roe), tone: 'border-emerald-500/15 bg-emerald-500/[0.06]' },
-                { label: 'Dividend Yield', value: formatDividendYield(snapshotMetrics.dividendYield), tone: 'border-amber-500/15 bg-amber-500/[0.06]' },
+                { label: 'P/E', value: formatRatio(snapshotMetrics.pe), tone: 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]/[0.06]' },
+                { label: 'P/B', value: formatRatio(snapshotMetrics.pb), tone: 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]/[0.06]' },
+                { label: 'ROE', value: formatPercent(snapshotMetrics.roe), tone: 'border-[var(--color-state-border)] bg-[var(--color-positive-bg)]/[0.06]' },
+                { label: 'Dividend Yield', value: formatDividendYield(snapshotMetrics.dividendYield), tone: 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]/[0.06]' },
               ].map((item) => (
                 <div
                   key={item.label}

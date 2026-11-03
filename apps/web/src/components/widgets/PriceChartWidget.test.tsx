@@ -82,8 +82,8 @@ describe('PriceChartWidget', () => {
     ['certified zero remains zero', 'percent', 0, 'percent', '0.00%'],
     ['unknown ratio falls back to certified screener', 'unknown', 0.25, 'percent', '0.75%'],
     ['missing ratio units fall back to certified screener', undefined, 0.25, 'percent', '0.75%'],
-    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', '-'],
-    ['missing units are unavailable', undefined, 0.25, undefined, '-'],
+    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', 'n/a'],
+    ['missing units are unavailable', undefined, 0.25, undefined, 'n/a'],
   ] as const)('renders dividend yield when %s', (_name, ratioUnit, ratioYield, screenerUnit, expected) => {
     // These query fixtures omit React Query state that the component never reads.
     const ratiosQuery = {

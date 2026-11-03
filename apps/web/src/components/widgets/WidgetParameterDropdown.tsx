@@ -79,9 +79,9 @@ export function WidgetParameterDropdown({
                             onClick={() => handleSelect(option.value)}
                             className={`
                                 w-full flex items-center gap-2 px-3 py-1.5 text-left
-                                text-xs hover:bg-blue-500/10 transition-colors
+                                text-xs hover:bg-[var(--color-state-bg)] transition-colors
                                 ${option.value === parameter.currentValue
-                                    ? 'text-blue-400 bg-blue-500/5'
+                                    ? 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]'
                                     : 'text-[var(--text-secondary)]'
                                 }
                             `}
@@ -95,7 +95,7 @@ export function WidgetParameterDropdown({
                                 )}
                             </span>
                             {option.value === parameter.currentValue && (
-                                <Check size={12} className="text-blue-400" />
+                                <Check size={12} className="text-[var(--color-accent-primary)]" />
                             )}
                         </button>
                     ))}
@@ -239,9 +239,9 @@ export function WidgetMultiSelectDropdown({
                             onClick={() => handleToggle(option.value)}
                             className={`
                                 w-full flex items-center gap-2 px-3 py-1.5 text-left
-                                text-xs hover:bg-blue-500/10 transition-colors
+                                text-xs hover:bg-[var(--color-state-bg)] transition-colors
                                 ${currentValues.includes(option.value)
-                                    ? 'text-blue-400 bg-blue-500/5'
+                                    ? 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]'
                                     : 'text-[var(--text-secondary)]'
                                 }
                             `}
@@ -250,12 +250,12 @@ export function WidgetMultiSelectDropdown({
                             <div className={`
                                 w-3.5 h-3.5 rounded border flex items-center justify-center
                                 ${currentValues.includes(option.value)
-                                    ? 'bg-blue-500 border-blue-500'
+                                    ? 'bg-[var(--color-state-bg)] border-[var(--color-state-border)]'
                                     : 'border-[var(--border-default)]'
                                 }
                             `}>
                                 {currentValues.includes(option.value) && (
-                                    <Check size={10} className="text-white" />
+                                    <Check size={10} className="text-[var(--color-accent-primary)]" />
                                 )}
                             </div>
                             <span className="flex-1">

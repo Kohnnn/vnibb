@@ -30,7 +30,7 @@ type SweepPreset = keyof typeof FAST_SETS;
 
 function formatNumber(value: unknown, suffix = ''): string {
   const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return '-';
+  if (!Number.isFinite(numeric)) return 'n/a';
   return `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 }
 
@@ -71,7 +71,7 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
       symbol: upperSymbol,
       empty: !hasData,
       endpoint: `/quant/${upperSymbol}/sweep`,
-      sourceLabel: 'VNIBB quant sweep',
+      sourceLabel: 'VniBB quant sweep',
       response: data,
       fetchedAt: dataUpdatedAt,
       extra: hasData ? {
@@ -121,14 +121,14 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
       </div>
 
       {warning && (
-        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+        <div className="mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
           {warning}
         </div>
       )}
 
       {payload?.best && (
-        <div className="mb-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs">
-          <div className="text-[9px] font-black uppercase tracking-widest text-emerald-300">Best by {objective.replace(/_/g, ' ')}</div>
+        <div className="mb-2 rounded-xl border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-3 py-2 text-xs">
+          <div className="text-[9px] font-black uppercase tracking-widest text-[var(--color-positive)]">Best by {objective.replace(/_/g, ' ')}</div>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[var(--text-primary)]">
             <span>{payload.best.fast_window}/{payload.best.slow_window} MA</span>
             <span>Return {formatNumber(payload.best.total_return_pct, '%')}</span>
@@ -156,7 +156,7 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
               return (
                 <div key={`${fast}-${slow}`} className="px-2 py-2 text-right text-xs">
                   {invalid ? <span className="text-[var(--text-muted)]">-</span> : (
-                    <div className={tone ? 'text-emerald-300' : 'text-red-300'}>
+                    <div className={tone ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}>
                       <div className="font-bold">{formatNumber(value, objective.includes('pct') ? '%' : '')}</div>
                       <div className="text-[9px] text-[var(--text-muted)]">{formatNumber(cell?.trade_count)} trades</div>
                     </div>

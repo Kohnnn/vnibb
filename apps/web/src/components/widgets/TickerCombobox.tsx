@@ -141,13 +141,13 @@ export function TickerCombobox({
                                 onClick={() => handleSelect(stock)}
                                 onMouseEnter={() => setSelectedIndex(index)}
                                 className={`w-full flex items-center gap-2 px-3 py-1.5 text-left transition-colors ${index === selectedIndex
-                                        ? 'bg-blue-600/20'
+                                        ? 'bg-[var(--color-state-bg)]'
                                         : 'hover:bg-[var(--bg-hover)]'
                                     }`}
                             >
                                 {/* Ticker Icon */}
-                                <div className="w-5 h-5 rounded bg-gradient-to-br from-blue-500/20 to-blue-600/20 flex items-center justify-center shrink-0">
-                                    <TrendingUp size={10} className="text-blue-400" />
+                                <div className="w-5 h-5 rounded bg-gradient-to-br from-[var(--color-accent-primary)] to-[var(--color-accent-primary)] flex items-center justify-center shrink-0">
+                                    <TrendingUp size={10} className="text-[var(--color-accent-primary)]" />
                                 </div>
 
                                 {/* Ticker Symbol */}

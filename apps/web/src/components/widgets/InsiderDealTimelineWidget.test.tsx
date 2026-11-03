@@ -77,7 +77,7 @@ describe('InsiderDealTimelineWidget money aggregates', () => {
             deal({ id: 2, deal_value: 5_000, value_unit: 'unknown', price_unit: 'unknown' }),
         ]);
 
-        expect(card('Buys')).toHaveTextContent('—');
+        expect(card('Buys')).toHaveTextContent('n/a');
         expect(card('Buys')).not.toHaveTextContent('VND');
     });
 
@@ -93,7 +93,7 @@ describe('InsiderDealTimelineWidget money aggregates', () => {
     it('keeps a side with no classified rows unavailable instead of zero', () => {
         show([deal({ id: 1, deal_action: 'Không xác định' })]);
 
-        expect(card('Buys')).toHaveTextContent('—');
-        expect(card('Sells')).toHaveTextContent('—');
+        expect(card('Buys')).toHaveTextContent('n/a');
+        expect(card('Sells')).toHaveTextContent('n/a');
     });
 });

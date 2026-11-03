@@ -15,9 +15,9 @@ interface NewsFilterBarProps {
 }
 
 const SENTIMENTS = [
-  { id: 'bullish', label: 'Bullish', icon: TrendingUp, color: 'text-green-400' },
+  { id: 'bullish', label: 'Bullish', icon: TrendingUp, color: 'text-[var(--color-positive)]' },
   { id: 'neutral', label: 'Neutral', icon: Minus, color: 'text-[var(--text-secondary)]' },
-  { id: 'bearish', label: 'Bearish', icon: TrendingDown, color: 'text-red-400' },
+  { id: 'bearish', label: 'Bearish', icon: TrendingDown, color: 'text-[var(--color-negative)]' },
 ];
 
 function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps) {
@@ -33,7 +33,7 @@ function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps
         {filters.symbols.map((symbol, index) => (
           <span 
             key={`${symbol}-${index}`}
-            className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded text-[10px] font-bold"
+            className="flex items-center gap-1 px-1.5 py-0.5 bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)] border border-[var(--color-state-border)] rounded text-[10px] font-bold"
           >
             {symbol}
             <button 
@@ -41,7 +41,7 @@ function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps
                 ...filters,
                 symbols: filters.symbols.filter(s => s !== symbol),
               })}
-              className="hover:text-white transition-colors"
+              className="hover:text-[var(--text-primary)] transition-colors"
             >
               <X size={10} />
             </button>

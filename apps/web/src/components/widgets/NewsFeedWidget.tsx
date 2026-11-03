@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { API_BASE_URL, APIError } from '@/lib/api';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -77,9 +77,9 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
     const config = {
         bullish: {
             icon: TrendingUp,
-            bg: 'bg-green-500/10',
-            text: 'text-green-400',
-            border: 'border-green-500/30',
+            bg: 'bg-[var(--color-positive-bg)]',
+            text: 'text-[var(--color-positive)]',
+            border: 'border-[var(--color-state-border)]',
             label: 'Bullish'
         },
         neutral: {
@@ -91,9 +91,9 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
         },
         bearish: {
             icon: TrendingDown,
-            bg: 'bg-red-500/10',
-            text: 'text-red-400',
-            border: 'border-red-500/30',
+            bg: 'bg-[var(--color-negative-bg)]',
+            text: 'text-[var(--color-negative)]',
+            border: 'border-[var(--color-state-border)]',
             label: 'Bearish'
         }
     };
@@ -321,7 +321,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                             {momentumBars.map((bucket) => (
                                 <div key={bucket.key} className="flex flex-1 flex-col items-center gap-1">
                                     <div className="relative flex w-full flex-1 items-end rounded bg-[var(--bg-primary)]/80">
-                                        <div className="w-full rounded bg-blue-500/50 transition-all" style={{ height: bucket.height }} />
+                                        <div className="w-full rounded bg-[var(--color-state-bg)] transition-all" style={{ height: bucket.height }} />
                                     </div>
                                     <span className="text-[9px] text-[var(--text-muted)]">{bucket.label}</span>
                                 </div>
@@ -448,7 +448,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                     {item.related_symbols.slice(0, 5).map(sym => (
                                                         <span
                                                             key={sym}
-                                                            className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/30"
+                                                            className="text-[9px] px-1.5 py-0.5 bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] rounded border border-[var(--color-state-border)]"
                                                         >
                                                             {sym}
                                                         </span>
@@ -463,10 +463,10 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                 e.stopPropagation();
                                                 toggleBookmark(item.id);
                                             }}
-                                            className="p-1 text-[var(--text-muted)] hover:text-yellow-400 transition-colors"
+                                            className="p-1 text-[var(--text-muted)] hover:text-[var(--color-accent-primary)] transition-colors"
                                         >
                                             {bookmarkedIds.has(item.id) ? (
-                                                <BookmarkCheck size={14} className="text-yellow-400" />
+                                                <BookmarkCheck size={14} className="text-[var(--color-accent-primary)]" />
                                             ) : (
                                                 <Bookmark size={14} />
                                             )}
@@ -478,8 +478,8 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                         <div className="mt-3 space-y-2 border-t border-border/60 pt-2">
                                             {/* AI Summary */}
                                             {item.ai_summary && (
-                                                <div className="p-2 bg-blue-500/5 border border-blue-500/20 rounded">
-                                                    <div className="text-[9px] text-blue-400 mb-1 font-medium">
+                                                <div className="p-2 bg-[var(--color-state-bg)] border border-[var(--color-state-border)] rounded">
+                                                    <div className="text-[9px] text-[var(--color-accent-primary)] mb-1 font-medium">
                                                         AI SUMMARY
                                                     </div>
                                                     <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
@@ -502,7 +502,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                     {item.sectors.map(sector => (
                                                         <span
                                                             key={sector}
-                                                            className="text-[9px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-400 rounded"
+                                                            className="text-[9px] px-1.5 py-0.5 bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] rounded"
                                                         >
                                                             {sector}
                                                         </span>
@@ -517,7 +517,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     onClick={(e) => e.stopPropagation()}
-                                                    className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300"
+                                                    className="inline-flex items-center gap-1 text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)]"
                                                 >
                                                     Read full article
                                                     <ExternalLink size={10} />

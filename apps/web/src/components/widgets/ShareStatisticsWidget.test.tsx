@@ -45,8 +45,8 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
     ['certified zero remains zero', 'percent', 0, 'percent', '0.00%', 'Screener'],
     ['unknown screener falls back to certified ratios', 'unknown', 0.25, 'percent', '0.75%', 'Ratios'],
     ['missing screener units fall back to certified ratios', undefined, 0.25, 'percent', '0.75%', 'Ratios'],
-    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', '-', undefined],
-    ['missing units are unavailable', undefined, 0.25, undefined, '-', undefined],
+    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', 'n/a', undefined],
+    ['missing units are unavailable', undefined, 0.25, undefined, 'n/a', undefined],
   ] as const)('renders dividend yield when %s', (_name, screenerUnit, screenerYield, ratioUnit, expected, source) => {
     mockScreener.mockReturnValue({
       data: { data: [{ ticker: 'FPT', pe: 12.3, dividend_yield: screenerYield,
@@ -183,7 +183,7 @@ describe('ShareStatisticsWidget confirmed-unit market cap', () => {
       isLoading:false, isFetching:false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
     });
     render(<ShareStatisticsWidget id="share-1" symbol="MSR" />);
-    expect(within(screen.getByText('P/E Ratio').parentElement!).getByText('-')).toBeInTheDocument();
-    expect(within(screen.getByText('P/B Ratio').parentElement!).getByText('-')).toBeInTheDocument();
+    expect(within(screen.getByText('P/E Ratio').parentElement!).getByText('n/a')).toBeInTheDocument();
+    expect(within(screen.getByText('P/B Ratio').parentElement!).getByText('n/a')).toBeInTheDocument();
   });
 });

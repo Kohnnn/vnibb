@@ -110,7 +110,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Waves size={12} className="text-cyan-400" />
+          <Waves size={12} className="text-[var(--color-accent-primary)]" />
           <span>Volume Flow (Order Flow Proxy)</span>
         </div>
         <div className="flex items-center gap-2">
@@ -120,7 +120,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -163,18 +163,18 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Divergence Months</div>
-              <div className="font-mono text-amber-300">{metric?.divergence_months ?? 0}</div>
+              <div className="font-mono text-[var(--color-warning)]">{metric?.divergence_months ?? 0}</div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Strongest Buy</div>
-              <div className="text-emerald-300 font-semibold">{metric?.strongest_buy_month || '-'}</div>
+              <div className="text-[var(--color-positive)] font-semibold">{metric?.strongest_buy_month || '-'}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Strongest Sell</div>
-              <div className="text-red-300 font-semibold">{metric?.strongest_sell_month || '-'}</div>
+              <div className="text-[var(--color-negative)] font-semibold">{metric?.strongest_sell_month || '-'}</div>
             </div>
           </div>
 
@@ -237,8 +237,8 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                           fontSize: '11px',
                         }}
                       />
-                      <Line yAxisId="delta" type="monotone" dataKey="cumulativeDelta" stroke="#06b6d4" strokeWidth={2} dot={false} name="Cumulative Delta" />
-                      <Line yAxisId="price" type="monotone" dataKey="close" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Close" />
+                      <Line yAxisId="delta" type="monotone" dataKey="cumulativeDelta" stroke="var(--chart-blue)" strokeWidth={2} dot={false} name="Cumulative Delta" />
+                      <Line yAxisId="price" type="monotone" dataKey="close" stroke="var(--chart-slate)" strokeWidth={1.5} strokeDasharray="5 3" dot={false} name="Close" />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>

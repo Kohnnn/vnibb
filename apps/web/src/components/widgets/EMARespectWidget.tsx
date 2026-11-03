@@ -11,6 +11,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface EMARespectWidgetProps {
   symbol: string
@@ -32,15 +33,15 @@ type EmaLevel = {
 }
 
 function tone(strength: string): string {
-  if (strength === 'strong') return 'text-emerald-300'
-  if (strength === 'moderate') return 'text-cyan-300'
-  if (strength === 'weak') return 'text-amber-300'
-  if (strength === 'fragile') return 'text-red-300'
+  if (strength === 'strong') return 'text-[var(--color-positive)]'
+  if (strength === 'moderate') return 'text-[var(--color-accent-primary)]'
+  if (strength === 'weak') return 'text-[var(--color-warning)]'
+  if (strength === 'fragile') return 'text-[var(--color-negative)]'
   return 'text-[var(--text-secondary)]'
 }
 
 function pct(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(Number(value))) return '-'
+  if (value == null || Number.isNaN(Number(value))) return 'n/a'
   return `${Number(value).toFixed(1)}%`
 }
 
@@ -98,7 +99,7 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Rows3 size={12} className="text-cyan-400" />
+          <Rows3 size={12} className="text-[var(--color-accent-primary)]" />
           <span>EMA Respect Analysis</span>
         </div>
         <div className="flex items-center gap-2">
@@ -108,7 +109,7 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -145,7 +146,7 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
           <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Best Support</div>
-              <div className="font-semibold text-cyan-300">{metric?.best_support_ema || '-'}</div>
+              <div className="font-semibold text-[var(--color-accent-primary)]">{metric?.best_support_ema || '-'}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Tolerance</div>
@@ -180,7 +181,7 @@ export function EMARespectWidget({ symbol, onDataChange }: EMARespectWidgetProps
                     </td>
                     <td className="py-1 text-right font-mono">{pct(row.support_breakdown_rate_pct)}</td>
                     <td
-                      className={`py-1 text-right font-mono ${Number(row.avg_5d_return_after_support_test_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}
+                      className={`py-1 text-right font-mono ${signedToneClass(row.avg_5d_return_after_support_test_pct)}`}
                     >
                       {pct(row.avg_5d_return_after_support_test_pct)}
                     </td>

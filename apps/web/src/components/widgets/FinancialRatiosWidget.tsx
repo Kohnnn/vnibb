@@ -12,7 +12,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { clampPercentage, convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
+import { convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useUnit } from '@/contexts/UnitContext';
@@ -44,8 +44,10 @@ function formatPct(metricKey: string, value: number | null | undefined): string 
             ? 'yoy_change'
             : 'margin';
 
+    // Let formatPercent apply the clamp: pre-clamping to null turned a
+    // non-meaningful value into `n/a` instead of `n/m`.
     return CANONICAL_PERCENT_KEYS[metricKey]
-        ? formatPercent(clampPercentage(value, clamp), { decimals: 2, input: 'percent' })
+        ? formatPercent(value, { decimals: 2, input: 'percent', clamp })
         : formatPercent(value, { decimals: 2, input: 'auto', clamp });
 }
 
@@ -452,12 +454,12 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                     />
                 </div>
                 {refreshWarning && hasData && (
-                    <div role="alert" className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                    <div role="alert" className="border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
                         {refreshWarning}
                     </div>
                 )}
                 {(canonicalRatios.issues.length > 0 || canonicalRatios.invalidPeriodCount > 0) && (
-                    <div className="px-3 py-1.5 text-[10px] text-amber-300">
+                    <div className="px-3 py-1.5 text-[10px] text-[var(--color-warning)]">
                         Fiscal period resolution: {canonicalRatios.issues.filter((issue) => issue.reason === 'ambiguous-basis').length} conflicting periods excluded; {canonicalRatios.issues.filter((issue) => issue.reason === 'duplicate-identical').length} identical repeats collapsed; {canonicalRatios.invalidPeriodCount} undated rows excluded.
                     </div>
                 )}
@@ -476,7 +478,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                     if (!earliestVisible) return null;
                     if (periodSortKey(earliestVisible) >= periodSortKey(coverageStarts)) return null;
                     return (
-                        <div className="border-b border-amber-500/20 bg-amber-500/8 px-3 py-1.5 text-[10px] text-amber-100/85">
+                        <div className="border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1.5 text-[10px] text-[var(--text-secondary)]/85">
                             Full ratio coverage starts {coverageStarts}. Earlier periods only have valuation metrics (P/E, P/B, P/S, EV/EBITDA) until raw financial statements are backfilled.
                         </div>
                     );
@@ -512,8 +514,8 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                     ) : (
                         <>
                             {dataQualityWarnings.length > 0 && (
-                                <div className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
-                                    <div className="font-black uppercase tracking-[0.16em] text-amber-200">Data quality notes</div>
+                                <div className="mb-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-5 text-[var(--text-secondary)]">
+                                    <div className="font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Data quality notes</div>
                                     {dataQualityWarnings.map((warning) => (
                                         <div key={warning}>{warning}</div>
                                     ))}

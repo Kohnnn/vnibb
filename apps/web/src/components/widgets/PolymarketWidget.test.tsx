@@ -124,7 +124,7 @@ describe('PolymarketWidget (v2)', () => {
         const dialog = await screen.findByRole('dialog');
         const beta = within(dialog).getByText('Beta').parentElement!;
         const gamma = within(dialog).getByText('Gamma').parentElement!;
-        expect(within(beta).getByText('—')).toBeInTheDocument();
+        expect(within(beta).getByText('n/a')).toBeInTheDocument();
         expect(within(gamma).getByText('80%')).toBeInTheDocument();
         await waitFor(() => expect(within(dialog).queryByText(/Loading recorded history/)).not.toBeInTheDocument());
     });

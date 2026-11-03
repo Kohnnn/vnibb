@@ -11,7 +11,9 @@ export interface UnitConfig {
   usdVndRatesByYear?: Record<string, number>
 }
 
-export const EMPTY_VALUE = '—'
+// Brand §19: an unavailable financial value reads `n/a`, not a dash that could
+// be mistaken for a measured value.
+export const EMPTY_VALUE = 'n/a'
 export const DEFAULT_USD_VND_RATE = 25_000
 export const DEFAULT_USD_VND_RATES_BY_YEAR: Record<string, number> = {
   '2016': 22_300,
@@ -333,11 +335,15 @@ interface NumberFormatOptions {
   useGrouping?: boolean
 }
 
-interface PercentFormatOptions {
+export interface PercentFormatOptions {
   decimals?: number
   locale?: string
   input?: 'auto' | 'ratio' | 'percent'
   clamp?: 'yoy_change' | 'margin' | 'yield' | 'ratio'
+  /** Prefix measured non-zero values with `+`/`-`. Zero never gets a sign. */
+  signed?: boolean
+  /** Unit suffix. Defaults to `%`; use `pp` for margin deltas. */
+  unit?: '%' | 'pp'
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -443,7 +449,10 @@ export function normalizePercentValue(
 
   if (options.clamp === 'margin' || options.clamp === 'yield') {
     const threshold = options.clamp === 'margin' ? 200 : 100
-    while (Math.abs(normalized) > threshold && Math.abs(normalized / 100) <= threshold) {
+    // Repair a mis-scaled provider value once. A value still out of range
+    // after that is genuinely non-meaningful: keep it out of range so it
+    // renders `n/m` instead of being divided into a plausible number.
+    if (Math.abs(normalized) > threshold && Math.abs(normalized / 100) > threshold) {
       normalized /= 100
     }
   }
@@ -597,20 +606,51 @@ export function formatNumber(
   })
 }
 
+/**
+ * Format a percentage.
+ *
+ * Missing and non-meaningful are separate states from a measured zero:
+ *   - no value (`null`/`undefined`/non-finite)      → `n/a`
+ *   - a value the clamp says cannot be meaningful   → `n/m`
+ *   - a measured `0`                                → `0.0%` (never `+0.0%`)
+ *
+ * `signed` adds `+`/`-` for measured non-zero values only, so direction is
+ * carried by the sign glyph as well as colour. `unit: 'pp'` renders margin
+ * deltas as percentage points.
+ */
 export function formatPercent(
   value: number | null | undefined,
   options: PercentFormatOptions = {}
 ): string {
+  if (!isFiniteNumber(value)) return 'n/a'
   const normalized = normalizePercentValue(value, options)
-  if (!isFiniteNumber(normalized)) return EMPTY_VALUE
+  if (!isFiniteNumber(normalized)) return 'n/m'
 
   const decimals = options.decimals ?? 2
-  const body = normalized.toLocaleString(options.locale ?? 'en-US', {
+  const body = Math.abs(normalized).toLocaleString(options.locale ?? 'en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
     useGrouping: true,
   })
-  return `${body}%`
+  // Sign follows the rendered digits: a change that rounds to 0.0 is shown
+  // unsigned, so `0.0%` never appears as `+0.0%`.
+  const rounded = Number(body.replace(/,/g, ''))
+  const sign = rounded === 0 ? '' : normalized < 0 ? '-' : options.signed ? '+' : ''
+  const unit = options.unit ?? '%'
+  return `${sign}${body}${unit === 'pp' ? ' pp' : unit}`
+}
+
+/**
+ * Label a period, marking estimates/forecasts explicitly so a projected
+ * figure is never read as measured. `kind` comes from the source row's
+ * `estimate`/`forecast` flag; absence means measured.
+ */
+export function forecastLabel(
+  row: { kind?: 'actual' | 'estimate' | 'forecast' | null; period?: string | null }
+): string {
+  const period = row.period?.trim()
+  if (!period) return 'n/a'
+  return row.kind === 'forecast' || row.kind === 'estimate' ? `${period} · forecast` : period
 }
 
 export function formatCurrency(

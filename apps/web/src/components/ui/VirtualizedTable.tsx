@@ -90,7 +90,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
               key={column.id}
               onClick={() => canSort && handleSort(column.id)}
               className={cn(
-                  "flex select-none items-center px-3 text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] transition-colors",
+                  "flex select-none items-center px-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] transition-colors",
                   canSort ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]' : '',
                   column.align === 'right' ? 'justify-end text-right' : 
                   column.align === 'center' ? 'justify-center text-center' : 'justify-start text-left'
@@ -102,7 +102,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
                 {canSort && (
                     <div className="flex flex-col opacity-30">
                         {isSorted ? (
-                            sortOrder === 'asc' ? <ArrowUp size={10} className="text-blue-500" /> : <ArrowDown size={10} className="text-blue-500" />
+                            sortOrder === 'asc' ? <ArrowUp size={10} className="text-[var(--color-accent-primary)]" /> : <ArrowDown size={10} className="text-[var(--color-accent-primary)]" />
                         ) : (
                             <ArrowUpDown size={10} />
                         )}
@@ -138,7 +138,7 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
                 className={cn(
                     "absolute left-0 top-0 flex w-full items-center border-b border-[var(--border-subtle)] transition-colors",
                     isClickable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)]' : '',
-                    isClickable && !interactiveCells ? 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30' : '',
+                    isClickable && !interactiveCells ? 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]' : '',
                     virtualItem.index % 2 ? 'bg-[var(--bg-secondary)]/40' : 'bg-transparent'
                 )}
                 style={{

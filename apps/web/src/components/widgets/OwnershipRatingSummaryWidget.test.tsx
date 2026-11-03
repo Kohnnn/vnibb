@@ -98,9 +98,9 @@ describe('OwnershipRatingSummaryWidget admission', () => {
     expect(payload.foreignNetVolume).toBe(flows ? 0 : null);
     expect(payload.insiderNetValue).toBe(sentiment ? 0 : null);
     expect(screen.getByRole('status')).toHaveTextContent('Composite withheld');
-    expect(screen.getByText('Score').nextElementSibling).toHaveTextContent('—');
-    expect(screen.getByText('Foreign Net 20D').nextElementSibling).toHaveTextContent(flows ? '0' : '—');
-    expect(screen.getByText('Insider Net 90D').nextElementSibling).toHaveTextContent(sentiment ? '0' : '—');
+    expect(screen.getByText('Score').nextElementSibling).toHaveTextContent('n/a');
+    expect(screen.getByText('Foreign Net 20D').nextElementSibling).toHaveTextContent(flows ? '0' : 'n/a');
+    expect(screen.getByText('Insider Net 90D').nextElementSibling).toHaveTextContent(sentiment ? '0' : 'n/a');
   });
 
   test('recovers from failure to a complete view and preserves admitted zero flows', () => {
@@ -161,7 +161,7 @@ describe('OwnershipRatingSummaryWidget admission', () => {
     const onDataChange = jest.fn();
     const { rerender } = render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
     expectWithheld(onDataChange.mock.calls.at(-1)?.[0]);
-    expect(screen.getByText('Insider Net 90D').nextElementSibling).toHaveTextContent('—');
+    expect(screen.getByText('Insider Net 90D').nextElementSibling).toHaveTextContent('n/a');
     insider.mockReturnValue(readyQuery({}));
     rerender(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
     expectWithheld(onDataChange.mock.calls.at(-1)?.[0]);
@@ -208,7 +208,7 @@ describe('OwnershipRatingSummaryWidget admission', () => {
     shareholders.mockReturnValue(readyQuery({ data: rows.map((row) => ({ ...row, ownership_unit_status: 'unverified' })) }));
     rerender(<><MajorShareholdersWidget symbol="FPT" /><OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} /></>);
     expect(screen.queryByText('0.04%')).not.toBeInTheDocument();
-    expect(screen.getByText('Top 3').nextElementSibling).toHaveTextContent('—');
+    expect(screen.getByText('Top 3').nextElementSibling).toHaveTextContent('n/a');
     expectWithheld(onDataChange.mock.calls.at(-1)?.[0]);
     expect(screen.queryByText('62/100')).not.toBeInTheDocument();
   });

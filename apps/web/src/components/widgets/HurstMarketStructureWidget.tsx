@@ -18,7 +18,7 @@ interface HurstMarketStructureWidgetProps {
 }
 
 function formatNumber(value: number, digits = 3): string {
-  if (!Number.isFinite(value)) return '-'
+  if (!Number.isFinite(value)) return 'n/a'
   return value.toFixed(digits)
 }
 
@@ -100,12 +100,12 @@ function classifyHurst(hurst: number | null): { label: string; className: string
     return { label: 'Insufficient Data', className: 'text-[var(--text-secondary)]', note: 'Need longer series' }
   }
   if (hurst > 0.55) {
-    return { label: 'Trending', className: 'text-emerald-300', note: 'Momentum persistence likely' }
+    return { label: 'Trending', className: 'text-[var(--color-positive)]', note: 'Momentum persistence likely' }
   }
   if (hurst < 0.45) {
-    return { label: 'Mean-Reverting', className: 'text-amber-300', note: 'Fade extreme moves' }
+    return { label: 'Mean-Reverting', className: 'text-[var(--color-warning)]', note: 'Fade extreme moves' }
   }
-  return { label: 'Random Walk', className: 'text-cyan-300', note: 'Range/event edge preferred' }
+  return { label: 'Random Walk', className: 'text-[var(--color-accent-primary)]', note: 'Range/event edge preferred' }
 }
 
 export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarketStructureWidgetProps) {
@@ -206,7 +206,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
     <div className="h-full flex flex-col">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Sigma size={12} className="text-cyan-300" />
+          <Sigma size={12} className="text-[var(--color-accent-primary)]" />
           <span>Hurst & Market Structure</span>
         </div>
         <div className="flex items-center gap-2">
@@ -216,7 +216,7 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -254,11 +254,11 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
             <div className="grid grid-cols-3 gap-2 text-[10px]">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="uppercase tracking-widest text-[var(--text-muted)]">Hurst</div>
-                <div className="font-mono text-cyan-300">{formatNumber(hurst ?? Number.NaN)}</div>
+                <div className="font-mono text-[var(--color-accent-primary)]">{formatNumber(hurst ?? Number.NaN)}</div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="uppercase tracking-widest text-[var(--text-muted)]">Lag-1 AC</div>
-                <div className="font-mono text-emerald-300">{formatNumber((lag1 ?? 0) * 100, 2)}%</div>
+                <div className="font-mono text-[var(--color-positive)]">{formatNumber((lag1 ?? 0) * 100, 2)}%</div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="uppercase tracking-widest text-[var(--text-muted)]">Structure</div>
@@ -278,10 +278,10 @@ export function HurstMarketStructureWidget({ symbol, onDataChange }: HurstMarket
                   const widthPct = Math.max(4, Math.min(100, value * 100))
                   const className =
                     value > 0.55
-                      ? 'bg-emerald-500/65'
+                      ? 'bg-[var(--color-positive-bg)]'
                       : value < 0.45
-                        ? 'bg-amber-500/65'
-                        : 'bg-cyan-500/65'
+                        ? 'bg-[var(--color-state-bg)]'
+                        : 'bg-[var(--color-state-bg)]'
 
                   return (
                     <div key={`${window.label}-${index}`} className="flex items-center gap-2">

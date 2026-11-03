@@ -73,7 +73,7 @@ function getInitialLanguage(config?: Record<string, unknown>): LanguageFilter {
 function chipClass(active: boolean) {
   return `rounded-md px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
     active
-      ? 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-400/30'
+      ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] ring-1 ring-[var(--color-state-border)]'
       : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
   }`;
 }
@@ -206,7 +206,7 @@ function WorldNewsSourcesWidgetComponent({
         <div className="border-b border-[var(--border-subtle)] px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              <Library className="h-3 w-3 text-sky-300" />
+              <Library className="h-3 w-3 text-[var(--color-accent-primary)]" />
               Source Registry
             </div>
             <WidgetMeta
@@ -255,7 +255,7 @@ function WorldNewsSourcesWidgetComponent({
             <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Tier 1</div>
           </div>
           <div className="border-l border-[var(--border-subtle)] px-2 py-2">
-            <div className="text-lg font-black leading-none text-amber-300">{failedFeeds.length}</div>
+            <div className="text-lg font-black leading-none text-[var(--color-warning)]">{failedFeeds.length}</div>
             <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.16em] text-[var(--text-muted)]">Failed</div>
           </div>
         </div>
@@ -282,7 +282,7 @@ function WorldNewsSourcesWidgetComponent({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded border border-sky-500/20 bg-sky-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-sky-200">
+                        <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[var(--color-accent-primary)]">
                           Tier {source.tier}
                         </span>
                         <span className="rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
@@ -295,7 +295,7 @@ function WorldNewsSourcesWidgetComponent({
                           {source.language}
                         </span>
                         {sourceFailedFeeds.length > 0 ? (
-                          <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-amber-200">
+                          <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[var(--text-secondary)]">
                             {sourceFailedFeeds.length} failed
                           </span>
                         ) : null}
@@ -316,7 +316,7 @@ function WorldNewsSourcesWidgetComponent({
                       href={source.homepage_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-[10px] font-bold uppercase text-[var(--text-secondary)] hover:border-sky-400/50 hover:text-sky-300"
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-[10px] font-bold uppercase text-[var(--text-secondary)] hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)]"
                     >
                       Source
                       <ExternalLink className="h-2.5 w-2.5" />
@@ -335,8 +335,8 @@ function WorldNewsSourcesWidgetComponent({
                         rel="noopener noreferrer"
                         title={failedFeed ? `${failedFeed.reason} at ${formatFailedFeedTime(failedFeed.failed_at)}` : undefined}
                         className={failedFeed
-                          ? 'inline-flex max-w-full items-center gap-1 rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-amber-200 hover:border-amber-300/50'
-                          : 'inline-flex max-w-full items-center gap-1 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-200 hover:border-emerald-300/50'}
+                          ? 'inline-flex max-w-full items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)] hover:border-[var(--color-state-border)]'
+                          : 'inline-flex max-w-full items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-positive)] hover:border-[var(--color-state-border)]'}
                       >
                         <Radio className="h-2.5 w-2.5" />
                         Feed {index + 1}{failedFeed ? ' failed' : ''}

@@ -65,8 +65,16 @@ jest.mock('@/components/layout', () => ({
   FreshnessBanner: () => null,
   WhatsNewPanel: () => null,
 }));
-jest.mock('@/components/layout/DashboardGrid', () => ({ ResponsiveDashboardGrid: () => null }));
-jest.mock('@/components/widgets', () => ({ WidgetWrapper: () => null, WidgetLibrary: () => null, widgetRegistry: {} }));
+jest.mock('@/components/layout/DashboardGrid', () => ({
+  ResponsiveDashboardGrid: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+// Render the tile shell so the unsupported-widget branch is observable, and use
+// the real registry: only IDs missing from it should hit that branch.
+jest.mock('@/components/widgets', () => ({
+  WidgetWrapper: ({ children, id }: { children: ReactNode; id: string }) => <div data-testid={`widget-${id}`}>{children}</div>,
+  WidgetLibrary: () => null,
+  widgetRegistry: jest.requireActual('@/components/widgets/WidgetRegistry').widgetRegistry,
+}));
 jest.mock('@/components/modals', () => ({
   WidgetSettingsModal: () => null,
   AppsLibrary: () => null,
@@ -109,6 +117,38 @@ describe('DashboardSyncStatusMessage', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Saved on this device');
     expect(screen.queryByText('Cloud sync failed. Check your connection and refresh to try again.')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage unsupported saved widget', () => {
+  afterEach(() => {
+    mockActiveDashboard = null;
+    mockActiveTab = null;
+    jest.restoreAllMocks();
+  });
+
+  it('renders the retained saved tile instead of dropping an unresolvable widget', async () => {
+    setViewport(1440);
+    // Not in widgetDefinitions, not registered: the state a retired or
+    // ahead-of-build widget ID leaves in a saved workspace.
+    const widget = {
+      id: 'retired-widget', type: 'retired_widget', tabId: 'saved-tab',
+      config: { symbol: 'FPT', savedFlag: true },
+      layout: { i: 'retired-widget', x: 0, y: 0, w: 8, h: 6 },
+    } as unknown as DashboardTab['widgets'][number];
+    mockActiveTab = { id: 'saved-tab', name: 'Saved', order: 0, widgets: [widget] };
+    mockActiveDashboard = {
+      id: 'saved-dashboard', name: 'Saved workspace', order: 0, isDefault: false,
+      isEditable: true, showGroupLabels: true, tabs: [mockActiveTab!], syncGroups: [],
+      createdAt: '2026-10-21T00:00:00.000Z', updatedAt: '2026-10-21T00:00:00.000Z',
+    };
+
+    render(<DashboardPage />);
+
+    const tile = await screen.findByTestId('widget-retired-widget');
+    expect(tile).toHaveTextContent('retired widget is not available in this build');
+    expect(tile).toHaveTextContent('Saved layout kept. Widget ID: retired_widget');
+    expect(tile.closest('[data-widget-type]')).toHaveAttribute('data-widget-type', 'retired_widget');
   });
 });
 

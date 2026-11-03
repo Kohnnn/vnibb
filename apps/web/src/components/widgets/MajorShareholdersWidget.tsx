@@ -121,9 +121,9 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                 ) : (
                     <>
                     {hasSparseData ? (
-                        <div className="mb-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-[11px] text-amber-200">
+                        <div className="mb-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-[11px] text-[var(--text-secondary)]">
                             <div className="font-semibold">Limited disclosure coverage</div>
-                            <div className="mt-0.5 text-amber-100/80">
+                            <div className="mt-0.5 text-[var(--text-secondary)]/80">
                                 Vietnam regulation only requires public disclosure for holders ≥5% of outstanding shares.
                                 Smaller institutional and retail holdings are not reported here. Showing the single
                                 available row for {symbol}.{' '}
@@ -131,7 +131,7 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                                     href={`https://www.hsx.vn/Modules/Listed/Web/SymbolView/${encodeURIComponent(symbol)}`}
                                     target="_blank"
                                     rel="noreferrer noopener"
-                                    className="underline hover:text-amber-100"
+                                    className="underline hover:text-[var(--text-secondary)]"
                                 >
                                     Cross-check on HOSE
                                 </a>
@@ -168,7 +168,7 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                                     <tr key={index} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
                                         <td className="py-1.5 px-1 align-top">
                                             <div className="flex items-start gap-1.5">
-                                                <Icon size={12} className="text-blue-400 shrink-0" />
+                                                <Icon size={12} className="text-[var(--color-accent-primary)] shrink-0" />
                                                 <span className="break-words whitespace-normal text-[var(--text-primary)]" title={(sh.shareholder_name || row.name || row.share_holder || '') as string}>
                                                     {(sh.shareholder_name || row.name || row.share_holder || 'Unknown') as string}
                                                 </span>
@@ -177,7 +177,7 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                                         <td className={`text-right py-1.5 px-1 ${missingShares ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--text-secondary)]'}`}>
                                             {formatShares(sharesOwned as number | null | undefined)}
                                         </td>
-                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-green-400'}`}>
+                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--color-positive)]'}`}>
                                             {formatPct(ownershipPct as number | null | undefined)}
                                         </td>
                                     </tr>

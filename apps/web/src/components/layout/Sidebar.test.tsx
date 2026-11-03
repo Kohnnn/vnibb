@@ -344,3 +344,17 @@ describe('Sidebar context menu accessibility', () => {
     expect(mockUseDashboard().toggleFolder).not.toHaveBeenCalled()
   })
 })
+
+describe('Sidebar brand', () => {
+  test('renders the master wordmark on a white plate instead of gradient text', () => {
+    renderSidebarWithDashboards([makeDashboard('workspace-1', 'First Workspace', 0), makeDashboard('workspace-2', 'Second Workspace', 1)])
+
+    const brand = screen.getByRole('link', { name: 'VniBB home' })
+    expect(brand).toHaveAttribute('href', '/')
+    const image = brand.querySelector('img') as HTMLImageElement
+    expect(image).toHaveAttribute('src', '/brand/vnibb-wordmark-master.svg')
+    expect(Number.parseFloat(image.style.width)).toBeGreaterThanOrEqual(80)
+    expect(image.parentElement).toHaveClass('vnibb-logo-plate')
+    expect(screen.queryByText('VNIBB')).not.toBeInTheDocument()
+  })
+})

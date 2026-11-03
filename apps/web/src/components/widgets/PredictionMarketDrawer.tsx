@@ -8,6 +8,7 @@ import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { API_BASE_URL } from '@/lib/api';
 import { ProbabilityBar } from './prediction-market-ui';
 import { formatMarketAmount, formatMarketTime, formatProb, parsePredictionMarketPayload, type PredictionMarketRow } from './PredictionMarketSource';
+import { EMPTY_VALUE } from '@/lib/units';
 
 export interface PredictionMarketDrawerProps {
     readonly source: string | null;
@@ -156,10 +157,10 @@ export function PredictionMarketDrawer({ source, sourceId, question, market: sel
             <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={headingId} tabIndex={-1} className="flex max-h-[90dvh] w-full max-w-xl flex-col gap-4 overflow-y-auto rounded-lg border border-default bg-[var(--bg-secondary)] p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
                 <header className="flex items-start justify-between gap-3">
                     <div>
-                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">Market analysis · {source ?? 'unknown'}</div>
+                        <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-accent-primary)]">Market analysis · {source ?? 'unknown'}</div>
                         <h3 id={headingId} className="text-sm font-semibold text-[var(--text-primary)]">{question ?? 'Prediction market'}</h3>
                     </div>
-                    <button type="button" onClick={onClose} className="rounded-md p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300" aria-label="Close drawer"><X size={16} /></button>
+                    <button type="button" onClick={onClose} className="rounded-md p-2 text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]" aria-label="Close drawer"><X size={16} /></button>
                 </header>
 
                 {market ? <section className="flex flex-col gap-3" aria-label="Selected market context">
@@ -189,16 +190,16 @@ export function PredictionMarketDrawer({ source, sourceId, question, market: sel
                 <section aria-label="Observed probability history" className="border-t border-default pt-3">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <h4 className="text-xs font-semibold">Recorded {historyOutcome} probability</h4>
-                        <div className="flex gap-1" aria-label="History window">{([1, 7, 30] as const).map((window) => <button key={window} type="button" aria-pressed={days === window} onClick={() => setDays(window)} className={`rounded-md border px-3 py-1.5 text-xs ${days === window ? 'border-blue-500/60 bg-blue-500/10 text-blue-300' : 'border-default text-[var(--text-muted)]'}`}>{window}d</button>)}</div>
+                        <div className="flex gap-1" aria-label="History window">{([1, 7, 30] as const).map((window) => <button key={window} type="button" aria-pressed={days === window} onClick={() => setDays(window)} className={`rounded-md border px-3 py-1.5 text-xs ${days === window ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]' : 'border-default text-[var(--text-muted)]'}`}>{window}d</button>)}</div>
                     </div>
                     {(history.key !== historyKey || history.kind === 'loading') && <WidgetLoading message="Loading recorded history..." />}
                     {history.key === historyKey && history.kind === 'error' && <WidgetError title="Could not load recorded history" error={history.error} onRetry={() => setRetry((value) => value + 1)} />}
                     {history.key === historyKey && history.kind === 'ready' && <>
-                        {hasTrend ? <svg viewBox="0 0 400 104" role="img" aria-label={`Recorded ${historyOutcome} probability over observed timestamps, zero to one hundred percent`} className="h-28 w-full text-blue-400"><line x1="4" y1="96" x2="396" y2="96" stroke="currentColor" opacity="0.2" /><polyline points={chartPoints} fill="none" stroke="currentColor" strokeWidth="2" /></svg> : <p className="py-3 text-xs text-[var(--text-muted)]">Insufficient history: at least two distinct observations are needed to measure a change. No trend can be inferred yet.</p>}
+                        {hasTrend ? <svg viewBox="0 0 400 104" role="img" aria-label={`Recorded ${historyOutcome} probability over observed timestamps, zero to one hundred percent`} className="h-28 w-full text-[var(--color-accent-primary)]"><line x1="4" y1="96" x2="396" y2="96" stroke="currentColor" opacity="0.2" /><polyline points={chartPoints} fill="none" stroke="currentColor" strokeWidth="2" /></svg> : <p className="py-3 text-xs text-[var(--text-muted)]">Insufficient history: at least two distinct observations are needed to measure a change. No trend can be inferred yet.</p>}
                         <dl className="grid grid-cols-3 gap-2 text-xs">
-                            <div><dt className="text-[var(--text-muted)]">Observed change</dt><dd className="font-mono">{change === null ? '—' : `${change > 0 ? '+' : ''}${change.toFixed(1)} pp`}</dd></div>
-                            <div><dt className="text-[var(--text-muted)]">Observed high</dt><dd className="font-mono">{prices.length ? formatProb(Math.max(...prices)) : '—'}</dd></div>
-                            <div><dt className="text-[var(--text-muted)]">Observed low</dt><dd className="font-mono">{prices.length ? formatProb(Math.min(...prices)) : '—'}</dd></div>
+                            <div><dt className="text-[var(--text-muted)]">Observed change</dt><dd className="font-mono">{change === null ? EMPTY_VALUE : `${change > 0 ? '+' : ''}${change.toFixed(1)} pp`}</dd></div>
+                            <div><dt className="text-[var(--text-muted)]">Observed high</dt><dd className="font-mono">{prices.length ? formatProb(Math.max(...prices)) : EMPTY_VALUE}</dd></div>
+                            <div><dt className="text-[var(--text-muted)]">Observed low</dt><dd className="font-mono">{prices.length ? formatProb(Math.min(...prices)) : EMPTY_VALUE}</dd></div>
                         </dl>
                         <dl className="mt-3 grid gap-1 text-[11px] text-[var(--text-muted)]">
                             <div className="flex justify-between gap-3"><dt>First observation</dt><dd>{formatMarketTime(first?.captured_at)}</dd></div>
@@ -213,13 +214,13 @@ export function PredictionMarketDrawer({ source, sourceId, question, market: sel
                 <section className="border-t border-default pt-3" aria-label="Related markets">
                     <h4 className="text-xs font-semibold">Related markets</h4>
                     <p className="mt-1 text-[11px] text-[var(--text-muted)]">Question matching only. Wording, close times and resolution rules may differ; these are not equivalent contracts or a consensus.</p>
-                    {related.key !== marketKey ? <p className="mt-2 text-xs text-[var(--text-muted)]">Loading related markets...</p> : related.error ? <p role="status" className="mt-2 text-xs text-amber-300">Related markets unavailable. Selected market history is unaffected.</p> : relatedRows.length === 0 ? <p className="mt-2 text-xs text-[var(--text-muted)]">No related markets found.</p> : <ul className="mt-2 space-y-2">{relatedRows.map((row, index) => <li key={`${row.source}:${row.source_id}:${index}`} className="rounded-md border border-default p-2 text-xs">
+                    {related.key !== marketKey ? <p className="mt-2 text-xs text-[var(--text-muted)]">Loading related markets...</p> : related.error ? <p role="status" className="mt-2 text-xs text-[var(--color-warning)]">Related markets unavailable. Selected market history is unaffected.</p> : relatedRows.length === 0 ? <p className="mt-2 text-xs text-[var(--text-muted)]">No related markets found.</p> : <ul className="mt-2 space-y-2">{relatedRows.map((row, index) => <li key={`${row.source}:${row.source_id}:${index}`} className="rounded-md border border-default p-2 text-xs">
                         <div className="flex justify-between gap-3"><span className="font-semibold">{row.source}</span><span>{row.outcomeLabel} {row.yes_price === null ? 'No data' : formatProb(row.yes_price)}</span></div>
-                        {row.url ? <a href={row.url} target="_blank" rel="noreferrer" className="mt-1 block text-blue-300 hover:underline">{row.question ?? 'View provider contract'}</a> : <p className="mt-1">{row.question ?? 'Contract wording not supplied'}</p>}
+                        {row.url ? <a href={row.url} target="_blank" rel="noreferrer" className="mt-1 block text-[var(--color-accent-primary)] hover:underline">{row.question ?? 'View provider contract'}</a> : <p className="mt-1">{row.question ?? 'Contract wording not supplied'}</p>}
                     </li>)}</ul>}
                 </section>
                 {market?.url && <footer className="flex flex-wrap gap-2">
-                    <a href={market.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md border border-default px-3 py-2 text-xs text-blue-300"><ExternalLink size={12} />View provider contract</a>
+                    <a href={market.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-md border border-default px-3 py-2 text-xs text-[var(--color-accent-primary)]"><ExternalLink size={12} />View provider contract</a>
                     <button type="button" onClick={handleCopy} className="flex items-center gap-2 rounded-md border border-default px-3 py-2 text-xs text-[var(--text-primary)]"><Copy size={12} />{copied ? 'Link copied' : 'Copy market link'}</button>
                 </footer>}
             </div>
