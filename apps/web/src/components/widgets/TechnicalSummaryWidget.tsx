@@ -14,7 +14,7 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { Timeframe } from '@/types/technical';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
-import { signedToneClass } from '@/lib/priceColor';;
+import { signedToneClass } from '@/lib/priceColor';
 
 interface TechnicalSummaryWidgetProps {
     id: string;
