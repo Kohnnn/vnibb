@@ -282,8 +282,12 @@ function StructureSection({ structure }: { structure: MarketStructureStats }) {
             const height = (Math.abs(v) / acfMax) * 32
             return (
               <div key={index} className="flex flex-1 flex-col items-center justify-end gap-0.5">
+                {/* ACF sign is not a financial direction: accent for positive lags,
+                    Slate for negative, so no gain/loss hue is implied. */}
                 <div
-                  className={v >= 0 ? 'w-full rounded-sm bg-[var(--color-state-bg)]' : 'w-full rounded-sm bg-[var(--color-negative-bg)]'}
+                  className={v >= 0
+                    ? 'w-full rounded-sm bg-[var(--color-accent-primary)]/60'
+                    : 'w-full rounded-sm bg-[var(--chart-slate)]/60'}
                   style={{ height: Math.max(2, height) }}
                   title={`lag ${index + 1}: ${v.toFixed(3)}`}
                 />

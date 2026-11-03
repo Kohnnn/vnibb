@@ -14,6 +14,7 @@ import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { Timeframe } from '@/types/technical';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
+import { signedToneClass } from '@/lib/priceColor';;
 
 interface TechnicalSummaryWidgetProps {
     id: string;
@@ -257,8 +258,8 @@ export function TechnicalSummaryWidget({ id, symbol, onRemove, onDataChange }: T
                                 {(signals?.trend_strength || 'n/a').replace('_', ' ')}
                             </span>
                             <span className="text-[var(--text-muted)]">| Bias:</span>
-                            <span className={signalBias >= 0 ? 'font-bold text-[var(--color-positive)]' : 'font-bold text-[var(--color-negative)]'}>
-                                {signalBias >= 0 ? '+' : ''}{signalBias}
+                            <span className={`font-bold ${signedToneClass(signalBias)}`}>
+                                {signalBias > 0 ? '+' : ''}{signalBias}
                             </span>
                         </div>
                     </Card>

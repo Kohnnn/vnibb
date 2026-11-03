@@ -214,8 +214,8 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
         {foreignNet !== null && (
           <div className="mt-3 rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1.5 text-[10px]">
             <span className="text-[var(--text-muted)]">Foreign net (last ~60 sessions): </span>
-            <span className={foreignNet >= 0 ? 'font-semibold text-[var(--color-positive)]' : 'font-semibold text-[var(--color-negative)]'}>
-              {foreignNet >= 0 ? '+' : ''}
+            <span className={`font-semibold ${signedToneClass(foreignNet)}`}>
+              {foreignNet > 0 ? '+' : ''}
               {fmtCompact(foreignNet)}
             </span>
           </div>

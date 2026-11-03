@@ -338,8 +338,8 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
               {monthlyAverages.map((row) => (
                 <div key={row.month} className="rounded border border-[var(--border-subtle)] px-2 py-1 bg-[var(--bg-secondary)]">
                   <div className="text-[var(--text-muted)]">M{row.month}</div>
-                  <div className={row.avgDelta >= 0 ? 'text-[var(--color-positive)] font-mono' : 'text-[var(--color-negative)] font-mono'}>
-                    {row.avgDelta >= 0 ? '+' : ''}
+                  <div className={`font-mono ${signedToneClass(row.avgDelta)}`}>
+                    {row.avgDelta > 0 ? '+' : ''}
                     {formatCompact(row.avgDelta)}
                   </div>
                 </div>
