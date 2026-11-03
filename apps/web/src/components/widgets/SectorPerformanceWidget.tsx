@@ -27,18 +27,18 @@ interface SectorPerformanceWidgetProps {
 // palette ramp: intensity rises monotonically with magnitude, and color-vision
 // mode reaches the tiles through --color-positive/negative instead of needing a
 // global class remap (which flattened one band and inverted the scale).
-function getHeatmapStyle(changePct: number | null): { background: string } {
+export function getHeatmapStyle(changePct: number | null): { background: string } {
     const tint = (token: string, pct: number) =>
         `color-mix(in srgb, var(${token}) ${pct}%, transparent)`;
     if (changePct === null) return { background: tint('--color-neutral', 40) };
-    if (changePct >= 2) return { background: tint('--color-positive', 100) };
-    if (changePct >= 1) return { background: tint('--color-positive', 70) };
-    if (changePct >= 0.5) return { background: tint('--color-positive', 50) };
-    if (changePct >= 0) return { background: tint('--color-positive', 28) };
-    if (changePct >= -0.5) return { background: tint('--color-negative', 28) };
-    if (changePct >= -1) return { background: tint('--color-negative', 50) };
-    if (changePct >= -2) return { background: tint('--color-negative', 70) };
-    return { background: tint('--color-negative', 100) };
+    // Symmetric: +2 and -2 must land on the same strength, because the label
+    // contrast flip keys off |change| >= 2 and only reads correctly on a solid fill.
+    const magnitude = Math.abs(changePct);
+    const direction = changePct >= 0 ? '--color-positive' : '--color-negative';
+    if (magnitude >= 2) return { background: tint(direction, 100) };
+    if (magnitude >= 1) return { background: tint(direction, 70) };
+    if (magnitude >= 0.5) return { background: tint(direction, 50) };
+    return { background: tint(direction, 28) };
 }
 
 export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }: SectorPerformanceWidgetProps) {
@@ -117,6 +117,9 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                         <div className="grid grid-cols-2 gap-1.5">
                             {sortedSectors.map((sector) => {
                                 const change = toNumber(sector.changePct);
+                                // The >=2% bands are solid fills: labels must flip to the
+                                // page surface colour or they disappear into the tile.
+                                const solid = change !== null && Math.abs(change) >= 2;
                                 const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                                 return (
                                     <div
@@ -124,13 +127,15 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                         className="p-3 rounded-lg border border-[var(--border-default)] cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]"
                                         style={getHeatmapStyle(change)}
                                     >
-                                        <div className="break-words whitespace-normal text-[10px] font-bold uppercase text-[var(--text-secondary)]">
+                                        <div className={`break-words whitespace-normal text-[10px] font-bold uppercase ${solid ? 'text-[var(--color-bg-primary)]' : 'text-[var(--text-secondary)]'}`}>
                                             {name}
                                         </div>
-                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : change >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
+                                        {/* The >=2% bands paint a solid direction fill, so a
+                                            same-token label would be 1:1 contrast. */}
+                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : solid ? 'text-[var(--color-bg-primary)]' : change >= 0 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}`}>
                                             {change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
                                         </div>
-                                        <div className="text-[9px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
+                                        <div className={`text-[9px] ${solid ? 'text-[var(--color-bg-primary)]' : 'text-[var(--text-muted)]'}`}>{sector.totalStocks} stocks</div>
                                     </div>
                                 );
                             })}

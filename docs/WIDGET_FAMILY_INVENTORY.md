@@ -1,6 +1,6 @@
 # Registered Widget fit families — 2026-09-27
 
-The native workspace uses five primary content families for fit/overflow review. This is a **static source inventory**, not proof that every widget renders successfully with live data. Runtime registry: **175 unique IDs** (`WidgetRegistry.ts`); widget-library catalogue: **171 unique IDs** (146 inline plus 25 TradingView definitions). The four registry-only IDs are `market_heatmap`, `dividend_ladder`, `ai_copilot`, and `rs_ranking`. Family assignment is mutually exclusive by dominant surface; mixed table/chart widgets are assigned to the more demanding presentation. TradingView embeds are always custom/third-party even if their contents depict a chart or table.
+The native workspace uses five primary content families for fit/overflow review. This is a **static source inventory**, not proof that every widget renders successfully with live data. Counts below were recomputed from source (`widgetDefinitions` and `getRegisteredWidgetIds`): runtime registry **175 unique IDs**, widget-library catalogue **170 unique IDs**, built-in templates 59 IDs, union 175, with zero catalogue-only and zero unresolved template IDs. The **five** registry-only IDs are `market_heatmap`, `dividend_ladder`, `ai_copilot`, `rs_ranking`, and `positioning_dashboard`. Family assignment is mutually exclusive by dominant surface; mixed table/chart widgets are assigned to the more demanding presentation. TradingView embeds are always custom/third-party even if their contents depict a chart or table.
 
 ## Dense table / board (35)
 

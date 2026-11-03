@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import type { SectorPerformanceResponse } from '@/lib/api';
 import { useSectorPerformance } from '@/lib/queries';
-import { SectorPerformanceWidget } from './SectorPerformanceWidget';
+import { SectorPerformanceWidget, getHeatmapStyle } from './SectorPerformanceWidget';
 
 jest.mock('@/lib/queries', () => ({
   useSectorPerformance: jest.fn(),
@@ -103,5 +103,41 @@ describe('SectorPerformanceWidget', () => {
 
     expect(screen.getByText('+0.00%')).toBeInTheDocument();
     expect(screen.queryByText('—')).not.toBeInTheDocument();
+  });
+});
+
+describe('getHeatmapStyle', () => {
+  const alpha = (style: { background: string }) => {
+    const match = style.background.match(/(\d+)%, transparent/);
+    expect(match).not.toBeNull();
+    return Number(match![1]);
+  };
+  const token = (style: { background: string }) => {
+    const match = style.background.match(/var\((--color-[a-z]+)\)/);
+    expect(match).not.toBeNull();
+    return match![1];
+  };
+
+  it('rises monotonically with magnitude in both directions', () => {
+    // Regression: a global `.bg-*-500/70` remap flattened only the +-1-2% band,
+    // so it rendered weaker than the +-0.5% band.
+    const positive = [0, 0.5, 1, 2].map((pct) => alpha(getHeatmapStyle(pct)));
+    const negative = [0, -0.5, -1, -2].map((pct) => alpha(getHeatmapStyle(pct)));
+    expect(positive).toEqual([...positive].sort((a, b) => a - b));
+    expect(negative).toEqual([...negative].sort((a, b) => a - b));
+    expect(new Set(positive).size).toBe(4);
+  });
+
+  it('uses the direction token per sign and neutral only for unknown', () => {
+    expect(token(getHeatmapStyle(3))).toBe('--color-positive');
+    expect(token(getHeatmapStyle(-3))).toBe('--color-negative');
+    expect(token(getHeatmapStyle(null))).toBe('--color-neutral');
+  });
+
+  it('fully saturates at the outer bands so labels need a contrast flip', () => {
+    // The tile flips its label to the page surface colour at |change| >= 2; that
+    // is only correct while those bands are solid.
+    expect(alpha(getHeatmapStyle(2))).toBe(100);
+    expect(alpha(getHeatmapStyle(-2))).toBe(100);
   });
 });
