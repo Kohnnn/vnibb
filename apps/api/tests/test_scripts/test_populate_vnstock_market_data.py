@@ -363,6 +363,35 @@ def test_unknown_probe_error_still_fails_closed(sdk):
         fetch("quote.history")
 
 
+
+def test_startup_policy_check_never_touches_the_credential_probe(sdk):
+    """The lifespan path must not depend on a provider auth round-trip.
+
+    Startup only enforces tier and source. Probing here turned an SDK auth
+    refusal into a crash-loop for the whole API.
+    """
+    def explode():
+        raise AssertionError("startup must not probe credentials")
+
+    sdk.status = explode
+    from vnibb.providers.vnstock import runtime
+
+    runtime.validate_runtime_policy()
+
+
+def test_acquisition_path_still_probes_credentials(sdk):
+    """Splitting startup must not weaken the guard where it matters.
+
+    The `sdk` fixture stubs `validate_runtime`, so assert on the unpatched
+    guard that `import_vnstock_symbol` reaches on every provider import.
+    """
+    from vnibb.providers.vnstock import runtime
+
+    sdk.status = lambda: {"authenticated": True, "tier": "golden"}
+    with pytest.raises(RuntimeError, match="free or guest account"):
+        runtime.validate_free_runtime()
+
+
 @pytest.mark.parametrize("surface", ["missing", "noncallable"])
 def test_missing_status_reader_fails_closed(sdk, surface):
     if surface == "missing":
