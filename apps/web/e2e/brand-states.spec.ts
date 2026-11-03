@@ -59,7 +59,14 @@ async function mount(page: Page, widgets: Widget[]) {
       activeDashboardId: 'states-dashboard',
       lastActiveTabIdByDashboard: { 'states-dashboard': 'states-tab' },
     }));
-    localStorage.setItem('vnibb-user-preferences', JSON.stringify({ defaultTicker: 'VCB', defaultTab: 'fundamentals' }));
+    // The walkthrough mounts over the widget and intercepts the actions-menu
+    // click; the locator handler raced it and made the export case flaky.
+    // Seed it as dismissed so no overlay exists to race.
+    localStorage.setItem('vnibb-user-preferences', JSON.stringify({
+      defaultTicker: 'VCB',
+      defaultTab: 'fundamentals',
+      onboarding: { dashboardWalkthroughVersion: 4, dashboardWalkthroughDismissedVersion: 4 },
+    }));
   }, widgets);
 }
 
