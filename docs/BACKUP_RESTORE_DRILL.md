@@ -92,9 +92,13 @@ into fresh `--network none` containers. The utility exited 0 with
 `RECOVERY OK` and `RTO_seconds=498.5` (8 minutes 18.5 seconds; excludes
 transfer and application cutover).
 
-- PostgreSQL: `stocks` and `stock_prices` nonempty. The dump TOC carries 90
-  `TABLE DATA` entries; the restored database has 42 public tables. These are
-  different measures and neither is a public-table count on its own.
+- PostgreSQL: `stocks` and `stock_prices` nonempty in the restored database.
+  The dump TOC carries 90 `TABLE DATA` entries, which is a TOC measure, not a
+  table count. The restored public-table count was **not captured**: the
+  drill's `PostgreSQL OK` line was cut from the captured output by a `tail`
+  window, and the `42` public tables measured afterwards came from the **live
+  source** `vnibb-db`, after the restore containers were already gone. Do not
+  read that 42 as a restore result.
 - MongoDB: 8,116,702 documents restored, zero failures; 17 collections,
   17 populated. Largest: `market_prices_eod`, 4,904,191 documents; sampled
   document present.
@@ -109,11 +113,13 @@ transfer and application cutover).
   `sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4`.
 
 **Handling errors.** The transfer preserved the source modes, so the pair
-arrived `-rw-r--r--` and was readable for roughly an hour before the drill
-began; `chmod 700`/`0600` was applied to the directory and files *after* the
-transfer and *before* the restore, not before the transfer. Treat the exposure
-window as real. Future drills must set `umask 077` and create the destination
-with `install -d -m 700` before the first byte lands.
+arrived `-rw-r--r--`, and the drill had already been started when
+`chmod 700`/`0600` was applied to the directory and files. Permissions were
+therefore restricted *during* the drill, not before it. The readable window
+began when the first artifact landed and its duration was never measured, so
+state it as unestablished rather than estimating an hour. Future drills must
+set `umask 077` and create the destination with `install -d -m 700` before the
+first byte lands, and must confirm modes before launching the utility.
 
 The plaintext pair was then packed into
 `20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
