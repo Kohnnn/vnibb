@@ -1159,29 +1159,37 @@ def _enrich_financial_statement_rows(
             )
 
         if item.selling_general_admin is None:
-            selling_expense = _lookup_financial_metric(
-                raw_data, "selling_expenses", "chi_phi_ban_hang"
-            )
-            admin_expense = _lookup_financial_metric(
-                raw_data,
-                "general_and_administrative_expenses",
-                "general_and_admin_expenses",
-                "chi_phi_quan_ly_dn",
-                "chi_phi_quan_ly_doanh_nghiep",
-            )
-            item.selling_general_admin = _sum_financial_metrics(
-                raw_data,
-                "selling_general_admin",
-                "selling_expenses",
-                "general_and_administrative_expenses",
-                "general_and_admin_expenses",
-                "chi_phi_ban_hang",
-                "chi_phi_quan_ly_dn",
-                "chi_phi_quan_ly_doanh_nghiep",
-            )
-            if item.selling_general_admin is None:
-                if selling_expense is not None or admin_expense is not None:
-                    item.selling_general_admin = (selling_expense or 0.0) + (admin_expense or 0.0)
+            # A direct `selling_general_admin` is a reported figure; the sum of
+            # the expense families is not, so its unit is only as good as the
+            # operands that produced it (#206).
+            combined = _lookup_financial_metric(raw_data, "selling_general_admin")
+            if combined is not None:
+                item.selling_general_admin = combined
+            else:
+                operands = [
+                    (item, name, value)
+                    for name, value in (
+                        ("selling_expenses", _lookup_financial_metric(
+                            raw_data, "selling_expenses", "chi_phi_ban_hang"
+                        )),
+                        ("general_and_administrative_expenses", _lookup_financial_metric(
+                            raw_data,
+                            "general_and_administrative_expenses",
+                            "general_and_admin_expenses",
+                            "chi_phi_quan_ly_dn",
+                            "chi_phi_quan_ly_doanh_nghiep",
+                        )),
+                    )
+                    if value is not None
+                ]
+                if operands:
+                    item.selling_general_admin = sum(value for _, _, value in operands)
+                    _record_derivation(
+                        item,
+                        "selling_general_admin",
+                        " + ".join(name for _, name, _ in operands),
+                        [(row, name) for row, name, _ in operands],
+                    )
 
         if item.research_development is None:
             item.research_development = _lookup_financial_metric(

@@ -220,7 +220,7 @@ async def test_index_withholds_previous_close_across_a_session_gap():
 
     assert hnx["current_value"] == pytest.approx(252.74)
     assert hnx["change"] == pytest.approx(-3.87)
-    assert hnx["previous_close"] is None
+    assert "previous_close" not in hnx
     assert hnx["previous_close_status"] == "previous_session_not_retained"
     # The stored percentage is quoted against the session's own base
     # (252.74 - -3.87 = 256.61), not against the level. Checking it against the
@@ -369,3 +369,137 @@ def test_admission_keeps_metrics_with_real_unit_evidence():
 
     assert row.revenue == 1000.0
     assert row.selling_general_admin == -100.0
+
+
+def test_provider_uses_an_asserted_base_and_never_an_open_fallback():
+    """#205: the transform derives only from a base the provider asserted.
+
+    An explicit `prev_close` is the provider's own claim about the session, so
+    the change may follow from it. Without one, the transform must not fall back
+    to `open`, which is this session's open rather than the previous close.
+    """
+    from vnibb.providers.vnstock.market_overview import (
+        MarketOverviewQueryParams,
+        VnstockMarketOverviewFetcher,
+    )
+
+    asserted = [
+        {
+            "index_name": "HNX",
+            "current_value": 252.74,
+            "time": "2026-10-30",
+            "prev_close": 256.61,
+        }
+    ]
+    (asserted_row,) = VnstockMarketOverviewFetcher.transform_data(
+        MarketOverviewQueryParams(), asserted
+    )
+    assert asserted_row.change == pytest.approx(-3.87)
+    assert asserted_row.change_pct == pytest.approx(-3.87 / 256.61 * 100, rel=1e-9)
+    assert asserted_row.previous_close == pytest.approx(256.61)
+
+    unbased = [
+        {
+            "index_name": "HNX",
+            "current_value": 252.74,
+            "open": 255.0,
+            "time": "2026-10-30",
+        }
+    ]
+    (unbased_row,) = VnstockMarketOverviewFetcher.transform_data(
+        MarketOverviewQueryParams(), unbased
+    )
+    assert unbased_row.change is None
+    assert unbased_row.change_pct is None
+
+
+def test_sessions_are_adjacent_uses_the_market_calendar():
+    from datetime import date
+
+    from vnibb.providers.vnstock.market_overview import _sessions_are_adjacent
+
+    # HNX is missing 2026-10-29, so these are not consecutive sessions.
+    assert not _sessions_are_adjacent(date(2026, 10, 28), date(2026, 10, 30))
+    assert _sessions_are_adjacent(date(2026, 10, 29), date(2026, 10, 30))
+    # Friday to Monday is consecutive: the weekend is not a session.
+    assert _sessions_are_adjacent(date(2026, 10, 30), date(2026, 11, 2))
+    # 2026-08-31, 09-01 and 09-02 are published closures, so 08-28 -> 09-03 is
+    # the next session, while 08-27 -> 09-03 skips 08-28.
+    assert _sessions_are_adjacent(date(2026, 8, 28), date(2026, 9, 3))
+    assert not _sessions_are_adjacent(date(2026, 8, 27), date(2026, 9, 3))
+
+
+def test_enrichment_does_not_reuse_target_evidence_for_a_different_sum():
+    """#206: a summed value must be backed by its operands, not by the total.
+
+    A payload carrying `selling_general_admin: -100` and `selling_expenses:
+    -50` produced a -150 sum that inherited the -100 field's evidence. The sum
+    has no provider record of its own, so it is only admissible when the
+    operands it came from are.
+    """
+    from vnibb.api.v1 import equity
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    def _row(raw: dict, metadata: dict) -> FinancialStatementData:
+        return FinancialStatementData(
+            symbol="ABC",
+            period="2024",
+            statement_type="income",
+            source="fixture",
+            currency="VND",
+            value_unit="VND",
+            consolidation_basis="consolidated",
+            flow_basis="annual",
+            raw_data={"_financial_lineage": {
+                "value_unit": "VND",
+                "canonical_data": {"unit_metadata": metadata, **raw},
+            }},
+        )
+
+    # Both operands carry evidence: the sum is backed.
+    (backed,) = equity._enrich_financial_statement_rows([
+        _row(
+            {"selling_expenses": -50.0, "general_and_administrative_expenses": -100.0},
+            {
+                "selling_expenses": {"source_unit": "VND", "value_unit": "VND"},
+                "general_and_administrative_expenses": {"source_unit": "VND", "value_unit": "VND"},
+            },
+        )
+    ])
+    assert backed.selling_general_admin == -150.0
+    assert equity.admit_statement_rows([backed], "year")[0].selling_general_admin == -150.0
+
+    # Only the total carries evidence, and the total is a different number.
+    (unbacked,) = equity._enrich_financial_statement_rows([
+        _row(
+            {"selling_expenses": -50.0, "selling_general_admin": -100.0},
+            {"selling_general_admin": {"source_unit": "VND", "value_unit": "VND"}},
+        )
+    ])
+    assert unbacked.selling_general_admin == -100.0
+    admitted = equity.admit_statement_rows([unbacked], "year")[0]
+    # The reported total is used as-is; it is never replaced by the sum.
+    assert admitted.selling_general_admin == -100.0
+
+
+def test_evidence_naming_another_currency_cannot_admit_a_vnd_value():
+    """#206: a source unit naming another currency is not evidence for VND.
+
+    `{"source_unit": "USD", "value_unit": "VND"}` asserts the figure arrived in
+    dollars, so it cannot certify a VND amount without a recorded conversion.
+    Scale differences (`Bn. VND`) remain admissible: the value is normalized.
+    """
+    from vnibb.services.financial_service import _monetary_evidence_admitted
+
+    assert _monetary_evidence_admitted(
+        {"source_unit": "Bn. VND", "value_unit": "VND"}, "VND"
+    )
+    assert _monetary_evidence_admitted(
+        {"source_unit": "VND", "value_unit": "VND"}, "VND"
+    )
+    assert not _monetary_evidence_admitted(
+        {"source_unit": "USD", "value_unit": "VND"}, "VND"
+    )
+    assert not _monetary_evidence_admitted(
+        {"source_unit": "vnd", "value_unit": "VND", "unavailable_reason": "rejected"}, "VND"
+    )

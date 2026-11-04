@@ -6,7 +6,7 @@ Fetches market indices and overview data for Vietnam stock market.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
@@ -17,6 +17,8 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
+from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS
+from vnibb.services.data_quality import is_market_business_day
 logger = logging.getLogger(__name__)
 _index_jobs: dict[tuple[str, str], asyncio.Future] = {}
 
@@ -44,6 +46,43 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
+def _sessions_are_adjacent(earlier: Any, later: Any) -> bool:
+    """True when `later` is the first market session after `earlier`.
+
+    `df.iloc[-2]` is only the previous session when no session is missing in
+    between. HNX is missing 2026-10-29, so its second row is 2026-10-28 and
+    deriving a change from it reports a two-session move as one session's
+    (#205).
+    """
+    def _to_date(value: Any) -> Optional[date]:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            try:
+                return date.fromisoformat(value[:10])
+            except ValueError:
+                return None
+        return None
+
+    start, end = _to_date(earlier), _to_date(later)
+    if start is None or end is None or end <= start:
+        return False
+    holidays = OFFICIAL_MARKET_HOLIDAYS | {
+        date.fromisoformat(value) for value in settings.market_holiday_dates
+    }
+    cursor = end
+    while cursor > start:
+        cursor -= timedelta(days=1)
+        if cursor == start:
+            return True
+        if is_market_business_day(cursor, holidays):
+            # A session between them means they are not adjacent.
+            return False
+    return False
+
+
 def _is_suspicious_index_value(index_name: str, value: Any) -> bool:
     numeric = _coerce_float(value)
     minimum = MARKET_INDEX_MIN_EXPECTED_VALUE.get(index_name)
@@ -63,6 +102,7 @@ class MarketIndexData(BaseModel):
     current_value: Optional[float] = None
     change: Optional[float] = None
     change_pct: Optional[float] = None
+    previous_close: Optional[float] = None
     volume: Optional[float] = None
     high: Optional[float] = None
     low: Optional[float] = None
@@ -152,8 +192,16 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                         continue
 
                     prev_close = None
-                    if len(df.index) > 1:
-                        prev_close = df.iloc[-2].get("close")
+                    previous_row = df.iloc[-2] if len(df.index) > 1 else None
+                    if previous_row is not None:
+                        # Only an adjacent row is the previous session's close.
+                        # A gap (HNX has no 2026-10-29 row) would otherwise turn
+                        # a two-session move into one session's change (#205).
+                        if _sessions_are_adjacent(
+                            previous_row.get("time") or previous_row.get("date"),
+                            latest.get("time") or latest.get("date"),
+                        ):
+                            prev_close = previous_row.get("close")
 
                     if prev_close is None:
                         prev_close = _first_non_none(
@@ -175,7 +223,12 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                                     prev_df = prev_df.sort_values("time")
                                 elif "date" in prev_df.columns:
                                     prev_df = prev_df.sort_values("date")
-                                prev_close = prev_df.iloc[-1].get("close")
+                                candidate = prev_df.iloc[-1]
+                                if _sessions_are_adjacent(
+                                    candidate.get("time") or candidate.get("date"),
+                                    latest.get("time") or latest.get("date"),
+                                ):
+                                    prev_close = candidate.get("close")
                         except Exception as exc:
                             logger.debug(
                                 "Previous-close lookup failed for %s source=%s symbol=%s: %s",
@@ -282,7 +335,6 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                 previous_close = _first_non_none(
                     row.get("prev_close"), row.get("previous_close"), row.get("ref_price")
                 )
-                open_price = row.get("open")
                 volume = _first_non_none(row.get("volume"), row.get("total_volume"))
                 high = _first_non_none(row.get("high"), row.get("highest"))
                 low = _first_non_none(row.get("low"), row.get("lowest"))
@@ -294,7 +346,6 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                 change_num = _coerce_float(change)
                 change_pct_num = _coerce_float(change_pct)
                 previous_close_num = _coerce_float(previous_close)
-                open_price_num = _coerce_float(open_price)
                 index_name = _first_non_none(row.get("index_name"), row.get("symbol"), "Unknown")
 
                 if _is_suspicious_index_value(index_name, current_value_num):
@@ -330,17 +381,18 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                     if base_value not in (None, 0):
                         change_pct_num = (change_num / base_value) * 100
 
-                if change_pct_num is None and current_value_num is not None:
-                    base_value = None
-                    if previous_close_num not in (None, 0):
-                        base_value = previous_close_num
-                    elif open_price_num not in (None, 0):
-                        base_value = open_price_num
-                    if base_value not in (None, 0):
-                        delta = (
-                            change_num if change_num is not None else current_value_num - base_value
-                        )
-                        change_pct_num = (delta / base_value) * 100
+                # No `open` fallback: `open` is this session's open, not the
+                # previous close, so a percentage measured from it is an
+                # intraday move mislabelled as the daily change (#205).
+                if (
+                    change_pct_num is None
+                    and current_value_num is not None
+                    and previous_close_num not in (None, 0)
+                ):
+                    delta = (
+                        change_num if change_num is not None else current_value_num - previous_close_num
+                    )
+                    change_pct_num = (delta / previous_close_num) * 100
 
                 results.append(
                     MarketIndexData(
@@ -348,6 +400,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                         current_value=current_value_num,
                         change=change_num,
                         change_pct=change_pct_num,
+                        previous_close=previous_close_num,
                         volume=_coerce_float(volume),
                         high=_coerce_float(high),
                         low=_coerce_float(low),

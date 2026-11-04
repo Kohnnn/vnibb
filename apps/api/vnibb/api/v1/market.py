@@ -849,13 +849,13 @@ _INDEX_CHANGE_TOLERANCE = 0.011
 
 
 def _reconcile_index_change_pct(row: dict[str, Any]) -> dict[str, Any]:
-    """Publish level, base, change and percentage only when they agree.
+    """Publish level, base, change and percentage only when all four agree.
 
-    Every supplied percentage is checked, not just a missing one: a row can
-    carry a base that reconciles with its change while its percentage was
-    quoted against something else. A contradictory percentage is withheld with
-    `change_pct_status` so a later normalization pass cannot re-derive it
-    (#205).
+    A supplied base is admitted only if it reconciles with the change the same
+    row publishes: a provider can return `(252.74, 259.86, -3.87)` where the
+    base belongs to a different session (#205). The percentage is then checked
+    against the admitted base, and a contradictory one is withheld with
+    `change_pct_status` so a later normalization pass cannot re-derive it.
     """
     current_value = _coerce_market_number(
         row.get("current_value") or row.get("close") or row.get("price")
@@ -869,16 +869,26 @@ def _reconcile_index_change_pct(row: dict[str, Any]) -> dict[str, Any]:
     if change is None and current_value is not None and base not in (None, 0):
         change = current_value - base
 
-    # The base this row's own change implies. Used only to verify a percentage;
-    # it is never published as `previous_close`.
-    implied_base = current_value - change if current_value is not None and change is not None else None
-    published_base = base if base not in (None, 0) else None
+    if base in (None, 0):
+        base = None
+    elif (
+        current_value is not None
+        and change is not None
+        and abs((current_value - base) - change) > _INDEX_CHANGE_TOLERANCE
+    ):
+        # The base does not belong to the change this row reports.
+        base = None
+
+    # Only an admitted base may anchor the percentage. Otherwise the base the
+    # retained change implies is the sole honest reference, and it is never
+    # published as `previous_close`.
+    reference = base
+    if reference in (None, 0) and current_value is not None and change is not None:
+        reference = current_value - change
 
     expected_pct = None
-    if change is not None:
-        reference = published_base or implied_base
-        if reference not in (None, 0):
-            expected_pct = (change / reference) * 100
+    if change is not None and reference not in (None, 0):
+        expected_pct = (change / reference) * 100
 
     status = row.get("change_pct_status")
     if change_pct is not None and expected_pct is not None:
@@ -901,6 +911,12 @@ def _reconcile_index_change_pct(row: dict[str, Any]) -> dict[str, Any]:
         "change": change,
         "change_pct": change_pct,
     }
+    # Every base spelling must go: leaving `prev_close`/`ref_price` behind lets
+    # the next normalization pass read the withheld base straight back (#205).
+    for key in ("previous_close", "prev_close", "ref_price"):
+        result.pop(key, None)
+    if base is not None:
+        result["previous_close"] = base
     if status is not None:
         result["change_pct_status"] = status
     else:

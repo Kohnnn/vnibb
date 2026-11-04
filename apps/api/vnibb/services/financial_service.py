@@ -92,9 +92,36 @@ def normalize_statement_period(
     return str(year)
 
 
+def _unit_currency(value: object) -> str | None:
+    """The currency family a unit label names, ignoring scale.
+
+    `source_unit` conventionally records the provider's scale ("Bn. VND") while
+    the value is already normalized, so scale is not a conflict. A different
+    currency is.
+    """
+    if value is None:
+        return None
+    label = str(value).strip().lower()
+    if not label:
+        return None
+    for token, currency in (
+        ("vnd", "vnd"), ("vnđ", "vnd"), ("đồng", "vnd"), ("dong", "vnd"),
+        ("usd", "usd"), ("$", "usd"), ("eur", "eur"), ("jpy", "jpy"),
+    ):
+        if token in label:
+            return currency
+    return None
+
+
 def _monetary_evidence_admitted(metadata: object, unit: str) -> bool:
     if not isinstance(metadata, dict) or metadata.get("unavailable_reason"):
         return False
+    target = _unit_currency(unit)
+    # A source unit naming a different currency is not evidence for this value.
+    for key in ("unit", "value_unit", "source_unit"):
+        claimed = _unit_currency(metadata.get(key))
+        if claimed is not None and target is not None and claimed != target:
+            return False
     if any(metadata.get(key) not in (None, unit) for key in ("unit", "value_unit")):
         return False
     components = metadata.get("components")

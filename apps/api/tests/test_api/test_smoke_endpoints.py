@@ -2293,6 +2293,44 @@ async def test_market_indices_withhold_a_contradictory_percentage(
 
 
 @pytest.mark.asyncio
+async def test_market_indices_withhold_a_provider_base_that_contradicts_change(
+    client, monkeypatch
+):
+    """#205: a provider-only row must reconcile its base against its change.
+
+    No DB row exists, so the merge guard never runs. The provider asserts
+    level 252.74, base 259.86 and change -3.87; that base belongs to another
+    session (252.74 - 259.86 = -7.12), so it is withheld.
+    """
+    from vnibb.api.v1 import market
+
+    async def fake_yahoo_fetch():
+        return [
+            {
+                "index_name": "HNX",
+                "current_value": 252.74,
+                "change": -3.87,
+                "previous_close": 259.86,
+                "time": "2026-10-30T08:15:00",
+                "source": "yahoo_finance",
+            }
+        ]
+
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", fake_yahoo_fetch)
+
+    response = await client.get("/api/v1/market/indices?limit=1")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["current_value"] == pytest.approx(252.74)
+    assert row["change"] == pytest.approx(-3.87)
+    assert "previous_close" not in row
+    # With no admitted base the percentage comes from the base the change
+    # implies (252.74 + 3.87).
+    assert row["change_pct"] == pytest.approx(-3.87 / 256.61 * 100, rel=1e-9)
+
+
+@pytest.mark.asyncio
 async def test_market_indices_use_yahoo_fast_path_when_available(client, monkeypatch):
     async def fake_yahoo_fetch():
         return [
