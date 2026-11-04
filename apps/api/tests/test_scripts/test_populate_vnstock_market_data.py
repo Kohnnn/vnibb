@@ -336,31 +336,22 @@ def test_status_call_that_raises_fails_closed(sdk):
         fetch("quote.history")
 
 
-def test_unregistered_device_is_not_a_probe_failure(sdk):
-    """A refused device is a definite "no credential"; the runtime must proceed.
+def test_unregistered_device_status_error_fails_closed(sdk):
+    """AuthError does not establish guest entitlement."""
+    from vnibb.providers.vnstock import runtime
 
-    The SDK answers `AuthError: Thiết bị chưa được đăng ký` when the persisted
-    key is not bound to this device. Treating that as an unreadable probe made
-    the free runtime refuse every provider call, which took the API down when
-    the guard also ran at startup.
-    """
     auth_error = type("AuthError", (Exception,), {})
-
-    def refused():
-        raise auth_error("Thiết bị chưa được đăng ký")
-
-    sdk.status = refused
-    # Reaching the provider (and failing there) proves the guard let it through.
-    with pytest.raises(Exception) as raised:
-        fetch("quote.history")
-    assert not isinstance(raised.value, RuntimeError)
-
-
-def test_unknown_probe_error_still_fails_closed(sdk):
-    """Only a positive auth answer is trusted; anything else keeps failing closed."""
-    sdk.status = lambda: (_ for _ in ()).throw(OSError("socket closed"))
+    sdk.status = lambda: (_ for _ in ()).throw(auth_error("device not registered"))
     with pytest.raises(RuntimeError, match="could not read"):
-        fetch("quote.history")
+        runtime.validate_free_runtime()
+
+
+def test_guest_status_is_admitted_without_provider_fetch(sdk):
+    """A positive guest status is sufficient; this exercises only the guard."""
+    from vnibb.providers.vnstock import runtime
+
+    sdk.status = lambda: {"authenticated": False, "tier": "guest", "active": True}
+    runtime.validate_free_runtime()
 
 
 

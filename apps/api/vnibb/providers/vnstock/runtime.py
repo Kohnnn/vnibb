@@ -27,17 +27,6 @@ def validate_free_runtime() -> None:
     _refuse_persisted_paid_account()
 
 
-def _is_auth_rejection(exc: BaseException) -> bool:
-    """Whether the SDK answered "this device/credential is not authenticated".
-
-    The SDK raises its core `AuthError` for an unregistered device, an expired
-    key or a refused device. That is a definite negative answer, not a probe
-    failure: no paid credential can be exercised, so the free runtime is safe.
-    Matched by class name because `vnstock._core` is a compiled extension the
-    module cannot import statically without importing the SDK itself.
-    """
-    return any(cls.__name__ == "AuthError" for cls in type(exc).__mro__)
-
 
 def _refuse_persisted_paid_account() -> None:
     """Refuse acquisition when the installed SDK already holds a paid credential.
@@ -65,12 +54,6 @@ def _refuse_persisted_paid_account() -> None:
     try:
         state = status()
     except Exception as exc:
-        # "Device not registered" and similar auth rejections are a definite
-        # answer: no credential is valid right now, so nothing paid can be
-        # exercised and the free runtime proceeds. Only a probe that produced
-        # no answer at all is unverifiable, and that still fails closed.
-        if _is_auth_rejection(exc):
-            return
         raise RuntimeError(
             "Free runtime could not read the installed vnstock credential state; "
             "refusing to acquire."
@@ -82,9 +65,13 @@ def _refuse_persisted_paid_account() -> None:
     authenticated = state.get("authenticated")
     if authenticated is None:
         authenticated = state.get("has_api_key")
-    if authenticated is not True:
-        return
     tier = str(state.get("tier") or "").strip().lower()
+    if authenticated is False and tier in {"guest", "free"}:
+        return
+    if authenticated is not True:
+        raise RuntimeError(
+            "Installed vnstock credential state is unverifiable; refusing to acquire."
+        )
     if tier in {"guest", "free"}:
         return
     if not tier:
