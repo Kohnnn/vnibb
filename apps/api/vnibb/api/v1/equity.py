@@ -1319,15 +1319,13 @@ def _enrich_financial_statement_rows(
         # field's evidence forward. Without it admission withholds the value
         # rather than asserting an unsourced unit (#206).
         for name in FinancialStatementData.model_fields:
-            filled = getattr(item, name, None)
-            if filled is None or pre_fill.get(name) is not None:
+            if getattr(item, name, None) is None or pre_fill.get(name) is not None:
                 continue
             evidence = _metric_evidence(item, name)
             if evidence is not None:
+                # Aliases need no copy: admission resolves `cash`/`equity` to
+                # `cash_and_equivalents`/`total_equity` itself.
                 item.unit_metadata.setdefault(name, evidence)
-                for alias in _FINANCIAL_METRIC_ALIASES.get(name, ()):
-                    if getattr(item, alias, None) == filled:
-                        item.unit_metadata.setdefault(alias, evidence)
 
         # A provider-rejected metric is not a missing value. Filling it from a raw
         # lookup or an accounting identity would publish a number the lineage refused.
