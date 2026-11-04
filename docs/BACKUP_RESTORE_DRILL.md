@@ -87,13 +87,14 @@ Both disposable containers were removed before success.
 
 ### 2026-11-04: `20261104T084539Z` restored off-box on deploy-01
 
-The OCI producer set `20261104T084539Z` (90 tables, 90 `TABLE DATA` entries;
-`stocks` and `stock_prices` present) was copied to `deploy-01` and restored
+The OCI producer set `20261104T084539Z` was copied to `deploy-01` and restored
 into fresh `--network none` containers. The utility exited 0 with
 `RECOVERY OK` and `RTO_seconds=498.5` (8 minutes 18.5 seconds; excludes
 transfer and application cutover).
 
-- PostgreSQL: 90 tables, `stocks` and `stock_prices` nonempty.
+- PostgreSQL: `stocks` and `stock_prices` nonempty. The dump TOC carries 90
+  `TABLE DATA` entries; the restored database has 42 public tables. These are
+  different measures and neither is a public-table count on its own.
 - MongoDB: 8,116,702 documents restored, zero failures; 17 collections,
   17 populated. Largest: `market_prices_eod`, 4,904,191 documents; sampled
   document present.
@@ -107,13 +108,25 @@ transfer and application cutover).
   image `mongo:7`:
   `sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4`.
 
-The plaintext pair was chmod-restricted to 0700/0600 before the drill, then
-packed into `~/offbox/20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
+**Handling errors.** The transfer preserved the source modes, so the pair
+arrived `-rw-r--r--` and was readable for roughly an hour before the drill
+began; `chmod 700`/`0600` was applied to the directory and files *after* the
+transfer and *before* the restore, not before the transfer. Treat the exposure
+window as real. Future drills must set `umask 077` and create the destination
+with `install -d -m 700` before the first byte lands.
+
+The plaintext pair was then packed into
+`~/offbox/20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
 SHA-256 `e3846a3dfe057ccdbf210c6d72120805e58493b567370f620da9877648608afc`)
 for the retained `age1lu9gvw3vvrghvzqf5fkn5rr2td86h4z0egtrs6cdgrnt3jcyj5hq0y9akg`
-recipient. Plaintext artifacts and the staged utility were removed; the
-recovery containers were confirmed absent. This is separate-host restore
-proof, not a separate human custodian.
+recipient, and the plaintext artifacts and staged utility were removed. The
+recovery containers were confirmed absent.
+
+**This is not independent encrypted custody.** The archive and its age
+identity now both live on the `deploy-01` account, so a compromise of that
+account defeats the encryption. It is a same-host restore proof. Retaining an
+encrypted copy off this host, under a custodian that does not hold the
+identity, remains open work.
 
 ### Historical drill and custody risks
 
