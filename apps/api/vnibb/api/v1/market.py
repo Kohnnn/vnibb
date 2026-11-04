@@ -845,41 +845,71 @@ async def _fetch_yahoo_commodities(limit: int) -> list[dict[str, Any]]:
     return rows
 
 
-def _normalize_market_index_metrics(row: dict[str, Any]) -> dict[str, Any]:
+_INDEX_CHANGE_TOLERANCE = 0.011
+
+
+def _reconcile_index_change_pct(row: dict[str, Any]) -> dict[str, Any]:
+    """Publish level, base, change and percentage only when they agree.
+
+    Every supplied percentage is checked, not just a missing one: a row can
+    carry a base that reconciles with its change while its percentage was
+    quoted against something else. A contradictory percentage is withheld with
+    `change_pct_status` so a later normalization pass cannot re-derive it
+    (#205).
+    """
     current_value = _coerce_market_number(
         row.get("current_value") or row.get("close") or row.get("price")
     )
     change = _coerce_market_number(row.get("change"))
     change_pct = _coerce_market_number(row.get("change_pct"))
-    previous_close = _coerce_market_number(
+    base = _coerce_market_number(
         row.get("previous_close") or row.get("prev_close") or row.get("ref_price")
     )
-    open_price = _coerce_market_number(row.get("open"))
 
-    if change is None and current_value is not None and previous_close not in (None, 0):
-        change = current_value - previous_close
+    if change is None and current_value is not None and base not in (None, 0):
+        change = current_value - base
 
-    # No `previous_close = current - change` fallback: that manufactures a
-    # close for a session nobody observed (#205). Callers either have an
-    # observed base or publish the level and change without one.
+    # The base this row's own change implies. Used only to verify a percentage;
+    # it is never published as `previous_close`.
+    implied_base = current_value - change if current_value is not None and change is not None else None
+    published_base = base if base not in (None, 0) else None
 
-    computed_change_pct = None
-    if current_value is not None and change is not None:
-        base_value = previous_close if previous_close not in (None, 0) else open_price
-        if base_value not in (None, 0):
-            computed_change_pct = (change / base_value) * 100
+    expected_pct = None
+    if change is not None:
+        reference = published_base or implied_base
+        if reference not in (None, 0):
+            expected_pct = (change / reference) * 100
 
-    if computed_change_pct is not None and (
-        change_pct is None or (abs(change_pct) < 1e-9 and abs(change) > 1e-9)
-    ):
-        change_pct = computed_change_pct
+    status = row.get("change_pct_status")
+    if change_pct is not None and expected_pct is not None:
+        if abs(change_pct) < 1e-9 and abs(change) > 1e-9:
+            change_pct = expected_pct
+            status = None
+        elif abs(change_pct - expected_pct) > _INDEX_CHANGE_TOLERANCE:
+            change_pct = None
+            status = "inconsistent_with_retained_change"
+        else:
+            # An agreeing percentage clears any status a merged row carried in,
+            # so a withheld value cannot keep its reason after it is repaired.
+            status = None
+    elif change_pct is None and expected_pct is not None and status is None:
+        change_pct = expected_pct
 
-    return {
+    result = {
         **row,
         "current_value": current_value,
         "change": change,
         "change_pct": change_pct,
     }
+    if status is not None:
+        result["change_pct_status"] = status
+    else:
+        result.pop("change_pct_status", None)
+    return result
+
+
+def _normalize_market_index_metrics(row: dict[str, Any]) -> dict[str, Any]:
+    return _reconcile_index_change_pct(row)
 
 
 def _is_suspicious_market_index_value(index_code: str, value: Optional[float]) -> bool:
@@ -973,27 +1003,7 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
             previous_close = None
             previous_close_status = "previous_session_not_retained"
 
-        computed_change_pct = None
-        if change is not None and previous_close not in (None, 0):
-            computed_change_pct = (change / previous_close) * 100
-
-        if computed_change_pct is not None and (
-            change_pct is None or (abs(change_pct) < 1e-9 and abs(change) > 1e-9)
-        ):
-            change_pct = computed_change_pct
-        elif (
-            previous_close is None
-            and change is not None
-            and change_pct is not None
-            and current_value not in (None, 0)
-            and abs((change / current_value) * 100 - change_pct) > 0.011
-        ):
-            # No retained base, and the stored percentage does not follow from
-            # the retained change either. Withhold it instead of asserting an
-            # unverifiable percentage.
-            change_pct = None
-
-        row = _normalize_market_index_metrics(
+        row = _reconcile_index_change_pct(
             {
                 "index_name": code,
                 "current_value": current_value,
@@ -1006,6 +1016,7 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
                 "previous_close": previous_close,
             }
         )
+        row = _normalize_market_index_metrics(row)
         if previous_close_status != "observed":
             row["previous_close_status"] = previous_close_status
         results.append(row)
@@ -1041,16 +1052,37 @@ def _merge_market_index_rows(
         provider_change = _coerce_market_number(existing_row.get("change"))
         provider_change_pct = _coerce_market_number(existing_row.get("change_pct"))
         db_change_pct = _coerce_market_number(normalized_db_row.get("change_pct"))
+        provider_level = _coerce_market_number(existing_row.get("current_value"))
+        db_level = _coerce_market_number(normalized_db_row.get("current_value"))
+        # The two sources describe the same session only when their levels agree.
+        same_session = (
+            provider_level is not None
+            and db_level is not None
+            and abs(provider_level - db_level) <= 0.011
+        )
 
         if (
             provider_change_pct in (None, 0.0)
             and provider_change not in (None, 0.0)
             and db_change_pct is not None
+            and same_session
         ):
             combined_row["change_pct"] = db_change_pct
         for key in ["volume", "high", "low", "time"]:
             if combined_row.get(key) is None and normalized_db_row.get(key) is not None:
                 combined_row[key] = normalized_db_row.get(key)
+        # A base from another session would let the final normalization derive a
+        # change (or a percentage) the provider never reported (#205). The base
+        # must reconcile with whichever change this row publishes.
+        base = _coerce_market_number(combined_row.get("previous_close"))
+        published_change = _coerce_market_number(combined_row.get("change"))
+        if (
+            provider_level is not None
+            and base is not None
+            and published_change is not None
+            and abs((provider_level - base) - published_change) > 0.011
+        ):
+            combined_row.pop("previous_close", None)
         merged[code] = _normalize_market_index_metrics(combined_row)
 
     ordered_codes = [code for code in MARKET_INDEX_ORDER if code in merged]

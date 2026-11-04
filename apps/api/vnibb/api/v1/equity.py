@@ -6952,7 +6952,7 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="income_statement_v5_eps_admitted")
+@cached(ttl=86400, key_prefix="income_statement_v6_fully_admitted")
 async def get_income_statement(
     symbol: str,
     period: Literal[

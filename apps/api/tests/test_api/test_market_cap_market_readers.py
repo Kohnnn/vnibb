@@ -222,6 +222,10 @@ async def test_index_withholds_previous_close_across_a_session_gap():
     assert hnx["change"] == pytest.approx(-3.87)
     assert hnx["previous_close"] is None
     assert hnx["previous_close_status"] == "previous_session_not_retained"
+    # The stored percentage is quoted against the session's own base
+    # (252.74 - -3.87 = 256.61), not against the level. Checking it against the
+    # level discarded a figure the source measured consistently.
+    assert hnx["change_pct"] == pytest.approx(-1.50812517049219)
 
 
 @pytest.mark.asyncio
@@ -254,6 +258,60 @@ async def test_index_keeps_an_observed_previous_close_that_reconciles():
     assert vnindex["change"] == pytest.approx(10.0)
     assert vnindex["change_pct"] == pytest.approx(10.0 / 1240.0 * 100, rel=1e-9)
     assert "previous_close_status" not in vnindex
+
+
+def test_merge_does_not_borrow_a_change_pct_from_another_session():
+    """#205: merging may not mix a base from one session with a level from another.
+
+    The DB row and provider row disagree on the level, so they describe
+    different sessions. Adopting the DB percentage beside the provider change
+    published a figure neither source measured.
+    """
+    db_rows = [
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "change_pct": None,
+            "previous_close": 1240.0,
+        }
+    ]
+    provider_rows = [
+        {"index_name": "VNINDEX", "current_value": 1275.5, "change": 25.5}
+    ]
+
+    merged = market._merge_market_index_rows(db_rows, provider_rows)
+    row = next(item for item in merged if item["index_name"] == "VNINDEX")
+
+    assert row["current_value"] == pytest.approx(1275.5)
+    assert row["change"] == pytest.approx(25.5)
+    # The DB base (1240) belongs to a different session and is dropped. The
+    # percentage then follows from the provider's own level and change
+    # (1275.5 - 25.5 = 1250), never from the foreign base.
+    assert "previous_close" not in row
+    assert row["change_pct"] == pytest.approx(25.5 / 1250 * 100, rel=1e-9)
+
+
+def test_merge_publishes_a_base_only_when_it_reconciles():
+    """An agreeing source pair keeps its base and derives the percentage from it."""
+    db_rows = [
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "change_pct": 0.8064516129032258,
+            "previous_close": 1240.0,
+        }
+    ]
+    provider_rows = [
+        {"index_name": "VNINDEX", "current_value": 1250.0, "change": 10.0}
+    ]
+
+    merged = market._merge_market_index_rows(db_rows, provider_rows)
+    row = next(item for item in merged if item["index_name"] == "VNINDEX")
+
+    assert row["previous_close"] == pytest.approx(1240.0)
+    assert row["change_pct"] == pytest.approx(10.0 / 1240.0 * 100, rel=1e-9)
 
 
 def test_admission_withholds_sga_after_enrichment_fills_it():

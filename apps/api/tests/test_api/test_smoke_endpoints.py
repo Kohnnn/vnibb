@@ -2242,6 +2242,57 @@ async def test_market_indices_smoke_returns_data(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_market_indices_withhold_a_contradictory_percentage(
+    client, test_db, monkeypatch
+):
+    """#205: a reconciling base does not license a contradictory percentage.
+
+    Level 1829.04, retained base 1817.0 and change 12.04 agree, but the stored
+    percentage is -1. Nothing measured -1, so the endpoint withholds the
+    percentage instead of publishing it beside a base and change it contradicts.
+    """
+    test_db.add_all(
+        [
+            StockIndex(
+                id=1,
+                index_code="VNINDEX",
+                time=date(2026, 1, 30),
+                open=1820.0,
+                high=1835.0,
+                low=1810.0,
+                close=1829.04,
+                volume=1_000_000,
+                change=12.04,
+                change_pct=-1.0,
+            ),
+            StockIndex(
+                id=2,
+                index_code="VNINDEX",
+                time=date(2026, 1, 29),
+                open=1810.0,
+                high=1825.0,
+                low=1802.0,
+                close=1817.0,
+                volume=900_000,
+                change=5.0,
+                change_pct=0.28,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/indices?limit=1")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["current_value"] == pytest.approx(1829.04)
+    assert row["change"] == pytest.approx(12.04)
+    assert row["previous_close"] == pytest.approx(1817.0)
+    assert row["change_pct"] is None
+    assert row["change_pct_status"] == "inconsistent_with_retained_change"
+
+
+@pytest.mark.asyncio
 async def test_market_indices_use_yahoo_fast_path_when_available(client, monkeypatch):
     async def fake_yahoo_fetch():
         return [
