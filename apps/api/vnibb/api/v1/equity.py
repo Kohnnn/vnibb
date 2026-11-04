@@ -894,7 +894,7 @@ def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
     return lookup
 
 
-def _metric_evidence(row: FinancialStatementData, field_name: str) -> Optional[dict]:
+def _metric_evidence(row: FinancialStatementData, field_name: str) -> dict | None:
     for name in (field_name, *_FINANCIAL_METRIC_ALIASES.get(field_name, ())):
         evidence = row.unit_metadata.get(name)
         if isinstance(evidence, dict) and evidence:
