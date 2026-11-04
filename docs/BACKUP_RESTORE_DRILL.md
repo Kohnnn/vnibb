@@ -85,6 +85,36 @@ with `RECOVERY OK`, `RTO_seconds=376.0`: 42 public PostgreSQL tables, 1,754 stoc
 16 populated collections, 4,870,705 EOD prices and a sampled document present.
 Both disposable containers were removed before success.
 
+### 2026-11-04: `20261104T084539Z` restored off-box on deploy-01
+
+The OCI producer set `20261104T084539Z` (90 tables, 90 `TABLE DATA` entries;
+`stocks` and `stock_prices` present) was copied to `deploy-01` and restored
+into fresh `--network none` containers. The utility exited 0 with
+`RECOVERY OK` and `RTO_seconds=498.5` (8 minutes 18.5 seconds; excludes
+transfer and application cutover).
+
+- PostgreSQL: 90 tables, `stocks` and `stock_prices` nonempty.
+- MongoDB: 8,116,702 documents restored, zero failures; 17 collections,
+  17 populated. Largest: `market_prices_eod`, 4,904,191 documents; sampled
+  document present.
+- PostgreSQL artifact: 217,785,983 bytes,
+  SHA-256 `b5978912ecd5c5ea2146337c39cb3d52aacf3e1e7d3bc748d7653be6c14eb1a6`.
+- Mongo artifact: 584,491,375 bytes,
+  SHA-256 `a0d3edc5262d399a2a29a7c644794b5e889480edc2698861d6e9c5e3119f42df`.
+- Host: Linux `7.0.0-38-generic`, Docker `29.1.3`.
+  Image `supabase/postgres:17.6.1.136`:
+  `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`;
+  image `mongo:7`:
+  `sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4`.
+
+The plaintext pair was chmod-restricted to 0700/0600 before the drill, then
+packed into `~/offbox/20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
+SHA-256 `e3846a3dfe057ccdbf210c6d72120805e58493b567370f620da9877648608afc`)
+for the retained `age1lu9gvw3vvrghvzqf5fkn5rr2td86h4z0egtrs6cdgrnt3jcyj5hq0y9akg`
+recipient. Plaintext artifacts and the staged utility were removed; the
+recovery containers were confirmed absent. This is separate-host restore
+proof, not a separate human custodian.
+
 ### Historical drill and custody risks
 
 
