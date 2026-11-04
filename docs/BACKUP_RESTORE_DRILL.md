@@ -116,17 +116,25 @@ window as real. Future drills must set `umask 077` and create the destination
 with `install -d -m 700` before the first byte lands.
 
 The plaintext pair was then packed into
-`~/offbox/20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
+`20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
 SHA-256 `e3846a3dfe057ccdbf210c6d72120805e58493b567370f620da9877648608afc`)
 for the retained `age1lu9gvw3vvrghvzqf5fkn5rr2td86h4z0egtrs6cdgrnt3jcyj5hq0y9akg`
 recipient, and the plaintext artifacts and staged utility were removed. The
 recovery containers were confirmed absent.
 
-**This is not independent encrypted custody.** The archive and its age
-identity now both live on the `deploy-01` account, so a compromise of that
-account defeats the encryption. It is a same-host restore proof. Retaining an
-encrypted copy off this host, under a custodian that does not hold the
-identity, remains open work.
+**Custody split.** The archive was first written beside the identity on
+`deploy-01`, which defeats key/store separation and contradicts the rule that
+no archive persists on the custody host. It was then copied to the workstation
+at `backups/20261104T084539Z-offbox.tar.age` (0700 directory, `0600` file),
+confirmed byte-identical by SHA-256, and confirmed decryptable with the
+identity by streaming `age -d` into `tar -t` without writing plaintext to disk.
+The copy on `deploy-01` was deleted, leaving no recovery material under
+`~/offbox` there.
+
+This is still not full custodian independence: the identity is retained on
+`compute_01`, and the archive now also lives on `compute_01`. Ciphertext and key
+share a host again, just not the custody host. Independent encrypted custody
+requires an archive held where the identity is not, which remains open work.
 
 ### Historical drill and custody risks
 
