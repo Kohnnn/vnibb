@@ -859,10 +859,9 @@ def _normalize_market_index_metrics(row: dict[str, Any]) -> dict[str, Any]:
     if change is None and current_value is not None and previous_close not in (None, 0):
         change = current_value - previous_close
 
-    if previous_close in (None, 0) and current_value is not None and change is not None:
-        derived_previous_close = current_value - change
-        if derived_previous_close not in (None, 0):
-            previous_close = derived_previous_close
+    # No `previous_close = current - change` fallback: that manufactures a
+    # close for a session nobody observed (#205). Callers either have an
+    # observed base or publish the level and change without one.
 
     computed_change_pct = None
     if current_value is not None and change is not None:
@@ -947,11 +946,33 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
             continue
 
         change = _coerce_market_number(latest.change)
-        previous_close = _coerce_market_number(previous.close) if previous else None
-        if change is None and current_value is not None and previous_close is not None:
-            change = current_value - previous_close
-
         change_pct = _coerce_market_number(latest.change_pct)
+        # `row_num <= 2` selects the second newest stored row, not necessarily
+        # the previous session: HNX is missing 2026-10-29, so the second row is
+        # 2026-10-28 (259.86) while the row's own change is -3.87. Publishing
+        # that close made level, base and change incompatible (#205).
+        observed_previous_close = (
+            _coerce_market_number(previous.close) if previous is not None else None
+        )
+        if observed_previous_close in (None, 0):
+            observed_previous_close = None
+
+        previous_close = observed_previous_close
+        previous_close_status = "observed"
+        if observed_previous_close is not None and change is not None and current_value is not None:
+            if abs((current_value - observed_previous_close) - change) > 0.011:
+                # The observed row is not the base this change was measured
+                # from. Withhold it rather than publish a mismatched base or
+                # invent the unobserved close that `close - change` implies.
+                previous_close = None
+                previous_close_status = "previous_session_not_retained"
+        elif observed_previous_close is not None:
+            # No change was retained on this row, so adjacency cannot be
+            # proven from arithmetic. Deriving `close - base` would report a
+            # multi-session move as one session's change (#205).
+            previous_close = None
+            previous_close_status = "previous_session_not_retained"
+
         computed_change_pct = None
         if change is not None and previous_close not in (None, 0):
             computed_change_pct = (change / previous_close) * 100
@@ -960,22 +981,34 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
             change_pct is None or (abs(change_pct) < 1e-9 and abs(change) > 1e-9)
         ):
             change_pct = computed_change_pct
+        elif (
+            previous_close is None
+            and change is not None
+            and change_pct is not None
+            and current_value not in (None, 0)
+            and abs((change / current_value) * 100 - change_pct) > 0.011
+        ):
+            # No retained base, and the stored percentage does not follow from
+            # the retained change either. Withhold it instead of asserting an
+            # unverifiable percentage.
+            change_pct = None
 
-        results.append(
-            _normalize_market_index_metrics(
-                {
-                    "index_name": code,
-                    "current_value": current_value,
-                    "change": change,
-                    "change_pct": change_pct,
-                    "volume": _coerce_market_number(latest.volume),
-                    "high": _coerce_market_number(latest.high),
-                    "low": _coerce_market_number(latest.low),
-                    "time": latest.time,
-                    "previous_close": previous_close,
-                }
-            )
+        row = _normalize_market_index_metrics(
+            {
+                "index_name": code,
+                "current_value": current_value,
+                "change": change,
+                "change_pct": change_pct,
+                "volume": _coerce_market_number(latest.volume),
+                "high": _coerce_market_number(latest.high),
+                "low": _coerce_market_number(latest.low),
+                "time": latest.time,
+                "previous_close": previous_close,
+            }
         )
+        if previous_close_status != "observed":
+            row["previous_close_status"] = previous_close_status
+        results.append(row)
 
     return results
 

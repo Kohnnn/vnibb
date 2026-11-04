@@ -184,3 +184,130 @@ async def test_board_unknown_returns_are_not_zero(client, market_rows, monkeypat
     sector = response.json()["sectors"][0]
     assert sector["change_pct"] is None
     assert sector["constituent_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_index_withholds_previous_close_across_a_session_gap():
+    """#205: a missing session must not rewrite the published base.
+
+    HNX has no 2026-10-29 row, so the second newest stored row is 2026-10-28
+    (259.86) while the 2026-10-30 row's own change is -3.87. Publishing 259.86
+    as the previous close made level, base and change incompatible. The close
+    for 2026-10-29 was never observed, so it is withheld rather than derived.
+    """
+
+    class FakeResult:
+        def all(self):
+            return [
+                SimpleNamespace(
+                    index_code="HNX", time=date(2026, 10, 30), open=252.74,
+                    high=256.88, low=252.74, close=252.74, volume=1,
+                    change=-3.87, change_pct=-1.50812517049219,
+                ),
+                SimpleNamespace(
+                    index_code="HNX", time=date(2026, 10, 28), open=259.86,
+                    high=261.49, low=255.67, close=259.86, volume=1,
+                    change=0.36, change_pct=0.138728323699427,
+                ),
+            ]
+
+    class FakeDB:
+        async def execute(self, *args, **kwargs):
+            return FakeResult()
+
+    rows = await market._load_latest_market_indices_from_db(FakeDB())
+    hnx = next(row for row in rows if row["index_name"] == "HNX")
+
+    assert hnx["current_value"] == pytest.approx(252.74)
+    assert hnx["change"] == pytest.approx(-3.87)
+    assert hnx["previous_close"] is None
+    assert hnx["previous_close_status"] == "previous_session_not_retained"
+
+
+@pytest.mark.asyncio
+async def test_index_keeps_an_observed_previous_close_that_reconciles():
+    """A retained adjacent session stays published."""
+
+    class FakeResult:
+        def all(self):
+            return [
+                SimpleNamespace(
+                    index_code="VNINDEX", time=date(2026, 10, 30), open=1250.0,
+                    high=1260.0, low=1240.0, close=1250.0, volume=1,
+                    change=10.0, change_pct=0.8064516129032258,
+                ),
+                SimpleNamespace(
+                    index_code="VNINDEX", time=date(2026, 10, 29), open=1240.0,
+                    high=1245.0, low=1235.0, close=1240.0, volume=1,
+                    change=5.0, change_pct=0.4048582995951417,
+                ),
+            ]
+
+    class FakeDB:
+        async def execute(self, *args, **kwargs):
+            return FakeResult()
+
+    rows = await market._load_latest_market_indices_from_db(FakeDB())
+    vnindex = next(row for row in rows if row["index_name"] == "VNINDEX")
+
+    assert vnindex["previous_close"] == pytest.approx(1240.0)
+    assert vnindex["change"] == pytest.approx(10.0)
+    assert vnindex["change_pct"] == pytest.approx(10.0 / 1240.0 * 100, rel=1e-9)
+    assert "previous_close_status" not in vnindex
+
+
+def test_admission_withholds_sga_after_enrichment_fills_it():
+    """#206: income-statement output must be the admitted rows.
+
+    FPT FY2025 returned `selling_general_admin=-14899986038258.0` with
+    `currency=null` and `value_unit=null`, while revenue and net income were
+    correctly withheld. SG&A was filled by `_enrich_financial_statement_rows`
+    after admission, and the endpoint copied back only EPS.
+    """
+    from vnibb.api.v1 import equity
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    enriched = FinancialStatementData(
+        symbol="FPT",
+        period="2025",
+        statement_type="income_statement",
+        raw_data={"selling_expenses": -100.0},
+        unit_metadata={"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}},
+    )
+    enriched = equity._enrich_financial_statement_rows([enriched])[0]
+    assert enriched.selling_general_admin == -100.0
+
+    row = equity.admit_statement_rows([enriched], "year")[0]
+
+    assert row.selling_general_admin is None
+    assert row.unit_metadata["selling_general_admin"]["unavailable_reason"] == (
+        "unverified_statement_currency_or_unit"
+    )
+
+
+def test_admission_keeps_metrics_with_real_unit_evidence():
+    """A metric with admitted unit evidence survives the same gate."""
+    from vnibb.api.v1 import equity
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    admitted = FinancialStatementData(
+        symbol="VNM",
+        period="2024",
+        statement_type="income_statement",
+        currency="VND",
+        value_unit="VND",
+        source="vnstock",
+        consolidation_basis="consolidated",
+        flow_basis="annual",
+        revenue=1000.0,
+        selling_general_admin=-100.0,
+        unit_metadata={
+            "revenue": {"source_unit": "VND", "value_unit": "VND"},
+            "selling_general_admin": {"source_unit": "VND", "value_unit": "VND"},
+        },
+    )
+
+    row = equity.admit_statement_rows([admitted], "year")[0]
+
+    assert row.revenue == 1000.0
+    assert row.selling_general_admin == -100.0

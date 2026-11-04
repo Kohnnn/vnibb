@@ -894,6 +894,60 @@ def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
     return lookup
 
 
+def _metric_evidence(row: FinancialStatementData, field_name: str) -> Optional[dict]:
+    for name in (field_name, *_FINANCIAL_METRIC_ALIASES.get(field_name, ())):
+        evidence = row.unit_metadata.get(name)
+        if isinstance(evidence, dict) and evidence:
+            return evidence
+    lineage = (row.raw_data or {}).get("_financial_lineage")
+    if not isinstance(lineage, dict):
+        return None
+    sources = (
+        (lineage.get("canonical_data") or {}).get("unit_metadata") or {},
+        lineage.get("unit_metadata") or {},
+    )
+    for source in sources:
+        for name in (field_name, *_FINANCIAL_METRIC_ALIASES.get(field_name, ())):
+            evidence = source.get(name)
+            if isinstance(evidence, dict) and evidence:
+                return evidence
+    return None
+
+
+def _record_derivation(
+    row: FinancialStatementData,
+    field_name: str,
+    expression: str,
+    sources: list[tuple[FinancialStatementData, str]],
+) -> None:
+    """Attach unit evidence to a value `row` derived from other admitted fields.
+
+    A derived figure has no provider record of its own, so its unit is only as
+    good as its components. Missing component evidence leaves the field without
+    evidence, and admission withholds it instead of asserting a unit (#206).
+    """
+    if field_name in row.unit_metadata or not sources:
+        return
+    components = []
+    for source_row, name in sources:
+        evidence = _metric_evidence(source_row, name)
+        if evidence is None:
+            return
+        components.append(evidence)
+    row.unit_metadata[field_name] = {
+        "unit": "VND",
+        "value_unit": "VND",
+        "derivation": expression,
+        "unitEvidence": {
+            "kind": "derived_from_admitted_fields",
+            "expression": expression,
+            "fields": [name for _, name in sources],
+            "value_unit": "VND",
+        },
+        "components": components,
+    }
+
+
 def _lookup_financial_metric(raw_payload: Any, *aliases: str) -> Optional[float]:
     lookup = _build_financial_metric_lookup(raw_payload)
     for alias in aliases:
@@ -1051,7 +1105,9 @@ def _enrich_financial_statement_rows(
             metric for metric, metadata in item.unit_metadata.items()
             if isinstance(metadata, dict) and metadata.get("unavailable_reason")
         }
-
+        pre_fill = {
+            name: getattr(item, name, None) for name in FinancialStatementData.model_fields
+        }
         if item.total_equity is None:
             item.total_equity = _pick_optional_float(
                 item.total_equity,
@@ -1073,6 +1129,12 @@ def _enrich_financial_statement_rows(
                 and item.total_liabilities not in (None, 0)
             ):
                 item.total_equity = item.total_assets - item.total_liabilities
+                _record_derivation(
+                    item,
+                    "total_equity",
+                    "total_assets - total_liabilities",
+                    [(item, "total_assets"), (item, "total_liabilities")],
+                )
 
         if item.cash_and_equivalents is None:
             item.cash_and_equivalents = _lookup_financial_metric(
@@ -1209,6 +1271,12 @@ def _enrich_financial_statement_rows(
             and capex_value is not None
         ):
             item.free_cash_flow = item.operating_cash_flow + capex_value
+            _record_derivation(
+                item,
+                "free_cash_flow",
+                "operating_cash_flow + capex",
+                [(item, "operating_cash_flow"), (item, "capex")],
+            )
 
         if (
             item.statement_type == StatementType.INCOME.value
@@ -1217,13 +1285,18 @@ def _enrich_financial_statement_rows(
         ):
             cashflow_match = rows_by_period.get(str(item.period or "").upper())
             if cashflow_match is not None and cashflow_match is not item:
-                item.depreciation = _pick_optional_float(
+                depreciation_value = _pick_optional_float(
                     item.depreciation,
                     cashflow_match.depreciation,
                     _lookup_financial_metric(
                         cashflow_match.raw_data, "depreciation", "depreciation_and_amortisation"
                     ),
                 )
+                item.depreciation = depreciation_value
+                if depreciation_value is not None:
+                    evidence = _metric_evidence(cashflow_match, "depreciation")
+                    if evidence is not None:
+                        item.unit_metadata.setdefault("depreciation", evidence)
 
         if item.ebitda is None and "ebitda" not in rejected:
             item.ebitda = _lookup_financial_metric(raw_data, "ebitda", "ebitda_bn_vnd")
@@ -1234,6 +1307,27 @@ def _enrich_financial_statement_rows(
             and item.depreciation is not None
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
+            _record_derivation(
+                item,
+                "ebitda",
+                "operating_income + abs(depreciation)",
+                [(item, "operating_income"), (item, "depreciation")],
+            )
+
+        # A value this function filled in has no provider record of its own. Its
+        # unit is only as good as the field it was copied from, so carry that
+        # field's evidence forward. Without it admission withholds the value
+        # rather than asserting an unsourced unit (#206).
+        for name in FinancialStatementData.model_fields:
+            filled = getattr(item, name, None)
+            if filled is None or pre_fill.get(name) is not None:
+                continue
+            evidence = _metric_evidence(item, name)
+            if evidence is not None:
+                item.unit_metadata.setdefault(name, evidence)
+                for alias in _FINANCIAL_METRIC_ALIASES.get(name, ()):
+                    if getattr(item, alias, None) == filled:
+                        item.unit_metadata.setdefault(alias, evidence)
 
         # A provider-rejected metric is not a missing value. Filling it from a raw
         # lookup or an accounting identity would publish a number the lineage refused.
@@ -1301,6 +1395,12 @@ async def _cross_fill_income_statement_rows(
             and item.depreciation is not None
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
+            _record_derivation(
+                item,
+                "ebitda",
+                "operating_income + abs(depreciation)",
+                [(item, "operating_income"), (item, "depreciation")],
+            )
 
     return _sort_financial_statement_rows(rows)
 
@@ -6901,14 +7001,14 @@ async def get_income_statement(
             rows=data,
             db=db,
         )
-        for row, admitted in zip(data, admit_statement_rows(data, period), strict=True):
-            row.eps, row.eps_diluted = admitted.eps, admitted.eps_diluted
-            for field in ("eps", "eps_diluted"):
-                if field in admitted.unit_metadata:
-                    row.unit_metadata[field] = admitted.unit_metadata[field]
+        # Return the admitted rows, not the pre-admission ones. Enrichment and
+        # cross-fill add values after `admit_statement_rows` has run, so copying
+        # back only EPS let SG&A survive with `currency=null` and
+        # `value_unit=null` while revenue and net income were withheld (#206).
+        admitted_rows = admit_statement_rows(data, period)
         return StandardResponse(
-            data=data,
-            meta=MetaData(count=len(data), last_data_date=last_data_date),
+            data=admitted_rows,
+            meta=MetaData(count=len(admitted_rows), last_data_date=last_data_date),
         )
     except BaseException as e:
         if _is_control_flow_exception(e):
@@ -6935,15 +7035,11 @@ async def get_income_statement(
                 rows=fallback_data,
                 db=db,
             )
-            for row, admitted in zip(fallback_data, admit_statement_rows(fallback_data, period), strict=True):
-                row.eps, row.eps_diluted = admitted.eps, admitted.eps_diluted
-                for field in ("eps", "eps_diluted"):
-                    if field in admitted.unit_metadata:
-                        row.unit_metadata[field] = admitted.unit_metadata[field]
-            if fallback_data:
+            admitted_rows = admit_statement_rows(fallback_data, period)
+            if admitted_rows:
                 return StandardResponse(
-                    data=fallback_data,
-                    meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                    data=admitted_rows,
+                    meta=MetaData(count=len(admitted_rows), last_data_date=last_data_date),
                 )
         except Exception:
             pass

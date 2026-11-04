@@ -952,6 +952,18 @@ async def test_income_statement_smoke_returns_data(client, monkeypatch):
                 profit_before_tax=300,
                 tax_expense=50,
                 net_income=250,
+                source="vnstock",
+                currency="VND",
+                value_unit="VND",
+                consolidation_basis="consolidated",
+                flow_basis="annual",
+                unit_metadata={
+                    field: {"source_unit": "VND", "value_unit": "VND"}
+                    for field in (
+                        "revenue", "cost_of_revenue", "pre_tax_profit",
+                        "profit_before_tax", "tax_expense", "net_income",
+                    )
+                },
             )
         ][:limit]
 
