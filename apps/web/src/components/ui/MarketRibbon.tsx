@@ -9,7 +9,7 @@ import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { useMemo, useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { formatPercent } from '@/lib/units';
-import { priceColorClass } from '@/lib/priceColor';
+import { priceColorClass, priceDirection, signedToneClass } from '@/lib/priceColor';
 
 interface IndexData {
     symbol: string;
@@ -20,11 +20,13 @@ interface IndexData {
 }
 
 function IndexTicker({ symbol, price, change, change_pct, direction }: IndexData) {
-    const isPositive = change >= 0;
-    const formatNumber = (n: number) => n?.toLocaleString('vi-VN', {
+    // A flat session is not a gain: colour, glyph and sign all follow the
+    // measurement, and a missing change prints `n/a` (brand §13, #200).
+    const dir = priceDirection(change);
+    const formatNumber = (n: number) => Number.isFinite(n) ? n.toLocaleString('vi-VN', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
-    }) || '0.00';
+    }) : 'n/a';
 
     return (
         <div className={cn(
@@ -39,10 +41,10 @@ function IndexTicker({ symbol, price, change, change_pct, direction }: IndexData
             </span>
             <div className={cn(
                 "flex items-center gap-1 text-[10px] font-bold",
-                isPositive ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'
+                signedToneClass(change)
             )}>
-                {isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                <span>{isPositive ? '+' : ''}{formatNumber(change)}</span>
+                {dir === 'up' ? <TrendingUp size={10} /> : dir === 'down' ? <TrendingDown size={10} /> : null}
+                <span>{dir === 'up' ? '+' : ''}{formatNumber(change)}</span>
                 <span className="opacity-80">({formatPercent(change_pct, { decimals: 2, input: 'percent', signed: true })})</span>
             </div>
         </div>

@@ -7,6 +7,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface SmartMoneyWidgetProps {
   symbol: string
@@ -15,11 +16,14 @@ interface SmartMoneyWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void
 }
 
-function formatBillions(value: number): string {
+function formatBillions(value: number | null): string {
+  if (value === null) return 'n/a'
   const abs = Math.abs(value)
-  if (abs >= 1e9) return `${value >= 0 ? '+' : '-'}${(abs / 1e9).toFixed(1)}B`
-  if (abs >= 1e6) return `${value >= 0 ? '+' : '-'}${(abs / 1e6).toFixed(1)}M`
-  return `${value >= 0 ? '+' : '-'}${abs.toFixed(0)}`
+  // A measured zero carries no sign character.
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(1)}B`
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(1)}M`
+  return `${sign}${abs.toFixed(0)}`
 }
 
 // Signed score: direction only. The cyan/amber middle steps read as extra states.
@@ -58,6 +62,12 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
   const flowScore = payload?.flow_score ?? 0
   const blockTrades = payload?.block_trades ?? []
   const hasData = Boolean(payload)
+  // Absent is not zero: a missing flow prints n/a and takes no direction colour.
+  const netForeign = payload?.net_foreign_20d_value ?? null
+  const blockNet = payload?.block_buy_20d_value === null || payload?.block_buy_20d_value === undefined
+    || payload?.block_sell_20d_value === null || payload?.block_sell_20d_value === undefined
+    ? null
+    : payload.block_buy_20d_value - payload.block_sell_20d_value
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -124,28 +134,14 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
           <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Foreign Net (20d)</div>
-              <div
-                className={
-                  (payload?.net_foreign_20d_value || 0) >= 0
-                    ? 'font-mono text-[var(--color-positive)]'
-                    : 'font-mono text-[var(--color-negative)]'
-                }
-              >
-                {formatBillions(Number(payload?.net_foreign_20d_value || 0))}
+              <div className={`font-mono ${signedToneClass(netForeign)}`}>
+                {formatBillions(netForeign)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Block Net (20 trades)</div>
-              <div
-                className={
-                  Number(payload?.block_buy_20d_value || 0) - Number(payload?.block_sell_20d_value || 0) >= 0
-                    ? 'font-mono text-[var(--color-positive)]'
-                    : 'font-mono text-[var(--color-negative)]'
-                }
-              >
-                {formatBillions(
-                  Number(payload?.block_buy_20d_value || 0) - Number(payload?.block_sell_20d_value || 0)
-                )}
+              <div className={`font-mono ${signedToneClass(blockNet)}`}>
+                {formatBillions(blockNet)}
               </div>
             </div>
           </div>

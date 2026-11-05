@@ -3,7 +3,7 @@
  * arrowed like a measured zero, and direction must survive colour-vision mode
  * through the arrow glyph rather than hue alone.
  */
-import { priceArrow, priceColorClass, priceDirection, signedToneClass } from './priceColor'
+import { colorForDirection, priceArrow, priceColorClass, priceDirection, signedToneClass } from './priceColor'
 
 describe('price direction', () => {
   it.each([
@@ -51,5 +51,19 @@ describe('signed tone', () => {
     expect(signedToneClass(null)).toBe('text-[var(--text-muted)]')
     expect(signedToneClass(undefined)).toBe('text-[var(--text-muted)]')
     expect(signedToneClass(Number.NaN)).toBe('text-[var(--text-muted)]')
+  })
+})
+
+describe('direction fill', () => {
+  it('fills a measured move with the direction tokens', () => {
+    expect(colorForDirection(1)).toBe('var(--color-positive-bg)')
+    expect(colorForDirection(-1)).toBe('var(--color-negative-bg)')
+  })
+
+  it('keeps a measured zero and a missing reading off the direction ramp', () => {
+    expect(colorForDirection(0)).not.toContain('--color-positive')
+    expect(colorForDirection(0)).not.toContain('--color-negative')
+    expect(colorForDirection(null)).toBe('transparent')
+    expect(colorForDirection(Number.NaN)).toBe('transparent')
   })
 })

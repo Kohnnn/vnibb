@@ -52,6 +52,19 @@ export function priceBgVar(direction: PriceDirection): string {
 }
 
 /**
+ * CSS background for a signed bar/meter fill: gain, loss, and the neutral
+ * token for both a measured zero and a missing reading. Use this instead of
+ * `value >= 0 ? positive : negative`, which paints a zero as a gain and a
+ * missing value as a loss.
+ */
+export function colorForDirection(change: number | null | undefined): string {
+  const dir = priceDirection(change);
+  if (dir === 'up' || dir === 'down') return priceBgVar(dir);
+  // Brand §13: a measured zero is ink, i.e. the neutral family, not a gain tint.
+  return dir === 'flat' ? 'color-mix(in srgb, var(--color-neutral) 20%, transparent)' : 'transparent';
+}
+
+/**
  * Utility-class name backed by tokens. Pairs with the `.price-up`/`.price-down`/
  * `.price-flat` rules in globals.css. Prefer this in className props.
  */

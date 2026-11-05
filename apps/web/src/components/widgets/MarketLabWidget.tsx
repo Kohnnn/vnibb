@@ -15,6 +15,7 @@ import {
   type MarketStructureStats,
 } from '@/lib/marketLabStats'
 import { EMPTY_VALUE } from '@/lib/units'
+import { colorForDirection } from '@/lib/priceColor'
 
 interface MarketLabWidgetProps {
   symbol: string
@@ -167,12 +168,14 @@ export function MarketLabWidget({ symbol, onDataChange }: MarketLabWidgetProps) 
           <div className="flex items-end gap-1" style={{ height: 56 }}>
             {stats!.monthlyAvgReturnPct.map((value, index) => {
               const height = value === null ? 0 : (Math.abs(value) / monthlyMax) * 44
-              const positive = (value ?? 0) >= 0
               return (
                 <div key={MONTH_LABELS[index]} className="flex flex-1 flex-col items-center justify-end gap-0.5">
                   <div
-                    className={positive ? 'w-full rounded-sm bg-[var(--color-positive-bg)]' : 'w-full rounded-sm bg-[var(--color-negative-bg)]'}
-                    style={{ height: Math.max(2, height) }}
+                    className="w-full rounded-sm"
+                    style={{
+                      height: Math.max(2, height),
+                      background: value === null ? 'var(--border-subtle)' : colorForDirection(value),
+                    }}
                     title={value === null ? 'No data' : `${MONTH_LABELS[index]}: ${value.toFixed(2)}%`}
                   />
                   <span className="text-[8px] text-[var(--text-muted)]">{MONTH_LABELS[index][0]}</span>

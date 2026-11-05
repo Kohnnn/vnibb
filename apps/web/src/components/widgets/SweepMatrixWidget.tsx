@@ -5,6 +5,7 @@ import { Grid3X3, AlertTriangle } from 'lucide-react';
 import { useQuantSweep } from '@/lib/queries';
 import { buildQuantRuntime, describeQuantBasis, extractQuantWarning } from '@/lib/quantWidgetHelpers';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
+import { signedToneClass } from '@/lib/priceColor';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import type { QuantPeriod, QuantSweepCell, QuantSweepRequest } from '@/lib/api';
@@ -150,13 +151,18 @@ export function SweepMatrixWidget({ symbol, onDataChange }: SweepMatrixWidgetPro
               const cell = cells.find((item) => item.fast_window === fast && item.slow_window === slow);
               const value = metricValue(cell, objective);
               const invalid = fast >= slow;
-              const tone = objective === 'max_drawdown_pct'
-                ? (value ?? 0) > -15
-                : (value ?? 0) >= 0;
+              // Drawdown ranks by depth, so shallower than -15% is the better
+              // cell; every other objective is a signed figure, where a measured
+              // zero is flat and a missing cell has no tone at all.
+              const tone = value === null
+                ? ''
+                : objective === 'max_drawdown_pct'
+                  ? value > -15 ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'
+                  : signedToneClass(value);
               return (
                 <div key={`${fast}-${slow}`} className="px-2 py-2 text-right text-xs">
-                  {invalid ? <span className="text-[var(--text-muted)]">-</span> : (
-                    <div className={tone ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'}>
+                  {invalid ? <span className="text-[var(--text-muted)]">n/m</span> : (
+                    <div className={tone}>
                       <div className="font-bold">{formatNumber(value, objective.includes('pct') ? '%' : '')}</div>
                       <div className="text-[9px] text-[var(--text-muted)]">{formatNumber(cell?.trade_count)} trades</div>
                     </div>

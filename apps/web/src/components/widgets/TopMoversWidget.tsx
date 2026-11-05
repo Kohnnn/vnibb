@@ -12,6 +12,7 @@ import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import type { WidgetGroupId } from '@/types/widget';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { priceDirection } from '@/lib/priceColor';
 
 interface TopMoversWidgetProps {
   isEditing?: boolean;
@@ -184,18 +185,26 @@ export function TopMoversWidget({
                   }
                 }
 
-                const hasChangePct = changePct !== null;
-                const isUp = (changePct ?? 0) >= 0;
+                // A measured zero is flat and a missing change is no reading:
+                // neither is a gain. Colour and sign both key off the direction
+                // so `0.00%` never prints as `+0.00%` in gain green (#200).
+                const direction = priceDirection(changePct);
+                const hasChangePct = direction !== 'none';
                 const changeLabel = hasChangePct
-                  ? `${isUp ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`
-                  : '--';
-                // Direction uses the gain/loss tokens (theme + colorblind aware)
-                // and always carries the +/- sign, never colour alone (#197).
-                const rowHoverClass = hasChangePct
-                  ? isUp
-                    ? 'hover:bg-[var(--color-positive-bg)] hover:border-[var(--color-positive)]'
-                    : 'hover:bg-[var(--color-negative-bg)] hover:border-[var(--color-negative)]'
-                  : 'hover:bg-[var(--bg-secondary)]/70 hover:border-[var(--border-subtle)]';
+                  ? `${(changePct ?? 0) > 0 ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`
+                  : 'n/a';
+                const changeClass = direction === 'up'
+                  ? 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]'
+                  : direction === 'down'
+                    ? 'text-[var(--color-negative)] bg-[var(--color-negative-bg)]'
+                    : direction === 'flat'
+                      ? 'text-[var(--text-primary)] bg-[var(--bg-secondary)]'
+                      : 'text-[var(--text-muted)] bg-[var(--bg-secondary)]';
+                const rowHoverClass = direction === 'up'
+                  ? 'hover:bg-[var(--color-positive-bg)] hover:border-[var(--color-positive)]'
+                  : direction === 'down'
+                    ? 'hover:bg-[var(--color-negative-bg)] hover:border-[var(--color-negative)]'
+                    : 'hover:bg-[var(--bg-secondary)]/70 hover:border-[var(--border-subtle)]';
                 return (
                   <button
                     key={`${stock.symbol}-${index}`}
@@ -212,8 +221,8 @@ export function TopMoversWidget({
                     <div className="flex items-center gap-2.5">
                       <span
                         className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded border ${
-                          index < 3
-                            ? isUp
+                          index < 3 && direction !== 'flat'
+                            ? direction === 'up'
                               ? 'bg-[var(--color-positive-bg)] border-[var(--color-positive)] text-[var(--color-positive)]'
                               : 'bg-[var(--color-negative-bg)] border-[var(--color-negative)] text-[var(--color-negative)]'
                             : 'bg-[var(--bg-secondary)] border-transparent text-[var(--text-muted)]'
@@ -231,13 +240,7 @@ export function TopMoversWidget({
                         {price !== null ? price.toLocaleString() : '--'}
                       </span>
                       <span
-                        className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${
-                          hasChangePct
-                            ? isUp
-                              ? 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]'
-                              : 'text-[var(--color-negative)] bg-[var(--color-negative-bg)]'
-                            : 'text-[var(--text-muted)] bg-[var(--bg-secondary)]'
-                        }`}
+                        className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${changeClass}`}
                       >
                         {changeLabel}
                       </span>

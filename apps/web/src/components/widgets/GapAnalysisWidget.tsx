@@ -12,6 +12,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
+import { signedToneClass } from '@/lib/priceColor'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 
@@ -169,7 +170,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                   />
                   <Bar dataKey="value" radius={[2, 2, 0, 0]}>
                     {monthRows.map((entry) => (
-                      <Cell key={`gap-month-${entry.month}`} fill={entry.value === null ? 'transparent' : entry.value >= 0 ? dirColors.positive : dirColors.negative} />
+                      <Cell key={`gap-month-${entry.month}`} fill={dirColors.forValue(entry.value)} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -216,7 +217,7 @@ export function GapAnalysisWidget({ symbol, onDataChange }: GapAnalysisWidgetPro
                         {row.type}
                       </td>
                       <td className="py-1 text-right font-mono">{formatPercent(row.gap_pct)}</td>
-                      <td className={`py-1 text-right font-mono ${typeof row.next_day_return_pct !== 'number' || !Number.isFinite(row.next_day_return_pct) ? 'text-[var(--text-muted)]' : row.next_day_return_pct >= 0 ? 'price-up' : 'price-down'}`}>
+                      <td className={`py-1 text-right font-mono ${signedToneClass(row.next_day_return_pct)}`}>
                         {formatPercent(row.next_day_return_pct, { decimals: 2, input: 'percent', signed: true })}
                       </td>
                       <td className={`py-1 text-center ${statusClass}`} title={ageDays !== null ? `${ageDays}d since gap` : undefined}>

@@ -19,7 +19,7 @@ import { useWidgetGroups } from '@/contexts/WidgetGroupContext'
 import { readTickerScope } from '@/lib/widgetScope'
 import type { WidgetGroupId } from '@/types/widget'
 import { EMPTY_VALUE } from '@/lib/units'
-import { signedToneClass } from '@/lib/priceColor'
+import { colorForDirection, signedToneClass } from '@/lib/priceColor'
 
 interface SignalRobustnessLabWidgetProps {
   id: string
@@ -263,19 +263,15 @@ export function SignalRobustnessLabWidget({ id, symbol, widgetGroup, onSymbolCli
           </div>
           <div className="flex items-end gap-1" style={{ height: 28 }}>
             {robustness.foldStability.folds.map((fold) => {
-              const positive = (fold.edge ?? 0) >= 0
               const height = fold.edge === null ? 2 : Math.min(24, Math.abs(fold.edge) * 2 + 3)
               return (
                 <div key={fold.fold} className="flex flex-1 flex-col items-center justify-end gap-0.5">
                   <div
-                    className={
-                      fold.edge === null
-                        ? 'w-full rounded-sm bg-[var(--border-subtle)]'
-                        : positive
-                          ? 'w-full rounded-sm bg-[var(--color-positive-bg)]'
-                          : 'w-full rounded-sm bg-[var(--color-negative-bg)]'
-                    }
-                    style={{ height }}
+                    className="w-full rounded-sm"
+                    style={{
+                      height,
+                      background: fold.edge === null ? 'var(--border-subtle)' : colorForDirection(fold.edge),
+                    }}
                     title={fold.edge === null ? `Fold ${fold.fold}: n/a` : `Fold ${fold.fold}: ${fold.edge.toFixed(1)}% edge`}
                   />
                   <span className="text-[8px] text-[var(--text-muted)]">{fold.fold}</span>

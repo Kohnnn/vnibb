@@ -11,6 +11,8 @@ import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 import { useSectorTopMovers, useSectorsCatalog } from '@/lib/queries';
+import { formatNumber } from '@/lib/formatters';
+import { priceDirection, signedToneClass } from '@/lib/priceColor';
 
 interface StockPerformance {
   symbol: string;
@@ -229,7 +231,12 @@ function SectorColumn({
 }
 
 function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (symbol: string) => void }) {
-  const isPositive = (stock.change_pct || 0) >= 0;
+  // Highlight strength is decorative, but the printed figure and its colour must
+  // agree with the measurement: a flat session is not a gain (#200).
+  const direction = priceDirection(stock.change_pct);
+  const changeLabel = direction === 'none'
+    ? 'n/a'
+    : `${(stock.change_pct ?? 0) > 0 ? '+' : ''}${formatNumber(stock.change_pct, 1)}%`;
 
   return (
     <button
@@ -243,12 +250,14 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
       }}
       className={cn(
         'w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--bg-hover)] transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]',
-        isPositive
-          ? (stock.change_pct || 0) > 4
+        direction === 'up'
+          ? (stock.change_pct ?? 0) > 4
             ? 'bg-[var(--color-positive-bg)]'
             : 'bg-transparent'
-          : (stock.change_pct || 0) < -4
-            ? 'bg-[var(--color-negative-bg)]'
+          : direction === 'down'
+            ? (stock.change_pct ?? 0) < -4
+              ? 'bg-[var(--color-negative-bg)]'
+              : 'bg-transparent'
             : 'bg-transparent'
       )}
     >
@@ -264,12 +273,9 @@ function StockRow({ stock, onSelect }: { stock: StockPerformance; onSelect: (sym
       </div>
       <div className="text-right">
         <div
-          className={cn(
-            'text-[11px] font-black font-mono',
-            isPositive ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]'
-          )}
+          className={cn('text-[11px] font-black font-mono', signedToneClass(stock.change_pct))}
         >
-          {isPositive ? '+' : ''}{(stock.change_pct || 0).toFixed(1)}%
+          {changeLabel}
         </div>
         <div className="text-[9px] font-bold text-[var(--text-secondary)] font-mono">
           {typeof stock.price === 'number' ? stock.price.toLocaleString() : '--'}

@@ -51,4 +51,18 @@ describe('top movers provenance', () => {
     expect(screen.queryByText('Market mover data will appear when available.')).not.toBeInTheDocument();
     expect(screen.queryByText('Provider secret/internal details')).not.toBeInTheDocument();
   });
+
+  it('does not sign or colour a flat mover as a gain', async () => {
+    showMovers({ data: [{ symbol: 'FPT', last_price: 100, price_change_pct: 0 }] }, null);
+    const label = await screen.findByText('0.00%');
+    expect(label.textContent).toBe('0.00%');
+    expect(label.className).toContain('text-[var(--text-primary)]');
+    expect(label.className).not.toContain('--color-positive');
+  });
+
+  it('prints a missing change as n/a instead of a fabricated zero', async () => {
+    showMovers({ data: [{ symbol: 'FPT', last_price: 100 }] }, null);
+    expect(await screen.findByText('n/a')).toBeInTheDocument();
+    expect(screen.queryByText('0.00%')).not.toBeInTheDocument();
+  });
 });
