@@ -316,6 +316,42 @@ test('market indices report each observation against its own source date', async
   await expect(widget.getByText('As of: 30 Oct 2026')).toBeVisible({ timeout: 30_000 });
 });
 
+test('a missing index change is unavailable, not a flat session', async ({ page }) => {
+  // A null change and a measured 0 both used to land on `index-card flat`, so
+  // "no reading" and "unchanged" were the same colour. They must not be.
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 2,
+      source: 'db_fallback',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 0, change_pct: 0, time: '2026-11-02' },
+        { index_name: 'HNX', current_value: 252.74, change: null, change_pct: null, time: '2026-11-02' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  // The cards paint after the query resolves; probe once both are on screen.
+  await expect(widget.locator('.index-card')).toHaveCount(2, { timeout: 30_000 });
+  await expect(widget.locator('.index-card.none')).toHaveCount(1);
+
+  const tones = await widget.evaluate((element) => {
+    const cards = Array.from(element.querySelectorAll('.index-card'));
+    const change = (card: Element) =>
+      getComputedStyle(card.querySelector('.index-card__change')!).color;
+    return {
+      flat: change(cards.find((card) => card.classList.contains('flat'))!),
+      missing: change(cards.find((card) => card.classList.contains('none'))!),
+    };
+  });
+
+  // Distinct readings: a genuine zero is ink/secondary, a null is muted.
+  expect(tones.missing).not.toBe(tones.flat);
+});
+
 test('color-vision mode remaps the direction tokens and reduced effects reach the root', async ({ page }) => {
   // #202: these two accessibility modes were only ever checked by reading CSS.
   // Seed them the way a returning user has them, then measure the resolved
@@ -348,14 +384,32 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
       const node = document.querySelector(selector);
       return node ? getComputedStyle(node).color : null;
     };
+    const card = document.querySelector('.widget-card-premium') as HTMLElement | null;
+    // `backdrop-filter` is `none` app-wide since #199 retired glass, so it
+    // cannot prove this preference applied. The rule's real effect is
+    // `box-shadow: var(--shadow-sm)`; measure it with the pref on and then
+    // with it off, so an attribute that stops reaching the root fails.
+    const withPref = card ? getComputedStyle(card).boxShadow : null;
+    root.setAttribute('data-reduce-effects', 'false');
+    const withoutPref = card ? getComputedStyle(card).boxShadow : null;
+    root.setAttribute('data-reduce-effects', 'true');
+    // A computed shadow is resolved to rgb()/px, so the raw token string never
+    // matches it. Resolve the token the same way through a probe element.
+    const probe = document.createElement('div');
+    probe.style.boxShadow = 'var(--shadow-sm)';
+    document.body.appendChild(probe);
+    const shadowSm = getComputedStyle(probe).boxShadow;
+    probe.remove();
     return {
       colorMode: root.getAttribute('data-color-mode'),
       reduceEffects: root.getAttribute('data-reduce-effects'),
       positive: style.getPropertyValue('--color-positive').trim(),
       negative: style.getPropertyValue('--color-negative').trim(),
+      shadowSm,
+      withPref,
+      withoutPref,
       up: changeColor('.index-card.up .index-card__change'),
       down: changeColor('.index-card.down .index-card__change'),
-      cardBackdrop: getComputedStyle(document.querySelector('.widget-card-premium')!).backdropFilter,
     };
   });
 
@@ -367,6 +421,10 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
   // The measurement, not the token declaration: a gain row must paint blue.
   expect(resolved.up).toBe('rgb(108, 182, 240)');
   expect(resolved.down).toBe('rgb(240, 163, 94)');
-  // Reduced effects keep the card a solid surface with no backdrop blur.
-  expect(resolved.cardBackdrop === 'none' || resolved.cardBackdrop === '').toBe(true);
+
+  // Reduced effects collapse the card shadow to the single --shadow-sm value,
+  // and the same card differs when the preference is off.
+  expect(resolved.shadowSm).not.toBe('');
+  expect(resolved.withPref).toBe(resolved.shadowSm);
+  expect(resolved.withoutPref).not.toBe(resolved.withPref);
 });

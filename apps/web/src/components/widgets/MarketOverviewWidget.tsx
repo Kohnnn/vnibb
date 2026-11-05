@@ -11,6 +11,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { getMarketState } from '@/lib/marketHours';
+import { priceDirection } from '@/lib/priceColor';
 
 interface MarketOverviewWidgetProps {
   isEditing?: boolean;
@@ -128,17 +129,17 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
                   (indexPayload.index_code as string | undefined) ||
                   `Index ${i + 1}`;
                 const reference = changePct ?? changeValue;
-                const hasTrend = typeof reference === 'number' && Number.isFinite(reference);
-                // A measured flat session is neither a gain nor a loss, and a
-                // missing change is unavailable rather than flat.
-                const direction = !hasTrend ? 'flat' : reference > 0 ? 'up' : reference < 0 ? 'down' : 'flat';
+                // A measured flat session is ink and a missing change is
+                // unavailable: `priceDirection` keeps those two apart instead
+                // of painting both as `flat`.
+                const direction = priceDirection(reference);
 
                 return (
                   <div key={i} className={`index-card ${direction}`}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="index-card__name">{indexName}</span>
-                      {direction === 'flat' ? (
-                        <Activity size={14} className="text-[var(--text-muted)]" />
+                      {direction === 'none' ? null : direction === 'flat' ? (
+                        <Activity size={14} className="text-[var(--text-secondary)]" />
                       ) : direction === 'up' ? (
                         <TrendingUp size={14} className="text-[var(--color-positive)]" />
                       ) : (
@@ -151,7 +152,7 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
                       {formatValue(currentValue)}
                     </div>
 
-                    <div className={direction === 'flat' ? 'index-card__change text-[var(--text-secondary)]' : `index-card__change ${direction === 'up' ? 'data-value-up' : 'data-value-down'}`}>
+                    <div className={`index-card__change ${direction === 'up' ? 'data-value-up' : direction === 'down' ? 'data-value-down' : direction === 'flat' ? 'text-[var(--text-secondary)]' : 'text-[var(--text-muted)]'}`}>
                       {formatValue(changeValue)} ({formatPct(changePct)})
                     </div>
 

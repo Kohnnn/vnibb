@@ -13,6 +13,7 @@ import type { WidgetGroupId } from '@/types/widget';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { priceDirection } from '@/lib/priceColor';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface TopMoversWidgetProps {
   isEditing?: boolean;
@@ -220,7 +221,7 @@ export function TopMoversWidget({
                     <div className="flex items-center gap-2.5">
                       <span
                         className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded border ${
-                          index < 3 && direction !== 'flat'
+                          (direction === 'up' || direction === 'down') && index < 3
                             ? direction === 'up'
                               ? 'bg-[var(--color-positive-bg)] border-[var(--color-positive)] text-[var(--color-positive)]'
                               : 'bg-[var(--color-negative-bg)] border-[var(--color-negative)] text-[var(--color-negative)]'
@@ -236,7 +237,7 @@ export function TopMoversWidget({
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-[var(--text-primary)] text-xs font-mono tabular-nums">
-                        {price !== null ? price.toLocaleString() : '--'}
+                        {price !== null ? price.toLocaleString() : EMPTY_VALUE}
                       </span>
                       <span
                         className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${changeClass}`}

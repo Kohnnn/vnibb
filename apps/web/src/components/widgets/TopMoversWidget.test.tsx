@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { useTopMovers } from '@/lib/queries';
 import { TopMoversWidget } from './TopMoversWidget';
 
@@ -60,9 +60,15 @@ describe('top movers provenance', () => {
     expect(label.className).not.toContain('--color-positive');
   });
 
-  it('prints a missing change as n/a instead of a fabricated zero', async () => {
-    showMovers({ data: [{ symbol: 'FPT', last_price: 100 }] }, null);
-    expect(await screen.findByText('n/a')).toBeInTheDocument();
-    expect(screen.queryByText('0.00%')).not.toBeInTheDocument();
+  it('prints a missing change and price as n/a, with no direction on the row', async () => {
+    showMovers({ data: [{ symbol: 'FPT' }] }, null);
+    const row = (await screen.findByText('FPT')).closest('button')!;
+    expect(within(row).getAllByText('n/a')).toHaveLength(2);
+    expect(within(row).queryByText('--')).not.toBeInTheDocument();
+    // The rank badge is only a direction cue for a measured move; a missing
+    // reading must not paint it loss-red.
+    const badge = within(row).getByText('1');
+    expect(badge.className).not.toContain('--color-positive');
+    expect(badge.className).not.toContain('--color-negative');
   });
 });
