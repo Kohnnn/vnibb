@@ -241,3 +241,29 @@ describe("probability-band and loss-mode remap (brand §13)", () => {
     }
   });
 });
+
+describe("chart colour reaching an SVG surface (#200)", () => {
+  // `var()` resolves in SVG presentation attributes on all three engines
+  // (checked in chromium, firefox and webkit), so a series colour belongs in a
+  // token. A raw hex in `stroke`/`fill`/`stopColor` opts that series out of the
+  // light theme and of color-vision mode at once, which is why this guard reads
+  // the attribute rather than any class.
+  const rawSeriesColor =
+    /(?:stroke|fill|stopColor|color)=(?:"|\{')#[0-9a-fA-F]{6}(?:"|'\})/;
+  // The world-news map is a fixed instrument palette on a forced dark canvas
+  // (`bg-[#030711]`): ocean gradient, graticules and continent labels are
+  // scenery, not series, and re-tinting them for the light theme would leave
+  // white labels on a pale ocean. Everything that plots data reads a token.
+  const fixedCanvas: Record<string, true> = { "widgets/WorldNewsMapWidget.tsx": true };
+
+  it("declares no hardcoded series colour in a rendered component", () => {
+    const componentsDir = join(stylesDir, "..", "components");
+    for (const file of walk(componentsDir)) {
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
+      const relative = file.slice(componentsDir.length + 1);
+      if (fixedCanvas[relative]) continue;
+      const source = readFileSync(file, "utf8");
+      expect([relative, source.match(rawSeriesColor)?.[0]]).toEqual([relative, undefined]);
+    }
+  });
+});

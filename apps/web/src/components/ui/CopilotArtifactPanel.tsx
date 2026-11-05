@@ -156,7 +156,7 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
                 key={series.key}
                 dataKey={series.key}
                 name={series.label}
-                fill={series.color || '#22d3ee'}
+                fill={series.color || 'var(--chart-cat-4)'}
                 radius={[4, 4, 0, 0]}
               />
             ))}
@@ -183,7 +183,7 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
                 type="monotone"
                 dataKey={series.key}
                 name={series.label}
-                stroke={series.color || '#22d3ee'}
+                stroke={series.color || 'var(--chart-cat-4)'}
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 4 }}

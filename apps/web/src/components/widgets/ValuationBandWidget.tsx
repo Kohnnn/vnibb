@@ -236,11 +236,11 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
                     />
                     {sigma2Lower !== null ? <ReferenceLine y={sigma2Lower} stroke="rgba(148,163,184,0.38)" strokeDasharray="2 4" /> : null}
                     {sigma2Upper !== null ? <ReferenceLine y={sigma2Upper} stroke="rgba(148,163,184,0.38)" strokeDasharray="2 4" /> : null}
-                    {sigma1Lower !== null ? <ReferenceLine y={sigma1Lower} stroke="rgba(56,189,248,0.5)" strokeDasharray="4 4" /> : null}
-                    {sigma1Upper !== null ? <ReferenceLine y={sigma1Upper} stroke="rgba(56,189,248,0.5)" strokeDasharray="4 4" /> : null}
-                    {mean !== null ? <ReferenceLine y={mean} stroke="#cbd5e1" strokeDasharray="4 4" /> : null}
+                    {sigma1Lower !== null ? <ReferenceLine y={sigma1Lower} stroke="var(--chart-blue)" strokeDasharray="4 4" /> : null}
+                    {sigma1Upper !== null ? <ReferenceLine y={sigma1Upper} stroke="var(--chart-blue)" strokeDasharray="4 4" /> : null}
+                    {mean !== null ? <ReferenceLine y={mean} stroke="var(--chart-slate)" strokeDasharray="4 4" /> : null}
                     <Line type="monotone" dataKey="current" stroke={seriesConfig.color} strokeWidth={2} dot={{ r: 3 }} />
-                    <Line type="monotone" dataKey="mean" stroke="#cbd5e1" strokeWidth={1.5} dot={false} strokeDasharray="4 4" />
+                    <Line type="monotone" dataKey="mean" stroke="var(--chart-slate)" strokeWidth={1.5} dot={false} strokeDasharray="4 4" />
                   </AreaChart>
                 </ResponsiveContainer>
               </ChartMountGuard>

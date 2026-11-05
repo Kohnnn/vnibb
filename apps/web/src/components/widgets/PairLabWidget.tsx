@@ -282,7 +282,7 @@ export function PairLabWidget({ symbol, onDataChange }: PairLabWidgetProps) {
                     }}
                     formatter={(value) => [Number(value).toFixed(2), 'Z'] as [string, string]}
                   />
-                  <Line type="monotone" dataKey="z" stroke="#a78bfa" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="z" stroke="var(--chart-cat-3)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </ChartMountGuard>
