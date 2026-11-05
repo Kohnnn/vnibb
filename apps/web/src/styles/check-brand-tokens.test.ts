@@ -128,6 +128,34 @@ describe("controls and focus", () => {
   });
 });
 
+describe("root attribute ownership (#202)", () => {
+  // Two providers used to write the same four attributes, so which value won
+  // depended on mount order and a test could agree with either writer. There is
+  // exactly one React owner now: the boot script in layout.tsx (first paint)
+  // plus UiPreferencesContext (after hydration).
+  const contextsDir = join(appDir, "..", "contexts");
+  const writers = (attribute: string) => {
+    // `setAttribute` calls in this codebase wrap onto the next line.
+    const call = new RegExp(`setAttribute\\(\\s*'${attribute}'`);
+    return walk(contextsDir)
+      .filter((file) => file.endsWith(".tsx") && !file.includes(".test."))
+      .filter((file) => call.test(readFileSync(file, "utf8")));
+  };
+
+  it.each(["data-density", "data-chart-style", "data-reduce-effects", "data-color-mode"])(
+    "has a single React writer for %s",
+    (attribute) => {
+      const owners = writers(attribute).map((file) => file.slice(contextsDir.length + 1));
+      expect(owners).toEqual(["UiPreferencesContext.tsx"]);
+    },
+  );
+
+  it("leaves data-theme to ThemeContext alone", () => {
+    const appContext = readFileSync(join(contextsDir, "AppContext.tsx"), "utf8");
+    expect(appContext).not.toContain("setAttribute('data-theme'");
+  });
+});
+
 describe("colorblind direction colours (#197 a11y)", () => {
   // Contrast is computed from the declared values, not trusted to comments.
   const luminance = (hex: string) => {
