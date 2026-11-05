@@ -291,3 +291,27 @@ test('PNG export downloads a real image for a chart widget', async ({ page }) =>
   expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('dark');
 });
 
+
+test('market indices report each observation against its own source date', async ({ page }) => {
+  // #205: the widget published one latest-across-rows date, so an HNX close from
+  // 2026-10-30 appeared as current as a 2026-11-02 VNINDEX close.
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 2,
+      source: 'db_fallback',
+      updated_at: '2026-11-02T00:00:00',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' },
+        { index_name: 'HNX', current_value: 252.74, change: -3.87, change_pct: -1.51, time: '2026-10-30' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+
+  await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
+  await expect(widget.getByText('As of: 30 Oct 2026')).toBeVisible({ timeout: 30_000 });
+});

@@ -2450,6 +2450,28 @@ def _pick_taxonomy_text(*values: Any) -> str | None:
     return _pick_optional_text(*(v for v in values if not _is_legal_form_label(v)))
 
 
+def _pick_sector_text(industry: Any, *values: Any) -> str | None:
+    """First sourced sector-level candidate; empty when none is sourced (#207).
+
+    Only values that came from a sector-level field qualify. A stored or provider
+    sector equal to the industry is the exact legacy `sector = industry` signature,
+    so it is not a broader classification and is dropped. Nothing is inferred from
+    a keyword/manual-symbol grouping: that is a market grouping, not a taxonomy
+    level with a traceable source.
+
+    ponytail: an equal `icb_name2`/`icb_name3` pair is indistinguishable from the
+    legacy copy without per-field provenance; upgrade when the provider records it.
+    """
+    industry_text = str(industry or "").strip().casefold()
+    return _pick_taxonomy_text(
+        *(
+            value
+            for value in values
+            if not (industry_text and str(value or "").strip().casefold() == industry_text)
+        )
+    )
+
+
 def _normalize_share_count(value: Any) -> Optional[float]:
     numeric = _coerce_optional_float(value)
     return numeric if numeric is not None and math.isfinite(numeric) and numeric > 0 else None
@@ -4567,12 +4589,15 @@ async def get_profile(
                     raw_profile.get("icb_name4"),
                     stock_row[2] if stock_row else None,
                 )
-                sector = _pick_taxonomy_text(
+                # #207: sector and industry are different taxonomy levels, so the
+                # chain stops at sourced sector evidence and stays unavailable
+                # otherwise instead of restating the industry string.
+                sector = _pick_sector_text(
+                    industry,
                     company.sector,
                     raw_profile.get("sector"),
                     raw_profile.get("icb_name2"),
                     stock_row[3] if stock_row else None,
-                    industry,
                 )
                 listing_date = (
                     _coerce_iso_date(company.listing_date)
@@ -4690,7 +4715,10 @@ async def get_profile(
                     short_name=stock.short_name,
                     exchange=stock.exchange,
                     industry=_pick_taxonomy_text(stock.industry),
-                    sector=_pick_taxonomy_text(stock.sector) or _pick_taxonomy_text(stock.industry),
+                    sector=_pick_sector_text(
+                        _pick_taxonomy_text(stock.industry),
+                        _pick_taxonomy_text(stock.sector),
+                    ),
                     listing_date=_coerce_iso_date(stock.listing_date),
                     market_cap=market_cap_provenance["value"],
                     market_cap_provenance=market_cap_provenance,
@@ -4780,12 +4808,12 @@ async def get_profile(
                 raw_profile.get("icb_name4"),
                 stock_row[2] if stock_row else None,
             )
-            profile_data.sector = _pick_taxonomy_text(
+            profile_data.sector = _pick_sector_text(
+                profile_data.industry,
                 profile_data.sector,
                 raw_profile.get("sector"),
                 raw_profile.get("icb_name2"),
                 stock_row[3] if stock_row else None,
-                profile_data.industry,
             )
 
             profile_data.outstanding_shares = _pick_optional_share_count(
@@ -7112,8 +7140,11 @@ async def get_balance_sheet(
         else:
             data = fallback_data
         data = _enrich_financial_statement_rows(data)
+        # #206: enrichment fills from `raw_data` after admission, so its output
+        # is gated again. Without this, a metric admission withheld came back
+        # with no unit evidence behind it.
         return StandardResponse(
-            data=data,
+            data=admit_statement_rows(data, period),
             meta=MetaData(count=len(data), last_data_date=last_data_date),
         )
     except BaseException as e:
@@ -7130,7 +7161,7 @@ async def get_balance_sheet(
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
-                    data=fallback_data,
+                    data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 )
         except Exception:
@@ -7168,8 +7199,9 @@ async def get_cash_flow(
         else:
             data = fallback_data
         data = _enrich_financial_statement_rows(data)
+        # #206: same final gate as the balance sheet, for the same reason.
         return StandardResponse(
-            data=data,
+            data=admit_statement_rows(data, period),
             meta=MetaData(count=len(data), last_data_date=last_data_date),
         )
     except BaseException as e:
@@ -7186,7 +7218,7 @@ async def get_cash_flow(
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
-                    data=fallback_data,
+                    data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 )
         except Exception:

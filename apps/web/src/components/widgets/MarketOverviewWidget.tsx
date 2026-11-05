@@ -28,6 +28,14 @@ function formatPct(value: number | null | undefined): string {
   return formatPercent(value, { input: 'percent', decimals: 2, signed: value !== 0 });
 }
 
+/** `02 Nov 2026`. An index date is its own observation date, never the envelope. */
+function formatIndexDate(value: string | null | undefined): string {
+  if (!value) return EMPTY_VALUE;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return EMPTY_VALUE;
+  return parsed.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -151,6 +159,10 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
                       <span>Vol: {idx.volume?.toLocaleString() || EMPTY_VALUE}</span>
                       <span>H: {formatValue(idx.high)}</span>
                       <span>L: {formatValue(idx.low)}</span>
+                      {/* #205: each index keeps its own source date. Sharing the
+                          newest date across cards implied older observations
+                          were current. */}
+                      <span>As of: {formatIndexDate(idx.time)}</span>
                     </div>
                   </div>
                 );

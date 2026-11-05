@@ -584,6 +584,11 @@ export interface MarketIndexData {
   low?: number;
   time?: string | null;
   source?: string | null;
+  // Published only when the retained base reconciles with the retained change;
+  // otherwise it is absent and `previous_close_status` says why (#205).
+  previous_close?: number | null;
+  previous_close_status?: string | null;
+  change_pct_status?: string | null;
 }
 
 export interface MarketOverviewResponse {

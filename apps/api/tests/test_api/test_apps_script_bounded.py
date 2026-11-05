@@ -43,7 +43,12 @@ async def test_bounds(client, query):
 @pytest.mark.asyncio
 async def test_legacy_array(client, monkeypatch):
     async def fetch(params):
-        return [FinancialStatementData(symbol='VNM', period='2025', statement_type='income', revenue=123)]
+        return [FinancialStatementData(
+            symbol='VNM', period='2025', statement_type='income', revenue=123,
+            source='vnstock', currency='VND', value_unit='VND',
+            consolidation_basis='consolidated', flow_basis='annual',
+            unit_metadata={'revenue': {'source_unit': 'VND', 'value_unit': 'VND'}},
+        )]
     monkeypatch.setattr('vnibb.api.v1.apps_script.VnstockFinancialsFetcher.fetch', fetch)
     response = await client.get('/api/v1/apps-script/financials/VNM?limit=5', headers=HEADERS)
     assert response.status_code == 200
@@ -142,3 +147,30 @@ async def test_partial_rows_not_discarded(client, monkeypatch):
     response = await client.get('/api/v1/apps-script/bounded/screener', headers=HEADERS)
     assert response.json()['meta']['availability'] == 'partial'
     assert len(response.json()['data']) == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_financials_applies_the_same_statement_admission(client, monkeypatch):
+    # #206: the legacy array endpoint returned provider rows verbatim, so a
+    # statement whose currency/unit basis was never admitted could publish
+    # SG&A and friends straight into a spreadsheet. It now passes the same
+    # gate the REST and MCP readers use.
+    async def fetch(_params):
+        return [FinancialStatementData(
+            symbol='FPT', period='2025', statement_type='income',
+            revenue=1000, selling_general_admin=-14899986038258.0,
+            currency='USD', value_unit='USD',
+            source='vnstock', consolidation_basis='consolidated',
+            flow_basis='annual',
+            unit_metadata={
+                name: {'source_unit': 'USD', 'value_unit': 'USD'}
+                for name in ('revenue', 'selling_general_admin')
+            },
+        )]
+
+    monkeypatch.setattr('vnibb.api.v1.apps_script.VnstockFinancialsFetcher.fetch', fetch)
+    response = await client.get('/api/v1/apps-script/financials/FPT?limit=1', headers=HEADERS)
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row['selling_general_admin'] is None
+    assert row['revenue'] is None
