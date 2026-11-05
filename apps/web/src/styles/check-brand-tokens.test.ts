@@ -133,14 +133,22 @@ describe("semantic cell colour can reach the cell (#200)", () => {
   // every layer regardless of specificity. An unlayered `.data-table td { color }`
   // therefore cancelled each cell's gain/loss/muted class, so a loss-making row
   // rendered as ordinary table text and nothing failed.
-  it("declares the data-table cell colour inside a layer", () => {
+  it("declares every data-table cell colour inside a layer", () => {
+    // Any rule whose selector ends in a cell (`td` / `th`) and sets `color`
+    // must sit inside a layer, including `.section-header-row td`, which kept an
+    // unlayered colour after the first fix.
+    const cellRule = /(?:^|\n)([^@{}\n][^\n{]*\b(?:td|th)\b[^\n{]*)\{([^}]*)\}/g;
     const files = [
-      readFileSync(join(stylesDir, "tables.css"), "utf8"),
-      globals,
+      { name: "tables.css", source: readFileSync(join(stylesDir, "tables.css"), "utf8") },
+      { name: "globals.css", source: globals },
     ];
-    for (const source of files) {
-      const unlayered = /(^|\n)(?!\s)(?:[^@{}\n][^\n{]*)?\.data-table td\s*\{[^}]*\bcolor\s*:/.test(source);
-      expect(unlayered).toBe(false);
+    for (const file of files) {
+      // Strip every layered block, then look for a remaining cell colour rule.
+      const unlayered = file.source.replace(/@layer[\s\S]*?\n\}/g, "");
+      const offenders = Array.from(unlayered.matchAll(cellRule))
+        .filter((match) => /\bcolor\s*:/.test(match[2]))
+        .map((match) => match[1].trim());
+      expect([file.name, offenders]).toEqual([file.name, []]);
     }
   });
 });

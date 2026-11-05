@@ -23,6 +23,19 @@ interface EarningsReleaseRecapWidgetProps {
     onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+/**
+ * A margin needs a real denominator. Zero revenue makes the ratio undefined and
+ * zero gross profit is a genuine 0% margin, so the numerator is not gated on
+ * truthiness. The bridge row and the highlight tiles both read this (#200).
+ */
+function marginOfIncome(
+    row: { revenue?: number | null; gross_profit?: number | null } | null | undefined,
+): number | null {
+    return typeof row?.revenue === 'number' && row.revenue !== 0 && typeof row.gross_profit === 'number'
+        ? (row.gross_profit / row.revenue) * 100
+        : null;
+}
+
 function yoyChange(current: number | null | undefined, previous: number | null | undefined): number | null {
     if (current == null || previous == null || previous === 0) return null;
     return ((current - previous) / Math.abs(previous)) * 100;
@@ -138,11 +151,13 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             },
             {
                 label: 'Gross Margin',
-                current: latestIncome.revenue && latestIncome.gross_profit ? (latestIncome.gross_profit / latestIncome.revenue) * 100 : null,
-                previous: comparableIncome?.revenue && comparableIncome?.gross_profit ? (comparableIncome.gross_profit / comparableIncome.revenue) * 100 : null,
-                change: latestIncome.revenue && latestIncome.gross_profit && comparableIncome?.revenue && comparableIncome?.gross_profit
-                    ? ((latestIncome.gross_profit / latestIncome.revenue) - (comparableIncome.gross_profit / comparableIncome.revenue)) * 100
-                    : null,
+                current: marginOfIncome(latestIncome),
+                previous: marginOfIncome(comparableIncome),
+                change: (() => {
+                    const current = marginOfIncome(latestIncome);
+                    const previous = marginOfIncome(comparableIncome);
+                    return current !== null && previous !== null ? current - previous : null;
+                })(),
                 formatter: (value: number | null) => formatPercent(value, { decimals: 1, input: 'percent', unit: 'pp', clamp: 'margin' }),
             },
         ];
@@ -150,12 +165,8 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
 
     const highlights = useMemo(() => {
         if (!latestIncome) return [];
-        const marginOf = (row: typeof latestIncome) =>
-            typeof row?.revenue === 'number' && row.revenue !== 0 && typeof row?.gross_profit === 'number'
-                ? (row.gross_profit / row.revenue) * 100
-                : null;
-        const grossMargin = marginOf(latestIncome);
-        const previousMargin = marginOf(comparableIncome);
+        const grossMargin = marginOfIncome(latestIncome);
+        const previousMargin = marginOfIncome(comparableIncome);
         const marginDelta = grossMargin !== null && previousMargin !== null ? grossMargin - previousMargin : null;
 
         // All four tiles are signed deltas, so all four take their tone from the

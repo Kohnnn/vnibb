@@ -437,7 +437,6 @@ test('OS reduced-motion actually shortens animations and transitions', async ({ 
   // whole time and nothing ever measured it. `data-reduce-effects` is a separate
   // app preference; this is the OS setting, so it cannot be seeded in
   // localStorage and must be emulated.
-  await page.emulateMedia({ reducedMotion: 'reduce' });
   await mount(page, [{ type: 'market_overview' }]);
   await baseRoutes(page, {
     '/market/indices': (route) => route.fulfill(json({
@@ -452,19 +451,29 @@ test('OS reduced-motion actually shortens animations and transitions', async ({ 
   await expect(widget).toBeVisible({ timeout: 30_000 });
   await expect(widget.locator('.index-card')).toHaveCount(1, { timeout: 30_000 });
 
-  // Measure an element that genuinely carries a transition: a detached probe
-  // has none, so its `0s` would satisfy this assertion with the rule deleted.
-  // `.react-grid-item` is the dashboard grid cell, `transition: all 200ms`.
-  const grid = await page.evaluate(() => {
-    const item = document.querySelector('.react-grid-item');
-    if (!item) return null;
-    return { transitionDuration: getComputedStyle(item).transitionDuration };
+  // Measure an element whose motion comes from the universal guard in
+  // accessibility.css, not from its own media query: `.react-grid-item` has a
+  // sibling `prefers-reduced-motion` rule in globals.css, so measuring it would
+  // still pass with the universal guard deleted. The widget card carries a real
+  // transition and has no such override.
+  const measure = () => page.evaluate(() => {
+    const card = document.querySelector('[data-widget-id] .widget-card-premium');
+    if (!card) return null;
+    const style = getComputedStyle(card);
+    return { transition: style.transitionDuration, animation: style.animationDuration };
   });
-  expect(grid, 'the dashboard grid cell must be present to measure a transition').not.toBeNull();
-
-  // The rule sets 0.01ms. Compare numerically: engines report "0.00001s" or "0s".
   const seconds = (value: string) => Math.max(...value.split(',').map((part) => parseFloat(part) || 0));
-  expect(seconds(grid!.transitionDuration)).toBeLessThan(0.001);
+
+  // Baseline first: with motion allowed the card must actually be animating, or
+  // the reduced reading below would be zero for both cases and prove nothing.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const unmuted = await measure();
+  expect(unmuted, 'the widget card must exist to measure its motion').not.toBeNull();
+  expect(Math.max(seconds(unmuted!.transition), seconds(unmuted!.animation))).toBeGreaterThan(0.05);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await measure();
+  expect(Math.max(seconds(reduced!.transition), seconds(reduced!.animation))).toBeLessThan(0.001);
 });
 
 for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390', width: 390, height: 844 }] as const) {
@@ -482,9 +491,75 @@ for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390
     const widget = page.locator('[data-widget-id]').first();
     await expect(widget).toBeVisible({ timeout: 30_000 });
     await expect(widget.getByRole('button', { name: /try again/i })).toBeVisible({ timeout: 45_000 });
-    // A narrow viewport must not turn a scroll failure into a lost column of
-    // chrome: the document itself must not overflow horizontally.
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
-    expect(overflow).toBe(false);
+    // A narrow viewport must not lose its scroll containment. Read after the
+    // grid has settled: an early read caught a mid-resize frame once, which
+    // failed webkit at 1024 while the document itself never overflowed.
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), {
+        timeout: 15_000,
+        message: 'the document must not scroll horizontally',
+      })
+      .toBeLessThanOrEqual(1);
   });
 }
+
+test('a data-table cell actually paints the sign it was given (#200)', async ({ page }) => {
+  // The source guard in check-brand-tokens.test.ts reads CSS text, so it can be
+  // bypassed by a rule that merely looks layered (" .data-table td { color }").
+  // This measures the outcome instead: the colour that reaches a rendered cell.
+  // Earnings History renders net margin per quarter, so one payload can carry a
+  // gain, a loss, a measured zero and a missing reading at once.
+  await mount(page, [{ type: 'earnings_history' }]);
+  await baseRoutes(page, {
+    '/income-statement': (route) => route.fulfill(json({
+      data: [
+        { period: '2026-Q4', revenue: 100, net_income: 25, gross_profit: 40 },
+        { period: '2026-Q3', revenue: 100, net_income: -25, gross_profit: 40 },
+        { period: '2026-Q2', revenue: 100, net_income: 0, gross_profit: 40 },
+        { period: '2026-Q1', revenue: 0, net_income: 5, gross_profit: 40 },
+      ],
+      count: 4,
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  // Net Margin is the only right-aligned percentage column carrying the tone.
+  const cells = widget.locator('td.font-medium');
+  await expect(cells.first()).toBeVisible({ timeout: 30_000 });
+
+  const painted = await page.evaluate(() => {
+    const tokens = getComputedStyle(document.documentElement);
+    const resolve = (name: string) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${name})`;
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    };
+    return {
+      positive: resolve('--color-positive'),
+      negative: resolve('--color-negative'),
+      ink: resolve('--text-primary'),
+      muted: resolve('--text-muted'),
+      rows: Array.from(document.querySelectorAll('[data-widget-id] td.font-medium'))
+        .map((cell) => ({ text: cell.textContent?.trim() ?? '', color: getComputedStyle(cell).color })),
+    };
+  });
+
+  const byText = (fragment: string) => painted.rows.find((row) => row.text.includes(fragment));
+  const gain = byText('25.00%');
+  const loss = byText('-25.00%');
+  expect(gain, `gain cell missing; saw ${JSON.stringify(painted.rows)}`).toBeDefined();
+  expect(loss, `loss cell missing; saw ${JSON.stringify(painted.rows)}`).toBeDefined();
+
+  // The measurement, not the class name: an unlayered `.data-table td { color }`
+  // made every one of these render as ordinary table text.
+  expect(gain!.color).toBe(painted.positive);
+  expect(loss!.color).toBe(painted.negative);
+  // A measured zero is ink, and a ratio with no revenue basis is n/a in muted.
+  expect(byText('0.00%')?.color ?? painted.ink).not.toBe(painted.positive);
+  expect(byText('n/a')?.color ?? painted.muted).not.toBe(painted.negative);
+});

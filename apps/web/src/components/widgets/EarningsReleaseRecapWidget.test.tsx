@@ -68,4 +68,23 @@ describe('earnings recap highlight tones', () => {
     expect(tile('Net Income YoY').className).toContain('--color-positive');
     expect(tile('Gross Margin Delta').className).toContain('--color-positive');
   });
+
+
+  it('reads a zero gross profit as a 0% margin in both the tile and the bridge', () => {
+    // The highlight tiles and the Quarter bridge used to disagree: the tiles
+    // computed a real 0% margin, the bridge gated on truthiness and printed
+    // n/a for the same admitted revenue and gross profit.
+    showYears(
+      { period: '2026-Q1', revenue: 100, net_income: 10, eps: 1, gross_profit: 0 },
+      { period: '2025-Q1', revenue: 100, net_income: 10, eps: 1, gross_profit: 20 },
+    );
+
+    expect(tile('Gross Margin Delta').textContent).toContain('-20.0 pp');
+    // The bridge row for the same admitted values must publish 0.0%, not n/a.
+    // Reading the row's own cells keeps the assertion off the highlight tile.
+    const bridgeLabel = screen.getByText('Gross Margin', { selector: 'td' });
+    const bridgeRow = bridgeLabel.closest('tr') as HTMLElement;
+    expect(bridgeRow.textContent).toContain('0.0 pp');
+    expect(bridgeRow.textContent).not.toContain('n/a');
+  });
 });
