@@ -2422,6 +2422,34 @@ def _pick_optional_text(*values: Any) -> Optional[str]:
     return None
 
 
+# #207: a legal form answers "what kind of entity", never "what industry".
+# Matched on the whole normalized value so a real classification that merely
+# starts with these words is unaffected.
+LEGAL_FORM_LABELS = frozenset({
+    "cong_ty_co_phan",
+    "cong_ty_cp",
+    "ctcp",
+    "tong_cong_ty_co_phan",
+    "cong_ty_trach_nhiem_huu_han",
+    "cong_ty_tnhh",
+    "tnhh",
+    "cong_ty_hop_danh",
+    "doanh_nghiep_tu_nhan",
+    "cong_ty_lien_doanh",
+    "joint_stock_company",
+    "joint_stock_corporation",
+})
+
+
+def _is_legal_form_label(value: Any) -> bool:
+    return _normalize_financial_metric_key(value) in LEGAL_FORM_LABELS
+
+
+def _pick_taxonomy_text(*values: Any) -> str | None:
+    """First value that is a classification rather than a legal form (#207)."""
+    return _pick_optional_text(*(v for v in values if not _is_legal_form_label(v)))
+
+
 def _normalize_share_count(value: Any) -> Optional[float]:
     numeric = _coerce_optional_float(value)
     return numeric if numeric is not None and math.isfinite(numeric) and numeric > 0 else None
@@ -4532,14 +4560,14 @@ async def get_profile(
                 ).first()
 
                 exchange = company.exchange or (stock_row[0] if stock_row else None)
-                industry = _pick_optional_text(
+                industry = _pick_taxonomy_text(
                     company.industry,
                     raw_profile.get("industry"),
                     raw_profile.get("icb_name3"),
                     raw_profile.get("icb_name4"),
                     stock_row[2] if stock_row else None,
                 )
-                sector = _pick_optional_text(
+                sector = _pick_taxonomy_text(
                     company.sector,
                     raw_profile.get("sector"),
                     raw_profile.get("icb_name2"),
@@ -4661,8 +4689,8 @@ async def get_profile(
                     company_name=stock.company_name,
                     short_name=stock.short_name,
                     exchange=stock.exchange,
-                    industry=stock.industry,
-                    sector=stock.sector or stock.industry,
+                    industry=_pick_taxonomy_text(stock.industry),
+                    sector=_pick_taxonomy_text(stock.sector) or _pick_taxonomy_text(stock.industry),
                     listing_date=_coerce_iso_date(stock.listing_date),
                     market_cap=market_cap_provenance["value"],
                     market_cap_provenance=market_cap_provenance,
@@ -4745,14 +4773,14 @@ async def get_profile(
                     raw_profile.get("noEmployees"),
                 )
 
-            profile_data.industry = _pick_optional_text(
+            profile_data.industry = _pick_taxonomy_text(
                 profile_data.industry,
                 raw_profile.get("industry"),
                 raw_profile.get("icb_name3"),
                 raw_profile.get("icb_name4"),
                 stock_row[2] if stock_row else None,
             )
-            profile_data.sector = _pick_optional_text(
+            profile_data.sector = _pick_taxonomy_text(
                 profile_data.sector,
                 raw_profile.get("sector"),
                 raw_profile.get("icb_name2"),

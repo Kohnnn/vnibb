@@ -17,6 +17,8 @@ export interface WidgetParameter {
     currentValue: string;
     options: ParameterOption[];
     onChange: (value: string) => void;
+    /** #209: saved config cannot change here, so the control is view-only. */
+    readOnly?: boolean;
 }
 
 interface WidgetParameterDropdownProps {
@@ -55,6 +57,16 @@ export function WidgetParameterDropdown({
     return (
         <div ref={dropdownRef} className="relative">
             {/* Trigger Button */}
+            {parameter.readOnly ? (
+                <span
+                    className={`flex items-center gap-1 px-1.5 py-0.5 text-[var(--text-muted)] ${compact ? 'text-[10px]' : 'text-xs'}`}
+                >
+                    <span>{parameter.label}:</span>
+                    <span className="font-medium text-[var(--text-secondary)]">
+                        {currentOption?.label || parameter.currentValue}
+                    </span>
+                </span>
+            ) : (
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={`
@@ -69,6 +81,7 @@ export function WidgetParameterDropdown({
                 </span>
                 <ChevronDown size={compact ? 10 : 12} className="text-[var(--text-muted)]" />
             </button>
+            )}
 
             {/* Dropdown Menu */}
             {isOpen && (

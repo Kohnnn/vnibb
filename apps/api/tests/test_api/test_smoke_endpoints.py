@@ -1267,6 +1267,46 @@ async def test_profile_endpoint_preserves_distinct_unscaled_share_counts(
 
 
 @pytest.mark.asyncio
+async def test_profile_never_publishes_legal_form_as_industry_or_sector(client, test_db):
+    # #207: "Công ty cổ phần" is a legal form, not a taxonomy value. It reaches
+    # the profile through stored Stock/Company columns, so both the cache path
+    # and the DB fallback must treat it as unavailable instead of publishing it.
+    test_db.add(
+        Stock(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Công ty cổ phần",
+            sector="Công ty cổ phần",
+        )
+    )
+    test_db.add(
+        Company(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Công ty cổ phần",
+            sector="Công ty cổ phần",
+            updated_at=datetime(2026, 11, 2, 7, 14, 56),
+        )
+    )
+    await test_db.commit()
+
+    cached = await client.get("/api/v1/equity/FPT/profile")
+    assert cached.status_code == 200
+    assert cached.json()["data"]["industry"] is None
+    assert cached.json()["data"]["sector"] is None
+
+    await test_db.delete(await test_db.get(Company, 1))
+    await test_db.commit()
+
+    fallback = await client.get("/api/v1/equity/FPT/profile")
+    assert fallback.status_code == 200
+    assert fallback.json()["data"]["industry"] is None
+    assert fallback.json()["data"]["sector"] is None
+
+
+@pytest.mark.asyncio
 async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
     async def fake_cache_lookup(*args, **kwargs):
         return SimpleNamespace(hit=False, data=None)

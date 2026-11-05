@@ -104,9 +104,9 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
       sourceLabel: exchange || 'TradingView',
       derived: true,
       stale: Boolean(metricsError && hasMetrics),
-      extra: { timeframe: selectedTimeframe },
+      extra: { timeframe: selectedTimeframe, chartType: chartMode },
     }));
-  }, [exchange, hasMetrics, metricsError, onDataChange, selectedTimeframe, symbol]);
+  }, [chartMode, exchange, hasMetrics, metricsError, onDataChange, selectedTimeframe, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view the chart" />;

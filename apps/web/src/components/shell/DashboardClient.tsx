@@ -1233,11 +1233,18 @@ function DashboardContent() {
         [activeTab?.widgets]
     );
 
+    // #209: in a locked system workspace the reducer drops UPDATE_WIDGET, so a
+    // control that still looks editable accepts the click and snaps back. The
+    // header is then a readout of what the widget renders, not an editor.
     const getWidgetParameters = useCallback((
         widget: WidgetInstance,
         onConfigChange: (key: string, value: string) => void
     ): WidgetParameter[] => {
         const config = widget.config || {};
+        // `canEditCurrentDashboard` is not the write gate: the reducer rejects
+        // any system-dashboard id regardless of isEditable. Use the same rule
+        // the reducer uses, so the control and the write agree.
+        const readOnly = !activeDashboard || !canEditDashboard(activeDashboard);
         switch (widget.type) {
             case 'price_chart':
                 return [
@@ -1246,20 +1253,22 @@ function DashboardContent() {
                         label: 'Period',
                         currentValue: normalizePriceChartTimeframe(config.timeframe),
                         options: [...PRICE_CHART_TIMEFRAME_OPTIONS],
-                        onChange: (v) => onConfigChange('timeframe', v)
+                        onChange: (v) => onConfigChange('timeframe', v),
+                        readOnly,
                     },
                     {
                         id: 'chartType',
                         label: 'Type',
                         currentValue: normalizePriceChartMode(config.chartType),
                         options: [...PRICE_CHART_MODE_OPTIONS],
-                        onChange: (v) => onConfigChange('chartType', v)
+                        onChange: (v) => onConfigChange('chartType', v),
+                        readOnly,
                     }
                 ];
             default:
                 return [];
         }
-    }, []);
+    }, [activeDashboard]);
 
     if (!mounted) {
         return <DashboardSkeleton />;

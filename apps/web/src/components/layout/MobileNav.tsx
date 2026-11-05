@@ -58,10 +58,11 @@ export function MobileNav({
                         tabIndex={-1}
                         className="fixed left-0 top-0 z-50 h-full w-[min(18rem,calc(100vw-3rem))] translate-x-0 border-r border-[var(--border-strong)] bg-[var(--bg-secondary)] transition-transform duration-300 ease-in-out lg:hidden"
                     >
+                        {/* #208: the drawer's Sidebar is a positioned sibling painted after this button, so equal stacking put the sidebar header over the close target. The button owns its own layer above the panel content. */}
                         <button
                             type="button"
                             onClick={() => closeMenu('close_button')}
-                            className="absolute right-4 top-4 rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
+                            className="absolute right-4 top-4 z-10 rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                             aria-label="Close menu"
                         >
                             <X size={20} />
