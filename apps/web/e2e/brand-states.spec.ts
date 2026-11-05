@@ -431,3 +431,60 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
   expect(resolved.withPref).toBe(resolved.shadowSm);
   expect(resolved.withoutPref).not.toBe(resolved.withPref);
 });
+
+test('OS reduced-motion actually shortens animations and transitions', async ({ page }) => {
+  // `prefers-reduced-motion: reduce` has had a rule in accessibility.css the
+  // whole time and nothing ever measured it. `data-reduce-effects` is a separate
+  // app preference; this is the OS setting, so it cannot be seeded in
+  // localStorage and must be emulated.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 1,
+      source: 'db_fallback',
+      data: [{ index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' }],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  await expect(widget.locator('.index-card')).toHaveCount(1, { timeout: 30_000 });
+
+  // Measure an element that genuinely carries a transition: a detached probe
+  // has none, so its `0s` would satisfy this assertion with the rule deleted.
+  // `.react-grid-item` is the dashboard grid cell, `transition: all 200ms`.
+  const grid = await page.evaluate(() => {
+    const item = document.querySelector('.react-grid-item');
+    if (!item) return null;
+    return { transitionDuration: getComputedStyle(item).transitionDuration };
+  });
+  expect(grid, 'the dashboard grid cell must be present to measure a transition').not.toBeNull();
+
+  // The rule sets 0.01ms. Compare numerically: engines report "0.00001s" or "0s".
+  const seconds = (value: string) => Math.max(...value.split(',').map((part) => parseFloat(part) || 0));
+  expect(seconds(grid!.transitionDuration)).toBeLessThan(0.001);
+});
+
+for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390', width: 390, height: 844 }] as const) {
+  test(`states hold at ${viewport.name}px: a provider failure is a retryable error, not blank`, async ({ page }) => {
+    // The state suite only ever ran at the desktop preset, so every state was
+    // unverified on a tablet and a phone width.
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mount(page, [{ type: 'financial_ratios' }]);
+    await baseRoutes(page, {
+      '/ratios': (route) =>
+        route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'provider failed' }) }),
+    });
+
+    await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+    const widget = page.locator('[data-widget-id]').first();
+    await expect(widget).toBeVisible({ timeout: 30_000 });
+    await expect(widget.getByRole('button', { name: /try again/i })).toBeVisible({ timeout: 45_000 });
+    // A narrow viewport must not turn a scroll failure into a lost column of
+    // chrome: the document itself must not overflow horizontally.
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    expect(overflow).toBe(false);
+  });
+}
