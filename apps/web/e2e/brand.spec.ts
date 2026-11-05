@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test';
 
 /**
  * #196 brand acceptance: the master wordmark renders at the native 2048:446
- * ratio with 5.5% clear space inside its white plate, at 390 and 1440 px, in
- * light and dark themes. Screenshots land in test-results/brand/.
+ * ratio with 5.5% clear space inside its white plate, at 390, 1024 and 1440 px,
+ * in light and dark themes. Screenshots land in test-results/brand/.
  *
  * Run against a dev server on :3101:
  *   pnpm --filter frontend exec playwright test -c playwright.brand.config.ts
@@ -11,6 +11,7 @@ import { expect, test } from '@playwright/test';
 
 const VIEWPORTS = [
   { name: '390', width: 390, height: 844 },
+  { name: '1024', width: 1024, height: 768 },
   { name: '1440', width: 1440, height: 900 },
 ] as const;
 

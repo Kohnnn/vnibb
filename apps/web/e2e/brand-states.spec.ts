@@ -315,3 +315,58 @@ test('market indices report each observation against its own source date', async
   await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
   await expect(widget.getByText('As of: 30 Oct 2026')).toBeVisible({ timeout: 30_000 });
 });
+
+test('color-vision mode remaps the direction tokens and reduced effects reach the root', async ({ page }) => {
+  // #202: these two accessibility modes were only ever checked by reading CSS.
+  // Seed them the way a returning user has them, then measure the resolved
+  // colour on a real gain/loss pair instead of the stylesheet source.
+  await mount(page, [{ type: 'market_overview' }]);
+  await page.addInitScript(() => {
+    localStorage.setItem('vnibb-colorblind-mode', 'true');
+    localStorage.setItem('vnibb-reduce-effects', 'true');
+  });
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 2,
+      source: 'db_fallback',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' },
+        { index_name: 'HNX', current_value: 252.74, change: -3.87, change_pct: -1.51, time: '2026-11-02' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  await expect(widget.getByText('As of: 02 Nov 2026')).toHaveCount(2);
+
+  const resolved = await page.evaluate(() => {
+    const root = document.documentElement;
+    const style = getComputedStyle(root);
+    const changeColor = (selector: string) => {
+      const node = document.querySelector(selector);
+      return node ? getComputedStyle(node).color : null;
+    };
+    return {
+      colorMode: root.getAttribute('data-color-mode'),
+      reduceEffects: root.getAttribute('data-reduce-effects'),
+      positive: style.getPropertyValue('--color-positive').trim(),
+      negative: style.getPropertyValue('--color-negative').trim(),
+      up: changeColor('.index-card.up .index-card__change'),
+      down: changeColor('.index-card.down .index-card__change'),
+      cardBackdrop: getComputedStyle(document.querySelector('.widget-card-premium')!).backdropFilter,
+    };
+  });
+
+  expect(resolved.colorMode).toBe('colorblind');
+  expect(resolved.reduceEffects).toBe('true');
+  // Okabe–Ito pair, not the default green/red: #6CB6F0 / #F0A35E on dark.
+  expect(resolved.positive.toLowerCase()).toBe('#6cb6f0');
+  expect(resolved.negative.toLowerCase()).toBe('#f0a35e');
+  // The measurement, not the token declaration: a gain row must paint blue.
+  expect(resolved.up).toBe('rgb(108, 182, 240)');
+  expect(resolved.down).toBe('rgb(240, 163, 94)');
+  // Reduced effects keep the card a solid surface with no backdrop blur.
+  expect(resolved.cardBackdrop === 'none' || resolved.cardBackdrop === '').toBe(true);
+});
