@@ -385,6 +385,10 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
       return node ? getComputedStyle(node).color : null;
     };
     const card = document.querySelector('.widget-card-premium') as HTMLElement | null;
+    // Read the attributes the app itself applied, before touching them. Toggling
+    // first and reading afterwards would assert our own write, not hydration.
+    const colorMode = root.getAttribute('data-color-mode');
+    const reduceEffects = root.getAttribute('data-reduce-effects');
     // `backdrop-filter` is `none` app-wide since #199 retired glass, so it
     // cannot prove this preference applied. The rule's real effect is
     // `box-shadow: var(--shadow-sm)`; measure it with the pref on and then
@@ -392,7 +396,7 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
     const withPref = card ? getComputedStyle(card).boxShadow : null;
     root.setAttribute('data-reduce-effects', 'false');
     const withoutPref = card ? getComputedStyle(card).boxShadow : null;
-    root.setAttribute('data-reduce-effects', 'true');
+    root.setAttribute('data-reduce-effects', reduceEffects ?? 'false');
     // A computed shadow is resolved to rgb()/px, so the raw token string never
     // matches it. Resolve the token the same way through a probe element.
     const probe = document.createElement('div');
@@ -401,8 +405,8 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
     const shadowSm = getComputedStyle(probe).boxShadow;
     probe.remove();
     return {
-      colorMode: root.getAttribute('data-color-mode'),
-      reduceEffects: root.getAttribute('data-reduce-effects'),
+      colorMode,
+      reduceEffects,
       positive: style.getPropertyValue('--color-positive').trim(),
       negative: style.getPropertyValue('--color-negative').trim(),
       shadowSm,
@@ -412,7 +416,6 @@ test('color-vision mode remaps the direction tokens and reduced effects reach th
       down: changeColor('.index-card.down .index-card__change'),
     };
   });
-
   expect(resolved.colorMode).toBe('colorblind');
   expect(resolved.reduceEffects).toBe('true');
   // Okabe–Ito pair, not the default green/red: #6CB6F0 / #F0A35E on dark.
