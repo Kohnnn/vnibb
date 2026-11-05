@@ -150,33 +150,22 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
 
     const highlights = useMemo(() => {
         if (!latestIncome) return [];
-        const grossMargin = latestIncome.revenue && latestIncome.gross_profit ? (latestIncome.gross_profit / latestIncome.revenue) * 100 : null;
-        const previousMargin = comparableIncome?.revenue && comparableIncome?.gross_profit
-            ? (comparableIncome.gross_profit / comparableIncome.revenue) * 100
-            : null;
+        const marginOf = (row: typeof latestIncome) =>
+            typeof row?.revenue === 'number' && row.revenue !== 0 && typeof row?.gross_profit === 'number'
+                ? (row.gross_profit / row.revenue) * 100
+                : null;
+        const grossMargin = marginOf(latestIncome);
+        const previousMargin = marginOf(comparableIncome);
         const marginDelta = grossMargin !== null && previousMargin !== null ? grossMargin - previousMargin : null;
 
+        // All four tiles are signed deltas, so all four take their tone from the
+        // sign. Two used a fixed gain/warning colour, which painted a falling
+        // net income or a shrinking margin as favourable.
         return [
-            {
-                label: 'Revenue YoY',
-                value: yoyChange(latestIncome.revenue, comparableIncome?.revenue),
-                tone: 'text-[var(--color-accent-primary)]',
-            },
-            {
-                label: 'Net Income YoY',
-                value: yoyChange(latestIncome.net_income, comparableIncome?.net_income),
-                tone: 'text-[var(--color-positive)]',
-            },
-            {
-                label: 'EPS YoY',
-                value: yoyChange(latestIncome.eps, comparableIncome?.eps),
-                tone: 'text-[var(--color-accent-primary)]',
-            },
-            {
-                label: 'Gross Margin Delta',
-                value: marginDelta,
-                tone: 'text-[var(--color-warning)]',
-            },
+            { label: 'Revenue YoY', value: yoyChange(latestIncome.revenue, comparableIncome?.revenue) },
+            { label: 'Net Income YoY', value: yoyChange(latestIncome.net_income, comparableIncome?.net_income) },
+            { label: 'EPS YoY', value: yoyChange(latestIncome.eps, comparableIncome?.eps) },
+            { label: 'Gross Margin Delta', value: marginDelta },
         ];
     }, [comparableIncome, latestIncome]);
 
@@ -264,7 +253,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                         {highlights.map((item) => (
                             <div key={item.label} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
                                 <div className="text-[9px] uppercase tracking-[0.16em] text-[var(--text-muted)]">{item.label}</div>
-                                <div className={`mt-1 text-sm font-semibold ${item.tone}`}>
+                                <div className={`mt-1 text-sm font-semibold ${signedToneClass(item.value)}`}>
                                     {formatPercent(item.value, { decimals: 1, input: 'percent', signed: true, unit: item.label.includes('Delta') ? 'pp' : '%', clamp: item.label.includes('Delta') ? 'margin' : 'yoy_change' })}
                                 </div>
                             </div>

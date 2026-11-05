@@ -32,9 +32,17 @@
   z-index: 10;
 }
 
+/* Colour is layered for the same reason as in app/globals.css: an unlayered
+   declaration beats Tailwind's `@layer utilities`, which silently cancelled
+   every per-cell gain/loss/muted colour. */
 .data-table td {
   border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
+}
+
+@layer base {
+  .data-table td {
+    color: var(--text-primary);
+  }
 }
 
 .data-table tr:hover td {

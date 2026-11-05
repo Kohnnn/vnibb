@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import type { OHLCData } from '@/lib/chartUtils';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE } from '@/lib/units';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface RiskDashboardWidgetProps {
   id: string;
@@ -461,7 +462,7 @@ export function RiskDashboardWidget({ id, symbol, onRemove, onDataChange }: Risk
               <div className="flex flex-col gap-3">
                 <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Sortino Quality</div>
-                  <div className="mt-1 text-lg font-semibold text-[var(--color-positive)]">{formatSigned(sortinoAverage)}</div>
+                  <div className={`mt-1 text-lg font-semibold ${signedToneClass(sortinoAverage)}`}>{formatSigned(sortinoAverage)}</div>
                   <div className="mt-2 text-[11px] text-[var(--text-secondary)]">
                     Best months: {(sortino?.best_months || []).join(', ') || '—'}
                   </div>

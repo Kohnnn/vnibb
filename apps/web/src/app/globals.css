@@ -335,13 +335,22 @@ html[data-theme="light"],
   height: 22px;
 }
 
+/* The default text colour lives in `@layer base`: Tailwind v4 puts utilities in
+   `@layer utilities`, and unlayered CSS outranks every layer whatever its
+   specificity, so an unlayered `color` here made each cell's gain/loss/muted
+   class a no-op. Padding and metrics stay unlayered so values do not shift. */
 .data-table td {
   padding: 0.2rem 0.5rem;
   font-size: 0.82rem;
-  color: var(--text-secondary);
   border-bottom: 1px solid var(--border-subtle);
   line-height: 1.35;
   height: 20px;
+}
+
+@layer base {
+  .data-table td {
+    color: var(--text-secondary);
+  }
 }
 
 .data-table tr:hover td {

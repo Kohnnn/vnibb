@@ -128,6 +128,23 @@ describe("controls and focus", () => {
   });
 });
 
+describe("semantic cell colour can reach the cell (#200)", () => {
+  // Tailwind v4 puts utilities in `@layer utilities`, and an unlayered rule beats
+  // every layer regardless of specificity. An unlayered `.data-table td { color }`
+  // therefore cancelled each cell's gain/loss/muted class, so a loss-making row
+  // rendered as ordinary table text and nothing failed.
+  it("declares the data-table cell colour inside a layer", () => {
+    const files = [
+      readFileSync(join(stylesDir, "tables.css"), "utf8"),
+      globals,
+    ];
+    for (const source of files) {
+      const unlayered = /(^|\n)(?!\s)(?:[^@{}\n][^\n{]*)?\.data-table td\s*\{[^}]*\bcolor\s*:/.test(source);
+      expect(unlayered).toBe(false);
+    }
+  });
+});
+
 describe("root attribute ownership (#202)", () => {
   // Two providers used to write the same four attributes, so which value won
   // depended on mount order and a test could agree with either writer. There is
