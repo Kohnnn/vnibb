@@ -87,4 +87,19 @@ describe('earnings recap highlight tones', () => {
     expect(bridgeRow.textContent).toContain('0.0 pp');
     expect(bridgeRow.textContent).not.toContain('n/a');
   });
+
+  it('does not paint an n/m margin with a direction', () => {
+    // A margin past +-200% is rendered `n/m` by the clamp. Toning the raw value
+    // painted that refusal green, so the tile claimed a direction for a figure
+    // it would not state.
+    showYears(
+      { period: '2026-Q1', revenue: 100, net_income: 10, eps: 1, gross_profit: 500 },
+      { period: '2025-Q1', revenue: 100, net_income: 10, eps: 1, gross_profit: -100 },
+    );
+
+    const delta = tile('Gross Margin Delta');
+    expect(delta.textContent).toContain('n/m');
+    expect(delta.className).not.toContain('--color-positive');
+    expect(delta.className).not.toContain('--color-negative');
+  });
 });
