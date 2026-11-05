@@ -189,10 +189,9 @@ export function TopMoversWidget({
                 // neither is a gain. Colour and sign both key off the direction
                 // so `0.00%` never prints as `+0.00%` in gain green (#200).
                 const direction = priceDirection(changePct);
-                const hasChangePct = direction !== 'none';
-                const changeLabel = hasChangePct
-                  ? `${(changePct ?? 0) > 0 ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`
-                  : 'n/a';
+                const changeLabel = direction === 'none'
+                  ? 'n/a'
+                  : `${(changePct ?? 0) > 0 ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`;
                 const changeClass = direction === 'up'
                   ? 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]'
                   : direction === 'down'

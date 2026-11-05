@@ -9,7 +9,7 @@ import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { useMemo, useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { formatPercent } from '@/lib/units';
-import { priceColorClass, priceDirection, signedToneClass } from '@/lib/priceColor';
+import { priceDirection, signedToneClass } from '@/lib/priceColor';
 
 interface IndexData {
     symbol: string;
