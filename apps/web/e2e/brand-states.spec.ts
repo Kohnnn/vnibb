@@ -315,6 +315,34 @@ test('market indices report each observation against its own source date', async
   await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
   await expect(widget.getByText('As of: 30 Oct 2026')).toBeVisible({ timeout: 30_000 });
 });
+test('an index date stays on the traded day west of UTC', async ({ browser }) => {
+  // The API sends a bare `YYYY-MM-DD`. `new Date('2026-11-02')` is midnight UTC,
+  // so a browser at a negative offset rendered that Monday as 01 Nov (Sunday).
+  // A unit test cannot catch this: Jest freezes the ICU zone at startup, so the
+  // assertion passes whatever `process.env.TZ` is set to. Only a real browser
+  // with a real zone shows the defect.
+  const context = await browser.newContext({ timezoneId: 'America/New_York' });
+  const page = await context.newPage();
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 1,
+      source: 'db_fallback',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+
+  await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
+  await expect(widget.getByText('As of: 01 Nov 2026')).toHaveCount(0);
+  await context.close();
+});
+
 
 test('a missing index change is unavailable, not a flat session', async ({ page }) => {
   // A null change and a measured 0 both used to land on `index-card flat`, so
