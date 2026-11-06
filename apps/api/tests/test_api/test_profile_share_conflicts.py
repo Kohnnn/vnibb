@@ -1,5 +1,13 @@
+from datetime import datetime
+from unittest.mock import AsyncMock
+
+import pytest
+
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
+from vnibb.models.company import Company
+from vnibb.models.stock import Stock
 from vnibb.providers.vnstock.equity_profile import (
+    EquityProfileData,
     EquityProfileQueryParams,
     VnstockEquityProfileFetcher,
 )
@@ -78,3 +86,51 @@ def test_stored_certified_cap_cannot_override_share_conflict():
     assert cap["value"] is None
     assert cap["observations"] == available.market_cap_provenance["observations"]
     assert reconcile_market_caps(cap)["status"] == "conflict"
+
+
+LEGAL_FORMS = ["JSC", " LLC ", "Limited Liability Company", "CORPORATION", "Cổ Phần", "co phan"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legal_form", LEGAL_FORMS)
+async def test_profile_paths_never_publish_legal_form_as_taxonomy(
+    client, test_db, monkeypatch, legal_form
+):
+    """#207: legal-form aliases stay out of industry/sector in every path."""
+    test_db.add(Stock(symbol="FPT", company_name="FPT", exchange="HOSE",
+                      industry=legal_form, sector=legal_form))
+    test_db.add(Company(symbol="FPT", company_name="FPT", exchange="HOSE",
+                        industry=legal_form, sector=legal_form,
+                        updated_at=datetime(2026, 11, 2)))
+    await test_db.commit()
+    monkeypatch.setattr("vnibb.api.v1.equity._schedule_refresh", AsyncMock())
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockEquityProfileFetcher.fetch",
+        AsyncMock(return_value=[EquityProfileData(
+            symbol="FPT", company_name="FPT", exchange="HOSE",
+            industry=legal_form, sector=legal_form,
+        )]),
+    )
+
+    for suffix in ("", "?refresh=true"):
+        response = await client.get(f"/api/v1/equity/FPT/profile{suffix}")
+        assert response.status_code == 200
+        assert response.json()["data"]["industry"] is None
+        assert response.json()["data"]["sector"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("industry", ["JSC financial services", "Phân tích cổ phần"])
+async def test_profile_keeps_classifications_that_contain_legal_form_words(
+    client, test_db, monkeypatch, industry
+):
+    """The alias set matches whole normalized values, not substrings."""
+    sector = f"{industry} sector"
+    test_db.add(Stock(symbol="FPT", company_name="FPT", exchange="HOSE",
+                      industry=industry, sector=sector))
+    await test_db.commit()
+    monkeypatch.setattr("vnibb.api.v1.equity._schedule_refresh", AsyncMock())
+
+    response = await client.get("/api/v1/equity/FPT/profile")
+    assert response.json()["data"]["industry"] == industry
+    assert response.json()["data"]["sector"] == sector

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -901,3 +902,47 @@ def test_mcp_admits_an_enriched_metric_without_a_sql_column(with_units, expected
     assert admitted.get("selling_general_admin") == expected
     if expected is None:
         assert admitted["unavailable_metrics"]["selling_general_admin"] == "unverified_monetary_unit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route,model,metric,old_prefix", [
+    ("balance-sheet", "BalanceSheet", "cash_and_equivalents", "balance_sheet_v4"),
+    ("cash-flow", "CashFlow", "free_cash_flow", "cash_flow_v4"),
+])
+async def test_financial_routes_do_not_serve_pre_admission_cached_payload(
+    client, test_db, monkeypatch, route, model, metric, old_prefix
+):
+    """#206: the final admission gate changed the served payload, so the
+    86400s response cache must start from a new namespace."""
+    import vnibb.models.financials as financial_models
+    from vnibb.core import cache
+
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    monkeypatch.setattr(cache, "_inflight_cache_loads", {})
+    model = getattr(financial_models, model)
+    test_db.add(model(id=1, symbol="FPT", period="2025", period_type="year",
+                      fiscal_year=2025, raw_data={metric: 12_345.0}))
+    await test_db.commit()
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.get_financials_with_ttm", AsyncMock(return_value=[])
+    )
+
+    @cache.cached(ttl=86400, key_prefix=old_prefix)
+    async def stale_endpoint(**kwargs):
+        return {"data": [{"symbol": "FPT", "period": "2025",
+                          "statement_type": "balance" if route == "balance-sheet" else "cashflow",
+                          metric: 12_345.0}],
+                "meta": {"count": 1}, "error": None}
+
+    await stale_endpoint(symbol="FPT", period="FY", limit=5, db=test_db)
+    response = await client.get(f"/api/v1/equity/FPT/{route}?period=FY&limit=5")
+    cached = await client.get(f"/api/v1/equity/FPT/{route}?period=FY&limit=5")
+
+    assert response.status_code == cached.status_code == 200
+    row = cached.json()["data"][0]
+    assert row[metric] is None
+    assert row["unit_metadata"][metric]["unavailable_reason"] == (
+        "unverified_statement_currency_or_unit"
+    )
