@@ -432,7 +432,8 @@ async def test_same_day_recovery_replaces_only_a_complete_cohort(admission_store
 
         monkeypatch.setattr(pipeline, "_save_progress", deactivate_after_materialization)
     monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: deepcopy(rows))
-    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress={}, sync_id=123 if failure == "active_membership" else None)
+    progress = {}
+    await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=123 if failure == "active_membership" else None)
     async with stores.sessions() as session:
         snapshots = (await session.scalars(select(ScreenerSnapshot).order_by(ScreenerSnapshot.symbol))).all()
         receipts = (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
@@ -447,6 +448,8 @@ async def test_same_day_recovery_replaces_only_a_complete_cohort(admission_store
             assert reader.hit and not reader.is_stale
         else:
             assert len(receipts) == 1
+            if failure == "missing":
+                assert progress["committed_count"] == progress["base_count"] == 0
             assert [(row.id, row.price, row.extended_metrics, row.created_at) for row in snapshots] == before
 
 
