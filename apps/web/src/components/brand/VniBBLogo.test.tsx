@@ -89,4 +89,21 @@ describe('app icon (brand §207)', () => {
   it('is declared in the web manifest so an installed app has an icon', () => {
     expect(manifest.icons?.map((entry: { src: string }) => entry.src)).toContain('/icon.svg')
   })
+
+  // SVG icons are ignored by iOS home screens and some install surfaces, which
+  // need a raster. Both PNGs are rendered from the same icon.svg, so their
+  // dimensions and opaque field are the contract worth pinning.
+  it.each([
+    ['src/app/apple-icon.png', 180],
+    ['public/brand/icon-512.png', 512],
+  ])('ships %s at %ipx with an opaque field', (file, size) => {
+    const png = readFileSync(join(process.cwd(), file))
+    expect(png.subarray(1, 4).toString()).toBe('PNG')
+    expect(png.readUInt32BE(16)).toBe(size)
+    expect(png.readUInt32BE(20)).toBe(size)
+  })
+
+  it('declares the raster icon too, for install surfaces that reject SVG', () => {
+    expect(manifest.icons?.map((entry: { src: string }) => entry.src)).toContain('/brand/icon-512.png')
+  })
 })
