@@ -530,6 +530,38 @@ for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390
       .toBeLessThanOrEqual(1);
   });
 }
+for (const width of [1440, 1024, 390]) {
+  test(`listing filters fit a narrow widget at ${width}px (#222)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await mount(page, [{ type: 'listing_browser', layout: { w: 8, h: 16 } }]);
+    await baseRoutes(page, {
+      '/search/tickers': (route) => route.fulfill(json({ data: [], count: 0 })),
+      '/listing/symbols': (route) => route.fulfill(json({ data: [
+        { symbol: 'AAA', company_name: 'An Phat', exchange: 'HOSE', industry: 'A deliberately long industry label for responsive control measurement' },
+        { symbol: 'FPT', company_name: 'FPT Corporation', exchange: 'HOSE', industry: 'Software' },
+        { symbol: 'VCB', company_name: 'Vietcombank', exchange: 'HNX', industry: 'Banking' },
+      ], count: 3 })),
+    });
+    await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+    const widget = page.locator('.react-grid-item[data-widget-id="states-widget-0"]');
+    await expect(widget.getByRole('combobox', { name: 'Industry filter' }).locator('option')).toHaveCount(4);
+    const box = await widget.boundingBox();
+    expect(box).not.toBeNull();
+    const rects = await widget.locator('select').evaluateAll((items) => items.map((item) => {
+      const rect = item.getBoundingClientRect();
+      return { height: rect.height, right: rect.right };
+    }));
+    expect(rects).toHaveLength(3);
+    expect(rects.every(({ height, right }) => height < 60 && right <= box!.x + box!.width + 1), JSON.stringify({ width, box, rects })).toBe(true);
+    await widget.getByRole('button', { name: /^HOSE/ }).click();
+    await widget.getByLabel('Sort listings').selectOption('company');
+    await widget.getByPlaceholder('Search symbol, company, or industry...').fill('FPT');
+    await expect(widget.getByRole('button', { name: /FPT/ })).toBeVisible();
+    await expect(widget.getByRole('button', { name: /VCB/ })).toHaveCount(0);
+    await widget.getByRole('button', { name: 'Clear', exact: true }).click();
+    await expect(widget.getByRole('button', { name: /VCB/ })).toBeVisible();
+  });
+}
 
 test('a data-table cell actually paints the sign it was given (#200)', async ({ page }) => {
   // The source guard in check-brand-tokens.test.ts reads CSS text, so it can be

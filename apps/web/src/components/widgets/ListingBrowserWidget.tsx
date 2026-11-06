@@ -203,8 +203,8 @@ export function ListingBrowserWidget({
             <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isLoading && hasData} note={`${rows.length} matches`} align="right" />
           </div>
 
-          <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
-            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 basis-full flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
               {(['ALL', 'HOSE', 'HNX', 'UPCOM'] as ExchangeFilter[]).map((item) => (
                 <button
                   key={item}
@@ -216,7 +216,7 @@ export function ListingBrowserWidget({
               ))}
             </div>
 
-            <select aria-label="Group filter" value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]">
+            <select aria-label="Group filter" value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="w-[min(100%,12rem)] min-w-0 max-w-full flex-1 basis-32 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]">
               {GROUP_OPTIONS.map((option) => (
                 <option key={option} value={option}>{option === 'ALL' ? 'All groups' : option}</option>
               ))}
@@ -226,7 +226,7 @@ export function ListingBrowserWidget({
               value={industry}
               onChange={(event) => setIndustry(event.target.value)}
               aria-label="Industry filter"
-              className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
+              className="w-[min(100%,12rem)] min-w-0 max-w-full flex-1 basis-32 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
             >
               {industryOptions.map((option) => (
                 <option key={option} value={option}>
@@ -235,7 +235,7 @@ export function ListingBrowserWidget({
               ))}
             </select>
 
-            <select aria-label="Sort listings" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]">
+            <select aria-label="Sort listings" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="w-[min(100%,12rem)] min-w-0 max-w-full flex-1 basis-32 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]">
               <option value="symbol">Sort: Symbol</option>
               <option value="company">Sort: Company</option>
               <option value="industry">Sort: Industry</option>

@@ -12,6 +12,7 @@ import asyncio
 import logging
 import re
 import unicodedata
+from math import isfinite
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
@@ -30,8 +31,9 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.company import Company
 from vnibb.models.trading import FinancialRatio
-from vnibb.providers.vnstock.financials import admitted_interest_expense
+from vnibb.providers.vnstock.financials import FinancialStatementData, admitted_interest_expense
 from vnibb.services.cache_manager import CacheManager
+from vnibb.services.financial_service import admit_statement_rows, normalize_statement_period
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +284,75 @@ def _statement_periods_match(
     return True
 
 
+def _admitted_ocf_sales(
+    income_rows: List[Any], cash_rows: List[Any], period_type: str, *, ttm: bool,
+) -> Optional[float]:
+    count = 4 if ttm else 1
+    if len(income_rows) < count or len(cash_rows) < count:
+        return None
+    revenue = cash_flow = 0.0
+    window_basis = None
+    for income, cash in zip(income_rows[:count], cash_rows[:count], strict=True):
+        pair = []
+        for row, metric, statement_type in (
+            (income, "revenue", "income"), (cash, "operating_cash_flow", "cashflow"),
+        ):
+            lineage = _statement_row_lineage(row)
+            canonical = lineage.get("canonical_data")
+            if not isinstance(canonical, dict):
+                return None
+            stored = _coerce_number(getattr(row, metric, None))
+            if stored is None or not isfinite(stored) or canonical.get(metric) != stored:
+                return None
+            if any(canonical.get(key) != getattr(row, key, None) for key in ("symbol", "source")):
+                return None
+            if canonical.get("statement_type") != statement_type or row.period_type != period_type:
+                return None
+            year, quarter = row.fiscal_year, row.fiscal_quarter
+            if not isinstance(year, int) or not 2000 <= year <= 2099:
+                return None
+            if period_type == "quarter":
+                if quarter not in (1, 2, 3, 4):
+                    return None
+                expected_period = f"Q{quarter}-{year}"
+                period_pattern = r"(?:Q[1-4][\-_/ ]?20\d{2}|20\d{2}[\-_/ ]?Q[1-4])"
+            else:
+                if quarter is not None:
+                    return None
+                expected_period = str(year)
+                period_pattern = r"(?:FY)?20\d{2}"
+            if any(canonical.get(key) not in (None, value)
+                   for key, value in (("fiscal_year", year), ("fiscal_quarter", quarter))):
+                return None
+            for supplied_period in (canonical.get("period"), row.period):
+                if not isinstance(supplied_period, str) or not re.fullmatch(period_pattern, supplied_period.upper()):
+                    return None
+                if normalize_statement_period(supplied_period) != expected_period:
+                    return None
+            if any(lineage.get(key) not in (None, canonical.get(key))
+                   for key in ("source", "currency", "value_unit", "consolidation_basis", "flow_basis")):
+                return None
+            try:
+                statement = admit_statement_rows([FinancialStatementData.model_validate({
+                    **canonical, "raw_data": getattr(row, "raw_data", None),
+                })], period_type)[0]
+            except (TypeError, ValueError):
+                return None
+            value = getattr(statement, metric)
+            expected_flow = "single_quarter" if period_type == "quarter" else "annual"
+            if statement.unavailable_reason or value is None or statement.flow_basis != expected_flow:
+                return None
+            basis = (statement.symbol, statement.source, statement.consolidation_basis)
+            if window_basis is not None and basis != window_basis:
+                return None
+            window_basis = basis
+            pair.append(value)
+        revenue += pair[0]
+        cash_flow += pair[1]
+    result = cash_flow / revenue * 100 if revenue else None
+    return result if result is not None and isfinite(result) else None
+
+
 async def _load_statement_rows(
     symbol: str,
     model: Any,
@@ -387,7 +458,7 @@ async def _build_comparison_backfill(
         if debt_service > 0:
             backfill["debt_service_coverage"] = operating_income / debt_service
     if income_cash_match and operating_cash_flow is not None and revenue not in (None, 0):
-        backfill["ocf_sales"] = (operating_cash_flow / revenue) * 100
+        backfill["ocf_sales"] = _admitted_ocf_sales(income_rows, cash_rows, period_type, ttm=use_ttm)
     if free_cash_flow is not None and market_cap not in (None, 0):
         backfill["fcf_yield"] = (free_cash_flow / market_cap) * 100
     if (

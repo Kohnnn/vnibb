@@ -437,11 +437,20 @@ async def test_get_comparison_data_derives_missing_metrics_and_sanitizes_negativ
                 period="2024",
                 period_type="year",
                 fiscal_year=2024,
+                source="vnstock",
                 revenue=1_200.0,
                 gross_profit=624.0,
                 operating_income=240.0,
                 net_income=180.0,
                 interest_expense=30.0,
+                # ocf_sales needs the writer's canonical lineage beside the SQL row.
+                raw_data={"_financial_lineage": {"canonical_data": {
+                    "symbol": "VIC", "period": "2024", "statement_type": "income",
+                    "source": "vnstock", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "consolidated", "flow_basis": "annual",
+                    "revenue": 1_200.0,
+                    "unit_metadata": {"revenue": {"value_unit": "VND", "source_unit": "VND"}},
+                }}},
             ),
             IncomeStatement(
                 id=101,
@@ -468,9 +477,17 @@ async def test_get_comparison_data_derives_missing_metrics_and_sanitizes_negativ
                 period="2024",
                 period_type="year",
                 fiscal_year=2024,
+                source="vnstock",
                 operating_cash_flow=210.0,
                 free_cash_flow=130.0,
                 debt_repayment=-40.0,
+                raw_data={"_financial_lineage": {"canonical_data": {
+                    "symbol": "VIC", "period": "2024", "statement_type": "cashflow",
+                    "source": "vnstock", "currency": "VND", "value_unit": "VND",
+                    "consolidation_basis": "consolidated", "flow_basis": "annual",
+                    "operating_cash_flow": 210.0,
+                    "unit_metadata": {"operating_cash_flow": {"value_unit": "VND", "source_unit": "VND"}},
+                }}},
             ),
         ]
     )
@@ -564,7 +581,9 @@ async def test_comparison_does_not_restore_unverified_market_cap(test_engine, te
     assert result.market_cap_provenance["observations"] == provenance["observations"]
     assert result.metrics["pe_ratio"] == 10
     assert result.metrics["fcf_yield"] is None
-    assert result.metrics["ocf_sales"] == pytest.approx(25)
+    # No canonical writer lineage on these rows: the OCF/sales pair is withheld
+    # rather than derived from an unproven statement basis.
+    assert result.metrics["ocf_sales"] is None
 
 
 @pytest.mark.asyncio
@@ -906,16 +925,20 @@ async def test_comparison_backfill_withholds_unproven_interest_without_losing_ot
 ):
     from vnibb.services.comparison_service import _build_comparison_backfill
 
-    canonical = {"interest_expense": 30.0, "value_unit": "VND"}
+    canonical = {
+        "symbol": "VNM", "period": "2024", "statement_type": "income", "source": "vnstock",
+        "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+        "flow_basis": "annual", "revenue": 1200.0, "interest_expense": 30.0,
+        "unit_metadata": {"revenue": {"value_unit": "VND", "source_unit": "VND"}},
+    }
     if interest_metadata is not None:
-        canonical["unit_metadata"] = {"interest_expense": interest_metadata}
+        canonical["unit_metadata"]["interest_expense"] = interest_metadata
     income = IncomeStatement(
         symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        source="vnstock",
         revenue=1200.0, gross_profit=600.0, operating_income=240.0, net_income=180.0,
         interest_expense=30.0,
-        raw_data={} if interest_metadata is None else {"_financial_lineage": {
-            "value_unit": "VND", "canonical_data": canonical,
-        }},
+        raw_data={"_financial_lineage": {"value_unit": "VND", "canonical_data": canonical}},
     )
     balance = BalanceSheet(
         symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
@@ -923,7 +946,14 @@ async def test_comparison_backfill_withholds_unproven_interest_without_losing_ot
     )
     cash = CashFlow(
         symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        source="vnstock",
         operating_cash_flow=210.0, free_cash_flow=130.0, debt_repayment=-40.0,
+        raw_data={"_financial_lineage": {"canonical_data": {
+            "symbol": "VNM", "period": "2024", "statement_type": "cashflow", "source": "vnstock",
+            "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+            "flow_basis": "annual", "operating_cash_flow": 210.0,
+            "unit_metadata": {"operating_cash_flow": {"value_unit": "VND", "source_unit": "VND"}},
+        }}},
     )
 
     async def load_rows(_symbol, model, *_args, **_kwargs):

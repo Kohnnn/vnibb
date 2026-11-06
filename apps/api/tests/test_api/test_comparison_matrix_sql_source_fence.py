@@ -102,7 +102,7 @@ async def test_comparison_backfill_excludes_issuer_ratios_and_statement_rows(leg
     assert result.metrics["pe_ratio"] == 10
     assert result.metrics["gross_margin"] == 30
     assert result.metrics["asset_turnover"] == 0.5
-    assert result.metrics["ocf_sales"] == 20
+    assert result.metrics["ocf_sales"] is None
 
 
 @pytest.mark.asyncio
@@ -156,13 +156,101 @@ async def test_comparison_backfill_requires_matching_fiscal_periods(
 
     result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
     assert result.metrics["asset_turnover"] == ((0 if zero == "revenue" else count / 2) if balance_match else None)
-    assert result.metrics["ocf_sales"] == (
-        (0 if zero == "cash_and_operating_income" else 20)
-        if cash_match and zero != "revenue" else None
-    )
+    assert result.metrics["ocf_sales"] is None
     assert result.metrics["debt_service_coverage"] == (
         (0 if zero == "cash_and_operating_income" else 2) if cash_match else None
     )
+
+
+def statement_lineage(symbol, year, quarter, statement_type, metric, value):
+    flow_basis = "single_quarter" if quarter else "annual"
+    return {"_financial_lineage": {
+        "value_unit": "VND", "flow_basis": flow_basis,
+        "canonical_data": {
+            "symbol": symbol, "period": f"Q{quarter}-{year}" if quarter else str(year),
+            "statement_type": statement_type, "fiscal_year": year, "fiscal_quarter": quarter,
+            "source": "vietcap", "currency": "VND", "value_unit": "VND",
+            "consolidation_basis": "consolidated", "flow_basis": flow_basis,
+            metric: value, "unit_metadata": {metric: {"value_unit": "VND", "source_unit": "VND"}},
+        },
+    }}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("period", ["FY", "Q2", "TTM"])
+@pytest.mark.parametrize("case", [
+    "admitted", "zero_cash", "zero_revenue", "missing_lineage", "stale_value",
+    "source", "symbol", "fiscal", "scope", "currency", "field_evidence", "flow", "missing_quarter",
+    "native_writer", "missing_period", "ambiguous_period", "orm_period", "fiscal_quarter",
+])
+async def test_comparison_ocf_sales_requires_admitted_operands(legacy_db, monkeypatch, period, case):
+    periods = [(2025, 2), (2025, 1), (2024, 4), (2024, 3)] if period == "TTM" else [(2025, 2 if period == "Q2" else None)]
+    for index, (year, quarter) in enumerate(periods):
+        for model, statement_type, metric, value in (
+            (IncomeStatement, "income", "revenue", 0 if case == "zero_revenue" else 100),
+            (CashFlow, "cashflow", "operating_cash_flow", 0 if case == "zero_cash" else 20),
+        ):
+            if case == "missing_quarter" and model is CashFlow and index == len(periods) - 1:
+                continue
+            raw = statement_lineage("FPT", year, quarter, statement_type, metric, value)
+            canonical = raw["_financial_lineage"]["canonical_data"]
+            stored_period = f"Q{quarter}-{year}" if quarter else str(year)
+            if case == "native_writer":
+                canonical["fiscal_year"] = canonical["fiscal_quarter"] = None
+            if model is CashFlow and index == 0:
+                if case == "missing_lineage":
+                    raw = {}
+                elif case == "stale_value":
+                    canonical[metric] = 99
+                elif case in {"source", "symbol", "scope", "currency", "fiscal", "flow"}:
+                    key, changed = {
+                        "source": ("source", "other_source"), "symbol": ("symbol", "VCB"),
+                        "scope": ("consolidation_basis", "separate"), "currency": ("currency", "USD"),
+                        "fiscal": ("fiscal_year", year - 1), "flow": ("flow_basis", "cumulative_ytd"),
+                    }[case]
+                    canonical[key] = changed
+                elif case == "field_evidence":
+                    canonical["unit_metadata"] = {}
+                elif case == "missing_period":
+                    canonical.pop("period")
+                elif case == "ambiguous_period":
+                    canonical["period"] = "TTM-2025"
+                elif case == "orm_period":
+                    stored_period = "2023"
+                elif case == "fiscal_quarter":
+                    canonical["fiscal_quarter"] = 1 if quarter != 1 else 2
+            legacy_db.add(model(
+                id=index + 1, symbol="FPT", period=stored_period,
+                period_type="quarter" if quarter else "year", fiscal_year=year, fiscal_quarter=quarter,
+                source="vietcap", raw_data=raw, **{metric: value},
+            ))
+    await legacy_db.commit()
+    monkeypatch.setattr(comparison_service.comparison_service, "get_stock_metrics", AsyncMock(
+        return_value=comparison_service.StockMetrics(symbol="FPT", metrics={}),
+    ))
+    monkeypatch.setattr("vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch", AsyncMock(return_value=[]))
+    result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
+    assert result.metrics["ocf_sales"] == (20 if case in {"admitted", "native_writer"} else 0 if case == "zero_cash" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("period,period_type,quarter", [("FY", "year", 2), ("Q2", "quarter", None)])
+async def test_comparison_ocf_sales_rejects_request_mode_conflict(legacy_db, monkeypatch, period, period_type, quarter):
+    for model, kind, metric, value in (
+        (IncomeStatement, "income", "revenue", 100), (CashFlow, "cashflow", "operating_cash_flow", 20),
+    ):
+        legacy_db.add(model(
+            id=1, symbol="FPT", period=f"Q{quarter}-2025" if quarter else "2025",
+            period_type=period_type, fiscal_year=2025, fiscal_quarter=quarter, source="vietcap",
+            raw_data=statement_lineage("FPT", 2025, quarter, kind, metric, value), **{metric: value},
+        ))
+    await legacy_db.commit()
+    monkeypatch.setattr(comparison_service.comparison_service, "get_stock_metrics", AsyncMock(
+        return_value=comparison_service.StockMetrics(symbol="FPT", metrics={}),
+    ))
+    monkeypatch.setattr("vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch", AsyncMock(return_value=[]))
+    result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
+    assert result.metrics["ocf_sales"] is None
 
 
 @pytest.mark.asyncio
