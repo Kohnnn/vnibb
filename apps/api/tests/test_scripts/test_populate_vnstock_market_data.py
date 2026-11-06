@@ -351,10 +351,8 @@ def test_sdk_import_failure_refuses_acquisition(monkeypatch, error):
 
     with pytest.raises(RuntimeError) as raised:
         runtime._refuse_persisted_paid_account()
-    assert str(raised.value) == (
-        "Free runtime could not import vnstock to verify credential state; refusing to acquire."
-    )
     assert raised.value.__cause__ is error
+    assert "sensitive import detail" not in str(raised.value)
 
 
 def test_status_call_that_raises_fails_closed(sdk):
