@@ -284,7 +284,9 @@ def _statement_periods_match(
     return True
 
 
-def _admitted_ocf_sales(income_rows: List[Any], cash_rows: List[Any], *, ttm: bool) -> Optional[float]:
+def _admitted_ocf_sales(
+    income_rows: List[Any], cash_rows: List[Any], period_type: str, *, ttm: bool,
+) -> Optional[float]:
     count = 4 if ttm else 1
     if len(income_rows) < count or len(cash_rows) < count:
         return None
@@ -302,16 +304,31 @@ def _admitted_ocf_sales(income_rows: List[Any], cash_rows: List[Any], *, ttm: bo
             stored = _coerce_number(getattr(row, metric, None))
             if stored is None or not isfinite(stored) or canonical.get(metric) != stored:
                 return None
-            if any(canonical.get(key) != getattr(row, key, None)
-                   for key in ("symbol", "source", "fiscal_year", "fiscal_quarter")):
+            if any(canonical.get(key) != getattr(row, key, None) for key in ("symbol", "source")):
                 return None
-            if canonical.get("statement_type") != statement_type:
+            if canonical.get("statement_type") != statement_type or row.period_type != period_type:
                 return None
-            period_type = "quarter" if getattr(row, "fiscal_quarter", None) else "year"
-            if normalize_statement_period(canonical.get("period")) != normalize_statement_period(
-                row.period, fiscal_year=row.fiscal_year, fiscal_quarter=row.fiscal_quarter, period_type=period_type,
-            ):
+            year, quarter = row.fiscal_year, row.fiscal_quarter
+            if not isinstance(year, int) or not 2000 <= year <= 2099:
                 return None
+            if period_type == "quarter":
+                if quarter not in (1, 2, 3, 4):
+                    return None
+                expected_period = f"Q{quarter}-{year}"
+                period_pattern = r"(?:Q[1-4][\-_/ ]?20\d{2}|20\d{2}[\-_/ ]?Q[1-4])"
+            else:
+                if quarter is not None:
+                    return None
+                expected_period = str(year)
+                period_pattern = r"(?:FY)?20\d{2}"
+            if any(canonical.get(key) not in (None, value)
+                   for key, value in (("fiscal_year", year), ("fiscal_quarter", quarter))):
+                return None
+            for supplied_period in (canonical.get("period"), row.period):
+                if not isinstance(supplied_period, str) or not re.fullmatch(period_pattern, supplied_period.upper()):
+                    return None
+                if normalize_statement_period(supplied_period) != expected_period:
+                    return None
             if any(lineage.get(key) not in (None, canonical.get(key))
                    for key in ("source", "currency", "value_unit", "consolidation_basis", "flow_basis")):
                 return None
@@ -441,7 +458,7 @@ async def _build_comparison_backfill(
         if debt_service > 0:
             backfill["debt_service_coverage"] = operating_income / debt_service
     if income_cash_match and operating_cash_flow is not None and revenue not in (None, 0):
-        backfill["ocf_sales"] = _admitted_ocf_sales(income_rows, cash_rows, ttm=use_ttm)
+        backfill["ocf_sales"] = _admitted_ocf_sales(income_rows, cash_rows, period_type, ttm=use_ttm)
     if free_cash_flow is not None and market_cap not in (None, 0):
         backfill["fcf_yield"] = (free_cash_flow / market_cap) * 100
     if (

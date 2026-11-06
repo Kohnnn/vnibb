@@ -181,6 +181,7 @@ def statement_lineage(symbol, year, quarter, statement_type, metric, value):
 @pytest.mark.parametrize("case", [
     "admitted", "zero_cash", "zero_revenue", "missing_lineage", "stale_value",
     "source", "symbol", "fiscal", "scope", "currency", "field_evidence", "flow", "missing_quarter",
+    "native_writer", "missing_period", "ambiguous_period", "orm_period", "fiscal_quarter",
 ])
 async def test_comparison_ocf_sales_requires_admitted_operands(legacy_db, monkeypatch, period, case):
     periods = [(2025, 2), (2025, 1), (2024, 4), (2024, 3)] if period == "TTM" else [(2025, 2 if period == "Q2" else None)]
@@ -193,6 +194,9 @@ async def test_comparison_ocf_sales_requires_admitted_operands(legacy_db, monkey
                 continue
             raw = statement_lineage("FPT", year, quarter, statement_type, metric, value)
             canonical = raw["_financial_lineage"]["canonical_data"]
+            stored_period = f"Q{quarter}-{year}" if quarter else str(year)
+            if case == "native_writer":
+                canonical["fiscal_year"] = canonical["fiscal_quarter"] = None
             if model is CashFlow and index == 0:
                 if case == "missing_lineage":
                     raw = {}
@@ -207,8 +211,16 @@ async def test_comparison_ocf_sales_requires_admitted_operands(legacy_db, monkey
                     canonical[key] = changed
                 elif case == "field_evidence":
                     canonical["unit_metadata"] = {}
+                elif case == "missing_period":
+                    canonical.pop("period")
+                elif case == "ambiguous_period":
+                    canonical["period"] = "TTM-2025"
+                elif case == "orm_period":
+                    stored_period = "2023"
+                elif case == "fiscal_quarter":
+                    canonical["fiscal_quarter"] = 1 if quarter != 1 else 2
             legacy_db.add(model(
-                id=index + 1, symbol="FPT", period=f"Q{quarter}-{year}" if quarter else str(year),
+                id=index + 1, symbol="FPT", period=stored_period,
                 period_type="quarter" if quarter else "year", fiscal_year=year, fiscal_quarter=quarter,
                 source="vietcap", raw_data=raw, **{metric: value},
             ))
@@ -218,7 +230,27 @@ async def test_comparison_ocf_sales_requires_admitted_operands(legacy_db, monkey
     ))
     monkeypatch.setattr("vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch", AsyncMock(return_value=[]))
     result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
-    assert result.metrics["ocf_sales"] == (20 if case == "admitted" else 0 if case == "zero_cash" else None)
+    assert result.metrics["ocf_sales"] == (20 if case in {"admitted", "native_writer"} else 0 if case == "zero_cash" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("period,period_type,quarter", [("FY", "year", 2), ("Q2", "quarter", None)])
+async def test_comparison_ocf_sales_rejects_request_mode_conflict(legacy_db, monkeypatch, period, period_type, quarter):
+    for model, kind, metric, value in (
+        (IncomeStatement, "income", "revenue", 100), (CashFlow, "cashflow", "operating_cash_flow", 20),
+    ):
+        legacy_db.add(model(
+            id=1, symbol="FPT", period=f"Q{quarter}-2025" if quarter else "2025",
+            period_type=period_type, fiscal_year=2025, fiscal_quarter=quarter, source="vietcap",
+            raw_data=statement_lineage("FPT", 2025, quarter, kind, metric, value), **{metric: value},
+        ))
+    await legacy_db.commit()
+    monkeypatch.setattr(comparison_service.comparison_service, "get_stock_metrics", AsyncMock(
+        return_value=comparison_service.StockMetrics(symbol="FPT", metrics={}),
+    ))
+    monkeypatch.setattr("vnibb.providers.vnstock.financial_ratios.VnstockFinancialRatiosFetcher.fetch", AsyncMock(return_value=[]))
+    result = (await comparison_service.get_comparison_data(["FPT"], period=period))[0]
+    assert result.metrics["ocf_sales"] is None
 
 
 @pytest.mark.asyncio
