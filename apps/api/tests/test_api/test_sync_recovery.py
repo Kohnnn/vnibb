@@ -1174,3 +1174,37 @@ async def test_screener_inactive_leftover_cannot_hide_invalid_active_base(
         assert (await session.scalars(select(ScreenerSnapshot).where(
             ScreenerSnapshot.symbol == "OLD",
         ))).one().price == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict, expected_requests", [(True, 1), (False, 5)])
+async def test_screener_board_requests_follow_recovery_mode(
+    screener_base_pipeline, monkeypatch, strict, expected_requests,
+):
+    """A timed-out strict acquisition must not re-request the board behind the operator."""
+    import requests
+    from vnibb.models.stock import Stock
+    from vnibb.services import vietcap_client as client_module
+    from vnibb.services.market_session import expected_market_session
+
+    pipeline, sessions = screener_base_pipeline
+    session = expected_market_session()
+    calls = []
+
+    def unavailable(self, method, url, **kwargs):
+        calls.append(url)
+        raise requests.HTTPError("HTTP 503", response=types.SimpleNamespace(status_code=503))
+
+    monkeypatch.setattr(client_module.requests.Session, "request", unavailable)
+    monkeypatch.setattr(client_module.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(client_module.VietcapClient, "_throttle", lambda self: None)
+    async with sessions.begin() as db:
+        db.add(Stock(symbol="AAA", is_active=1))
+    progress = {}
+    options = {"acquire_sessions": True, "enrich_ratios": False, "progress": progress}
+    if strict:
+        options.update(expected_symbols=["AAA"], expected_session=session, verify_cache=True)
+    assert await pipeline.sync_screener_data(**options) == 0
+    assert len(calls) == expected_requests
+    assert progress["cohort_published"] is False
+    assert progress["sql_commit_state"] in {"not_started", "committed"}

@@ -318,13 +318,41 @@ def test_missing_module_tolerated_so_free_runtime_still_imports(monkeypatch):
 
     def block_vnstock(name, *args, **kwargs):
         if name == "vnstock":
-            raise ImportError(name)
+            raise ModuleNotFoundError("No module named 'vnstock'", name="vnstock")
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", block_vnstock)
 
     # An absent SDK persists nothing; the refusal must not block the free runtime.
     runtime._refuse_persisted_paid_account()
+
+
+@pytest.mark.parametrize("error", [
+    ModuleNotFoundError("sensitive import detail", name="vnstock.internal"),
+    ModuleNotFoundError("sensitive import detail", name="dependency"),
+    ModuleNotFoundError("sensitive import detail"),
+    ImportError("sensitive import detail", name="vnstock"),
+    RuntimeError("sensitive import detail"),
+])
+def test_sdk_import_failure_refuses_acquisition(monkeypatch, error):
+    import builtins
+
+    from vnibb.providers.vnstock import runtime
+
+    monkeypatch.delitem(sys.modules, "vnstock", raising=False)
+    original_import = builtins.__import__
+
+    def block_vnstock(name, *args, **kwargs):
+        if name == "vnstock":
+            raise error
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", block_vnstock)
+
+    with pytest.raises(RuntimeError) as raised:
+        runtime._refuse_persisted_paid_account()
+    assert raised.value.__cause__ is error
+    assert "sensitive import detail" not in str(raised.value)
 
 
 def test_status_call_that_raises_fails_closed(sdk):

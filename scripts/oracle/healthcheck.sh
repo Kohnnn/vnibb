@@ -29,7 +29,7 @@ check_status() {
   local code=""
 
   for ((i=1; i<=attempts; i++)); do
-    code="$("$CURL_BIN" -ksS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
+    code="$("$CURL_BIN" -sS -o "$NULL_SINK" -w "%{http_code}" --max-time "$TIMEOUT" "${BASE_URL}${path}" || true)"
     if [[ "$code" == "$expected" ]]; then
       break
     fi

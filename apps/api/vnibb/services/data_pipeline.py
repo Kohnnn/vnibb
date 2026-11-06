@@ -7,6 +7,7 @@ Supports both PostgreSQL and SQLite dialects.
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -89,6 +90,59 @@ from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
+
+async def _drain_screener_thread(operation, *args, **kwargs):
+    """Do not release acquisition exclusion while a submitted blocking call lives."""
+    task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        if not task.cancelled():
+            task.exception()
+        raise
+
+
+def _validate_screener_recovery_target(
+    active_symbols: list[str], pinned_symbols: list[str] | None,
+    pinned_session: date | None, session_date: date,
+) -> None:
+    if pinned_symbols is not None:
+        if (
+            not isinstance(pinned_symbols, list) or not pinned_symbols
+            or any(not isinstance(symbol, str) or not symbol or symbol != symbol.strip().upper()
+                   for symbol in pinned_symbols)
+            or len(set(pinned_symbols)) != len(pinned_symbols)
+        ):
+            raise ValueError("expected_symbols must be a nonempty canonical unique symbol list")
+        if set(pinned_symbols) != set(active_symbols):
+            raise ValueError("expected_symbols does not match the full active symbol universe")
+    if pinned_session is not None and (
+        type(pinned_session) is not date or pinned_session != session_date
+    ):
+        raise ValueError("expected_session does not match the source-computed market session")
+
+
+async def _write_verified_screener_cache(key: str, payload: dict[str, Any], ttl: int) -> None:
+    canonical = json.loads(json.dumps(payload, default=str))
+    if not await redis_client.set_json(key, payload, ttl=ttl):
+        raise RuntimeError("cache write was not acknowledged")
+    if await redis_client.get_json(key) != canonical:
+        raise RuntimeError("cache readback does not match the written payload")
+
+
+async def _invalidate_verified_screener_cache(key: str) -> None:
+    if await redis_client.client.delete(key) not in (0, 1):
+        raise RuntimeError("cache deletion was not acknowledged")
+    if await redis_client.client.get(key) is not None:
+        raise RuntimeError("cache key remains after deletion")
+
 
 logger = logging.getLogger(__name__)
 
@@ -1129,25 +1183,71 @@ class DataPipeline:
             logger.info(f"Synced {count} stocks.")
             return count
 
-    @with_retry(max_retries=3)
     async def sync_screener_data(
         self,
-        symbols: Optional[List[str]] = None,
-        exchanges: Optional[List[str]] = None,
-        limit: Optional[int] = None,
-        progress: Optional[Dict[str, Any]] = None,
-        sync_id: Optional[int] = None,
+        symbols: list[str] | None = None,
+        exchanges: list[str] | None = None,
+        limit: int | None = None,
+        progress: dict[str, Any] | None = None,
+        sync_id: int | None = None,
         enrich_ratios: bool = True,
         acquire_sessions: bool = False,
+        *,
+        expected_symbols: list[str] | None = None,
+        expected_session: date | None = None,
+        verify_cache: bool = False,
+    ) -> int:
+        """Materialize quotes; explicit recovery assertions run once, without retries."""
+        strict_recovery = expected_symbols is not None or expected_session is not None or verify_cache
+        if progress is not None:
+            progress.update(
+                cohort_published=False, committed_count=0,
+                sql_commit_state="not_started", sql_effects_may_exist=False,
+                cache_updates_verified=False if verify_cache else None,
+                cache_expected_count=0, cache_verified_count=0, cache_errors=[],
+            )
+        operation = self._sync_screener_data
+        if strict_recovery:
+            operation = operation.__wrapped__.__get__(self, type(self))
+        try:
+            return await operation(
+                symbols=symbols, exchanges=exchanges, limit=limit, progress=progress,
+                sync_id=sync_id, enrich_ratios=enrich_ratios, acquire_sessions=acquire_sessions,
+                pinned_symbols=expected_symbols, pinned_session=expected_session, verify_cache=verify_cache,
+            )
+        except BaseException:
+            if progress is not None and progress["sql_effects_may_exist"] and progress["sql_commit_state"] != "committed":
+                # Cancellation at a SQL commit boundary cannot prove rollback.
+                progress["sql_commit_state"] = "unknown"
+            raise
+
+    @with_retry(max_retries=3)
+    async def _sync_screener_data(
+        self,
+        symbols: list[str] | None = None,
+        exchanges: list[str] | None = None,
+        limit: int | None = None,
+        progress: dict[str, Any] | None = None,
+        sync_id: int | None = None,
+        enrich_ratios: bool = True,
+        acquire_sessions: bool = False,
+        *,
+        pinned_symbols: list[str] | None = None,
+        pinned_session: date | None = None,
+        verify_cache: bool = False,
     ) -> int:
         """Materialize retained quotes; acquire provider-board sessions only when requested."""
+        strict_recovery = pinned_symbols is not None or pinned_session is not None or verify_cache
+        if strict_recovery and (
+            not acquire_sessions or symbols is not None or exchanges is not None or limit is not None
+        ):
+            raise ValueError("recovery assertions require session acquisition without selection filters")
         from vnibb.providers.vnstock.runtime import (
             import_vnstock_symbol,
             get_listing_class,
             run_financial_provider,
         )
 
-        Listing = get_listing_class() if enrich_ratios else None
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -1323,6 +1423,10 @@ class DataPipeline:
 
         if limit is not None and limit > 0:
             deduped_symbols = deduped_symbols[:limit]
+        observed_at = datetime.now(UTC)
+        session_date = expected_market_session(now=observed_at)
+        if strict_recovery:
+            _validate_screener_recovery_target(deduped_symbols, pinned_symbols, pinned_session, session_date)
 
         if not deduped_symbols:
             logger.warning("No symbols found in database for screener sync.")
@@ -1373,11 +1477,23 @@ class DataPipeline:
                     "raw_data": raw_data if isinstance(raw_data, dict) else {},
                 }
 
+        if strict_recovery:
+            async with async_session_maker() as session:
+                active_symbols = list((await session.scalars(
+                    select(Stock.symbol).where(Stock.is_active == 1)
+                )).all())
+            session_date = expected_market_session(now=datetime.now(UTC))
+            _validate_screener_recovery_target(active_symbols, pinned_symbols, pinned_session, session_date)
+            if set(active_symbols) != set(deduped_symbols):
+                raise ValueError("the full active symbol universe changed during recovery preflight")
+        Listing = get_listing_class() if enrich_ratios else None
         primary_source = (settings.vnstock_source or "VCI").upper()
-        listing_metadata = (
-            await loop.run_in_executor(None, _extract_listing_metadata, primary_source)
-            if enrich_ratios else {}
-        )
+        listing_metadata = {}
+        if enrich_ratios:
+            listing_metadata = (
+                await _drain_screener_thread(_extract_listing_metadata, primary_source)
+                if acquire_sessions else await loop.run_in_executor(None, _extract_listing_metadata, primary_source)
+            )
 
         start_index = 0
         if progress and progress.get("stage") == "screener":
@@ -1395,8 +1511,7 @@ class DataPipeline:
         ratio_failed_symbols: list[str] = []
         cache_batch: list[dict[str, Any]] = []
         price_cache_batch: list[dict[str, Any]] = []
-        observed_at = datetime.now(UTC)
-        expected_session = expected_market_session(now=observed_at)
+        expected_session = session_date
         market_sessions: dict[str, dict[str, Any]] = {}
         materialized_sessions: set[str] = set()
         retained_envelopes: list[dict[str, Any]] = []
@@ -1474,16 +1589,18 @@ class DataPipeline:
             from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
             from vnibb.services.vietcap_client import VietcapClient
 
-            client = VietcapClient()
+            # Strict recovery is an explicit one-shot: retries after a timeout would
+            # re-request a board whose answer an operator already abandoned.
+            client = VietcapClient(max_retries=0) if strict_recovery else VietcapClient()
             mongo = get_mongo_market_data_service()
             seen_symbols: set[str] = set()
             rejected_symbols: set[str] = set()
             for batch_start in range(0, len(deduped_symbols), 50):
                 requested = deduped_symbols[batch_start:batch_start + 50]
                 try:
-                    raw_rows = await asyncio.to_thread(client.get_price_board, requested, validate_membership=False)
+                    raw_rows = await _drain_screener_thread(client.get_price_board, requested, validate_membership=False)
                     batch_observed_at = datetime.now(UTC)
-                    await asyncio.to_thread(
+                    await _drain_screener_thread(
                         mongo.retain_price_board_envelope, requested, raw_rows, expected_session, batch_observed_at,
                     )
                     retained_envelopes.append({"requested_symbols": requested, "raw": raw_rows, "session_date": expected_session.isoformat()})
@@ -1518,7 +1635,7 @@ class DataPipeline:
                             session_input_complete = False
                             continue
                         qualified.append(record)
-                    retained = await asyncio.to_thread(mongo.retain_market_sessions, qualified)
+                    retained = await _drain_screener_thread(mongo.retain_market_sessions, qualified)
                     market_sessions.update(retained)
                     if set(retained) != set(requested):
                         session_input_complete = False
@@ -1586,6 +1703,8 @@ class DataPipeline:
         for symbol, market_session in market_sessions.items():
             if market_session["status"] != "traded":
                 continue
+            if progress is not None:
+                progress["sql_effects_may_exist"] = True
             try:
                 promoted_fence_id = None
                 match = market_session["raw"]["matchPrice"]
@@ -1641,8 +1760,15 @@ class DataPipeline:
                 if promoted_fence_id is not None:
                     acquisition_fence_id = promoted_fence_id
             except Exception as exc:
+                if strict_recovery and not isinstance(exc, StructuredPersistenceConflict):
+                    # A commit that failed after the server accepted it cannot prove
+                    # rollback. Stop here instead of letting a later commit report
+                    # this run as complete; the wrapper records the unknown outcome.
+                    raise
                 price_write_errors[symbol] = exc
 
+        if progress is not None:
+            progress["sql_effects_may_exist"] = True
         async with async_session_maker() as session:
             if engine.dialect.name == "postgresql":
                 await session.execute(text("LOCK TABLE screener_snapshots IN SHARE ROW EXCLUSIVE MODE"))
@@ -2313,7 +2439,7 @@ class DataPipeline:
             durable_sessions = set()
             if acquire_sessions:
                 try:
-                    durable_sessions = await asyncio.to_thread(mongo.verified_market_sessions, market_sessions, retained_envelopes)
+                    durable_sessions = await _drain_screener_thread(mongo.verified_market_sessions, market_sessions, retained_envelopes)
                 except Exception as exc:
                     logger.warning("Market-session publication readback failed: %s", exc)
                 prices = {row.symbol: row for row in (await session.scalars(select(StockPrice).where(
@@ -2487,7 +2613,7 @@ class DataPipeline:
                 if progress is not None:
                     persisted_snapshots = (await session.scalars(select(ScreenerSnapshot).where(
                         ScreenerSnapshot.snapshot_date == today, ScreenerSnapshot.symbol.in_(expected_symbols),
-                    ))).all()
+                    ).execution_options(populate_existing=True))).all()
                     progress["base_count"] = sum(
                         snapshot.symbol in durable_sessions
                         and (snapshot.extended_metrics or {}).get("market_session") == market_sessions.get(snapshot.symbol)
@@ -2511,18 +2637,84 @@ class DataPipeline:
                         "failed_symbols": ratio_failed_symbols,
                     },
                 ))
+            if progress is not None:
+                progress["sql_commit_state"] = "in_progress"
             await session.commit()
+            if progress is not None:
+                progress["sql_commit_state"] = "committed"
             if progress is not None:
                 # Publish the certified-cohort outcome only after the durable
                 # commit, so the owner can require it instead of inferring
                 # completeness from counts alone.
                 progress["cohort_published"] = bool(publish_cohort)
-                progress["committed_count"] = count
-            for item in cache_batch:
-                cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
-                await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
-            for item in price_cache_batch:
-                await self._cache_set_json(build_cache_key("vnibb", "price", "latest", item["symbol"]), item, CACHE_TTL_PRICE_LATEST)
+                progress["committed_count"] = (
+                    progress["base_count"] if not publish_cohort and protects_admitted_cohort else count
+                )
+            if verify_cache:
+                required_prices = {symbol for symbol, record in market_sessions.items() if record["status"] == "traded"}
+                non_traded_prices = {symbol for symbol, record in market_sessions.items() if record["status"] != "traded"}
+                cache_errors = []
+                verified_count = 0
+                expected_count = len(expected_symbols) * 2
+                if progress is not None:
+                    progress["cache_expected_count"] = expected_count
+                if not publish_cohort:
+                    cache_errors.append("cohort was not published")
+                if set(market_sessions) != expected_symbols:
+                    cache_errors.append("market sessions do not cover the complete admitted cohort")
+                if publish_cohort:
+                    for item in cache_batch:
+                        snapshot = current_snapshots.get(item["symbol"])
+                        if snapshot is None:
+                            cache_errors.append(f"{item['symbol']}: committed snapshot is missing")
+                            continue
+                        metrics = snapshot.get("extended_metrics") or {}
+                        for field in item.keys() & snapshot.keys():
+                            value = snapshot[field]
+                            item[field] = value.isoformat() if isinstance(value, date) else value
+                        for field in ("price_unit", "price_source", "market_cap_provenance", "shares_outstanding_provenance", "market_session"):
+                            item[field] = metrics.get(field)
+                if (
+                    len(cache_batch) != len(expected_symbols)
+                    or {item["symbol"] for item in cache_batch} != expected_symbols
+                    or len(price_cache_batch) != len(required_prices)
+                    or {item["symbol"] for item in price_cache_batch} != required_prices
+                ):
+                    cache_errors.append("required cache payloads do not cover the complete admitted cohort")
+                if not self.cache_writes_enabled or not await self._ensure_redis():
+                    cache_errors.append("cache writes are disabled or Redis is unavailable")
+                if not cache_errors:
+                    for kind, batch, ttl in (
+                        ("screener", cache_batch, CACHE_TTL_SCREENER),
+                        ("price", price_cache_batch, CACHE_TTL_PRICE_LATEST),
+                    ):
+                        for item in batch:
+                            key = build_cache_key("vnibb", kind, "latest", item["symbol"])
+                            try:
+                                await _write_verified_screener_cache(key, item, ttl)
+                                verified_count += 1
+                                if progress is not None:
+                                    progress["cache_verified_count"] = verified_count
+                            except Exception as exc:
+                                cache_errors.append(f"{key}: {exc}")
+                    for symbol in sorted(non_traded_prices):
+                        key = build_cache_key("vnibb", "price", "latest", symbol)
+                        try:
+                            await _invalidate_verified_screener_cache(key)
+                            verified_count += 1
+                            if progress is not None:
+                                progress["cache_verified_count"] = verified_count
+                        except Exception as exc:
+                            cache_errors.append(f"{key}: {exc}")
+                if progress is not None:
+                    progress["cache_errors"] = cache_errors
+                    progress["cache_updates_verified"] = not cache_errors and verified_count == expected_count
+            else:
+                for item in cache_batch:
+                    cache_key = build_cache_key("vnibb", "screener", "latest", item["symbol"])
+                    await self._cache_set_json(cache_key, item, CACHE_TTL_SCREENER)
+                for item in price_cache_batch:
+                    await self._cache_set_json(build_cache_key("vnibb", "price", "latest", item["symbol"]), item, CACHE_TTL_PRICE_LATEST)
             if progress is not None and sync_id is not None:
                 progress["last_symbol"] = None
                 progress["last_index"] = None

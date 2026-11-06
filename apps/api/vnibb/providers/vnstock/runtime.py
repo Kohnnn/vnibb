@@ -41,10 +41,12 @@ def _refuse_persisted_paid_account() -> None:
     if module is None:
         try:
             module = __import__("vnstock")
-        except Exception:
-            # The SDK is genuinely absent: nothing can be persisted, and a later
-            # provider import fails on its own. Proceed without provider access.
-            return
+        except Exception as exc:
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "vnstock":
+                return
+            raise RuntimeError(
+                "Free runtime could not import vnstock to verify credential state; refusing to acquire."
+            ) from exc
     status = getattr(module, "status", None)
     if not callable(status):
         raise RuntimeError(

@@ -2427,6 +2427,7 @@ def _pick_optional_text(*values: Any) -> Optional[str]:
 # starts with these words is unaffected.
 LEGAL_FORM_LABELS = frozenset({
     "cong_ty_co_phan",
+    "co_phan",
     "cong_ty_cp",
     "ctcp",
     "tong_cong_ty_co_phan",
@@ -2437,6 +2438,10 @@ LEGAL_FORM_LABELS = frozenset({
     "doanh_nghiep_tu_nhan",
     "cong_ty_lien_doanh",
     "joint_stock_company",
+    "jsc",
+    "llc",
+    "limited_liability_company",
+    "corporation",
     "joint_stock_corporation",
 })
 
@@ -7111,7 +7116,7 @@ async def get_income_statement(
 @router.get(
     "/{symbol}/balance-sheet", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="balance_sheet_v4")
+@cached(ttl=86400, key_prefix="balance_sheet_v5")
 async def get_balance_sheet(
     symbol: str,
     period: Literal[
@@ -7170,7 +7175,7 @@ async def get_balance_sheet(
 
 
 @router.get("/{symbol}/cash-flow", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=86400, key_prefix="cash_flow_v4")
+@cached(ttl=86400, key_prefix="cash_flow_v5")
 async def get_cash_flow(
     symbol: str,
     period: Literal[

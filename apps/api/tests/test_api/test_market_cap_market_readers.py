@@ -260,6 +260,153 @@ async def test_index_keeps_an_observed_previous_close_that_reconciles():
     assert "previous_close_status" not in vnindex
 
 
+def _index_db(rows):
+    """Minimal AsyncSession stand-in for the retained-index reader."""
+
+    class FakeResult:
+        def all(self):
+            return rows
+
+    class FakeDB:
+        async def execute(self, *args, **kwargs):
+            return FakeResult()
+
+    return FakeDB()
+
+
+def _stored(code, when, close, change=None, change_pct=None):
+    return SimpleNamespace(
+        index_code=code, time=when, open=close, high=close, low=close,
+        close=close, volume=1, change=change, change_pct=change_pct,
+    )
+
+
+@pytest.mark.asyncio
+async def test_index_gap_with_matching_arithmetic_still_withholds_the_base():
+    """#205: matching arithmetic is not proof of the preceding session.
+
+    2026-10-28 (259.86) to 2026-10-30 is two sessions apart because 10-29 was
+    never retained. Submitted with a change that happens to agree, it would
+    otherwise publish a two-session close as one session's base.
+    """
+    rows = await market._load_latest_market_indices_from_db(
+        _index_db(
+            [
+                _stored("HNX", date(2026, 10, 30), 252.74, change=-7.12),
+                _stored("HNX", date(2026, 10, 28), 259.86, change=0.36),
+            ]
+        )
+    )
+    hnx = next(row for row in rows if row["index_name"] == "HNX")
+
+    assert "previous_close" not in hnx
+    assert hnx["previous_close_status"] == "previous_session_not_retained"
+    assert hnx["change"] == pytest.approx(-7.12)
+
+
+@pytest.mark.asyncio
+async def test_index_adjacent_base_derives_a_missing_change():
+    """A proven adjacent base is allowed to derive the change it implies."""
+    rows = await market._load_latest_market_indices_from_db(
+        _index_db(
+            [
+                _stored("VNINDEX", date(2026, 10, 30), 1250.0),
+                _stored("VNINDEX", date(2026, 10, 29), 1240.0),
+            ]
+        )
+    )
+    vnindex = next(row for row in rows if row["index_name"] == "VNINDEX")
+
+    assert vnindex["previous_close"] == pytest.approx(1240.0)
+    assert vnindex["change"] == pytest.approx(10.0)
+    assert "previous_close_status" not in vnindex
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("previous_time", "latest_time"),
+    [
+        # Friday -> Monday and a published holiday span are real adjacency.
+        (date(2026, 10, 30), date(2026, 11, 2)),
+        (date(2026, 8, 28), date(2026, 9, 3)),
+        # ... and the same values as source timestamps.
+        ("2026-08-28", "2026-09-03"),
+    ],
+)
+async def test_index_accepts_a_real_session_boundary(previous_time, latest_time):
+    rows = await market._load_latest_market_indices_from_db(
+        _index_db(
+            [
+                _stored("VNINDEX", latest_time, 1250.0, change=10.0),
+                _stored("VNINDEX", previous_time, 1240.0),
+            ]
+        )
+    )
+    vnindex = next(row for row in rows if row["index_name"] == "VNINDEX")
+
+    assert vnindex["previous_close"] == pytest.approx(1240.0)
+    assert "previous_close_status" not in vnindex
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("previous_time", "latest_time"),
+    [
+        # A weekend day or a closure beside the other date is not a session.
+        (date(2026, 11, 1), date(2026, 11, 2)),
+        (date(2026, 10, 30), date(2026, 10, 31)),
+        (date(2026, 8, 31), date(2026, 9, 3)),
+        # A skipped real session is a gap.
+        (date(2026, 10, 28), date(2026, 10, 30)),
+    ],
+)
+async def test_index_rejects_an_unproven_session_boundary(previous_time, latest_time):
+    rows = await market._load_latest_market_indices_from_db(
+        _index_db(
+            [
+                _stored("VNINDEX", latest_time, 1250.0, change=10.0),
+                _stored("VNINDEX", previous_time, 1240.0),
+            ]
+        )
+    )
+    vnindex = next(row for row in rows if row["index_name"] == "VNINDEX")
+
+    assert "previous_close" not in vnindex
+    assert vnindex["previous_close_status"] == "previous_session_not_retained"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("previous_time", "latest_time"),
+    [
+        (None, date(2026, 10, 30)),
+        (date(2026, 10, 29), None),
+        ("", date(2026, 10, 30)),
+        ("2026-13-40", date(2026, 10, 30)),
+        # A valid date followed by junk is not a session date either: the
+        # whole timestamp must parse, so a truncated slice cannot prove a base.
+        ("2026-10-29garbage", date(2026, 10, 30)),
+    ],
+)
+async def test_index_missing_or_invalid_dates_cannot_prove_a_base(previous_time, latest_time):
+    """No retained timestamp means no adjacency proof, and no borrowing."""
+    rows = await market._load_latest_market_indices_from_db(
+        _index_db(
+            [
+                _stored("VNINDEX", latest_time, 1250.0, change=10.0),
+                _stored("VNINDEX", previous_time, 1240.0),
+            ]
+        )
+    )
+    vnindex = next(row for row in rows if row["index_name"] == "VNINDEX")
+
+    assert "previous_close" not in vnindex
+    assert vnindex["previous_close_status"] == "previous_session_unconfirmed"
+    # The retained change still anchors the percentage; it is never reloaded
+    # from a base that was withheld.
+    assert vnindex["change_pct"] == pytest.approx(10.0 / 1240.0 * 100, rel=1e-6)
+
+
 def test_merge_does_not_borrow_a_change_pct_from_another_session():
     """#205: merging may not mix a base from one session with a level from another.
 
@@ -293,7 +440,11 @@ def test_merge_does_not_borrow_a_change_pct_from_another_session():
 
 
 def test_merge_publishes_a_base_only_when_it_reconciles():
-    """An agreeing source pair keeps its base and derives the percentage from it."""
+    """An agreeing source pair keeps its base and derives the percentage from it.
+
+    Both rows name the same observed session and agree on the level, so the
+    DB base is this session's base and may anchor the percentage.
+    """
     db_rows = [
         {
             "index_name": "VNINDEX",
@@ -301,10 +452,16 @@ def test_merge_publishes_a_base_only_when_it_reconciles():
             "change": 10.0,
             "change_pct": 0.8064516129032258,
             "previous_close": 1240.0,
+            "time": "2026-10-30",
         }
     ]
     provider_rows = [
-        {"index_name": "VNINDEX", "current_value": 1250.0, "change": 10.0}
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "time": "2026-10-30T08:15:00",
+        }
     ]
 
     merged = market._merge_market_index_rows(db_rows, provider_rows)
@@ -414,19 +571,45 @@ def test_provider_uses_an_asserted_base_and_never_an_open_fallback():
 
 
 def test_sessions_are_adjacent_uses_the_market_calendar():
-    from datetime import date
+    from datetime import UTC, date, datetime
 
-    from vnibb.providers.vnstock.market_overview import _sessions_are_adjacent
+    from vnibb.services.market_session import market_sessions_are_adjacent
 
     # HNX is missing 2026-10-29, so these are not consecutive sessions.
-    assert not _sessions_are_adjacent(date(2026, 10, 28), date(2026, 10, 30))
-    assert _sessions_are_adjacent(date(2026, 10, 29), date(2026, 10, 30))
+    assert not market_sessions_are_adjacent(date(2026, 10, 28), date(2026, 10, 30))
+    assert market_sessions_are_adjacent(date(2026, 10, 29), date(2026, 10, 30))
     # Friday to Monday is consecutive: the weekend is not a session.
-    assert _sessions_are_adjacent(date(2026, 10, 30), date(2026, 11, 2))
+    assert market_sessions_are_adjacent(date(2026, 10, 30), date(2026, 11, 2))
     # 2026-08-31, 09-01 and 09-02 are published closures, so 08-28 -> 09-03 is
     # the next session, while 08-27 -> 09-03 skips 08-28.
-    assert _sessions_are_adjacent(date(2026, 8, 28), date(2026, 9, 3))
-    assert not _sessions_are_adjacent(date(2026, 8, 27), date(2026, 9, 3))
+    assert market_sessions_are_adjacent(date(2026, 8, 28), date(2026, 9, 3))
+    assert not market_sessions_are_adjacent(date(2026, 8, 27), date(2026, 9, 3))
+
+    # Both endpoints must themselves be sessions: a weekend or a closure next
+    # to the other date is a gap, not the previous session.
+    assert not market_sessions_are_adjacent(date(2026, 11, 1), date(2026, 11, 2))  # Sun -> Mon
+    assert not market_sessions_are_adjacent(date(2026, 10, 30), date(2026, 10, 31))  # Fri -> Sat
+    assert not market_sessions_are_adjacent(date(2026, 8, 31), date(2026, 9, 3))  # closure endpoint
+    assert not market_sessions_are_adjacent(date(2026, 10, 30), date(2026, 10, 30))
+    assert not market_sessions_are_adjacent(date(2026, 10, 30), date(2026, 10, 29))
+
+    # Missing or malformed dates never prove adjacency and never become today.
+    for earlier, later in (
+        (None, date(2026, 10, 30)),
+        (date(2026, 10, 29), None),
+        ("", date(2026, 10, 30)),
+        ("not-a-date", date(2026, 10, 30)),
+        (date(2026, 10, 29), "2026-13-45"),
+    ):
+        assert not market_sessions_are_adjacent(earlier, later)
+
+    # An aware timestamp resolves in the market zone, not in UTC: 17:30Z on
+    # 2026-10-29 is 2026-10-30 00:30 ICT, so it can only ever be 10-30.
+    from vnibb.services.market_session import market_session_date
+
+    late_utc = datetime(2026, 10, 29, 17, 30, tzinfo=UTC)
+    assert market_session_date(late_utc) == date(2026, 10, 30)
+    assert market_sessions_are_adjacent(date(2026, 10, 29), late_utc)
 
 
 def test_enrichment_does_not_reuse_target_evidence_for_a_different_sum():
@@ -531,8 +714,13 @@ def test_merge_does_not_lend_a_foreign_session_date_to_a_provider_row():
     assert row.get("time") is None
 
 
-def test_merge_keeps_the_date_of_an_agreeing_same_session_row():
-    """An agreeing pair is one session, so its observed date still applies."""
+def test_merge_does_not_lend_a_date_to_an_undated_provider_row():
+    """An agreeing pair with no provider date is not proof of one session.
+
+    Equal levels alone never establish that both sources observed one session,
+    and an index date is an observation rather than a fillable field, so the
+    undated provider row stays undated.
+    """
     db_rows = [
         {
             "index_name": "VNINDEX",
@@ -548,7 +736,40 @@ def test_merge_keeps_the_date_of_an_agreeing_same_session_row():
     merged = market._merge_market_index_rows(db_rows, provider_rows)
     row = next(item for item in merged if item["index_name"] == "VNINDEX")
 
-    assert row["time"] == "2026-10-30"
+    assert row.get("time") is None
+
+
+def test_merge_enriches_only_a_known_matching_session_date():
+    """A known equal source date is the one control that permits enrichment.
+
+    The provider keeps its own observation time (never a borrowed clock) while
+    the DB volume and range for the same session fill the gaps.
+    """
+    db_rows = [
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "volume": 900_000,
+            "high": 1255.0,
+            "time": "2026-10-30",
+        }
+    ]
+    provider_rows = [
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "time": "2026-10-30T08:15:00",
+        }
+    ]
+
+    merged = market._merge_market_index_rows(db_rows, provider_rows)
+    row = next(item for item in merged if item["index_name"] == "VNINDEX")
+
+    assert row["time"] == "2026-10-30T08:15:00"
+    assert row["volume"] == 900_000
+    assert row["high"] == pytest.approx(1255.0)
 
 
 def test_balance_sheet_readmission_keeps_a_refilled_metric_withheld():

@@ -2409,9 +2409,84 @@ async def test_market_indices_withhold_a_provider_base_that_contradicts_change(
     assert row["current_value"] == pytest.approx(252.74)
     assert row["change"] == pytest.approx(-3.87)
     assert "previous_close" not in row
+    # The withheld base names its own reason, and no alias spelling survives.
+    assert row["previous_close_status"] == "inconsistent_with_retained_change"
+    for alias in ("prev_close", "ref_price"):
+        assert alias not in row
     # With no admitted base the percentage comes from the base the change
     # implies (252.74 + 3.87).
     assert row["change_pct"] == pytest.approx(-3.87 / 256.61 * 100, rel=1e-9)
+
+
+def test_contradictory_base_aliases_cannot_resurrect_after_normalization():
+    """#205: repeated normalization never rebuilds a withheld base from aliases.
+
+    Every base spelling is dropped on the first pass and the withholding reason
+    is preserved, so a second pass cannot read the base back and publish it.
+    """
+    from vnibb.api.v1 import market
+
+    once = market._normalize_market_index_metrics(
+        {
+            "index_name": "HNX",
+            "current_value": 252.74,
+            "change": -3.87,
+            "previous_close": 259.86,
+            "prev_close": 259.86,
+            "ref_price": 259.86,
+        }
+    )
+    assert once["previous_close_status"] == "inconsistent_with_retained_change"
+
+    twice = market._normalize_market_index_metrics(once)
+    assert "previous_close" not in twice
+    assert "prev_close" not in twice
+    assert "ref_price" not in twice
+    assert twice["previous_close_status"] == "inconsistent_with_retained_change"
+    assert twice["change"] == pytest.approx(-3.87)
+    assert twice["change_pct"] == pytest.approx(-3.87 / 256.61 * 100, rel=1e-9)
+
+
+@pytest.mark.parametrize(
+    "withheld_reason",
+    ["previous_session_unconfirmed", "previous_session_not_retained"],
+)
+def test_an_incoming_withholding_reason_blocks_alias_reconstruction(withheld_reason):
+    """#205: a refused base is never rebuilt from an alias spelling.
+
+    A row that already records why its base was withheld must not publish a
+    base again just because a `prev_close`/`ref_price` alias arrived beside the
+    reason. Only a canonical admitted replacement may reconsider it.
+    """
+    from vnibb.api.v1 import market
+
+    for alias in ("prev_close", "ref_price"):
+        row = market._normalize_market_index_metrics(
+            {
+                "index_name": "HNX",
+                "current_value": 252.74,
+                "change": -3.87,
+                alias: 256.61,
+                "previous_close_status": withheld_reason,
+            }
+        )
+        assert "previous_close" not in row
+        for spelling in ("previous_close", "prev_close", "ref_price"):
+            assert spelling not in row
+        assert row["previous_close_status"] == withheld_reason
+
+    # A canonical base that reconciles is an admitted replacement and clears it.
+    replaced = market._normalize_market_index_metrics(
+        {
+            "index_name": "HNX",
+            "current_value": 252.74,
+            "change": -3.87,
+            "previous_close": 256.61,
+            "previous_close_status": "previous_session_not_retained",
+        }
+    )
+    assert replaced["previous_close"] == pytest.approx(256.61)
+    assert "previous_close_status" not in replaced
 
 
 @pytest.mark.asyncio

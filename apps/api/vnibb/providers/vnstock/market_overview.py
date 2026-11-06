@@ -6,7 +6,7 @@ Fetches market indices and overview data for Vietnam stock market.
 
 import asyncio
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
@@ -17,8 +17,7 @@ from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
 
 from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
-from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS
-from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.market_session import market_sessions_are_adjacent
 logger = logging.getLogger(__name__)
 _index_jobs: dict[tuple[str, str], asyncio.Future] = {}
 
@@ -44,43 +43,6 @@ def _coerce_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _sessions_are_adjacent(earlier: Any, later: Any) -> bool:
-    """True when `later` is the first market session after `earlier`.
-
-    `df.iloc[-2]` is only the previous session when no session is missing in
-    between. HNX is missing 2026-10-29, so its second row is 2026-10-28 and
-    deriving a change from it reports a two-session move as one session's
-    (#205).
-    """
-    def _to_date(value: Any) -> Optional[date]:
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        if isinstance(value, str):
-            try:
-                return date.fromisoformat(value[:10])
-            except ValueError:
-                return None
-        return None
-
-    start, end = _to_date(earlier), _to_date(later)
-    if start is None or end is None or end <= start:
-        return False
-    holidays = OFFICIAL_MARKET_HOLIDAYS | {
-        date.fromisoformat(value) for value in settings.market_holiday_dates
-    }
-    cursor = end
-    while cursor > start:
-        cursor -= timedelta(days=1)
-        if cursor == start:
-            return True
-        if is_market_business_day(cursor, holidays):
-            # A session between them means they are not adjacent.
-            return False
-    return False
 
 
 def _is_suspicious_index_value(index_name: str, value: Any) -> bool:
@@ -197,7 +159,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                         # Only an adjacent row is the previous session's close.
                         # A gap (HNX has no 2026-10-29 row) would otherwise turn
                         # a two-session move into one session's change (#205).
-                        if _sessions_are_adjacent(
+                        if market_sessions_are_adjacent(
                             previous_row.get("time") or previous_row.get("date"),
                             latest.get("time") or latest.get("date"),
                         ):
@@ -224,7 +186,7 @@ class VnstockMarketOverviewFetcher(BaseFetcher[MarketOverviewQueryParams, Market
                                 elif "date" in prev_df.columns:
                                     prev_df = prev_df.sort_values("date")
                                 candidate = prev_df.iloc[-1]
-                                if _sessions_are_adjacent(
+                                if market_sessions_are_adjacent(
                                     candidate.get("time") or candidate.get("date"),
                                     latest.get("time") or latest.get("date"),
                                 ):
