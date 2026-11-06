@@ -1589,7 +1589,9 @@ class DataPipeline:
             from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
             from vnibb.services.vietcap_client import VietcapClient
 
-            client = VietcapClient()
+            # Strict recovery is an explicit one-shot: retries after a timeout would
+            # re-request a board whose answer an operator already abandoned.
+            client = VietcapClient(max_retries=0) if strict_recovery else VietcapClient()
             mongo = get_mongo_market_data_service()
             seen_symbols: set[str] = set()
             rejected_symbols: set[str] = set()
@@ -1758,6 +1760,11 @@ class DataPipeline:
                 if promoted_fence_id is not None:
                     acquisition_fence_id = promoted_fence_id
             except Exception as exc:
+                if strict_recovery and not isinstance(exc, StructuredPersistenceConflict):
+                    # A commit that failed after the server accepted it cannot prove
+                    # rollback. Stop here instead of letting a later commit report
+                    # this run as complete; the wrapper records the unknown outcome.
+                    raise
                 price_write_errors[symbol] = exc
 
         if progress is not None:

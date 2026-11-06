@@ -895,3 +895,67 @@ async def test_promotion_commit_failure_keeps_failed_symbol_unfenced(admission_s
     # BBB, promoted after the failed commit, is promoted and fenced.
     assert sources["BBB"] == "vietcap_vnd"
     assert fenced == {"BBB"}
+
+
+@pytest.mark.asyncio
+async def test_strict_recovery_never_reports_a_lost_commit_as_incomplete(admission_stores, monkeypatch):
+    """A commit the server accepted but whose acknowledgement was lost is unknown, not retried."""
+    stores = admission_stores
+    symbols = ["AAA", "BBB"]
+    async with stores.sessions.begin() as session:
+        session.add_all([Stock(symbol=symbol, is_active=1) for symbol in symbols])
+    rows = [board_row(symbol) for symbol in symbols]
+    requests = []
+
+    def board(self, requested, **kwargs):
+        requests.append(list(requested))
+        return deepcopy(rows)
+
+    monkeypatch.setattr(VietcapClient, "get_price_board", board)
+    original_commit = sqlalchemy_async.AsyncSession.commit
+    commits = []
+
+    async def commit_then_lose_acknowledgement(self):
+        await original_commit(self)
+        commits.append(self)
+        if len(commits) == 1:
+            raise ConnectionError("commit response lost")
+
+    monkeypatch.setattr(sqlalchemy_async.AsyncSession, "commit", commit_then_lose_acknowledgement)
+    progress = {}
+    with pytest.raises(ConnectionError):
+        await DataPipeline().sync_screener_data(
+            enrich_ratios=False, acquire_sessions=True, progress=progress,
+            expected_symbols=sorted(symbols), expected_session=SESSION, verify_cache=True,
+        )
+
+    # One request only: a strict recovery is not retried after an abandoned attempt.
+    assert requests == [symbols]
+    assert len(commits) == 1
+    # The durable commit landed, so the outcome can never be reported as complete.
+    assert progress["sql_commit_state"] == "unknown"
+    assert progress["cohort_published"] is False
+    async with stores.sessions() as session:
+        assert not (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe"
+        ))).all()
+
+
+@pytest.mark.asyncio
+async def test_strict_recovery_keeps_per_symbol_conflicts_incomplete_not_unknown(admission_stores, monkeypatch):
+    """A rejected conflicting price stays a per-symbol error, not an unprovable commit."""
+    stores = admission_stores
+    original = board_row("AAA")
+    assert (await run_board(stores, monkeypatch, ["AAA"], [original]))[0] == 1
+    changed = deepcopy(original)
+    changed["matchPrice"]["matchPrice"] = 10500
+    monkeypatch.setattr(VietcapClient, "get_price_board", lambda *args, **kwargs: [changed])
+    progress = {}
+    assert await DataPipeline().sync_screener_data(
+        enrich_ratios=False, acquire_sessions=True, progress=progress,
+        expected_symbols=["AAA"], expected_session=SESSION, verify_cache=True,
+    ) == 0
+    assert progress["cohort_published"] is False
+    assert progress["sql_commit_state"] == "committed"
+    async with stores.sessions() as session:
+        assert (await session.scalar(select(StockPrice.close))) == 11000

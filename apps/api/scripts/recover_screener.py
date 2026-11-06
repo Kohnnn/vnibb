@@ -193,7 +193,6 @@ def target_fingerprint(sql_locator, settings) -> str:
 class Runtime:
     async def inspect(self, cap: int) -> dict:
         from sqlalchemy import text
-
         from vnibb.core.config import settings
         from vnibb.core.database import engine
         from vnibb.services.market_session import expected_market_session
