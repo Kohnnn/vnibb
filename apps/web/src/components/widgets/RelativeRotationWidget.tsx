@@ -1,5 +1,6 @@
 'use client'
 
+import { EMPTY_VALUE } from '@/lib/units'
 import { useEffect, useMemo } from 'react'
 import { Orbit } from 'lucide-react'
 import { CartesianGrid, ReferenceArea, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
@@ -20,19 +21,19 @@ interface RelativeRotationWidgetProps {
 }
 
 function quadrantTone(quadrant: string): string {
-  if (quadrant === 'Leading') return 'text-emerald-400'
-  if (quadrant === 'Improving') return 'text-cyan-400'
-  if (quadrant === 'Weakening') return 'text-amber-400'
-  if (quadrant === 'Lagging') return 'text-red-400'
+  if (quadrant === 'Leading' || quadrant === 'Improving') return 'text-[var(--color-positive)]'
+  if (quadrant === 'Weakening' || quadrant === 'Lagging') return 'text-[var(--color-negative)]'
   return 'text-[var(--text-secondary)]'
 }
 
+// Quadrants are direction-specific, so gain/loss is the honest pairing here;
+// the two weaker quadrants use the focal and comparison series instead.
 function quadrantFill(quadrant: string): string {
-  if (quadrant === 'Leading') return '#4ade80'
-  if (quadrant === 'Improving') return '#22d3ee'
-  if (quadrant === 'Weakening') return '#f59e0b'
-  if (quadrant === 'Lagging') return '#f87171'
-  return '#94a3b8'
+  if (quadrant === 'Leading') return 'var(--color-positive)'
+  if (quadrant === 'Improving') return 'var(--chart-blue)'
+  if (quadrant === 'Weakening') return 'var(--chart-slate)'
+  if (quadrant === 'Lagging') return 'var(--color-negative)'
+  return 'var(--text-muted)'
 }
 
 function buildDomain(values: number[]): [number, number] {
@@ -52,7 +53,7 @@ function RotationDot(props: {
       cx={cx}
       cy={cy}
       r={payload?.radius ?? (payload?.isSelected ? 6 : 4)}
-      fill={payload?.color || '#94a3b8'}
+      fill={payload?.color || 'var(--chart-slate)'}
       fillOpacity={payload?.opacity ?? 0.85}
       stroke={payload?.isSelected ? '#e0f2fe' : 'rgba(255,255,255,0.32)'}
       strokeWidth={payload?.isSelected ? 2 : 1}
@@ -83,7 +84,7 @@ function RotationCoverageEmpty({
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-4 py-6 text-center">
-      <Orbit size={20} className="text-cyan-400/70" />
+      <Orbit size={20} className="text-[var(--color-accent-primary)]" />
       <div>
         <div className="text-sm font-semibold text-[var(--text-primary)]">
           {`No relative-rotation data available for ${symbol}.`}
@@ -112,7 +113,7 @@ function RotationCoverageEmpty({
       <button
         type="button"
         onClick={onRefresh}
-        className="rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold text-cyan-200 transition-colors hover:bg-cyan-500/20"
+        className="rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1 text-[11px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)]"
       >
         Refresh
       </button>
@@ -164,7 +165,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
         symbol: upperSymbol,
         rsRatio: Number(point.rs_ratio),
         rsMomentum: Number(point.rs_momentum),
-        color: '#38bdf8',
+        color: 'var(--chart-blue)',
         opacity: 0.3 + (index / Math.max(trail.length, 1)) * 0.55,
         radius: index === trail.length - 1 ? 4 : 2.5,
       }))
@@ -226,7 +227,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Orbit size={12} className="text-cyan-400" />
+          <Orbit size={12} className="text-[var(--color-accent-primary)]" />
           <span>Relative Rotation</span>
         </div>
         <WidgetMeta
@@ -268,7 +269,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
                 <div className="font-mono text-[var(--text-primary)]">
                   {selectedRsRatio !== null
                     ? selectedRsRatio.toFixed(2)
-                    : '-'}
+                    : EMPTY_VALUE}
                 </div>
               </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -276,13 +277,13 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
               <div
                 className={
                   (selectedRsMomentum ?? 0) >= 100
-                    ? 'font-mono text-emerald-400'
-                    : 'font-mono text-red-400'
+                    ? 'font-mono text-[var(--color-positive)]'
+                    : 'font-mono text-[var(--color-negative)]'
                 }
               >
                   {selectedRsMomentum !== null
                     ? selectedRsMomentum.toFixed(2)
-                    : '-'}
+                    : EMPTY_VALUE}
               </div>
             </div>
           </div>
@@ -335,7 +336,7 @@ export function RelativeRotationWidget({ symbol, onDataChange }: RelativeRotatio
                       ]}
                     />
                     {trailPoints.length > 1 ? (
-                      <Scatter data={trailPoints} line={{ stroke: '#38bdf8', strokeWidth: 1.5 }} shape={<RotationDot />} />
+                      <Scatter data={trailPoints} line={{ stroke: 'var(--chart-blue)', strokeWidth: 1.5 }} shape={<RotationDot />} />
                     ) : null}
                     {peerPoints.length ? (
                       <Scatter data={peerPoints} shape={<RotationDot />} />

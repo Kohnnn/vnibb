@@ -24,20 +24,26 @@ interface RSRankingWidgetProps {
 
 type TabType = 'leaders' | 'laggards' | 'gainers';
 
-function getRSColor(rating: number): string {
-    if (rating >= 80) return 'text-green-400';
-    if (rating >= 60) return 'text-cyan-400';
-    if (rating >= 40) return 'text-yellow-400';
-    if (rating >= 20) return 'text-orange-400';
-    return 'text-red-400';
+// An RS rating is an ordinal score, not a gain or a loss, so it gets a
+// single-hue sequential ramp: one accent, strength rising with the score. A
+// five-hue rainbow (green/cyan/yellow/orange/red) read as bullish/bearish data
+// that the number does not contain, and red at the bottom implied a loss.
+// The badge is a score label, not a filled gauge: the tint stays low and the
+// number uses the primary ink. Accent-on-accent-tint cannot clear AA at any
+// useful strength (accent text on a 60% accent tint measured 1.75:1), and a
+// solid fill with accent text hid a perfect score at 1:1.
+const RS_MAX_TINT = 45;
+
+export function getRSColor(): string {
+    // One legible foreground for the whole ramp: ink clears AA on every tint of
+    // the accent (worst case measured 8.96:1), so the score never has to trade
+    // readability for its own strength encoding.
+    return 'text-[var(--text-primary)]';
 }
 
-function getRSBg(rating: number): string {
-    if (rating >= 80) return 'bg-green-500/20';
-    if (rating >= 60) return 'bg-cyan-500/20';
-    if (rating >= 40) return 'bg-yellow-500/20';
-    if (rating >= 20) return 'bg-orange-500/20';
-    return 'bg-red-500/20';
+export function getRSBg(rating: number): { background: string } {
+    const score = Math.max(0, Math.min(100, rating));
+    return { background: `color-mix(in srgb, var(--color-accent-primary) ${Math.round((score / 100) * RS_MAX_TINT)}%, transparent)` };
 }
 
 export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetProps) {
@@ -118,7 +124,7 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                 setLinkedSymbol(stock.symbol);
                             }
                         }}
-                        className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                        className="bg-[var(--bg-secondary)] border-[var(--border-color)] p-2 hover:bg-[var(--bg-tertiary)] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                     >
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -135,14 +141,20 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                 <div className="flex flex-col items-end">
                                     <Badge
                                         variant="outline"
-                                        className={`text-xs font-bold border-none ${getRSBg(stock.rs_rating)} ${getRSColor(stock.rs_rating)}`}
+                                        className={`text-xs font-bold border-none ${getRSColor()}`}
+                                        style={getRSBg(stock.rs_rating)}
                                     >
                                         {stock.rs_rating}
                                     </Badge>
-                                    {stock.rs_rating_change !== undefined && activeTab === 'gainers' && (
+                                    {typeof stock.rs_rating_change === 'number' && activeTab === 'gainers' && (
+                                        // Movement of an ordinal score, not a price return: it
+                                        // keeps the score's single-hue ramp (sign + glyph carry
+                                        // direction), so it never reads as profit or loss.
                                         <div className="flex items-center gap-1 mt-0.5">
-                                            <TrendingUp size={10} className="text-green-400" />
-                                            <span className="text-[9px] text-green-400 font-mono">+{stock.rs_rating_change}</span>
+                                            <TrendingUp size={10} className={stock.rs_rating_change < 0 ? 'text-[var(--text-muted)]' : 'text-[var(--color-accent-primary)]'} />
+                                            <span className={`text-[9px] font-mono ${stock.rs_rating_change < 0 ? 'text-[var(--text-muted)]' : 'text-[var(--color-accent-primary)]'}`}>
+                                                {stock.rs_rating_change >= 0 ? '+' : ''}{stock.rs_rating_change}
+                                            </span>
                                         </div>
                                     )}
                                 </div>
@@ -158,7 +170,7 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
         <div aria-label="RS rankings" className="h-full flex flex-col space-y-3 overflow-hidden">
             <div className="flex items-center justify-between px-1">
                 <div className="flex items-center gap-2">
-                    <Zap size={14} className="text-blue-400" />
+                    <Zap size={14} className="text-[var(--color-accent-primary)]" />
                     <span className="text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">RS Rankings</span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -184,13 +196,13 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="flex-1 flex flex-col overflow-hidden">
                 <TabsList className="grid w-full grid-cols-3 bg-[var(--bg-secondary)] border border-[var(--border-color)] p-0.5 h-8">
-                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-green-400">
+                    <TabsTrigger value="leaders" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-secondary)]">
                         Leaders
                     </TabsTrigger>
-                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-red-400">
+                    <TabsTrigger value="laggards" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-secondary)]">
                         Laggards
                     </TabsTrigger>
-                    <TabsTrigger value="gainers" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-blue-400">
+                    <TabsTrigger value="gainers" className="text-[10px] text-[var(--text-muted)] data-[state=active]:bg-[var(--bg-tertiary)] data-[state=active]:text-[var(--color-accent-secondary)]">
                         Gainers
                     </TabsTrigger>
                 </TabsList>

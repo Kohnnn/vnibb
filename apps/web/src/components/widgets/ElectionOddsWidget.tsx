@@ -212,7 +212,7 @@ export function ElectionOddsWidget() {
                                     rel="noreferrer"
                                     className="block rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 transition-colors hover:bg-[var(--bg-hover)]"
                                 >
-                                    <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
+                                    <div className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-accent-primary)]">
                                         {market.source}
                                     </div>
                                     <h3 className="mb-2 text-sm font-semibold leading-snug text-[var(--text-primary)]">

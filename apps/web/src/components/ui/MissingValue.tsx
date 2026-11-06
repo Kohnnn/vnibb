@@ -3,8 +3,8 @@
 /**
  * Smart placeholder for missing or unavailable metric values.
  *
- * Replaces ad-hoc "—" / "N/A" strings scattered across widgets so the user
- * gets a tooltip-driven explanation distinguishing four classes of "missing":
+ * Replaces ad-hoc dash / uppercase-N-A strings scattered across widgets so the user
+ * gets a tooltip-driven explanation distinguishing the classes of "missing":
  *
  *   - `market_closed`   the value resumes at next session open (intraday only)
  *   - `data_unavailable` the metric exists in the schema but the upstream
@@ -14,9 +14,12 @@
  *   - `insufficient_history` the symbol simply doesn't have enough historical
  *                       data to compute the metric (e.g. Beta 63D needs 63
  *                       trading days)
+ *   - `not_meaningful`   the value exists but the ratio cannot be interpreted
+ *                       (e.g. P/E on a loss, a margin delta beyond its clamp)
  *
- * The visible glyph defaults to "—" (en dash) to match the existing UI; for
- * `not_applicable` we render "N/A" since users find that clearer.
+ * Glyph contract (#198): `n/a` means no value, `n/m` means a value that is not
+ * meaningful. Neither is a measured zero, which must render as `0`. Never use
+ * a bare dash for missing data — it reads as a measured flat.
  */
 
 import { ReactNode } from 'react';
@@ -26,14 +29,15 @@ export type MissingValueReason =
   | 'market_closed'
   | 'data_unavailable'
   | 'not_applicable'
-  | 'insufficient_history';
+  | 'insufficient_history'
+  | 'not_meaningful';
 
 interface MissingValueProps {
   reason?: MissingValueReason;
   /** Optional override for the tooltip message. */
   detail?: string;
   className?: string;
-  /** Custom glyph (rare — defaults are "—" or "N/A"). */
+  /** Custom glyph (rare — defaults are `n/a` or `n/m`). */
   glyph?: ReactNode;
 }
 
@@ -42,13 +46,15 @@ const DEFAULT_DETAILS: Record<MissingValueReason, string> = {
   data_unavailable: 'Provider did not ship a value for this period.',
   not_applicable: 'Not reported for this security type.',
   insufficient_history: 'Insufficient history to compute this metric.',
+  not_meaningful: 'Not meaningful for this period.',
 };
 
 const DEFAULT_GLYPH: Record<MissingValueReason, string> = {
-  market_closed: '—',
-  data_unavailable: '—',
-  not_applicable: 'N/A',
-  insufficient_history: '—',
+  market_closed: 'n/a',
+  data_unavailable: 'n/a',
+  not_applicable: 'n/a',
+  insufficient_history: 'n/a',
+  not_meaningful: 'n/m',
 };
 
 export function MissingValue({

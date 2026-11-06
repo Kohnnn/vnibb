@@ -4,28 +4,75 @@ import { Suspense } from "react";
 import { AppProviders } from "@/contexts/AppProviders";
 import "./globals.css";
 
-const geistSans = localFont({
-  src: "./fonts/Geist-Variable.ttf",
-  variable: "--font-geist-sans",
+/* Self-hosted brand fonts (OFL; licenses beside the files). Variables mount on
+   <html> so the :root tokens in design-tokens.css can resolve them. */
+const inter = localFont({
+  src: [
+    { path: "./fonts/Inter-Regular.ttf", weight: "400", style: "normal" },
+    { path: "./fonts/Inter-Medium.ttf", weight: "500", style: "normal" },
+    { path: "./fonts/Inter-SemiBold.ttf", weight: "600", style: "normal" },
+    { path: "./fonts/Inter-Bold.ttf", weight: "700", style: "normal" },
+  ],
+  variable: "--font-inter",
   display: "swap",
-  weight: "100 900",
+  fallback: ["-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
 });
 
-const geistMono = localFont({
-  src: "./fonts/GeistMono-Variable.ttf",
-  variable: "--font-geist-mono",
+const plexMono = localFont({
+  src: "./fonts/IBMPlexMono-Regular.ttf",
+  variable: "--font-plex-mono",
   display: "swap",
-  weight: "100 900",
+  weight: "400",
+  fallback: ["monospace"],
 });
+
+/**
+ * Canonical origin. Preview deployments and localhost must not advertise
+ * themselves as canonical, so only the production host is pinned; every other
+ * environment keeps Next's per-request origin.
+ */
+const VNIBB_CANONICAL_ORIGIN = "https://web.vnibb.xyz";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || VNIBB_CANONICAL_ORIGIN;
+
+const SITE_DESCRIPTION =
+  "VniBB is a research cockpit for Vietnamese equities: financial statements, ratios, charts and market intelligence in one modular workspace.";
 
 export const metadata: Metadata = {
-  title: "VNIBB",
-  description: "Vietnam stock market analytics dashboard",
-  openGraph: {
-    title: "VNIBB",
-    description: "Vietnam stock market analytics dashboard",
-    type: "website",
+  // No root-level canonical: a layout-level canonical would make every page
+  // (login, dashboard, shares) claim the site root. Pages that need one set it.
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "VniBB | Research cockpit for Vietnamese equities",
+    template: "VniBB %s",
   },
+  description: SITE_DESCRIPTION,
+  applicationName: "VniBB",
+  manifest: "/manifest.json",
+  openGraph: {
+    title: "VniBB | Research cockpit for Vietnamese equities",
+    description: SITE_DESCRIPTION,
+    type: "website",
+    url: "/",
+    siteName: "VniBB",
+    locale: "en_US",
+    images: [
+      {
+        url: "/brand/og-vnibb.png",
+        width: 1200,
+        height: 630,
+        alt: "VniBB wordmark on the brand plate",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "VniBB | Research cockpit for Vietnamese equities",
+    description: SITE_DESCRIPTION,
+    images: ["/brand/og-vnibb.png"],
+  },
+  /* Brand §10/§207: no standalone symbol or invented monogram exists, so the
+     icon is the unchanged wordmark on the required white plate
+     (`src/app/icon.svg`, picked up by Next's file convention). */
 };
 
 // Theme and UI preferences pre-hydration scripts
@@ -51,6 +98,23 @@ function ThemeUiScripts() {
                 if (chartStyle) {
                   document.documentElement.setAttribute('data-chart-style', chartStyle);
                 }
+                // Color-vision and reduce-effects must apply before first paint,
+                // otherwise the initial frame shows the default palette.
+                if (localStorage.getItem('vnibb-colorblind-mode') === 'true') {
+                  document.documentElement.setAttribute('data-color-mode', 'colorblind');
+                }
+                if (localStorage.getItem('vnibb-reduce-effects') === 'true') {
+                  document.documentElement.setAttribute('data-reduce-effects', 'true');
+                }
+                // Browser chrome must match the painted background; a static
+                // theme-color would clash with the other theme (WIG: dark mode).
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (!meta) {
+                  meta = document.createElement('meta');
+                  meta.setAttribute('name', 'theme-color');
+                  document.head.appendChild(meta);
+                }
+                meta.setAttribute('content', resolved === 'light' ? '#FFFFFF' : '#0A0E17');
               } catch (e) {}
             })();
           `
@@ -67,23 +131,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${inter.variable} ${plexMono.variable}`}
+    >
       <head>
         <ThemeUiScripts />
-        <title>VNIBB | Vietnam Stock Market Analytics</title>
-        <meta
-          name="description"
-          content="Vietnam-first stock market analytics dashboard with financial statements, ratios, charts, and market intelligence."
-        />
-        <meta property="og:title" content="VNIBB | Vietnam Stock Market Analytics" />
-        <meta
-          property="og:description"
-          content="Vietnam-first stock market analytics dashboard with financial statements, ratios, charts, and market intelligence."
-        />
-        <meta property="og:type" content="website" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]`}
+        className="antialiased bg-[var(--bg-primary)] text-[var(--text-primary)]"
         suppressHydrationWarning
       >
         <a

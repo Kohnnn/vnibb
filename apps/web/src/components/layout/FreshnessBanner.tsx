@@ -57,9 +57,12 @@ export function FreshnessBanner() {
     }
   }, []);
 
+  // A payload without `buckets` is a degraded response, not a crash: accessing
+  // `.filter` on undefined took the whole /dashboard route down through the
+  // error boundary.
   const affectedBuckets = useMemo(() => {
     if (!data) return null;
-    return data.buckets.filter((bucket) => bucket.status !== 'fresh');
+    return (data.buckets ?? []).filter((bucket) => bucket.status !== 'fresh');
   }, [data]);
 
   const isCritical = affectedBuckets?.some((bucket) => bucket.status === 'critical') ?? false;
@@ -71,7 +74,7 @@ export function FreshnessBanner() {
   }`;
 
   const currentHash = useMemo(
-    () => (data ? buildStatusHash(data.overall, data.buckets) : null),
+    () => (data ? buildStatusHash(data.overall, data.buckets ?? []) : null),
     [data],
   );
 
@@ -89,7 +92,7 @@ export function FreshnessBanner() {
   const showWarning = !isLoading && hasWarnings && currentHash !== dismissedHash;
   const neutralMessage = isLoading
     ? 'Checking data freshness…'
-    : isError || !data || data.buckets.length === 0
+    : isError || !data || (data.buckets ?? []).length === 0
       ? 'Freshness status unavailable.'
       : hasWarnings
         ? 'Freshness warning dismissed for this session.'
@@ -104,10 +107,10 @@ export function FreshnessBanner() {
       className={cn(
         'flex h-[61px] shrink-0 items-start gap-3 border-b px-4 py-2 text-[12px] leading-5',
         !showWarning
-          ? 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
+          ? 'border-[var(--border-subtle)] bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
           : isCritical
-            ? 'border-rose-500/30 bg-rose-500/10 text-rose-100'
-            : 'border-amber-500/30 bg-amber-500/10 text-amber-100',
+            ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
+            : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]',
       )}
     >
       {showWarning && (
@@ -115,7 +118,7 @@ export function FreshnessBanner() {
           size={14}
           className={cn(
             'mt-0.5 shrink-0',
-            isCritical ? 'text-rose-300' : 'text-amber-300',
+            isCritical ? 'text-[var(--color-info)]' : 'text-[var(--color-warning)]',
           )}
         />
       )}
@@ -123,7 +126,7 @@ export function FreshnessBanner() {
         role="region"
         aria-label="Data freshness details"
         tabIndex={0}
-        className="min-h-0 min-w-0 flex-1 self-stretch overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-current"
+        className="min-h-0 min-w-0 flex-1 self-stretch overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-current"
       >
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           {showWarning ? (
@@ -154,7 +157,7 @@ export function FreshnessBanner() {
         <button
           type="button"
           onClick={handleDismiss}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-current/70 transition-colors hover:bg-white/10 hover:text-current"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-current opacity-70 transition-colors hover:bg-[var(--bg-hover)] hover:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
           aria-label="Dismiss banner for this session"
         >
           <X size={12} />

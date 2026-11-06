@@ -395,20 +395,20 @@ function getProviderLabel(provider: AISettings['provider']): string {
 
 /**
  * Render a friendly, brand-aligned label for the active LLM model so end-users
- * see "VNIBB Intelligence" instead of the raw provider slug like
+ * see "VniBB Intelligence" instead of the raw provider slug like
  * `openrouter/free` or `nvidia/nemotron-3-super-128b-a12b`. Power users still
  * see the raw slug in the badge tooltip (`title=`) for debugging.
  *
  * QA-v4 VA-1: Collapse all branches to a single label so the badge does not
- * inconsistently flip between "VNIBB Intelligence" and "VNIBB Intelligence
+ * inconsistently flip between "VniBB Intelligence" and "VniBB Intelligence
  * Pro" depending on which upstream model resolved a particular response.
  * The raw slug is still surfaced in the tooltip for debugging.
  */
 function getFriendlyModelLabel(rawModel: string | null | undefined): string {
-    if (!rawModel) return 'VNIBB Intelligence';
+    if (!rawModel) return 'VniBB Intelligence';
     const slug = rawModel.toLowerCase();
     if (slug.includes('browser model not set')) return 'Local model not set';
-    return 'VNIBB Intelligence';
+    return 'VniBB Intelligence';
 }
 
 function getWidgetAwareIntro(widgetContext?: string, activeTabName?: string, symbol?: string): string {
@@ -1236,7 +1236,7 @@ export function AICopilot({
         <div className="flex flex-col h-full w-full bg-[var(--bg-primary)] text-[var(--text-primary)]">
             <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/70 flex items-center justify-between gap-3">
                 <div>
-                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">VniAgent</div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent-primary)]">VniAgent</div>
                     <div className="mt-1 text-[11px] text-[var(--text-muted)]">
                         {widgetContext ? 'Widget-native workspace agent' : 'Workspace-native Vietnam equity agent'}
                     </div>
@@ -1245,7 +1245,7 @@ export function AICopilot({
                     <button
                         type="button"
                         onClick={handleNewChat}
-                        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                        className="rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                         <span className="inline-flex items-center gap-1"><Plus size={11} /> New Chat</span>
                     </button>
@@ -1253,7 +1253,7 @@ export function AICopilot({
                         type="button"
                         onClick={handleNewChat}
                         disabled={messages.length === 0 && attachedDocuments.length === 0 && !matrixSelection}
-                        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                         aria-label="Clear chat"
                         title="Clear chat"
                     >
@@ -1262,7 +1262,7 @@ export function AICopilot({
                     <button
                         type="button"
                         onClick={() => setIsPromptLibraryOpen(true)}
-                        className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition-colors hover:bg-cyan-500/20"
+                        className="rounded-md border border-[var(--border-strong)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                         Prompt Library
                     </button>
@@ -1270,12 +1270,12 @@ export function AICopilot({
             </div>
 
             <div aria-live="polite" aria-atomic="true" className="sr-only">{responseStatus}</div>
-            <div className="px-4 py-3 border-b border-[var(--border-color)] bg-blue-600/10 space-y-3">
+            <div className="space-y-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-primary)]">
-                            <Database size={11} className="text-cyan-300" />
-                            {matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VNIBB DB' : 'External-first'}
+                            <Database size={11} className="text-[var(--text-secondary)]" />
+                            {matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VniBB DB' : 'External-first'}
                         </span>
                         <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em]">
                             {getProviderLabel(aiSettings.provider)}
@@ -1284,13 +1284,13 @@ export function AICopilot({
                             {aiSettings.mode === 'browser_key' ? 'Browser Key' : 'App Default'}
                         </span>
                         <span
-                            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-cyan-200"
+                            className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-primary)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]"
                             title={`Active model: ${activeModelLabel}`}
                         >
                             {getFriendlyModelLabel(activeModelLabel)}
                         </span>
                         {!matrixSelection && aiSettings.webSearch ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-blue-200">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--color-info)]">
                                 <Globe size={11} /> web
                             </span>
                         ) : null}
@@ -1306,29 +1306,29 @@ export function AICopilot({
                         </button>
                     )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-blue-200/85">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-secondary)]">
                     {!matrixSelection && widgetContext ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2.5 py-1">
                             @{widgetContext}
                         </span>
                     ) : null}
                     {!matrixSelection && activeTabName ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2.5 py-1">
                             {activeTabName}
                         </span>
                     ) : null}
-                    <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 font-semibold">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2.5 py-1 font-semibold">
                         {matrixSelection ? 'Selected results only' : currentSymbol}
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-blue-100/80">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[var(--text-muted)]">
                         <Clock3 size={11} /> {memoryOnly ? 'Memory-only chat — not saved' : currentSessionMessageCount > 0
                             ? `${currentSessionMessageCount} saved message${currentSessionMessageCount === 1 ? '' : 's'} in this context`
                             : 'Fresh context for this symbol'}
                     </span>
                 </div>
                 {aiSettings.mode === 'browser_key' ? (
-                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100/85">
-                        <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300" />
+                    <div className="flex items-start gap-2 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-5 text-[var(--text-secondary)]">
+                        <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
                         <span>
                             Browser Key mode uses a localStorage credential in this browser profile. Avoid shared devices and prefer restricted provider keys.
                         </span>
@@ -1337,10 +1337,10 @@ export function AICopilot({
             </div>
 
             {matrixSelection && (
-                <div className="space-y-2 border-b border-cyan-500/30 bg-cyan-500/10 px-4 py-3" role="status">
+                <div className="space-y-2 border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-4 py-3" role="status">
                     <div className="flex items-center justify-between gap-2">
-                        <strong className="text-xs text-cyan-200">Attached Matrix selection · {matrixSelection.result_ids.length} results</strong>
-                        <button type="button" onClick={clearMatrixContext} aria-label="Remove Matrix selection" className="rounded p-2 hover:bg-cyan-500/20">
+                        <strong className="text-xs text-[var(--color-info)]">Attached Matrix selection · {matrixSelection.result_ids.length} results</strong>
+                        <button type="button" onClick={clearMatrixContext} aria-label="Remove Matrix selection" className="rounded p-2 transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">
                             <X size={14} />
                         </button>
                     </div>
@@ -1353,7 +1353,7 @@ export function AICopilot({
                 <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/60 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                         <div>
-                            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Connected Widget</div>
+                            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent-primary)]">Connected Widget</div>
                             <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">@{widgetContext}</div>
                         </div>
                         <div className="text-right text-[10px] text-[var(--text-muted)]">
@@ -1365,7 +1365,7 @@ export function AICopilot({
                         {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)}
                     </div>
                     {widgetDataPreview && (
-                        <div className="rounded-md border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[10px] text-cyan-100/80">
+                        <div className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-secondary)]">
                             {widgetDataPreview}
                         </div>
                     )}
@@ -1373,17 +1373,17 @@ export function AICopilot({
             )}
 
             {attachedDocuments.length > 0 && (
-                <div className="px-4 py-2 border-b border-[var(--border-color)] bg-cyan-500/5">
-                    <div className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">Attached Documents</div>
+                <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-2">
+                    <div className="mb-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent-primary)]">Attached Documents</div>
                     <div className="flex flex-wrap gap-2">
                         {attachedDocuments.map((document) => (
-                            <div key={document.id} className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] text-cyan-200">
+                            <div key={document.id} className="inline-flex items-center gap-2 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 text-[10px] text-[var(--text-secondary)]">
                                 <FileText size={10} />
                                 <span>{document.filename}</span>
                                 <button
                                     type="button"
                                     onClick={() => setAttachedDocuments((prev) => prev.filter((item) => item.id !== document.id))}
-                                    className="text-cyan-100/70 hover:text-cyan-100"
+                                    className="text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
                                 >
                                     <X size={10} />
                                 </button>
@@ -1396,14 +1396,14 @@ export function AICopilot({
             {relevantRecentSessions.length > 0 && (
                 <div className="px-4 py-3 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/40 space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                        <div className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-cyan-300">
+                        <div className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-accent-primary)]">
                             <History size={12} /> Recent Sessions
                         </div>
                         <div className="text-[10px] text-[var(--text-muted)]">Same symbol thread archive</div>
                     </div>
                     <div className="space-y-2">
                         {relevantRecentSessions.map((session) => (
-                            <div key={session.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                            <div key={session.id} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0 flex-1">
                                         <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">{session.title}</div>
@@ -1420,7 +1420,7 @@ export function AICopilot({
                                         <button
                                             type="button"
                                             onClick={() => handleRestoreRecentSession(session)}
-                                            className="rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
+                                            className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                         >
                                             Restore
                                         </button>
@@ -1448,7 +1448,7 @@ export function AICopilot({
                         onClick={() => setIsRunLedgerOpen((prev) => !prev)}
                         className="flex w-full items-center justify-between gap-2"
                     >
-                        <span className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-300">
+                        <span className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                             <Terminal size={12} /> Run Ledger
                         </span>
                         <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
@@ -1459,7 +1459,7 @@ export function AICopilot({
                     {isRunLedgerOpen && (
                         <div className="space-y-2">
                             {runLedger.slice(0, 8).map((run) => (
-                                <div key={run.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                                <div key={run.id} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1">
                                             <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">{run.prompt}</div>
@@ -1468,10 +1468,10 @@ export function AICopilot({
                                                 <span>{run.symbol}</span>
                                                 <span className={
                                                     run.status === 'completed'
-                                                        ? 'text-emerald-400'
+                                                        ? 'text-[var(--color-info)]'
                                                         : run.status === 'timeout'
-                                                            ? 'text-amber-400'
-                                                            : 'text-rose-400'
+                                                            ? 'text-[var(--color-warning)]'
+                                                            : 'text-[var(--text-muted)]'
                                                 }>• {run.status}</span>
                                                 <span>• {run.sourceCount} src</span>
                                                 {run.toolsUsed.length > 0 ? <span>• {run.toolsUsed.length} tool{run.toolsUsed.length === 1 ? '' : 's'}</span> : null}
@@ -1483,7 +1483,7 @@ export function AICopilot({
                                             <button
                                                 type="button"
                                                 onClick={() => handleExportRun(run)}
-                                                className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                                                className="rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                                                 aria-label="Export run as markdown"
                                             >
                                                 <Download size={11} />
@@ -1510,10 +1510,10 @@ export function AICopilot({
                 {messages.length === 0 ? (
                     <div className="space-y-4">
                         <div className="text-center text-[var(--text-muted)] py-8">
-                            <Sparkles size={40} className="mx-auto mb-3 text-cyan-300/70" />
-                            <div className="text-sm font-semibold text-[var(--text-primary)]">{matrixSelection ? 'Review your Matrix draft, then Send' : 'Start with evidence from the VNIBB database'}</div>
+                            <Sparkles size={40} className="mx-auto mb-3 text-[var(--text-muted)]" />
+                            <div className="text-sm font-semibold text-[var(--text-primary)]">{matrixSelection ? 'Review your Matrix draft, then Send' : 'Start with evidence from the VniBB database'}</div>
                             <p className="mx-auto mt-2 max-w-[26rem] text-xs leading-5">
-                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VNIBB database, attached documents, and the active workspace context before external sources.`}
+                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VniBB database, attached documents, and the active workspace context before external sources.`}
                             </p>
                         </div>
 
@@ -1524,9 +1524,9 @@ export function AICopilot({
                                     <button
                                         key={i}
                                         onClick={() => handleSend(item.prompt, 'suggested')}
-                                        className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-secondary)] rounded-lg hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors border border-transparent hover:border-blue-500/30"
+                                        className="flex items-center gap-2 rounded-md border border-transparent bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                                     >
-                                        <item.icon size={12} className="text-blue-400" />
+                                        <item.icon size={12} className="text-[var(--color-accent-primary)]" />
                                         {item.label}
                                     </button>
                                 ))}
@@ -1544,8 +1544,8 @@ export function AICopilot({
                             <div
                                 aria-busy={isAssistantPending || undefined}
                                 aria-label={message.role === 'assistant' && !isAssistantPending ? 'VniAgent response ready' : undefined}
-                                className={`rounded-lg p-3 ${message.role === 'user'
-                                    ? 'bg-blue-600/20 ml-8 border border-blue-500/20'
+                                className={`rounded-md p-3 ${message.role === 'user'
+                                    ? 'ml-8 border border-[var(--color-state-border)] bg-[var(--color-state-bg)]'
                                     : 'bg-[var(--bg-secondary)] mr-4 border border-[var(--border-color)]'
                                     }`}
                             >
@@ -1553,9 +1553,9 @@ export function AICopilot({
                                     {isAssistantPending ? (
                                         <div className="flex items-center gap-2 py-1">
                                             <span className="flex gap-1" aria-label="VniAgent is thinking">
-                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '0ms' }} />
-                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '180ms' }} />
-                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" style={{ animationDelay: '360ms' }} />
+                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-info)]" style={{ animationDelay: '0ms' }} />
+                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-info)]" style={{ animationDelay: '180ms' }} />
+                                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-info)]" style={{ animationDelay: '360ms' }} />
                                             </span>
                                             <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
                                                 {currentStatus || 'Thinking…'}
@@ -1574,7 +1574,7 @@ export function AICopilot({
                                     <button
                                         type="button"
                                         onClick={() => handleSaveToResearchNotebook(message)}
-                                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/20"
+                                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                                     >
                                         <BookMarked size={12} />
                                         {savedNotebookMessageIds[message.id] ? 'Saved to Research Notebook' : 'Save to Research Notebook'}
@@ -1590,9 +1590,9 @@ export function AICopilot({
                                             type="button"
                                             disabled={isLoading}
                                             onClick={() => handleSend(followUp.prompt, 'suggested')}
-                                            className="flex w-full items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2.5 py-2 text-left text-xs text-[var(--text-secondary)] transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                                            className="flex w-full items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-2.5 py-2 text-left text-xs text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50"
                                         >
-                                            <Sparkles size={12} className="shrink-0 text-blue-400" />
+                                            <Sparkles size={12} className="shrink-0 text-[var(--color-accent-primary)]" />
                                             <span className="truncate">{followUp.label}</span>
                                         </button>
                                     ))}
@@ -1617,7 +1617,7 @@ export function AICopilot({
                             {message.role === 'assistant' && showDetails[message.id] && (
                                 <div id={`vniagent-details-${message.id}`} className="mr-4 space-y-3">
                                     {message.reasoning && (
-                                        <div className="p-2 text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)]/70 rounded border-l-2 border-blue-500">
+                                        <div className="rounded border-l-2 border-[var(--color-accent-primary)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-secondary)]">
                                             {message.reasoning}
                                         </div>
                                     )}
@@ -1667,7 +1667,7 @@ export function AICopilot({
                     the user message. We keep this fallback only when the
                     placeholder bubble somehow hasn't been mounted yet. */}
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
-                    <div className="bg-[var(--bg-secondary)] rounded-lg p-3 mr-4 border border-[var(--border-color)]">
+                    <div className="bg-[var(--bg-secondary)] rounded-md p-3 mr-4 border border-[var(--border-color)]">
                         <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                             <div className="animate-pulse">{currentStatus || 'VniAgent is reasoning...'}</div>
                         </div>
@@ -1679,12 +1679,12 @@ export function AICopilot({
 
             {/* Input */}
             <div className="p-4 border-t border-[var(--border-color)]">
-                {selectedWorkflow && <div className="mb-2 flex items-center justify-between gap-2 text-xs text-cyan-200">
+                {selectedWorkflow && <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
                     <span>Reviewed workflow: {selectedWorkflow.id} · revision {selectedWorkflow.revision}</span>
                     <button type="button" onClick={() => setSelectedWorkflow(null)} className="rounded px-2 py-1 hover:bg-[var(--bg-hover)]">Use without workflow</button>
                 </div>}
                 {selectedWorkflow && <ReviewedWorkflowDisclosure workflow={selectedWorkflow} symbol={focusedSymbol} prompt={selectedPromptMetadata} matrixSelectionAvailable={Boolean(matrixSelection)} />}
-                <div className="flex items-center gap-2 bg-[var(--bg-secondary)] rounded-lg px-3 py-2 border border-[var(--border-color)]">
+                <div className="flex items-center gap-2 bg-[var(--bg-secondary)] rounded-md px-3 py-2 border border-[var(--border-color)]">
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -1699,7 +1699,7 @@ export function AICopilot({
                         type="button"
                         disabled={Boolean(matrixSelection)}
                         onClick={() => setIsComposerToolsOpen((current) => !current)}
-                        className="p-1 text-cyan-300 hover:text-cyan-200"
+                        className="rounded p-1 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
                         aria-label="Open VniAgent tools"
                         title="Open VniAgent tools"
                     >
@@ -1707,7 +1707,7 @@ export function AICopilot({
                     </button>
                     <div className="hidden md:flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
                         <Globe size={11} />
-                        <span>{matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VNIBB database' : 'external-first'}</span>
+                        <span>{matrixSelection ? 'Frozen Matrix' : aiSettings.preferDatabaseData ? 'VniBB database' : 'external-first'}</span>
                         {!matrixSelection && aiSettings.webSearch ? <span>· web</span> : null}
                     </div>
                     <input
@@ -1723,16 +1723,16 @@ export function AICopilot({
                     <button
                         onClick={() => handleSend()}
                         disabled={!input.trim() || isLoading}
-                        className="p-1 text-blue-400 hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="rounded p-1 text-[var(--color-accent-primary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
                         aria-label="Send message"
                     >
                         <Send size={18} />
                     </button>
                 </div>
-                {matrixInputError && <p role="alert" className="mt-2 text-xs text-amber-300">{matrixInputError}</p>}
+                {matrixInputError && <p role="alert" className="mt-2 text-xs text-[var(--color-warning)]">{matrixInputError}</p>}
                 {isComposerToolsOpen && (
                     <div className="mt-2 flex justify-start">
-                        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-lg">
+                        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-lg">
                             <button
                                 type="button"
                                 onClick={() => {

@@ -9,7 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 import type { CompanyEventData } from '@/types/equity';
 
 interface CompanyFilingsWidgetProps {
@@ -22,16 +22,16 @@ interface CompanyFilingsWidgetProps {
 function getEventTypeColor(type: string): string {
     const typeLC = type?.toLowerCase() || '';
     if (typeLC.includes('dividend') || typeLC.includes('cổ tức')) {
-        return 'text-green-400 bg-green-400/10';
+        return 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]';
     }
     if (typeLC.includes('agm') || typeLC.includes('đại hội')) {
-        return 'text-blue-400 bg-blue-400/10';
+        return 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]';
     }
     if (typeLC.includes('rights') || typeLC.includes('phát hành')) {
-        return 'text-yellow-400 bg-yellow-400/10';
+        return 'text-[var(--color-warning)] bg-[var(--color-state-bg)]';
     }
     if (typeLC.includes('bonus') || typeLC.includes('thưởng')) {
-        return 'text-cyan-400 bg-cyan-400/10';
+        return 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]';
     }
     return 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]';
 }

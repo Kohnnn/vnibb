@@ -33,7 +33,7 @@ export function TTMSnapshotWidget({ id, symbol, onRemove, onDataChange }: TTMSna
     ? {
         status: 'coverage_gap',
         label: 'Coverage gap',
-        detail: `${upperSymbol} does not have enough trailing income, cash-flow, or balance-sheet rows in the current VNIBB database snapshot.`,
+        detail: `${upperSymbol} does not have enough trailing income, cash-flow, or balance-sheet rows in the current VniBB database snapshot.`,
       }
     : hasData && cards.length < expectedCardCount
       ? {
@@ -104,7 +104,9 @@ export function TTMSnapshotWidget({ id, symbol, onRemove, onDataChange }: TTMSna
             {cards.map((card) => (
               <div key={card.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">{card.label}</div>
-                <div className={`mt-2 text-lg font-semibold ${card.tone}`}>{card.value}</div>
+                {/* Ordinary magnitudes are Ink (brand §13); direction colour is reserved
+                    for signed changes, not for a line item's identity. */}
+                <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{card.value}</div>
               </div>
             ))}
           </div>

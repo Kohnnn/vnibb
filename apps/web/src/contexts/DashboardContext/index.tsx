@@ -270,7 +270,6 @@ import { DEFAULT_GLOBAL_MARKETS_SYMBOL, isLegacyGlobalMarketsSymbol } from '@/li
 import { dispatchOnboardingMeaningfulAction, findPreferredDashboardId, findPreferredTabId, readStoredUserPreferences } from '@/lib/userPreferences';
 import { useDashboardSync, useLoadFromBackend } from '@/lib/useDashboardSync';
 import { config } from '@/lib/config';
-import { normalizeWidgetType } from '@/data/widgetDefinitions';
 import { autoFitGridItems, compactGridItems, findAvailableLayoutPosition, findNextAvailableLayout, getWidgetDefaultLayout, layoutsOverlap, preserveTemplateGridItems } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { getPublishedSystemDashboardTemplates } from '@/lib/api';
@@ -390,7 +389,7 @@ function hasValidDashboardShape(dashboard: unknown): dashboard is Dashboard {
         tabIds.add(tab.id);
         const widgetIds = new Set<string>();
         return tab.widgets.every((widget) => {
-            if (!isRecord(widget) || typeof widget.id !== 'string' || !widget.id || widget.tabId !== tab.id || typeof widget.type !== 'string' || !normalizeWidgetType(widget.type) || !isRecord(widget.config) || !isFiniteLayout(widget.layout) || widgetIds.has(widget.id)) {
+            if (!isRecord(widget) || typeof widget.id !== 'string' || !widget.id || widget.tabId !== tab.id || typeof widget.type !== 'string' || !widget.type || !isRecord(widget.config) || !isFiniteLayout(widget.layout) || widgetIds.has(widget.id)) {
                 return false;
             }
             widgetIds.add(widget.id);

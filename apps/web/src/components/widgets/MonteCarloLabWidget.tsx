@@ -9,6 +9,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { QuantRunHistoryPanel } from '@/components/widgets/QuantRunHistoryPanel'
+import { EMPTY_VALUE, formatPercent } from '@/lib/units'
 
 interface MonteCarloLabWidgetProps {
   symbol: string
@@ -19,8 +20,8 @@ const HORIZON_OPTIONS = [63, 126, 252] as const
 type Horizon = (typeof HORIZON_OPTIONS)[number]
 
 function fmtPct(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`
+  if (value === null || value === undefined || !Number.isFinite(value)) return EMPTY_VALUE
+  return formatPercent(value, { input: 'percent', decimals: 1, signed: true })
 }
 
 export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidgetProps) {
@@ -90,7 +91,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Dices size={12} className="text-cyan-400" />
+          <Dices size={12} className="text-[var(--color-accent-primary)]" />
           <span>Monte Carlo Lab</span>
           <span className="text-[10px] text-[var(--text-muted)]">{stats ? `${stats.paths} paths` : 'bootstrap'}</span>
         </div>
@@ -101,7 +102,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
                 key={value}
                 type="button"
                 onClick={() => setHorizon(value)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${horizon === value ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${horizon === value ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
               >
                 {value}D
               </button>
@@ -113,7 +114,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-violet-600/30 text-violet-200' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
               >
                 {option}
               </button>
@@ -122,7 +123,7 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
         </div>
       </div>
 
-      <div className="mx-1 mb-2 rounded border border-violet-500/25 bg-violet-500/5 px-2 py-1 text-[9px] leading-3 text-violet-200/90">
+      <div className="mx-1 mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[9px] leading-3 text-[var(--color-accent-primary)]">
         Resampling of this symbol&apos;s past daily returns (IID bootstrap). Ignores volatility clustering and regime change. A range of historical-style outcomes — not a prediction.
       </div>
 
@@ -158,11 +159,11 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
               </thead>
               <tbody>
                 <tr className="font-mono">
-                  <td className="px-1 py-1 text-emerald-300">{fmtPct(stats.maxDrawdownPct.p5)}</td>
+                  <td className="px-1 py-1 text-[var(--color-positive)]">{fmtPct(stats.maxDrawdownPct.p5)}</td>
                   <td className="px-1 py-1 text-[var(--text-primary)]">{fmtPct(stats.maxDrawdownPct.p25)}</td>
-                  <td className="px-1 py-1 font-semibold text-amber-300">{fmtPct(stats.maxDrawdownPct.p50)}</td>
+                  <td className="px-1 py-1 font-semibold text-[var(--color-warning)]">{fmtPct(stats.maxDrawdownPct.p50)}</td>
                   <td className="px-1 py-1 text-[var(--text-primary)]">{fmtPct(stats.maxDrawdownPct.p75)}</td>
-                  <td className="px-1 py-1 text-rose-300">{fmtPct(stats.maxDrawdownPct.p95)}</td>
+                  <td className="px-1 py-1 text-[var(--color-negative)]">{fmtPct(stats.maxDrawdownPct.p95)}</td>
                 </tr>
               </tbody>
             </table>
@@ -184,11 +185,11 @@ export function MonteCarloLabWidget({ symbol, onDataChange }: MonteCarloLabWidge
               </thead>
               <tbody>
                 <tr className="font-mono">
-                  <td className="px-1 py-1 text-rose-300">{fmtPct(stats.terminalReturnPct.p5)}</td>
+                  <td className="px-1 py-1 text-[var(--color-negative)]">{fmtPct(stats.terminalReturnPct.p5)}</td>
                   <td className="px-1 py-1 text-[var(--text-primary)]">{fmtPct(stats.terminalReturnPct.p25)}</td>
-                  <td className="px-1 py-1 font-semibold text-cyan-300">{fmtPct(stats.terminalReturnPct.p50)}</td>
+                  <td className="px-1 py-1 font-semibold text-[var(--color-accent-primary)]">{fmtPct(stats.terminalReturnPct.p50)}</td>
                   <td className="px-1 py-1 text-[var(--text-primary)]">{fmtPct(stats.terminalReturnPct.p75)}</td>
-                  <td className="px-1 py-1 text-emerald-300">{fmtPct(stats.terminalReturnPct.p95)}</td>
+                  <td className="px-1 py-1 text-[var(--color-positive)]">{fmtPct(stats.terminalReturnPct.p95)}</td>
                 </tr>
               </tbody>
             </table>

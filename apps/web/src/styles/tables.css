@@ -22,19 +22,32 @@
   white-space: nowrap;
 }
 
+@layer base {
+  .data-table th {
+    color: var(--text-primary);
+  }
+}
+
 .data-table th {
   position: sticky;
   top: 0;
   background: var(--table-sticky-header-bg);
   font-weight: 600;
-  color: var(--text-primary);
   border-bottom: 1px solid var(--border-default);
   z-index: 10;
 }
 
+/* Colour is layered for the same reason as in app/globals.css: an unlayered
+   declaration beats Tailwind's `@layer utilities`, which silently cancelled
+   every per-cell gain/loss/muted colour. */
 .data-table td {
   border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary);
+}
+
+@layer base {
+  .data-table td {
+    color: var(--text-primary);
+  }
 }
 
 .data-table tr:hover td {
@@ -76,25 +89,19 @@
   font-size: var(--font-size-xs);
   font-weight: 500;
 }
-
-.status-badge-success {
-  background: var(--color-positive-bg);
-  color: var(--color-positive);
+/* System-state badges (saved / loading / warning / failed): neutral or blue
+   only, always paired with text or an icon by the consumer. Red/green are
+   reserved for financial direction (#197). */
+.status-badge-success,
+.status-badge-warning,
+.status-badge-info {
+  background: var(--color-state-bg);
+  color: var(--color-accent-primary);
 }
 
 .status-badge-error {
-  background: var(--color-negative-bg);
-  color: var(--color-negative);
-}
-
-.status-badge-warning {
-  background: rgba(245, 158, 11, 0.16);
-  color: var(--color-warning);
-}
-
-.status-badge-info {
-  background: rgba(59, 130, 246, 0.16);
-  color: var(--color-accent-primary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 /* Sortable column headers */

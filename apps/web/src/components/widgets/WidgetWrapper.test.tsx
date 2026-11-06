@@ -420,3 +420,39 @@ test('wrapper badges use source age while preserving retrieval and cache lineage
     now.mockRestore();
   }
 });
+
+test('header parameters follow the control the widget is actually rendering', async () => {
+  const user = userEvent.setup();
+  const onConfigChange = jest.fn();
+
+  // Stand-in for PriceChartWidget: the inner control owns the live value and
+  // reports it through the runtime payload, while `config` stays whatever the
+  // saved layout last stored. #209 is exactly that divergence in a protected
+  // workspace, where onConfigChange is never wired.
+  function ChartStandIn({ onDataChange }: { onDataChange?: (data: unknown) => void }) {
+    const [mode, setMode] = React.useState('candles');
+    React.useEffect(() => {
+      onDataChange?.(buildWidgetRuntime({
+        empty: false, apiGroup: '/chart', endpoint: '/chart', extra: { chartType: mode },
+      }));
+    }, [mode, onDataChange]);
+    return <button type="button" onClick={() => setMode('area')}>3M Area</button>;
+  }
+
+  render(<WidgetWrapper
+    id="price"
+    title="Price Chart"
+    widgetType="price_chart"
+    dashboardId="dashboard"
+    tabId="tab"
+    parameters={[{ id: 'chartType', label: 'Type', currentValue: 'candles',
+      options: [{ value: 'candles', label: 'Candles' }, { value: 'area', label: 'Area' }],
+      onChange: onConfigChange }]}
+  >
+    <ChartStandIn />
+  </WidgetWrapper>);
+
+  expect(screen.getByRole('button', { name: /Type: Candles/ })).toBeInTheDocument();
+  await user.click(await screen.findByRole('button', { name: '3M Area' }, { timeout: 4000 }));
+  expect(screen.getByRole('button', { name: /Type: Area/ })).toBeInTheDocument();
+});

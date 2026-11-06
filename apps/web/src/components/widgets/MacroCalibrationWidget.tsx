@@ -223,7 +223,7 @@ function CalibrationTile(props: {
 }) {
     return (
         <div className="rounded-lg border border-default bg-[var(--bg-tertiary)] p-3">
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--color-accent-primary)]">
                 <span>{props.title}</span>
                 <ConfidencePill value={props.confidence} />
             </div>

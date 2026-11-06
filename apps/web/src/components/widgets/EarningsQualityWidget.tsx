@@ -16,26 +16,25 @@ interface EarningsQualityWidgetProps {
 }
 
 function pct(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a'
   return `${value.toFixed(2)}%`
 }
 
 function score(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a'
   return value.toFixed(1)
 }
 
 function persistence(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '-'
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a'
   return value.toFixed(2)
 }
 
+// A-D is an ordinal grade, not a gain or a loss. Green-to-red implied the grade
+// was a P&L direction; a single accent keeps it legible as a rank.
 function gradeTone(grade: string): string {
-  if (grade === 'A') return 'text-emerald-400'
-  if (grade === 'B') return 'text-cyan-400'
-  if (grade === 'C') return 'text-amber-400'
-  if (grade === 'D') return 'text-red-400'
-  return 'text-[var(--text-primary)]'
+  if (grade === 'A' || grade === 'B') return 'text-[var(--color-accent-primary)]'
+  return 'text-[var(--text-secondary)]'
 }
 
 export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityWidgetProps) {
@@ -60,7 +59,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       fetchedAt: payload?.computed_at || dataUpdatedAt || null,
       derived: true,
       stale: Boolean(error && hasData),
-      extra: { grade: payload?.grade || 'N/A' },
+      extra: { grade: payload?.grade || 'n/a' },
     }))
   }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, upperSymbol])
 
@@ -72,7 +71,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <ShieldCheck size={12} className="text-cyan-400" />
+          <ShieldCheck size={12} className="text-[var(--color-accent-primary)]" />
           <span>Earnings Quality</span>
         </div>
         <WidgetMeta
@@ -94,7 +93,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
         <>
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
             <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Quality Grade</div>
-            <div className={`text-lg font-semibold ${gradeTone(payload?.grade || 'N/A')}`}>{payload?.grade || 'N/A'}</div>
+            <div className={`text-lg font-semibold ${gradeTone(payload?.grade || 'n/a')}`}>{payload?.grade || 'n/a'}</div>
             <div className="text-[10px] text-[var(--text-secondary)]">Quality Score: {score(payload?.quality_score)} / 100</div>
           </div>
 

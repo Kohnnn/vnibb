@@ -59,7 +59,7 @@ function formatFlowValue(
   mode: FlowMode,
   unitConfig: UnitConfig
 ) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
   const abs = Math.abs(value);
   if (mode === 'value') {
     return formatCompactValueForUnit(value, { ...unitConfig, decimalPlaces: 2 });
@@ -159,7 +159,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
     // QA-v4 Transaction Flow: when the latest row's bucket is null
     // (e.g. weekend/post-close where the foreign feed lags one session),
     // walk back through `rows` to surface the most recent non-null value
-    // instead of rendering "N/A". Track which row was used so the UI can
+    // instead of rendering "n/a". Track which row was used so the UI can
     // optionally annotate "as of <date>" if needed.
     const lastNonNull = (s: FlowScope): { value: number | null; date: string | null } => {
       for (let i = rows.length - 1; i >= 0; i -= 1) {
@@ -171,10 +171,10 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
       return { value: null, date: null };
     };
     return [
-      { label: 'Domestic', ...(latestIsFullSession ? lastNonNull('domestic') : { value: null, date: latest.date }), tone: 'text-sky-300' },
-      { label: 'Foreign', ...lastNonNull('foreign'), tone: 'text-fuchsia-300' },
-      { label: 'Prop', ...lastNonNull('proprietary'), tone: 'text-cyan-300' },
-      { label: latestIsFullSession ? 'Total' : 'Observed sample', value: getScopeValue(latest, 'total', mode), date: latest.date, tone: 'text-emerald-300' },
+      { label: 'Domestic', ...(latestIsFullSession ? lastNonNull('domestic') : { value: null, date: latest.date }), tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Foreign', ...lastNonNull('foreign'), tone: 'text-[var(--color-accent-primary)]' },
+      { label: 'Prop', ...lastNonNull('proprietary'), tone: 'text-[var(--color-accent-primary)]' },
+      { label: latestIsFullSession ? 'Total' : 'Observed sample', value: getScopeValue(latest, 'total', mode), date: latest.date, tone: 'text-[var(--color-positive)]' },
     ];
   }, [latest, latestIsFullSession, mode, rows]);
 
@@ -251,7 +251,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                     className={cn(
                       'inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                       active
-                        ? 'border-cyan-500/40 bg-cyan-500/15 text-cyan-200'
+                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                         : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
                   >
@@ -272,7 +272,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                     className={cn(
                       'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                       mode === option.id
-                        ? 'bg-blue-600 text-white'
+                        ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
                   >
@@ -294,16 +294,16 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
 
         <div className="flex-1 overflow-auto px-3 py-3 scrollbar-hide">
           {hasData ? (
-            <div className="mb-3 rounded-lg border border-amber-500/20 bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+            <div className="mb-3 rounded-lg border border-[var(--color-state-border)] bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-secondary)]">
               <div className="font-semibold text-[var(--text-primary)]">
                 {latestIsFullSession ? 'Session coverage' : 'Observed sample'} · {completeness}
               </div>
               <dl className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div><dt>Observed trades</dt><dd>{coverage?.observed_trade_count ?? 'N/A'}</dd></div>
-                <div><dt>Observed window (source time)</dt><dd>{coverage?.observed_window_start ?? 'N/A'} – {coverage?.observed_window_end ?? 'N/A'}</dd></div>
-                <div><dt>Source session / requested session</dt><dd>{coverage?.session_date ?? 'N/A'} / {coverage?.requested_session_date ?? 'N/A'}</dd></div>
+                <div><dt>Observed trades</dt><dd>{coverage?.observed_trade_count ?? 'n/a'}</dd></div>
+                <div><dt>Observed window (source time)</dt><dd>{coverage?.observed_window_start ?? 'n/a'} – {coverage?.observed_window_end ?? 'n/a'}</dd></div>
+                <div><dt>Source session / requested session</dt><dd>{coverage?.session_date ?? 'n/a'} / {coverage?.requested_session_date ?? 'n/a'}</dd></div>
                 <div><dt>Source / status</dt><dd>{coverage?.provider ?? 'Unknown'} / {coverage?.status ?? 'Unknown'}</dd></div>
-                <div><dt>Session trade count / coverage</dt><dd>{latestIsFullSession ? coverage?.denominator_trade_count ?? 'N/A' : 'N/A'} / {latestIsFullSession && coverage?.session_fraction != null ? `${formatNumber(coverage.session_fraction * 100, { decimals: 1 })}%` : 'Unknown'}</dd></div>
+                <div><dt>Session trade count / coverage</dt><dd>{latestIsFullSession ? coverage?.denominator_trade_count ?? 'n/a' : 'n/a'} / {latestIsFullSession && coverage?.session_fraction != null ? `${formatNumber(coverage.session_fraction * 100, { decimals: 1 })}%` : 'Unknown'}</dd></div>
                 <div><dt>Stored flow / SQL ticks / Mongo ticks</dt><dd>{coverage?.sql_flows?.status ?? 'Unknown'} / {coverage?.sql_ticks?.status ?? 'Unknown'} / {coverage?.mongo_ticks?.status ?? 'Unknown'}</dd></div>
               </dl>
               {!latestIsFullSession ? (
@@ -353,7 +353,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
           ) : (
             <div className="space-y-3">
               {isStale ? (
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                   Latest transaction flow snapshot is {staleDays} days old. Showing the last available session until the pipeline refreshes.
                 </div>
               ) : null}
@@ -446,20 +446,20 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
 
                       {scope === 'total' && hasIncompleteSessions ? (
                         <>
-                          <Bar yAxisId="flow" dataKey="observed" fill="#10b981" name="Observed sample" radius={[2, 2, 0, 0]} />
-                          <Bar yAxisId="flow" dataKey="sessionTotal" fill="#2563eb" name="Certified session total" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="observed" fill="var(--chart-slate)" name="Observed sample" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="sessionTotal" fill="var(--chart-blue)" name="Certified session total" radius={[2, 2, 0, 0]} />
                         </>
                       ) : scope === 'total' ? (
                         <>
-                          <Bar yAxisId="flow" dataKey="domestic" stackId="flow" fill="#2563eb" name="Domestic" radius={[2, 2, 0, 0]} />
-                          <Bar yAxisId="flow" dataKey="foreign" stackId="flow" fill="#c026d3" name="Foreign" radius={[2, 2, 0, 0]} />
-                          <Bar yAxisId="flow" dataKey="proprietary" stackId="flow" fill="#06b6d4" name="Proprietary" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="domestic" stackId="flow" fill="var(--chart-blue)" name="Domestic" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="foreign" stackId="flow" fill="var(--chart-slate)" name="Foreign" radius={[2, 2, 0, 0]} />
+                          <Bar yAxisId="flow" dataKey="proprietary" stackId="flow" fill="var(--chart-cat-4)" name="Proprietary" radius={[2, 2, 0, 0]} />
                         </>
                       ) : (
                         <Bar
                           yAxisId="flow"
                           dataKey="selected"
-                          fill={scope === 'foreign' ? '#c026d3' : scope === 'proprietary' ? '#06b6d4' : '#2563eb'}
+                          fill={scope === 'foreign' ? 'var(--chart-slate)' : scope === 'proprietary' ? 'var(--chart-cat-4)' : 'var(--chart-blue)'}
                           name={scope === 'foreign' ? 'Foreign' : scope === 'proprietary' ? 'Proprietary' : 'Domestic'}
                           radius={[2, 2, 0, 0]}
                         />
@@ -469,7 +469,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                         yAxisId="price"
                         type="monotone"
                         dataKey="price"
-                        stroke="#93c5fd"
+                        stroke="var(--chart-blue)"
                         strokeWidth={2}
                         dot={false}
                         strokeDasharray="4 4"
@@ -487,7 +487,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                 <div className="grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2 xl:grid-cols-5">
                   <div>
                     <div className="text-[var(--text-muted)]">Date</div>
-                    <div className="font-medium text-[var(--text-primary)]">{latest?.date ?? 'N/A'}</div>
+                    <div className="font-medium text-[var(--text-primary)]">{latest?.date ?? 'n/a'}</div>
                   </div>
                   <div>
                     <div className="text-[var(--text-muted)]">Price</div>
@@ -504,13 +504,13 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                   <div>
                     <div className="text-[var(--text-muted)]">{latestIsFullSession ? 'Big Orders' : 'Observed Big Orders'}</div>
                     <div className="font-medium text-[var(--text-primary)]">
-                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.big_order_count ?? 'N/A' : 'N/A'}
+                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.big_order_count ?? 'n/a' : 'n/a'}
                     </div>
                   </div>
                   <div>
                     <div className="text-[var(--text-muted)]">{latestIsFullSession ? 'Block Trades' : 'Observed Block Trades'}</div>
                     <div className="font-medium text-[var(--text-primary)]">
-                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.block_trade_count ?? 'N/A' : 'N/A'}
+                      {latestIsFullSession || coverage?.observed_trade_count != null ? latest?.block_trade_count ?? 'n/a' : 'n/a'}
                     </div>
                   </div>
                 </div>

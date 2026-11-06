@@ -1,12 +1,13 @@
 'use client'
-
 import { useEffect, useMemo, useState } from 'react'
 import { Calculator } from 'lucide-react'
+import { EMPTY_VALUE } from '@/lib/units';
 import { useTTMSnapshot, useStockQuote } from '@/lib/queries'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { runDcf, solveImpliedGrowth, type DcfAssumptions } from '@/lib/valuationLab'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface ValuationLabWidgetProps {
   symbol: string
@@ -149,7 +150,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
     <div className="flex h-full flex-col overflow-hidden">
       <div className="mb-2 flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Calculator size={12} className="text-violet-400" />
+          <Calculator size={12} className="text-[var(--color-accent-primary)]" />
           <span>Valuation Lab · DCF</span>
         </div>
         <span className="text-[10px] text-[var(--text-muted)]">assumptions editable</span>
@@ -164,7 +165,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
             label="Upside"
             value={upside}
             suffix="%"
-            tone={upside === null ? undefined : upside >= 0 ? 'text-emerald-400' : 'text-red-400'}
+            tone={upside === null ? undefined : signedToneClass(upside)}
           />
         </div>
 
@@ -175,13 +176,13 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         )}
 
         {result.warning && (
-          <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+          <div className="mt-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
             {result.warning}
           </div>
         )}
 
         {impliedGrowth !== null && (
-          <div className="mt-2 rounded border border-violet-500/20 bg-violet-500/5 px-2 py-1 text-[10px] text-violet-200">
+          <div className="mt-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-accent-primary)]">
             Reverse DCF: at the current price the market is implying ~{(impliedGrowth * 100).toFixed(1)}% annual FCF growth.
           </div>
         )}
@@ -209,7 +210,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
                 <div key={delta} className="rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-1 py-1">
                   <div className="text-[var(--text-muted)]">{((discountRate + delta) * 100).toFixed(0)}%</div>
                   <div className="font-semibold text-[var(--text-primary)]">
-                    {r.intrinsicPerShare === null ? '—' : r.intrinsicPerShare.toFixed(1)}
+                    {r.intrinsicPerShare === null ? EMPTY_VALUE : r.intrinsicPerShare.toFixed(1)}
                   </div>
                 </div>
               )
@@ -218,7 +219,7 @@ export function ValuationLabWidget({ symbol, onDataChange }: ValuationLabWidgetP
         </div>
 
         <p className="mt-3 text-[9px] leading-3 text-[var(--text-muted)]">
-          Educational model. Values are derived from your editable assumptions and VNIBB TTM data, not investment advice.
+          Educational model. Values are derived from your editable assumptions and VniBB TTM data, not investment advice.
         </p>
       </div>
 
@@ -242,7 +243,7 @@ function Result({
     <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 px-2 py-1.5">
       <div className="text-[9px] uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
       <div className={`text-sm font-bold ${tone || 'text-[var(--text-primary)]'}`}>
-        {value === null || !Number.isFinite(value) ? '—' : `${value.toFixed(2)}${suffix || ''}`}
+        {value === null || !Number.isFinite(value) ? EMPTY_VALUE : `${value.toFixed(2)}${suffix || ''}`}
       </div>
     </div>
   )

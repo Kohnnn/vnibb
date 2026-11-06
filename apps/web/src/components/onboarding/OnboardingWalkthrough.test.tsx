@@ -123,7 +123,7 @@ describe('OnboardingWalkthrough', () => {
 
     render(<TestWalkthrough />)
 
-    const dialog = screen.getByRole('dialog', { name: 'VNIBB walkthrough' })
+    const dialog = screen.getByRole('dialog', { name: 'VniBB walkthrough' })
     await waitFor(() => expect(screen.getByRole('button', { name: /Follow a ticker/ })).toHaveFocus())
     fireEvent.keyDown(dialog, { key: 'Escape' })
 

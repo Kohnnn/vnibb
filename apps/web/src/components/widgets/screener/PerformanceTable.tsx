@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { ArrowUpDown, ArrowUp, ArrowDown, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { EMPTY_VALUE } from '@/lib/units';
 
 export interface PerformanceData {
   symbol: string;
@@ -71,7 +72,7 @@ export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: Perf
                 <div className="flex items-center justify-end gap-1">
                   {col.label}
                   {sortColumn === col.key ? (
-                      sortDirection === 'desc' ? <ArrowDown size={10} className="text-blue-400" /> : <ArrowUp size={10} className="text-blue-400" />
+                      sortDirection === 'desc' ? <ArrowDown size={10} className="text-[var(--color-accent-primary)]" /> : <ArrowUp size={10} className="text-[var(--color-accent-primary)]" />
                   ) : <ArrowUpDown size={10} className="opacity-20" />}
                 </div>
               </th>
@@ -89,16 +90,16 @@ export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: Perf
                 <div className="flex items-center gap-2">
                   <CompanyLogo symbol={row.symbol} size={20} />
                   <div>
-                    <button type="button" onClick={(event) => { event.stopPropagation(); onSymbolClick?.(row.symbol); }} aria-label={`View ${row.symbol}`} className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">
+                    <button type="button" onClick={(event) => { event.stopPropagation(); onSymbolClick?.(row.symbol); }} aria-label={`View ${row.symbol}`} className="rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">
                       <div className="font-bold tracking-tight text-[var(--text-primary)]">{row.symbol}</div>
                       <div className="max-w-[110px] truncate text-[9px] font-medium uppercase tracking-tighter text-[var(--text-muted)]">{row.name}</div>
                     </button>
                   </div>
-                  {onAddToWatchlist && <button type="button" onClick={(event) => { event.stopPropagation(); onAddToWatchlist(row.symbol); }} aria-label={`Add ${row.symbol} to Watchlist`} className="ml-auto min-h-9 min-w-9 rounded p-2 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"><Plus size={13} /></button>}
+                  {onAddToWatchlist && <button type="button" onClick={(event) => { event.stopPropagation(); onAddToWatchlist(row.symbol); }} aria-label={`Add ${row.symbol} to Watchlist`} className="ml-auto min-h-9 min-w-9 rounded p-2 text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"><Plus size={13} /></button>}
                 </div>
               </td>
               <td className="px-3 py-2 text-right font-mono text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
-                {row.price == null ? '—' : row.price.toLocaleString()}
+                {row.price == null ? EMPTY_VALUE : row.price.toLocaleString()}
               </td>
               {TIMEFRAME_COLUMNS.map(col => {
                 const value = row[col.key];
@@ -110,10 +111,10 @@ export function PerformanceTable({ data, onSymbolClick, onAddToWatchlist }: Perf
                     key={col.key}
                     className={cn(
                         "text-right px-3 py-2 font-mono font-medium",
-                        isPositive ? 'bg-green-500/5 text-green-500' : isNegative ? 'bg-red-500/5 text-red-500' : 'text-[var(--text-muted)]'
+                        isPositive ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]' : isNegative ? 'bg-[var(--color-negative-bg)] text-[var(--color-negative)]' : 'text-[var(--text-muted)]'
                     )}
                   >
-                    {value == null ? '—' : `${isPositive ? '+' : ''}${value.toFixed(2)}%`}
+                    {value == null ? EMPTY_VALUE : `${isPositive ? '+' : ''}${value.toFixed(2)}%`}
                   </td>
                 );
               })}

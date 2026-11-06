@@ -126,7 +126,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           <h3 className="text-sm font-medium text-[var(--text-primary)]">Alert Settings</h3>
         </div>
         <div className="flex items-center gap-2">
-          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${feedState === 'loaded' ? 'border-emerald-500/30 text-emerald-400' : 'border-amber-500/30 text-amber-400'}`}>
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${feedState === 'loaded' ? 'border-[var(--color-state-border)] text-[var(--color-accent-primary)]' : 'border-[var(--color-state-border)] text-[var(--color-warning)]'}`}>
             Feed {feedState}
           </span>
           <WidgetMeta
@@ -139,7 +139,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           <button
             onClick={handleSave}
             disabled={updateMutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-[var(--color-accent-fill)] hover:brightness-110 text-[var(--color-on-accent)] rounded transition-colors disabled:opacity-50"
           >
             <Save size={12} />
             {updateMutation.isPending ? 'Saving...' : 'Save'}
@@ -159,7 +159,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               type="checkbox"
               checked={formData.enable_insider_buy_alerts}
               onChange={(e) => setFormData({ ...formData, enable_insider_buy_alerts: e.target.checked })}
-              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
             />
           </label>
 
@@ -169,7 +169,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               type="checkbox"
               checked={formData.enable_insider_sell_alerts}
               onChange={(e) => setFormData({ ...formData, enable_insider_sell_alerts: e.target.checked })}
-              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
             />
           </label>
 
@@ -179,7 +179,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               type="checkbox"
               checked={formData.enable_ownership_change_alerts}
               onChange={(e) => setFormData({ ...formData, enable_ownership_change_alerts: e.target.checked })}
-              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
+              className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
             />
           </label>
         </div>
@@ -198,7 +198,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               onChange={(e) => setFormData({ ...formData, block_trade_threshold: Number(e.target.value) })}
               min={1}
               max={1000}
-              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
+              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--color-state-border)] focus:outline-none"
             />
             <p className="mt-1 text-xs text-[var(--text-muted)]">
               Alert when trade value exceeds this amount
@@ -216,7 +216,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               min={1}
               max={100}
               step={0.1}
-              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
+              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--color-state-border)] focus:outline-none"
             />
             <p className="mt-1 text-xs text-[var(--text-muted)]">
               Alert when ownership changes by this percentage
@@ -231,7 +231,7 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           <div className="rounded bg-[var(--bg-secondary)] p-2">
             <label className="flex items-center justify-between cursor-pointer">
               <div className="flex items-center gap-2">
-                <Bell size={14} className="text-blue-400" />
+                <Bell size={14} className="text-[var(--color-accent-primary)]" />
                 <span className="text-sm text-[var(--text-primary)]">Browser Notifications</span>
               </div>
               <input
@@ -239,21 +239,21 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
                 checked={Boolean(formData.enable_browser_notifications)}
                 disabled={notificationPermission !== 'granted'}
                 onChange={(e) => setFormData({ ...formData, enable_browser_notifications: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)] disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
               Preference: {formData.enable_browser_notifications ? 'on' : 'off'} · Delivery: {hasEffectiveBrowserNotifications(Boolean(formData.enable_browser_notifications), notificationPermission) ? 'available' : 'unavailable'} · Permission: {notificationPermission === 'unsupported' ? 'not supported' : notificationPermission}
             </p>
             {notificationPermission === 'denied' && (
-              <p className="text-xs text-red-400 mt-1">
+              <p className="text-xs text-[var(--color-negative)] mt-1">
                 Browser notifications are blocked. Enable in browser settings.
               </p>
             )}
             {notificationPermission === 'default' && (
               <button
                 onClick={handleRequestNotificationPermission}
-                className="text-xs text-blue-400 hover:text-blue-300 mt-1"
+                className="text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] mt-1"
               >
                 Request permission
               </button>
@@ -263,14 +263,14 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           <div className="rounded bg-[var(--bg-secondary)] p-2">
             <label className="flex items-center justify-between cursor-pointer">
               <div className="flex items-center gap-2">
-                <Volume2 size={14} className="text-yellow-400" />
+                <Volume2 size={14} className="text-[var(--color-accent-primary)]" />
                 <span className="text-sm text-[var(--text-primary)]">Sound Alerts</span>
               </div>
               <input
                 type="checkbox"
                 checked={formData.enable_sound_alerts}
                 onChange={(e) => setFormData({ ...formData, enable_sound_alerts: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
               />
             </label>
           </div>
@@ -278,14 +278,14 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           <div className="rounded bg-[var(--bg-secondary)] p-2">
             <label className="flex items-center justify-between mb-2 cursor-pointer">
               <div className="flex items-center gap-2">
-                <Mail size={14} className="text-green-400" />
+                <Mail size={14} className="text-[var(--color-accent-primary)]" />
                 <span className="text-sm text-[var(--text-primary)]">Email Notifications</span>
               </div>
               <input
                 type="checkbox"
                 checked={formData.enable_email_notifications}
                 onChange={(e) => setFormData({ ...formData, enable_email_notifications: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-blue-500 focus:ring-blue-500"
+                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
               />
             </label>
             {formData.enable_email_notifications && (
@@ -295,9 +295,9 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
                   value={formData.notification_email || ''}
                   onChange={(e) => setFormData({ ...formData, notification_email: e.target.value })}
                   placeholder="your@email.com"
-                  className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-blue-500 focus:outline-none"
+                  className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--color-state-border)] focus:outline-none"
                 />
-                <p className="mt-1 text-xs text-amber-400">Preference only · email delivery is unverified.</p>
+                <p className="mt-1 text-xs text-[var(--color-warning)]">Preference only · email delivery is unverified.</p>
               </>
             )}
           </div>
@@ -306,14 +306,14 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
 
       {/* Success Message */}
       {updateMutation.isSuccess && (
-        <div className="mt-3 p-2 bg-green-500/10 border border-green-500/30 rounded text-xs text-green-400">
+        <div className="mt-3 p-2 bg-[var(--color-state-bg)] border border-[var(--color-state-border)] rounded text-xs text-[var(--color-accent-primary)]">
           Settings saved successfully!
         </div>
       )}
 
       {/* Error Message */}
       {updateMutation.isError && (
-        <div className="mt-3 p-2 bg-red-500/10 border border-red-500/30 rounded text-xs text-red-400">
+        <div className="mt-3 p-2 bg-[var(--color-negative-bg)] border border-[var(--color-state-border)] rounded text-xs text-[var(--color-negative)]">
           Failed to save settings. Please try again.
         </div>
       )}

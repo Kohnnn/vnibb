@@ -49,7 +49,11 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
         const corporate = eventQueries.flatMap((query) => query.data?.data?.map(companyEventToInvestorEvent).filter((event): event is InvestorCalendarEvent => Boolean(event)) || []);
         return aggregateInvestorEvents(corporate);
     }, [eventQueries]);
-    const failedSymbols = symbols.filter((_, index) => eventQueries[index]?.isError);
+    // `useQueries` returns a new array every render, so depend on a primitive key
+    // instead: a fresh `failedSymbols` array re-ran the publish effect below,
+    // whose `onDataChange` re-rendered the parent and looped until React aborted.
+    const failedSymbolsKey = symbols.filter((_, index) => eventQueries[index]?.isError).join(',');
+    const failedSymbols = useMemo(() => (failedSymbolsKey ? failedSymbolsKey.split(',') : []), [failedSymbolsKey]);
     const loading = eventQueries.some((query) => query.isLoading);
     const error = eventQueries.find((query) => query.error)?.error;
     // Event dates here are action schedules, not source observations, so
@@ -69,8 +73,7 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
                 data: { eventCount: events.length, symbolCount: symbols.length, unavailableSymbols: failedSymbols },
             },
         });
-    }, [events.length, failedSymbols, fetchedAt, onDataChange, symbols.length]);
-
+    }, [events.length, failedSymbolsKey, fetchedAt, onDataChange, symbols.length]);
     if (loading && events.length === 0) return <WidgetLoading message="Loading event coverage..." />;
     if (error && events.length === 0) return <WidgetError error={error as Error} />;
 
@@ -81,7 +84,7 @@ export function InvestorEventCalendarWidget({ id, config, widgetGroup, onDataCha
             <button type="button" onClick={saveManualSymbols} className="rounded border border-[var(--border-subtle)] px-2 py-1 text-xs hover:bg-[var(--bg-tertiary)]">Save</button>
         </div>
         <div className="text-[10px] text-[var(--text-muted)]">Company events: {symbols.length - failedSymbols.length}/{symbols.length} symbols</div>
-        {failedSymbols.length > 0 && <div className="text-[10px] text-amber-300">Unavailable company-event coverage: {failedSymbols.join(', ')}</div>}
-        {events.length === 0 ? <WidgetEmpty message="No upcoming events in current coverage" detail="Missing provider data is shown as unavailable; this does not mean no events are scheduled." /> : <div className="flex-1 space-y-2 overflow-auto">{events.map((event) => <button key={`${event.symbol}-${event.eventClass}-${event.effectiveDate}`} type="button" onClick={() => setLinkedSymbol(event.symbol)} className="w-full rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 text-left hover:bg-[var(--bg-tertiary)]"><div className="flex justify-between gap-2"><span className="font-semibold text-blue-300">{event.symbol} · {event.eventClass}</span><time className="text-[var(--text-muted)]">{event.effectiveDate}</time></div><div className="mt-1 text-xs text-[var(--text-primary)]">{event.label}</div><div className="mt-1 text-[10px] text-[var(--text-muted)]">{event.source} · {event.provider}</div></button>)}</div>}
+        {failedSymbols.length > 0 && <div className="text-[10px] text-[var(--color-warning)]">Unavailable company-event coverage: {failedSymbols.join(', ')}</div>}
+        {events.length === 0 ? <WidgetEmpty message="No upcoming events in current coverage" detail="Missing provider data is shown as unavailable; this does not mean no events are scheduled." /> : <div className="flex-1 space-y-2 overflow-auto">{events.map((event) => <button key={`${event.symbol}-${event.eventClass}-${event.effectiveDate}`} type="button" onClick={() => setLinkedSymbol(event.symbol)} className="w-full rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2 text-left hover:bg-[var(--bg-tertiary)]"><div className="flex justify-between gap-2"><span className="font-semibold text-[var(--color-accent-primary)]">{event.symbol} · {event.eventClass}</span><time className="text-[var(--text-muted)]">{event.effectiveDate}</time></div><div className="mt-1 text-xs text-[var(--text-primary)]">{event.label}</div><div className="mt-1 text-[10px] text-[var(--text-muted)]">{event.source} · {event.provider}</div></button>)}</div>}
     </div>;
 }

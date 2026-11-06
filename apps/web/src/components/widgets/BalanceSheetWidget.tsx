@@ -19,7 +19,7 @@ import {
     Legend,
     CartesianGrid,
 } from 'recharts';
-import { convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale, toFiniteNumber } from '@/lib/units';
+import { EMPTY_VALUE, convertFinancialValueForUnit, formatAxisValue, formatConvertedValue, formatUnitValuePlain, getUnitCaption, getUnitLegend, resolveUnitScale, toFiniteNumber } from '@/lib/units';
 import { useUnit } from '@/contexts/UnitContext';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
@@ -338,7 +338,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                         value={chartType}
                         onChange={(e) => setChartType(e.target.value as any)}
                         aria-label="Balance sheet chart mode"
-                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+                        className="bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-state-border)] uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Assets & Liab.</option>
                         <option value="debt">Debt Structure</option>
@@ -369,9 +369,9 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                         formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                    <Bar dataKey="totalAssets" name="Assets" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                                    <Bar dataKey="totalLiabilities" name="Liabilities" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                                    <Line type="monotone" dataKey="equity" name="Equity" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                    <Bar dataKey="totalAssets" name="Assets" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
+                                    <Bar dataKey="totalLiabilities" name="Liabilities" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
+                                    <Line type="monotone" dataKey="equity" name="Equity" stroke="var(--color-positive)" strokeWidth={2} dot={{ r: 3 }} />
                                 </ComposedChart>
                             ) : (
                                 <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
@@ -404,13 +404,13 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                                         formatter={(value: unknown, name: unknown) => {
                                             const numeric = toFiniteNumber(value)
                                             return name === 'D/E Ratio'
-                                                ? `${numeric === null ? '—' : numeric.toFixed(2)}x`
+                                                ? `${numeric === null ? EMPTY_VALUE : numeric.toFixed(2)}x`
                                                 : formatConvertedValue(numeric, unitConfig)
                                         }}
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                                    <Bar yAxisId="left" dataKey="totalLiabilities" name="Total Debt" fill="#ef4444" radius={[2, 2, 0, 0]} />
-                                    <Line yAxisId="right" type="monotone" dataKey="debtToEquity" name="D/E Ratio" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                    <Bar yAxisId="left" dataKey="totalLiabilities" name="Total Debt" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
+                                    <Line yAxisId="right" type="monotone" dataKey="debtToEquity" name="D/E Ratio" stroke="var(--chart-blue)" strokeWidth={2} dot={{ r: 3 }} />
                                 </ComposedChart>
                             )}
                         </ResponsiveContainer>
@@ -428,7 +428,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                     className={cn(
                         "p-1 rounded transition-all",
                         viewMode === 'table'
-                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                             : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Table View"
@@ -440,7 +440,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                     className={cn(
                         "p-1 rounded transition-all",
                         viewMode === 'chart'
-                            ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                            ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                             : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                     )}
                     title="Chart View"
@@ -479,7 +479,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
                     {statementNote && (
-                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                        <div className="mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             {statementNote}
                         </div>
                     )}

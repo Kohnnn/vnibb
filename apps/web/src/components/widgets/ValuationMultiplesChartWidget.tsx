@@ -29,12 +29,15 @@ interface ValuationMultiplesChartWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+// Documented extension of the two-hue series rule (§20): P/E is the focal blue
+// series, the rest are Slate variants. Valuation multiples are not directions,
+// so no green/red.
 const SERIES = [
-  { key: 'pe', label: 'P/E', color: '#38bdf8' },
-  { key: 'pb', label: 'P/B', color: '#22c55e' },
-  { key: 'ps', label: 'P/S', color: '#f59e0b' },
-  { key: 'ev_ebitda', label: 'EV/EBITDA', color: '#f97316' },
-  { key: 'ev_sales', label: 'EV/Sales', color: '#e11d48' },
+  { key: 'pe', label: 'P/E', color: 'var(--chart-blue)' },
+  { key: 'pb', label: 'P/B', color: 'var(--chart-slate)' },
+  { key: 'ps', label: 'P/S', color: 'color-mix(in srgb, var(--chart-slate) 65%, transparent)' },
+  { key: 'ev_ebitda', label: 'EV/EBITDA', color: 'color-mix(in srgb, var(--chart-blue) 55%, var(--chart-slate))' },
+  { key: 'ev_sales', label: 'EV/Sales', color: 'color-mix(in srgb, var(--chart-slate) 40%, transparent)' },
 ];
 
 const EMPTY_ROWS: RatioHistoryPoint[] = [];
@@ -139,10 +142,10 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
                     className={cn(
                       'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors border',
                       active
-                        ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
+                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
                         : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     )}
-                    style={active ? { boxShadow: `inset 0 0 0 1px ${series.color}33` } : undefined}
+                    style={active ? { boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${series.color} 20%, transparent)` } : undefined}
                   >
                     {series.label}
                   </button>
@@ -155,7 +158,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
                   className={cn(
                     'ml-1 rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors border',
                     focusRecent
-                      ? 'border-blue-500/30 bg-blue-500/12 text-[var(--text-primary)]'
+                      ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
                       : 'border-[var(--border-default)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                   aria-pressed={focusRecent}
@@ -177,7 +180,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
         </div>
         <div className="flex-1 px-2 py-2">
           {isFallback && (
-            <div role="alert" className="mb-2 text-[10px] text-amber-300">
+            <div role="alert" className="mb-2 text-[10px] text-[var(--color-warning)]">
               {error?.message} Showing previously received ratio history.{' '}
               <button type="button" onClick={() => refetch()}>Retry</button>
             </div>

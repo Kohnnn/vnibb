@@ -56,10 +56,10 @@ const RANKING_OPTIONS: Array<{ id: RankingMetric; label: string }> = [
 ];
 
 const QUADRANT_STYLES = {
-  bullish: { label: 'Bullish', bg: 'rgba(34,197,94,0.12)', text: '#86efac' },
-  accumulation: { label: 'Accumulation', bg: 'rgba(56,189,248,0.12)', text: '#7dd3fc' },
-  weakening: { label: 'Weakening', bg: 'rgba(234,179,8,0.12)', text: '#fde047' },
-  bearish: { label: 'Bearish', bg: 'rgba(239,68,68,0.12)', text: '#fca5a5' },
+  bullish: { label: 'Bullish', bg: 'var(--color-positive-bg)', text: 'var(--color-positive)' },
+  accumulation: { label: 'Accumulation', bg: 'color-mix(in srgb, var(--chart-blue) 12%, transparent)', text: 'var(--chart-blue)' },
+  weakening: { label: 'Weakening', bg: 'color-mix(in srgb, var(--color-warning) 12%, transparent)', text: 'var(--color-warning)' },
+  bearish: { label: 'Bearish', bg: 'var(--color-negative-bg)', text: 'var(--color-negative)' },
 } as const;
 
 function FlowPointShape(props: any) {
@@ -69,9 +69,9 @@ function FlowPointShape(props: any) {
 
   return (
     <g>
-      <circle cx={cx} cy={cy} r={radius} fill={stroke} fillOpacity={latest ? 0.95 : 0.35} stroke="#f8fafc" strokeWidth={latest ? 1.5 : 0.5} />
+      <circle cx={cx} cy={cy} r={radius} fill={stroke} fillOpacity={latest ? 0.95 : 0.35} stroke="var(--color-on-accent)" strokeWidth={latest ? 1.5 : 0.5} />
       {latest && payload?.showLabel ? (
-        <text x={cx + 10} y={cy + 4} fontSize={11} fontWeight={700} fill="#e2e8f0">
+        <text x={cx + 10} y={cy + 4} fontSize={11} fontWeight={700} fill="var(--text-primary)">
           {payload.symbol}
         </text>
       ) : null}
@@ -215,7 +215,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     timeframe === option.id
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -232,7 +232,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     topCount === option.id
-                      ? 'bg-cyan-600 text-white'
+                      ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -249,7 +249,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
                   className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     rankingMetric === option.id
-                      ? 'bg-emerald-600 text-white'
+                      ? 'bg-[var(--color-positive)] text-[var(--color-bg-primary)]'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -266,7 +266,7 @@ function MoneyFlowTrendWidgetComponent({ id, symbol, onRemove, onDataChange }: M
             />
           </div>
             <div className="mt-2 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
-              <Info size={12} className="text-cyan-300" />
+              <Info size={12} className="text-[var(--color-accent-primary)]" />
               <span>Proxy model: relative strength vs VNINDEX with trend and momentum centered at 100. Ranked view trims clutter to the strongest names first.</span>
             </div>
           {referenceStock && (

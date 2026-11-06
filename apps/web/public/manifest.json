@@ -1,24 +1,24 @@
 {
-    "name": "VNIBB - Vietnam Stock Dashboard",
-    "short_name": "VNIBB",
-    "description": "Professional stock market dashboard for Vietnamese equities",
+    "name": "VniBB — Research cockpit for Vietnamese equities",
+    "short_name": "VniBB",
+    "description": "Research cockpit for Vietnamese equities",
     "start_url": "/dashboard",
     "display": "standalone",
-    "background_color": "#0a1628",
-    "theme_color": "#0b1021",
+    "background_color": "#FFFFFF",
+    "theme_color": "#0A0A0A",
     "orientation": "portrait-primary",
     "icons": [
         {
-            "src": "/icon-192x192.png",
-            "sizes": "192x192",
-            "type": "image/png",
-            "purpose": "any maskable"
+            "src": "/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
         },
         {
-            "src": "/icon-512x512.png",
+            "src": "/brand/icon-512.png",
             "sizes": "512x512",
             "type": "image/png",
-            "purpose": "any maskable"
+            "purpose": "any"
         }
     ],
     "categories": [

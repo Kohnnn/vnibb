@@ -94,7 +94,7 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Activity size={12} className="text-cyan-400" />
+          <Activity size={12} className="text-[var(--color-accent-primary)]" />
           <span>VWAP Bands</span>
         </div>
         <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo trade ticks" align="right" />
@@ -103,15 +103,15 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">VWAP</div>
-          <div className="font-mono text-cyan-300">{formatPrice(latest?.vwap)}</div>
+          <div className="font-mono text-[var(--color-accent-primary)]">{formatPrice(latest?.vwap)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Upper 1σ</div>
-          <div className="font-mono text-emerald-300">{formatPrice(latest?.upper1)}</div>
+          <div className="font-mono text-[var(--color-positive)]">{formatPrice(latest?.upper1)}</div>
         </div>
         <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
           <div className="text-[var(--text-muted)] uppercase tracking-widest">Lower 1σ</div>
-          <div className="font-mono text-amber-300">{formatPrice(latest?.lower1)}</div>
+          <div className="font-mono text-[var(--color-warning)]">{formatPrice(latest?.lower1)}</div>
         </div>
       </div>
 
@@ -124,8 +124,8 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
             const bandBottom = typeof point.lower1 === 'number' ? 100 - ((point.lower1 - minValue) / span) * 100 : y;
             return (
               <div key={`${point.time}-${index}`} className="absolute bottom-0 top-0" style={{ left: `${x}%` }}>
-                <div className="absolute w-px bg-cyan-500/35" style={{ top: `${bandTop}%`, height: `${Math.max(1, bandBottom - bandTop)}%` }} />
-                <div className="absolute -ml-0.5 h-1.5 w-1.5 rounded-full bg-cyan-300" style={{ top: `${y}%` }} title={`${point.time} VWAP ${formatPrice(point.vwap)}`} />
+                <div className="absolute w-px bg-[var(--color-state-bg)]" style={{ top: `${bandTop}%`, height: `${Math.max(1, bandBottom - bandTop)}%` }} />
+                <div className="absolute -ml-0.5 h-1.5 w-1.5 rounded-full bg-[var(--color-state-bg)]" style={{ top: `${y}%` }} title={`${point.time} VWAP ${formatPrice(point.vwap)}`} />
               </div>
             );
           })}

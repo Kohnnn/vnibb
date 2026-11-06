@@ -532,7 +532,9 @@ async def test_profile_cache_backfills_sector_without_guessing_share_or_cap_scal
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["data"]["sector"] == "Chung khoan"
+    # #207: the cached row carries no sector-level field, so the profile reports
+    # the sector as unavailable instead of restating the industry as one.
+    assert payload["data"]["sector"] is None
     assert payload["data"]["outstanding_shares"] == pytest.approx(850.1)
     assert payload["data"]["listed_shares"] == pytest.approx(850.1)
     assert payload["data"]["market_cap"] is None
@@ -952,6 +954,18 @@ async def test_income_statement_smoke_returns_data(client, monkeypatch):
                 profit_before_tax=300,
                 tax_expense=50,
                 net_income=250,
+                source="vnstock",
+                currency="VND",
+                value_unit="VND",
+                consolidation_basis="consolidated",
+                flow_basis="annual",
+                unit_metadata={
+                    field: {"source_unit": "VND", "value_unit": "VND"}
+                    for field in (
+                        "revenue", "cost_of_revenue", "pre_tax_profit",
+                        "profit_before_tax", "tax_expense", "net_income",
+                    )
+                },
             )
         ][:limit]
 
@@ -1252,6 +1266,88 @@ async def test_profile_endpoint_preserves_distinct_unscaled_share_counts(
     assert payload["data"]["listed_shares"] == pytest.approx(850.0)
     assert payload["data"]["outstanding_shares"] == pytest.approx(850.1)
     assert payload["data"]["market_cap"] is None
+
+
+@pytest.mark.asyncio
+async def test_profile_never_publishes_legal_form_as_industry_or_sector(client, test_db):
+    # #207: "Công ty cổ phần" is a legal form, not a taxonomy value. It reaches
+    # the profile through stored Stock/Company columns, so both the cache path
+    # and the DB fallback must treat it as unavailable instead of publishing it.
+    test_db.add(
+        Stock(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Công ty cổ phần",
+            sector="Công ty cổ phần",
+        )
+    )
+    test_db.add(
+        Company(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Công ty cổ phần",
+            sector="Công ty cổ phần",
+            updated_at=datetime(2026, 11, 2, 7, 14, 56),
+        )
+    )
+    await test_db.commit()
+
+    cached = await client.get("/api/v1/equity/FPT/profile")
+    assert cached.status_code == 200
+    assert cached.json()["data"]["industry"] is None
+    assert cached.json()["data"]["sector"] is None
+
+    await test_db.delete(await test_db.get(Company, 1))
+    await test_db.commit()
+
+    fallback = await client.get("/api/v1/equity/FPT/profile")
+    assert fallback.status_code == 200
+    assert fallback.json()["data"]["industry"] is None
+    assert fallback.json()["data"]["sector"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached", [True, False])
+async def test_profile_keeps_sector_unavailable_rather_than_restating_industry(
+    client, test_db, monkeypatch, cached
+):
+    # #207: sector and industry are different taxonomy levels. No stored or
+    # provider sector-level field is present, and a keyword/symbol grouping is
+    # not a sourced classification, so FPT's `Phần mềm` industry yields no sector.
+    # The stock-only path schedules a real refresh; keep it offline.
+    async def no_refresh(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("vnibb.api.v1.equity._schedule_refresh", no_refresh)
+    test_db.add(
+        Stock(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Phần mềm",
+            sector=None,
+        )
+    )
+    if cached:
+        test_db.add(
+            Company(
+                symbol="FPT",
+                company_name="Công ty Cổ phần FPT",
+                exchange="HOSE",
+                industry="Phần mềm",
+                sector=None,
+                updated_at=datetime(2026, 11, 2, 7, 14, 56),
+            )
+        )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/profile")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["industry"] == "Phần mềm"
+    assert data["sector"] is None
 
 
 @pytest.mark.asyncio
@@ -2227,6 +2323,95 @@ async def test_market_indices_smoke_returns_data(client, monkeypatch):
     assert payload["count"] == 1
     assert payload["data"][0]["index_name"] == "VNINDEX"
     assert payload["updated_at"].startswith("2026-03-14T15:05:00")
+
+
+@pytest.mark.asyncio
+async def test_market_indices_withhold_a_contradictory_percentage(
+    client, test_db, monkeypatch
+):
+    """#205: a reconciling base does not license a contradictory percentage.
+
+    Level 1829.04, retained base 1817.0 and change 12.04 agree, but the stored
+    percentage is -1. Nothing measured -1, so the endpoint withholds the
+    percentage instead of publishing it beside a base and change it contradicts.
+    """
+    test_db.add_all(
+        [
+            StockIndex(
+                id=1,
+                index_code="VNINDEX",
+                time=date(2026, 1, 30),
+                open=1820.0,
+                high=1835.0,
+                low=1810.0,
+                close=1829.04,
+                volume=1_000_000,
+                change=12.04,
+                change_pct=-1.0,
+            ),
+            StockIndex(
+                id=2,
+                index_code="VNINDEX",
+                time=date(2026, 1, 29),
+                open=1810.0,
+                high=1825.0,
+                low=1802.0,
+                close=1817.0,
+                volume=900_000,
+                change=5.0,
+                change_pct=0.28,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/market/indices?limit=1")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["current_value"] == pytest.approx(1829.04)
+    assert row["change"] == pytest.approx(12.04)
+    assert row["previous_close"] == pytest.approx(1817.0)
+    assert row["change_pct"] is None
+    assert row["change_pct_status"] == "inconsistent_with_retained_change"
+
+
+@pytest.mark.asyncio
+async def test_market_indices_withhold_a_provider_base_that_contradicts_change(
+    client, monkeypatch
+):
+    """#205: a provider-only row must reconcile its base against its change.
+
+    No DB row exists, so the merge guard never runs. The provider asserts
+    level 252.74, base 259.86 and change -3.87; that base belongs to another
+    session (252.74 - 259.86 = -7.12), so it is withheld.
+    """
+    from vnibb.api.v1 import market
+
+    async def fake_yahoo_fetch():
+        return [
+            {
+                "index_name": "HNX",
+                "current_value": 252.74,
+                "change": -3.87,
+                "previous_close": 259.86,
+                "time": "2026-10-30T08:15:00",
+                "source": "yahoo_finance",
+            }
+        ]
+
+    monkeypatch.setattr(market, "_fetch_yahoo_market_indices", fake_yahoo_fetch)
+
+    response = await client.get("/api/v1/market/indices?limit=1")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["current_value"] == pytest.approx(252.74)
+    assert row["change"] == pytest.approx(-3.87)
+    assert "previous_close" not in row
+    # With no admitted base the percentage comes from the base the change
+    # implies (252.74 + 3.87).
+    assert row["change_pct"] == pytest.approx(-3.87 / 256.61 * 100, rel=1e-9)
 
 
 @pytest.mark.asyncio
@@ -4993,3 +5178,63 @@ async def test_depreciation_crossfill_only_replaces_evidence_when_it_fills(
     else:
         assert filled.depreciation is None
         assert filled.unit_metadata["depreciation"] == {"label": "Khấu hao", "source_unit": "VND"}
+
+
+@pytest.mark.asyncio
+async def test_profile_refresh_does_not_publish_industry_level_as_sector(client, monkeypatch):
+    # #207: a provider sector identical to the industry is the legacy
+    # `sector = industry` copy, so the refresh path publishes no sector either.
+    async def fake_profile_fetch(_params):
+        return [EquityProfileData(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Phần mềm",
+            sector="Phần mềm",
+        )]
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockEquityProfileFetcher.fetch", fake_profile_fetch
+    )
+    response = await client.get("/api/v1/equity/FPT/profile?refresh=true")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["industry"] == "Phần mềm"
+    assert data["sector"] is None
+
+
+@pytest.mark.asyncio
+async def test_balance_sheet_enrichment_cannot_republish_a_withheld_metric(
+    client, test_db, monkeypatch
+):
+    """#206: enrichment runs after admission, so its fill needs a final gate.
+
+    A retained legacy row has no unit lineage. Admission withholds its numbers;
+    `_enrich_financial_statement_rows` then refills `cash_and_equivalents` from
+    `raw_data`, and the dedicated balance-sheet endpoint returned that value
+    with no second admission.
+    """
+    test_db.add(
+        BalanceSheet(
+            id=301,
+            symbol="VNM",
+            period="2023",
+            period_type="year",
+            fiscal_year=2023,
+            total_assets=1000.0,
+            cash_and_equivalents=None,
+            raw_data={"cash_and_equivalents": 12_345.0},
+        )
+    )
+    await test_db.commit()
+
+    async def no_provider_rows(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", no_provider_rows)
+
+    response = await client.get("/api/v1/equity/VNM/balance-sheet?period=FY&limit=5")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["cash_and_equivalents"] is None

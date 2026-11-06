@@ -29,9 +29,8 @@ function splitLabel(label: string): string[] {
 }
 
 function formatDelta(changePct: number | null | undefined): string {
-  if (changePct === null || changePct === undefined) return '';
-  const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change' });
-  return formatted === EMPTY_VALUE ? '' : `${changePct > 0 ? '+' : ''}${formatted}`;
+  const formatted = formatPercent(changePct, { decimals: 1, input: 'percent', clamp: 'yoy_change', signed: true });
+  return formatted === 'n/a' ? '' : formatted;
 }
 
 export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfallChartProps) {
@@ -75,10 +74,10 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
   return (
     <div className="flex h-full flex-col gap-3">
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
-        <SummaryCard label="Reported Free Cash Flow" value={summary.freeCashFlow !== null ? formatValue(summary.freeCashFlow) : EMPTY_VALUE} tone="text-emerald-300" />
-        <SummaryCard label="CapEx" value={summary.capex !== null ? formatValue(summary.capex) : EMPTY_VALUE} tone="text-amber-300" />
-        <SummaryCard label="Dividends" value={summary.dividends !== null ? formatValue(summary.dividends) : EMPTY_VALUE} tone="text-cyan-300" />
-        <SummaryCard label="Net Change" value={formatValue(summary.netChange)} tone="text-blue-300" />
+        <SummaryCard label="Reported Free Cash Flow" value={summary.freeCashFlow !== null ? formatValue(summary.freeCashFlow) : EMPTY_VALUE} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="CapEx" value={summary.capex !== null ? formatValue(summary.capex) : EMPTY_VALUE} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="Dividends" value={summary.dividends !== null ? formatValue(summary.dividends) : EMPTY_VALUE} tone="text-[var(--text-primary)]" />
+        <SummaryCard label="Net Change" value={formatValue(summary.netChange)} tone="text-[var(--text-primary)]" />
       </div>
 
       <div className="min-h-[340px] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
@@ -99,8 +98,10 @@ export function CashFlowWaterfallChart({ model, formatValue }: CashFlowWaterfall
 
           {laidOut.bars.map((bar, index) => {
             const delta = formatDelta(bar.changePct);
+            // `total` is an aggregate, not a direction: it must not read as gain
+            // or loss, and must stay distinct from both in color-vision mode.
             const fill = bar.tone === 'total'
-              ? '#2563eb'
+              ? 'var(--color-neutral)'
               : bar.value >= 0
                 ? dirColors.positive
                 : dirColors.negative;

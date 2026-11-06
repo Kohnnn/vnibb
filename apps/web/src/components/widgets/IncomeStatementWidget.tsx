@@ -503,7 +503,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                         value={effectiveChartType}
                         onChange={(e) => setChartType(e.target.value as 'overview' | 'margins' | 'sankey')}
                         aria-label="Income statement chart mode"
-                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-state-border)] uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Revenue & Profit</option>
                         <option value="margins">Margins %</option>
@@ -546,16 +546,16 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                         formatter={(value: unknown) => formatConvertedValue(toFiniteNumber(value), unitConfig)}
                                     />
                                     {chartedSeries.some((entry) => entry.key === 'revenue') ? (
-                                        <Bar dataKey="revenue" name="Revenue" fill="#3b82f6" radius={[2, 2, 0, 0]} />
+                                        <Bar dataKey="revenue" name="Revenue" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
                                     ) : null}
                                     {selection && chartedSeries.some((entry) => entry.key === 'grossProfit') ? (
-                                        <Line type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="grossProfit" name="Gross Profit" stroke="var(--chart-slate)" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                     {selection && chartedSeries.some((entry) => entry.key === 'operatingIncome') ? (
-                                        <Line type="monotone" dataKey="operatingIncome" name="Operating Income" stroke="#a855f7" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="operatingIncome" name="Operating Income" stroke="var(--chart-slate)" strokeWidth={2} dot={{ r: 3 }} strokeDasharray="5 3" />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netIncome') ? (
-                                        <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="netIncome" name="Net Income" stroke="var(--color-positive)" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                 </ComposedChart>
                             ) : effectiveChartType === 'margins' ? (
@@ -577,13 +577,13 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {chartedSeries.some((entry) => entry.key === 'grossMargin') ? (
-                                        <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="#3b82f6" strokeWidth={2} dot={{ r: 2 }} />
+                                        <Line type="monotone" dataKey="grossMargin" name="Gross %" stroke="var(--chart-blue)" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'operatingMargin') ? (
-                                        <Line type="monotone" dataKey="operatingMargin" name="Operating %" stroke="#a855f7" strokeWidth={2} dot={{ r: 2 }} />
+                                        <Line type="monotone" dataKey="operatingMargin" name="Operating %" stroke="var(--chart-slate)" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netMargin') ? (
-                                        <Line type="monotone" dataKey="netMargin" name="Net %" stroke="#10b981" strokeWidth={2} dot={{ r: 2 }} />
+                                        <Line type="monotone" dataKey="netMargin" name="Net %" stroke="var(--color-positive)" strokeWidth={2} dot={{ r: 2 }} />
                                     ) : null}
                                 </ComposedChart>
                             ) : (
@@ -628,7 +628,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 className={cn(
                                     "p-1 rounded transition-all",
                                     viewMode === 'table'
-                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                                         : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 )}
                                 title="Table View"
@@ -643,7 +643,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 className={cn(
                                     "p-1 rounded transition-all",
                                     viewMode === 'chart'
-                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                                         : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 )}
                                 title="Chart View"
@@ -666,7 +666,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
                     {statementNote && (
-                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                        <div className="mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             {statementNote}
                         </div>
                     )}

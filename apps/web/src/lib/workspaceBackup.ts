@@ -62,7 +62,7 @@ function onlyKeys(value: Record<string, unknown>, keys: string[]): boolean {
 
 function validateWidget(widget: unknown, tabId: string, groupIds: Set<number>): widget is WidgetInstance {
     if (!record(widget) || !onlyKeys(widget, ['id', 'type', 'tabId', 'syncGroupId', 'widgetGroup', 'config', 'layout'])
-        || !string(widget.id) || widget.tabId !== tabId || !string(widget.type) || !normalizeWidgetType(widget.type)) return false;
+        || !string(widget.id) || widget.tabId !== tabId || !string(widget.type) || !widget.type) return false;
     if (widget.syncGroupId !== undefined && (!finite(widget.syncGroupId) || !groupIds.has(widget.syncGroupId))) return false;
     if (widget.widgetGroup !== undefined && !['global', 'A', 'B', 'C', 'D'].includes(widget.widgetGroup as string)) return false;
     if (!record(widget.config) || !jsonSafe(widget.config)

@@ -11,6 +11,8 @@ import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetGroupId } from '@/types/widget';
 import { toNumber } from './utils';
+import { EMPTY_VALUE } from '@/lib/units';
+import { signedToneClass, priceDirection } from '@/lib/priceColor';
 
 interface SectorPerformanceWidgetProps {
     isEditing?: boolean;
@@ -20,18 +22,32 @@ interface SectorPerformanceWidgetProps {
 }
 
 // A sector with no usable change rows is not a flat 0% sector: it gets the
-// neutral slate tile and a "—" label instead of a fabricated "+0.00%" read
-// (issue #107). A genuine 0 still paints the neutral band.
-function getHeatmapColor(changePct: number | null): string {
-    if (changePct === null) return 'bg-slate-600/40';
-    if (changePct >= 2) return 'bg-green-600';
-    if (changePct >= 1) return 'bg-green-500/70';
-    if (changePct >= 0.5) return 'bg-green-400/50';
-    if (changePct >= 0) return 'bg-green-300/30';
-    if (changePct >= -0.5) return 'bg-red-300/30';
-    if (changePct >= -1) return 'bg-red-400/50';
-    if (changePct >= -2) return 'bg-red-500/70';
-    return 'bg-red-600';
+// neutral slate tile and an "n/a" label instead of a fabricated "+0.00%" read
+// (issue #107). A genuine 0 keeps the same neutral family at a fainter strength
+// (brand §13: zero is ink, not a gain) and still prints `0.00%`.
+//
+// Bands are tint strengths of the semantic direction tokens rather than a raw
+// palette ramp: intensity rises monotonically with magnitude, and color-vision
+// mode reaches the tiles through --color-positive/negative instead of needing a
+// global class remap (which flattened one band and inverted the scale).
+export function getHeatmapStyle(changePct: number | null): { background: string } {
+    const tint = (token: string, pct: number) =>
+        `color-mix(in srgb, var(${token}) ${pct}%, transparent)`;
+    if (changePct === null) return { background: tint('--color-neutral', 40) };
+    // Brand §13 `financialSemantics`: a measured zero is ink, so it takes the
+    // neutral family rather than the gain tint.
+    if (changePct === 0) return { background: tint('--color-neutral', 10) };
+    // Symmetric: +2 and -2 must land on the same strength, because the label
+    // contrast flip keys off |change| >= 2 and only reads correctly on a solid fill.
+    const magnitude = Math.abs(changePct);
+    const direction = changePct > 0 ? '--color-positive' : '--color-negative';
+    if (magnitude >= 2) return { background: tint(direction, 100) };
+    // Non-solid bands cap at 30% so primary ink stays >= 9:1 on the fill in both
+    // themes. Above ~30% a same-hue label falls under 4.5:1 and secondary body
+    // text under 3:1 (light +70% measured 2.0:1), so the tint must stay pale.
+    if (magnitude >= 1) return { background: tint(direction, 30) };
+    if (magnitude >= 0.5) return { background: tint(direction, 20) };
+    return { background: tint(direction, 10) };
 }
 
 export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }: SectorPerformanceWidgetProps) {
@@ -66,13 +82,13 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
         <div className="flex bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded text-[10px] mr-2">
             <button
                 onClick={() => setView('grid')}
-                className={`px-3 py-1 rounded transition-colors ${view === 'grid' ? 'bg-blue-600 text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                className={`px-3 py-1 rounded transition-colors ${view === 'grid' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
             >
                 Grid
             </button>
             <button
                 onClick={() => setView('list')}
-                className={`px-3 py-1 rounded transition-colors ${view === 'list' ? 'bg-blue-600 text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
+                className={`px-3 py-1 rounded transition-colors ${view === 'list' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
             >
                 List
             </button>
@@ -110,19 +126,26 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                         <div className="grid grid-cols-2 gap-1.5">
                             {sortedSectors.map((sector) => {
                                 const change = toNumber(sector.changePct);
+                                // The >=2% bands are solid fills: labels must flip to the
+                                // page surface colour or they disappear into the tile.
+                                const solid = change !== null && Math.abs(change) >= 2;
                                 const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                                 return (
                                     <div
                                         key={sector.sectorId}
-                                        className={`p-3 rounded-lg border border-[var(--border-default)] ${getHeatmapColor(change)} cursor-pointer hover:opacity-90 transition-opacity flex flex-col justify-between min-h-[60px]`}
+                                        className="p-3 rounded-lg border border-[var(--border-default)] flex flex-col justify-between min-h-[60px]"
+                                        style={getHeatmapStyle(change)}
                                     >
-                                        <div className="break-words whitespace-normal text-[10px] font-bold uppercase text-[var(--text-secondary)]">
+                                        <div className={`break-words whitespace-normal text-[10px] font-bold uppercase ${solid ? 'text-[var(--color-bg-primary)]' : 'text-[var(--text-primary)]'}`}>
                                             {name}
                                         </div>
-                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                            {change === null ? '—' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}
+                                        {/* The >=2% bands paint a solid direction fill, so a
+                                            same-token label would be 1:1 contrast. Paler bands
+                                            carry direction in the fill, not the ink. */}
+                                        <div className={`text-base font-black ${change === null ? 'text-[var(--text-muted)]' : solid ? 'text-[var(--color-bg-primary)]' : 'text-[var(--text-primary)]'}`}>
+                                            {change === null ? EMPTY_VALUE : `${Number(change.toFixed(2)) > 0 ? '+' : ''}${change.toFixed(2)}%`}
                                         </div>
-                                        <div className="text-[9px] text-[var(--text-muted)]">{sector.totalStocks} stocks</div>
+                                        <div className={`text-[9px] ${solid ? 'text-[var(--color-bg-primary)]' : 'text-[var(--text-primary)]'}`}>{sector.totalStocks} stocks</div>
                                     </div>
                                 );
                             })}
@@ -131,7 +154,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                         <div className="space-y-0.5">
                             {sortedSectors.map((sector) => {
                                 const change = toNumber(sector.changePct);
-                                const isUp = (change ?? 0) >= 0;
+                                const direction = priceDirection(change);
                                 const name = sector.sectorName || sector.sectorNameEn || sector.sectorId;
                                 const topGainer = sector.topGainer?.symbol;
                                 const topLoser = sector.topLoser?.symbol;
@@ -142,14 +165,14 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                         className="flex items-center justify-between py-2 px-3 hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className={`w-2 h-2 rounded-full ${change === null ? 'bg-slate-500' : isUp ? 'bg-green-400' : 'bg-red-400'}`} />
+                                            <div className={`w-2 h-2 rounded-full ${direction === 'none' ? 'bg-[var(--color-neutral)]' : direction === 'flat' ? 'bg-[var(--color-neutral)]' : direction === 'up' ? 'bg-[var(--color-positive)]' : 'bg-[var(--color-negative)]'}`} />
                                             <div>
                                                 <div className="text-sm font-medium text-[var(--text-primary)]">{name}</div>
                                                 <div className="text-[10px] text-[var(--text-muted)] flex items-center gap-2">
                                                     {topGainer && (
                                                         <button
                                                             onClick={() => setLinkedSymbol(topGainer)}
-                                                            className="text-green-400 hover:text-green-300 font-bold"
+                                                            className="text-[var(--color-positive)] hover:text-[var(--color-positive)] font-bold"
                                                         >
                                                             {topGainer}
                                                         </button>
@@ -157,7 +180,7 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                                     {topLoser && (
                                                         <button
                                                             onClick={() => setLinkedSymbol(topLoser)}
-                                                            className="text-red-400 hover:text-red-300 font-bold"
+                                                            className="text-[var(--color-negative)] hover:text-[var(--color-negative)] font-bold"
                                                         >
                                                             {topLoser}
                                                         </button>
@@ -165,8 +188,8 @@ export function SectorPerformanceWidget({ onRemove, widgetGroup, onDataChange }:
                                                 </div>
                                             </div>
                                         </div>
-                                        <span className={`text-sm font-bold font-mono ${change === null ? 'text-[var(--text-muted)]' : isUp ? 'text-green-400' : 'text-red-400'}`}>
-                                            {change === null ? '—' : `${isUp ? '+' : ''}${change.toFixed(2)}%`}
+                                        <span className={`text-sm font-bold font-mono ${signedToneClass(change)}`}>
+                                            {change === null ? EMPTY_VALUE : `${Number(change.toFixed(2)) > 0 ? '+' : ''}${change.toFixed(2)}%`}
                                         </span>
                                     </div>
                                 );

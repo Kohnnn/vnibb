@@ -27,6 +27,7 @@ def validate_free_runtime() -> None:
     _refuse_persisted_paid_account()
 
 
+
 def _refuse_persisted_paid_account() -> None:
     """Refuse acquisition when the installed SDK already holds a paid credential.
 
@@ -64,9 +65,13 @@ def _refuse_persisted_paid_account() -> None:
     authenticated = state.get("authenticated")
     if authenticated is None:
         authenticated = state.get("has_api_key")
-    if authenticated is not True:
-        return
     tier = str(state.get("tier") or "").strip().lower()
+    if authenticated is False and tier in {"guest", "free"}:
+        return
+    if authenticated is not True:
+        raise RuntimeError(
+            "Installed vnstock credential state is unverifiable; refusing to acquire."
+        )
     if tier in {"guest", "free"}:
         return
     if not tier:
@@ -82,8 +87,8 @@ def _refuse_persisted_paid_account() -> None:
     )
 
 
-def validate_runtime() -> None:
-    """Enforce the configured tier and VCI policy before importing the SDK."""
+def validate_runtime_policy() -> None:
+    """Enforce the configured tier and VCI source without touching credentials."""
     tier = os.getenv("VNSTOCK_RUNTIME_TIER", settings.vnstock_runtime_tier).strip().lower()
     if tier not in {"free", "golden"}:
         raise ValueError("VNSTOCK_RUNTIME_TIER must be 'free' or 'golden'")
@@ -91,7 +96,12 @@ def validate_runtime() -> None:
         raise ValueError("VNSTOCK_RUNTIME_TIER differs from configured runtime tier")
     validate_source(settings.vnstock_source)
     validate_source(os.getenv("VNSTOCK_SOURCE", settings.vnstock_source))
-    if tier == "free":
+
+
+def validate_runtime() -> None:
+    """Enforce tier, source and the free-tier credential guard before an import."""
+    validate_runtime_policy()
+    if os.getenv("VNSTOCK_RUNTIME_TIER", settings.vnstock_runtime_tier).strip().lower() == "free":
         validate_free_runtime()
 
 

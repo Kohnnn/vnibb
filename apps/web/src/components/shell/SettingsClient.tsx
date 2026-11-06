@@ -38,13 +38,13 @@ export default function SettingsPage() {
         <header className="mb-8 flex items-center gap-4">
           <button
             onClick={() => router.back()}
-            className="rounded-lg p-2 transition-colors hover:bg-[var(--bg-hover)]"
+            className="rounded-md p-2 transition-colors hover:bg-[var(--bg-hover)]"
             aria-label="Go back"
           >
             <ArrowLeft size={20} />
           </button>
           <h1 className="flex items-center gap-3 text-2xl font-bold">
-            <Settings className="text-blue-500" />
+            <Settings className="text-[var(--color-accent-primary)]" />
             Settings
           </h1>
         </header>
@@ -52,7 +52,7 @@ export default function SettingsPage() {
         <div className="space-y-6">
           <section className="border-y border-[var(--border-subtle)] py-5">
             <div className="flex gap-3">
-              <HardDrive size={18} className="mt-0.5 shrink-0 text-blue-400" />
+              <HardDrive size={18} className="mt-0.5 shrink-0 text-[var(--text-secondary)]" />
               <div>
                 <h2 className="text-sm font-semibold">Saved on this device</h2>
                 <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
@@ -66,12 +66,12 @@ export default function SettingsPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold">
-                  <RotateCcw size={16} className="text-blue-500" />
+                  <RotateCcw size={16} className="text-[var(--color-accent-primary)]" />
                   Walkthrough
                 </h2>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">Replay the quick VNIBB tour from the dashboard.</p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">Replay the quick VniBB tour from the dashboard.</p>
               </div>
-              <Button type="button" onClick={handleRestartWalkthrough} className="gap-2 bg-blue-600 text-white hover:bg-blue-500">
+              <Button type="button" onClick={handleRestartWalkthrough} className="gap-2">
                 <RotateCcw size={16} />
                 Restart Walkthrough
               </Button>
@@ -81,7 +81,7 @@ export default function SettingsPage() {
           <section>
             <div className="mb-4">
               <h2 className="flex items-center gap-2 text-sm font-semibold">
-                <Database size={16} className="text-emerald-500" />
+                <Database size={16} className="text-[var(--text-secondary)]" />
                 vnstock Provider
               </h2>
               <p className="mt-1 text-xs text-[var(--text-muted)]">The backend uses Vietcap IQ first and free VCI only. Previous provider selections are migrated to VCI.</p>
@@ -103,7 +103,7 @@ export default function SettingsPage() {
                     <span className="block text-sm font-semibold text-[var(--text-primary)]">{source.label}</span>
                     <span className="mt-1 block text-xs text-[var(--text-muted)]">{source.description}</span>
                   </span>
-                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${preferredVnstockSource === source.value ? 'bg-blue-500' : 'border border-[var(--border-color)]'}`} />
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${preferredVnstockSource === source.value ? 'bg-[var(--color-accent-primary)]' : 'border border-[var(--border-strong)]'}`} />
                 </button>
               ))}
             </div>

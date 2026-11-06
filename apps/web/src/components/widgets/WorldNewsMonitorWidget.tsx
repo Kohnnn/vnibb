@@ -11,7 +11,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { addNotebookItem } from '@/lib/researchNotebook';
 import { newsObservationProvenance } from '@/lib/newsTime';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import {
   getWorldNews,
   getWorldNewsSources,
@@ -81,7 +81,7 @@ function getNumberConfig(config: Record<string, unknown> | undefined, key: strin
 function chipClass(active: boolean) {
   return `rounded-md px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
     active
-      ? 'bg-blue-500/20 text-blue-200 ring-1 ring-blue-400/30'
+      ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] ring-1 ring-[var(--color-state-border)]'
       : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
   }`;
 }
@@ -100,8 +100,8 @@ function FailedFeedsNotice({ failedFeeds }: { failedFeeds: WorldNewsFailedFeed[]
   if (failedFeeds.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[10px] text-amber-100/85">
-      <div className="font-black uppercase tracking-[0.14em] text-amber-200">
+    <div className="mt-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] text-[var(--color-warning)]">
+      <div className="font-black uppercase tracking-[0.14em] text-[var(--color-warning)]">
         {failedFeeds.length} RSS feed{failedFeeds.length === 1 ? '' : 's'} failed
       </div>
       <div className="mt-1 space-y-1">
@@ -328,7 +328,7 @@ function WorldNewsMonitorWidgetComponent({
         <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              <Radio className="h-3 w-3 text-emerald-300" />
+              <Radio className="h-3 w-3 text-[var(--color-positive)]" />
               Live Source Links
             </div>
             <WidgetMeta
@@ -384,19 +384,19 @@ function WorldNewsMonitorWidgetComponent({
               value={customUrlInput}
               onChange={(event) => setCustomUrlInput(event.target.value)}
               placeholder="Ask a custom RSS feed..."
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-400/50"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
             <input
               aria-label="Custom RSS source name"
               value={customNameInput}
               onChange={(event) => setCustomNameInput(event.target.value)}
               placeholder="Source name"
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-400/50"
+              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
             <div className="flex gap-1">
               <button
                 type="submit"
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-blue-400/30 bg-blue-400/10 px-2 text-[10px] font-black uppercase text-blue-100 hover:bg-blue-400/20"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 text-[10px] font-black uppercase text-[var(--color-accent-primary)] hover:bg-[var(--color-state-bg)]"
               >
                 <Radio className="h-3 w-3" />
                 Use Feed
@@ -419,16 +419,16 @@ function WorldNewsMonitorWidgetComponent({
               )}
             </div>
           </form>
-          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-red-300">{customError}</div>}
+          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-[var(--color-negative)]">{customError}</div>}
           {!customError && customNotice && (
-            <div className="mt-1 text-[10px] font-semibold text-emerald-300">{customNotice}</div>
+            <div className="mt-1 text-[10px] font-semibold text-[var(--color-positive)]">{customNotice}</div>
           )}
           {customFeedFailure ? (
-            <div role="alert" className="mt-1 truncate text-[10px] text-amber-200/90">
+            <div role="alert" className="mt-1 truncate text-[10px] text-[var(--color-warning)]">
               Custom RSS failed {formatFailedFeedTime(customFeedFailure.failed_at)}: {customFeedFailure.reason}
             </div>
           ) : customFeed ? (
-            <div className="mt-1 truncate text-[10px] text-blue-200/80">
+            <div className="mt-1 truncate text-[10px] text-[var(--color-accent-primary)]">
               Custom RSS active: {customFeed.name || customFeed.url}
             </div>
           ) : null}
@@ -459,10 +459,10 @@ function WorldNewsMonitorWidgetComponent({
               {visibleArticles.map((article: WorldNewsArticle) => (
                 <article key={article.id} className="p-3 transition-colors hover:bg-[var(--bg-tertiary)]/30">
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    <span className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-200">
+                    <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[var(--color-positive)]">
                       Live
                     </span>
-                    <span className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-200">
+                    <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-primary)]">
                       {article.region}
                     </span>
                     <span className="rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
@@ -477,7 +477,7 @@ function WorldNewsMonitorWidgetComponent({
                     href={article.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="group flex items-start gap-2 text-sm font-semibold leading-snug text-[var(--text-primary)] hover:text-blue-300"
+                    className="group flex items-start gap-2 text-sm font-semibold leading-snug text-[var(--text-primary)] hover:text-[var(--color-accent-primary)]"
                   >
                     <span className="line-clamp-2 flex-1">{article.title}</span>
                     <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-50 transition-opacity group-hover:opacity-100" />
@@ -503,7 +503,7 @@ function WorldNewsMonitorWidgetComponent({
                       href={article.source_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="ml-auto rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-blue-400/50 hover:text-blue-300"
+                      className="ml-auto rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)]"
                     >
                       Source
                     </a>
@@ -511,7 +511,7 @@ function WorldNewsMonitorWidgetComponent({
                       href={article.feed_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-emerald-400/50 hover:text-emerald-300"
+                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-positive)]"
                     >
                       <Rss className="h-2.5 w-2.5" />
                       Feed
@@ -520,7 +520,7 @@ function WorldNewsMonitorWidgetComponent({
                       type="button"
                       onClick={() => handlePinArticle(article)}
                       disabled={pinnedIds[article.id]}
-                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-amber-400/50 hover:text-amber-300 disabled:cursor-default disabled:border-emerald-400/40 disabled:text-emerald-300"
+                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-[var(--color-state-border)] hover:text-[var(--color-warning)] disabled:cursor-default disabled:border-[var(--color-state-border)] disabled:text-[var(--color-positive)]"
                       title={pinnedIds[article.id] ? 'Pinned to research notebook' : 'Pin to research notebook'}
                     >
                       {pinnedIds[article.id] ? <Check className="h-2.5 w-2.5" /> : <BookmarkPlus className="h-2.5 w-2.5" />}

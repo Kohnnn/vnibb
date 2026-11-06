@@ -6,6 +6,10 @@ export interface ChartEventMarker {
   date: string
   shortLabel: 'D' | 'S' | 'R'
   label: string
+  /**
+   * `var(--chart-event-*)` token: the label is 10 px text, so the hue must clear
+   * 4.5:1 against the chart surface and the value differs per theme.
+   */
   color: string
   position: 'aboveBar' | 'belowBar'
   shape: 'arrowUp' | 'arrowDown' | 'circle'
@@ -31,7 +35,7 @@ function classifyEvent(event: CompanyEventData): Omit<ChartEventMarker, 'date'> 
     return {
       shortLabel: 'D',
       label: 'Dividend',
-      color: '#f59e0b',
+      color: 'var(--chart-event-dividend)',
       position: 'belowBar',
       shape: 'arrowDown',
       category: 'dividend',
@@ -42,7 +46,7 @@ function classifyEvent(event: CompanyEventData): Omit<ChartEventMarker, 'date'> 
     return {
       shortLabel: 'S',
       label: 'Split',
-      color: '#a78bfa',
+      color: 'var(--chart-event-split)',
       position: 'aboveBar',
       shape: 'arrowUp',
       category: 'split',
@@ -53,7 +57,7 @@ function classifyEvent(event: CompanyEventData): Omit<ChartEventMarker, 'date'> 
     return {
       shortLabel: 'R',
       label: subtype === 'stock_dividend' ? 'Stock Dividend' : 'Rights Issue',
-      color: '#22d3ee',
+      color: 'var(--chart-event-rights)',
       position: 'aboveBar',
       shape: 'circle',
       category: 'rights',

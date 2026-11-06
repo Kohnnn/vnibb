@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { IChartApi, ISeriesApi } from 'lightweight-charts';
+import type { HistogramData, IChartApi, ISeriesApi, WhitespaceData } from 'lightweight-charts';
 import { RefreshCw } from 'lucide-react';
 import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
 import type { QuoteData } from '@/lib/api';
 import { buildChartEventMarkers, type ChartEventMarker } from '@/lib/chartEventMarkers';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
+import { CHART_CAPTURE_EVENT, LIGHT_CAPTURE_ATTR, type ChartLightCaptureDetail } from '@/lib/chartCapture';
+import { useColorblind } from '@/lib/colorblind';
 
 export type AdvancedChartMode = 'candles' | 'line' | 'area';
 export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX' | 'YTD';
@@ -269,6 +271,9 @@ export function TradingViewAdvancedChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const { resolvedTheme } = useTheme();
+  // The canvas is a bitmap: it only picks up a colour-vision swap when the
+  // chart is rebuilt, so the mode is part of this effect's dependencies.
+  const colorblind = useColorblind();
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
@@ -394,6 +399,7 @@ export function TradingViewAdvancedChart({
     let retryFrame: number | null = null;
     let retryCount = 0;
     let isRendering = false;
+    let removeCaptureListener: (() => void) | null = null;
 
     const removeChart = (chart: IChartApi | null) => {
       if (!chart) return;
@@ -463,6 +469,20 @@ export function TradingViewAdvancedChart({
         // light/dark overrides reach the candlesticks and volume bars. (DEF-001)
         const upColor = cssVars.getPropertyValue('--color-positive').trim() || '#22c55e';
         const downColor = cssVars.getPropertyValue('--color-negative').trim() || '#ef4444';
+        // Series colours: brand blue is focal, Slate is comparison. Reading the
+        // tokens keeps light theme and color-vision mode in sync with the palette
+        // instead of pinning a fixed hue that reads as a state colour.
+        const focalColor = cssVars.getPropertyValue('--chart-blue').trim() || '#3b82f6';
+        const compareColor = cssVars.getPropertyValue('--chart-slate').trim() || '#5B6573';
+        // Marker colours are theme-dependent tokens, and lightweight-charts
+        // writes colours straight into the canvas, where `var(...)` is invalid.
+        // Resolve them against a given cascade (live root or light capture).
+        const resolveMarkerColor = (marker: ChartEventMarker, read: (name: string) => string): string => {
+          if (!marker.color.startsWith('var(')) return marker.color;
+          const token = marker.color.slice(4, -1);
+          return read(token).trim() || (marker.category === 'dividend' ? '#f59e0b' : marker.category === 'split' ? '#a78bfa' : '#22d3ee');
+        };
+        const liveMarkerColor = (marker: ChartEventMarker) => resolveMarkerColor(marker, (n) => cssVars.getPropertyValue(n));
         const hexToRgba = (hex: string, alpha: number): string => {
           const h = hex.replace('#', '').trim();
           if (h.length !== 6) return `rgba(148,163,184,${alpha})`;
@@ -554,7 +574,7 @@ export function TradingViewAdvancedChart({
         try {
           if (effectiveMode === 'line') {
             series = chart.addLineSeries({
-              color: '#38bdf8',
+              color: focalColor,
               lineWidth: 2,
               crosshairMarkerVisible: true,
               crosshairMarkerRadius: 4,
@@ -564,9 +584,9 @@ export function TradingViewAdvancedChart({
             )));
           } else if (effectiveMode === 'area') {
             series = chart.addAreaSeries({
-              topColor: 'rgba(56, 189, 248, 0.35)',
-              bottomColor: 'rgba(56, 189, 248, 0.04)',
-              lineColor: '#38bdf8',
+              topColor: hexToRgba(focalColor, 0.35),
+              bottomColor: hexToRgba(focalColor, 0.04),
+              lineColor: focalColor,
               lineWidth: 2,
             });
             series.setData(points.map((point) => (
@@ -596,7 +616,7 @@ export function TradingViewAdvancedChart({
           // long-standing "price chart blank" mystery into something we
           // can grep for in user devtools.
           console.error(
-            '[VNIBB PriceChart] series.setData failed for symbol',
+            '[VniBB PriceChart] series.setData failed for symbol',
             symbol,
             'mode',
             effectiveMode,
@@ -612,7 +632,7 @@ export function TradingViewAdvancedChart({
           eventMarkers.map((marker) => ({
             time: marker.date,
             position: marker.position,
-            color: marker.color,
+            color: liveMarkerColor(marker),
             shape: marker.shape,
             text: marker.shortLabel,
           }))
@@ -620,7 +640,7 @@ export function TradingViewAdvancedChart({
 
         if (activeCompareSymbol && safeComparePoints.length > 0) {
           const compareSeries = chart.addLineSeries({
-            color: '#f59e0b',
+            color: compareColor,
             lineWidth: 2,
             priceScaleId: 'right',
             crosshairMarkerVisible: true,
@@ -659,7 +679,131 @@ export function TradingViewAdvancedChart({
               : { time: point.time }
           ))
         );
-        volumeSeriesRef.current = volumeSeries;
+        // A canvas bakes its colours into pixels, so the exporter cannot lighten
+        // it with CSS. Register a synchronous light render: the exporter asks,
+        // this chart repaints on light tokens, hands over a bitmap, then puts the
+        // live theme back. The user's theme preference is never touched.
+        const captureHost = containerRef.current;
+        const originalChartOptions = {
+          layout: { background: { type: ColorType.Solid, color: bgPrimary }, textColor: textMuted },
+          grid: { vertLines: { color: borderSubtle }, horzLines: { color: borderSubtle } },
+          crosshair: {
+            vertLine: { color: textMuted, labelBackgroundColor: bgSecondary },
+            horzLine: { color: textMuted, labelBackgroundColor: bgSecondary },
+          },
+          rightPriceScale: { borderColor },
+          timeScale: { borderColor },
+        };
+        const candleSeries = effectiveMode === 'candles' ? (series as ISeriesApi<'Candlestick'>) : null;
+        const lineSeries = effectiveMode === 'line' ? (series as ISeriesApi<'Line'>) : null;
+        const areaSeries = effectiveMode === 'area' ? (series as ISeriesApi<'Area'>) : null;
+        const captureLight = (event: Event) => {
+          const detail = (event as CustomEvent<ChartLightCaptureDetail>).detail;
+          if (!detail) return;
+          // No dark fallback: the live tokens are dark, so substituting them
+          // would hand the exporter a dark bitmap that looks like success.
+          const token = (name: string) => {
+            const value = detail.token(name).trim();
+            if (!value) throw new Error(`light capture token ${name} is missing`);
+            return value;
+          };
+          let originalVolume: Array<HistogramData | WhitespaceData> | null = null;
+          try {
+            originalVolume = [...volumeSeries.data()];
+            const lightUp = token('--color-positive');
+            const lightDown = token('--color-negative');
+            const lightFocal = token('--chart-blue');
+            chart.applyOptions({
+              layout: { background: { type: ColorType.Solid, color: token('--bg-primary') }, textColor: token('--text-muted') },
+              grid: {
+                vertLines: { color: token('--border-subtle') },
+                horzLines: { color: token('--border-subtle') },
+              },
+              crosshair: {
+                vertLine: { color: token('--text-muted'), labelBackgroundColor: token('--bg-secondary') },
+                horzLine: { color: token('--text-muted'), labelBackgroundColor: token('--bg-secondary') },
+              },
+              rightPriceScale: { borderColor: token('--border-color') },
+              timeScale: { borderColor: token('--border-color') },
+            });
+            candleSeries?.applyOptions({
+              upColor: lightUp, downColor: lightDown,
+              borderUpColor: lightUp, borderDownColor: lightDown,
+              wickUpColor: lightUp, wickDownColor: lightDown,
+            });
+            lineSeries?.applyOptions({ color: lightFocal });
+            // Markers carry a per-theme token; the dark pastels measure 1.8-2.7:1
+            // on the white export, so they are re-applied from the light cascade.
+            series.setMarkers(eventMarkers.map((marker) => ({
+              time: marker.date,
+              position: marker.position,
+              color: resolveMarkerColor(marker, (name) => token(name)),
+              shape: marker.shape,
+              text: marker.shortLabel,
+            })));
+            areaSeries?.applyOptions({
+              lineColor: lightFocal,
+              topColor: hexToRgba(lightFocal, 0.35),
+              bottomColor: hexToRgba(lightFocal, 0.04),
+            });
+            // Volume bars carry their own baked colour, so they are re-set for
+            // the snapshot and restored from the same points afterwards.
+            volumeSeries.setData(points.map((point) => (
+              isRenderablePoint(point)
+                ? {
+                    time: point.time,
+                    value: Number.isFinite(point.volume) ? point.volume : 0,
+                    color: hexToRgba(point.close >= point.open ? lightUp : lightDown, 0.35),
+                  }
+                : { time: point.time }
+            )));
+            const bitmap = chart.takeScreenshot();
+            // An empty bitmap would be pasted over the widget as a blank box.
+            if (!bitmap.width || !bitmap.height) throw new Error('the chart screenshot is empty');
+            detail.canvas = bitmap;
+          } catch (captureError) {
+            // `dispatchEvent` swallows listener exceptions, so the exporter can
+            // only learn about the failure through the detail it passed in.
+            detail.canvas = undefined;
+            detail.error = captureError;
+          } finally {
+            // Restore the live chart even when the snapshot threw. A restore
+            // failure leaves the widget light, so it must fail the export too.
+            try {
+              chart.applyOptions(originalChartOptions);
+              candleSeries?.applyOptions({
+                upColor, downColor, borderUpColor: upColor, borderDownColor: downColor,
+                wickUpColor: upColor, wickDownColor: downColor,
+              });
+              lineSeries?.applyOptions({ color: focalColor });
+              series.setMarkers(eventMarkers.map((marker) => ({
+                time: marker.date,
+                position: marker.position,
+                color: liveMarkerColor(marker),
+                shape: marker.shape,
+                text: marker.shortLabel,
+              })));
+              areaSeries?.applyOptions({
+                lineColor: focalColor,
+                topColor: hexToRgba(focalColor, 0.35),
+                bottomColor: hexToRgba(focalColor, 0.04),
+              });
+              if (originalVolume) volumeSeries.setData(originalVolume);
+            } catch (restoreError) {
+              detail.canvas = undefined;
+              detail.error ??= restoreError;
+            }
+          }
+        };
+        if (captureHost) {
+          removeCaptureListener?.();
+          captureHost.setAttribute(LIGHT_CAPTURE_ATTR, '');
+          captureHost.addEventListener(CHART_CAPTURE_EVENT, captureLight);
+          removeCaptureListener = () => {
+            captureHost.removeEventListener(CHART_CAPTURE_EVENT, captureLight);
+            captureHost.removeAttribute(LIGHT_CAPTURE_ATTR);
+          };
+        }
         const admittedPoints = new Map(points.filter(isRenderablePoint).map((point) => [point.time, point]));
         chart.subscribeCrosshairMove((event) => {
           const time = typeof event.time === 'string' ? event.time
@@ -686,7 +830,7 @@ export function TradingViewAdvancedChart({
             // QA-v3 F4/T1: if setVisibleLogicalRange rejects the range
             // (can happen when the chart is mid-resize), fall back to
             // fitContent which always works once data is present.
-            console.warn('[VNIBB PriceChart] setVisibleLogicalRange failed, falling back to fitContent', rangeError);
+            console.warn('[VniBB PriceChart] setVisibleLogicalRange failed, falling back to fitContent', rangeError);
             chart.timeScale().fitContent();
           }
         } else {
@@ -745,13 +889,14 @@ export function TradingViewAdvancedChart({
     return () => {
       disposed = true;
       clearRetryFrame();
+      removeCaptureListener?.();
       resizeObserver?.disconnect();
       removeChart(chartRef.current);
       chartRef.current = null;
       mainSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [activeCompareSymbol, comparePoints, eventMarkers, mode, points, timeframe, resolvedTheme]);
+  }, [activeCompareSymbol, colorblind, comparePoints, eventMarkers, mode, points, timeframe, resolvedTheme]);
 
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>
@@ -766,7 +911,7 @@ export function TradingViewAdvancedChart({
             className={cn(
               'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
               adjustmentMode === modeOption
-                ? 'bg-blue-600 text-white'
+                ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                 : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
             )}
           >
@@ -792,7 +937,7 @@ export function TradingViewAdvancedChart({
       ) : null}
 
       {activeCompareSymbol && comparePoints.length > 0 ? (
-        <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-200 backdrop-blur">
+        <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] backdrop-blur">
           Compare {activeCompareSymbol}
         </div>
       ) : null}
@@ -800,7 +945,7 @@ export function TradingViewAdvancedChart({
       {!isLoading && !error && excludedNotice ? (
         <div
           role="status"
-          className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-amber-500/25 bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-amber-200 backdrop-blur"
+          className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-secondary)] backdrop-blur"
         >
           {excludedNotice}
         </div>
@@ -812,7 +957,7 @@ export function TradingViewAdvancedChart({
           style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 78%, transparent)' }}
         >
           <div className="flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-modal)] px-4 py-3 text-xs text-[var(--text-secondary)] shadow-xl">
-            <RefreshCw size={14} className="animate-spin text-sky-400" />
+            <RefreshCw size={14} className="animate-spin text-[var(--color-accent-primary)]" />
             <span>Loading live chart data...</span>
           </div>
         </div>
@@ -823,7 +968,7 @@ export function TradingViewAdvancedChart({
           className="absolute inset-0 flex items-center justify-center backdrop-blur-sm"
           style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 82%, transparent)' }}
         >
-          <div className="max-w-sm rounded-xl border border-red-500/25 bg-[var(--bg-modal)] px-4 py-3 text-center text-xs text-[var(--text-secondary)] shadow-xl">
+          <div className="max-w-sm rounded-xl border border-[var(--color-state-border)] bg-[var(--bg-modal)] px-4 py-3 text-center text-xs text-[var(--text-secondary)] shadow-xl">
             <div className="mb-1 font-semibold text-[var(--text-primary)]">Chart data unavailable</div>
             <div>{error}</div>
           </div>

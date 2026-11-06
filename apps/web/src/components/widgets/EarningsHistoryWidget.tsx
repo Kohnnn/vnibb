@@ -13,6 +13,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { formatFinancialPeriodLabel, isCanonicalQuarterPeriod, periodSortKey } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface EarningsHistoryWidgetProps {
     symbol: string;
@@ -92,9 +93,15 @@ export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryW
                         </thead>
                         <tbody>
                             {rows.map((row, idx) => {
-                                const netMargin = row.revenue && row.net_income
-                                    ? (row.net_income / row.revenue) * 100
-                                    : null;
+                                // A measured zero is a value, not a missing one, so
+                                // this must not be a truthiness test. Revenue of 0
+                                // makes the ratio undefined rather than infinite.
+                                const netMargin =
+                                    typeof row.revenue === 'number' &&
+                                    typeof row.net_income === 'number' &&
+                                    row.revenue !== 0
+                                        ? (row.net_income / row.revenue) * 100
+                                        : null;
 
                                 return (
                                     <tr key={`${row.period || 'period'}-${idx}`} className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]">
@@ -103,7 +110,7 @@ export function EarningsHistoryWidget({ symbol, onDataChange }: EarningsHistoryW
                                         <td className="py-2 pr-4 text-right text-[var(--text-primary)]">{formatNumber(convertFinancialValueForUnit(row.pre_tax_profit ?? row.profit_before_tax ?? null, unitConfig, row.period), { decimals: 0 })}</td>
                                         <td className="py-2 pr-4 text-right text-[var(--text-primary)]">{formatNumber(convertFinancialValueForUnit(row.net_income ?? null, unitConfig, row.period), { decimals: 0 })}</td>
                                         <td className="py-2 pr-4 text-right text-[var(--text-primary)] font-medium">{formatNumber(convertFinancialValueForUnit(row.eps ?? null, unitConfig, row.period), { decimals: 2 })}</td>
-                                        <td className="py-2 text-right text-green-400 font-medium">{formatPercent(netMargin, { decimals: 2, input: 'percent', clamp: 'margin' })}</td>
+                                        <td className={`py-2 text-right font-medium ${signedToneClass(netMargin)}`}>{formatPercent(netMargin, { decimals: 2, input: 'percent', clamp: 'margin' })}</td>
                                     </tr>
                                 );
                             })}

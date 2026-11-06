@@ -25,7 +25,7 @@ export function IndicatorPanel({ configs, onToggle, isOpen, onClose }: Indicator
     <div className="absolute top-12 right-2 w-64 bg-[var(--bg-dropdown)] border border-[var(--border-default)] rounded-xl shadow-2xl z-50 overflow-hidden animate-in slide-in-from-top-2 duration-200">
       <div className="p-3 border-b border-[var(--border-default)] flex items-center justify-between bg-[var(--bg-secondary)]">
         <div className="flex items-center gap-2">
-            <Layers size={14} className="text-blue-500" />
+            <Layers size={14} className="text-[var(--color-accent-primary)]" />
             <span className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">Indicators</span>
         </div>
         <button
@@ -54,7 +54,7 @@ export function IndicatorPanel({ configs, onToggle, isOpen, onClose }: Indicator
                         className={cn(
                             "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-all",
                             indicator.enabled 
-                                ? "bg-blue-600/10 text-blue-400 font-bold" 
+                                ? "bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] font-bold" 
                                 : "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
                         )}
                     >
@@ -75,7 +75,7 @@ export function IndicatorPanel({ configs, onToggle, isOpen, onClose }: Indicator
                         className={cn(
                             "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs transition-all",
                             indicator.enabled 
-                                ? "bg-blue-600/10 text-blue-400 font-bold" 
+                                ? "bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] font-bold" 
                                 : "text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
                         )}
                     >

@@ -92,7 +92,7 @@ export function classifyHurst(hurst: number | null): RegimeFacet {
     return {
       label: 'Trending',
       shortLabel: 'Trending',
-      tone: 'text-emerald-300',
+      tone: 'text-[var(--color-accent-primary)]',
       score: clamp(hurst * 100, 0, 100),
     }
   }
@@ -101,7 +101,7 @@ export function classifyHurst(hurst: number | null): RegimeFacet {
     return {
       label: 'Mean-Reverting',
       shortLabel: 'Mean-Rev',
-      tone: 'text-amber-300',
+      tone: 'text-[var(--color-accent-primary)]',
       score: clamp((1 - hurst) * 100, 0, 100),
     }
   }
@@ -109,7 +109,7 @@ export function classifyHurst(hurst: number | null): RegimeFacet {
   return {
     label: 'Random Walk',
     shortLabel: 'Balanced',
-    tone: 'text-cyan-300',
+    tone: 'text-[var(--color-accent-primary)]',
     score: 55,
   }
 }
@@ -121,25 +121,25 @@ export function classifyVolatility(
   const normalized = String(regime || '').trim().toLowerCase()
 
   if (normalized === 'low') {
-    return { label: 'Low Volatility', shortLabel: 'Low-Vol', tone: 'text-emerald-300', score: 82 }
+    return { label: 'Low Volatility', shortLabel: 'Low-Vol', tone: 'text-[var(--color-accent-primary)]', score: 82 }
   }
   if (normalized === 'high') {
-    return { label: 'High Volatility', shortLabel: 'High-Vol', tone: 'text-amber-300', score: 38 }
+    return { label: 'High Volatility', shortLabel: 'High-Vol', tone: 'text-[var(--color-accent-primary)]', score: 38 }
   }
   if (normalized === 'extreme') {
-    return { label: 'Extreme Volatility', shortLabel: 'Extreme-Vol', tone: 'text-rose-300', score: 18 }
+    return { label: 'Extreme Volatility', shortLabel: 'Extreme-Vol', tone: 'text-[var(--color-accent-primary)]', score: 18 }
   }
 
   if (typeof zScore === 'number' && Number.isFinite(zScore)) {
     if (zScore <= -0.5) {
-      return { label: 'Low Volatility', shortLabel: 'Low-Vol', tone: 'text-emerald-300', score: 78 }
+      return { label: 'Low Volatility', shortLabel: 'Low-Vol', tone: 'text-[var(--color-accent-primary)]', score: 78 }
     }
     if (zScore >= 1.5) {
-      return { label: 'High Volatility', shortLabel: 'High-Vol', tone: 'text-amber-300', score: 34 }
+      return { label: 'High Volatility', shortLabel: 'High-Vol', tone: 'text-[var(--color-accent-primary)]', score: 34 }
     }
   }
 
-  return { label: 'Normal Volatility', shortLabel: 'Normal-Vol', tone: 'text-cyan-300', score: 60 }
+  return { label: 'Normal Volatility', shortLabel: 'Normal-Vol', tone: 'text-[var(--color-accent-primary)]', score: 60 }
 }
 
 export function classifyMomentum(
@@ -151,16 +151,16 @@ export function classifyMomentum(
   const normalizedScore = clamp(((score + 4) / 8) * 100, 0, 100)
 
   if (text.includes('strong uptrend') || text.includes('bull') || score >= 3) {
-    return { label: trendLabel || 'Strong Uptrend', shortLabel: 'Bull', tone: 'text-emerald-300', score: Math.max(normalizedScore, 88) }
+    return { label: trendLabel || 'Strong Uptrend', shortLabel: 'Bull', tone: 'text-[var(--color-positive)]', score: Math.max(normalizedScore, 88) }
   }
   if (text.includes('uptrend') || score >= 1) {
-    return { label: trendLabel || 'Uptrend', shortLabel: 'Bull', tone: 'text-cyan-300', score: Math.max(normalizedScore, 68) }
+    return { label: trendLabel || 'Uptrend', shortLabel: 'Bull', tone: 'text-[var(--color-positive)]', score: Math.max(normalizedScore, 68) }
   }
   if (text.includes('strong downtrend') || text.includes('bear') || score <= -3) {
-    return { label: trendLabel || 'Strong Downtrend', shortLabel: 'Bear', tone: 'text-rose-300', score: Math.min(normalizedScore, 20) }
+    return { label: trendLabel || 'Strong Downtrend', shortLabel: 'Bear', tone: 'text-[var(--color-negative)]', score: Math.min(normalizedScore, 20) }
   }
   if (text.includes('downtrend') || score <= -1) {
-    return { label: trendLabel || 'Downtrend', shortLabel: 'Bear', tone: 'text-amber-300', score: Math.min(normalizedScore, 38) }
+    return { label: trendLabel || 'Downtrend', shortLabel: 'Bear', tone: 'text-[var(--color-negative)]', score: Math.min(normalizedScore, 38) }
   }
 
   return { label: trendLabel || 'Sideways', shortLabel: 'Neutral', tone: 'text-[var(--text-secondary)]', score: 52 }

@@ -8,9 +8,11 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useInsiderDeals } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { formatNumber, formatVND } from '@/lib/formatters';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
+import { EMPTY_VALUE } from '@/lib/units';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface InsiderDealTimelineWidgetProps {
   id: string;
@@ -115,18 +117,18 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
               <div className="grid grid-cols-3 gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
                 <div>
                   <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Buys</div>
-                  <div className="text-xs font-semibold text-emerald-400">{summary.buyCount}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">{summary.buyValue === null ? '—' : formatVND(summary.buyValue)}</div>
+                  <div className="text-xs font-semibold text-[var(--color-positive)]">{summary.buyCount}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{summary.buyValue === null ? EMPTY_VALUE : formatVND(summary.buyValue)}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Sells</div>
-                  <div className="text-xs font-semibold text-red-400">{summary.sellCount}</div>
-                  <div className="text-[10px] text-[var(--text-muted)]">{summary.sellValue === null ? '—' : formatVND(summary.sellValue)}</div>
+                  <div className="text-xs font-semibold text-[var(--color-negative)]">{summary.sellCount}</div>
+                  <div className="text-[10px] text-[var(--text-muted)]">{summary.sellValue === null ? EMPTY_VALUE : formatVND(summary.sellValue)}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Net</div>
-                  <div className={`text-xs font-semibold ${summary.netValue === null ? 'text-[var(--text-muted)]' : summary.netValue >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {summary.netValue === null ? '—' : `${summary.netValue >= 0 ? '+' : '-'}${formatVND(Math.abs(summary.netValue))}`}
+                  <div className={`text-xs font-semibold ${signedToneClass(summary.netValue)}`}>
+                    {summary.netValue === null ? EMPTY_VALUE : `${summary.netValue > 0 ? '+' : summary.netValue < 0 ? '-' : ''}${formatVND(Math.abs(summary.netValue))}`}
                   </div>
                 </div>
               </div>
@@ -135,10 +137,10 @@ export function InsiderDealTimelineWidget({ id, symbol, onRemove, onDataChange }
                 {deals.slice(0, 8).map((deal) => {
                   const actionToken = normalizeInsiderAction(deal.deal_action);
                   const actionLabel = actionToken ?? 'UNKNOWN';
-                  const actionClass = actionToken === 'BUY' ? 'text-emerald-400'
-                    : actionToken === 'SELL' ? 'text-red-400' : 'text-[var(--text-muted)]';
-                  const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : '—';
-                  const valueText = deal.value_unit === 'VND' ? formatVND(deal.deal_value) : '—';
+                  const actionClass = actionToken === 'BUY' ? 'text-[var(--color-positive)]'
+                    : actionToken === 'SELL' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]';
+                  const priceText = deal.price_unit === 'VND' ? formatVND(deal.deal_price) : EMPTY_VALUE;
+                  const valueText = deal.value_unit === 'VND' ? formatVND(deal.deal_value) : EMPTY_VALUE;
                   return (
                     <div
                       key={deal.id}

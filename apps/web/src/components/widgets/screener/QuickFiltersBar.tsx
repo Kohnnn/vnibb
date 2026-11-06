@@ -32,7 +32,7 @@ export function QuickFiltersBar({ activeFilter, onFilterSelect }: QuickFiltersBa
           className={cn(
               "px-3 py-1 text-[10px] font-bold rounded-full whitespace-nowrap transition-all uppercase tracking-tighter border",
               activeFilter === filter.id
-                ? "bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/20"
+                ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] border-[var(--color-state-border)] shadow-lg shadow-[var(--color-state-bg)]"
                 : "border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
           )}
         >

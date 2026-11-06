@@ -31,9 +31,9 @@ interface RSISeasonalWidgetProps {
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 function rsiClass(rsi: number): string {
-  if (rsi >= 70) return 'text-red-300'
-  if (rsi <= 30) return 'text-emerald-300'
-  return 'text-amber-300'
+  if (rsi >= 70) return 'text-[var(--color-negative)]'
+  if (rsi <= 30) return 'text-[var(--color-positive)]'
+  return 'text-[var(--color-warning)]'
 }
 
 export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetProps) {
@@ -100,7 +100,7 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Signal size={12} className="text-cyan-400" />
+          <Signal size={12} className="text-[var(--color-accent-primary)]" />
           <span>RSI Seasonal Profile</span>
         </div>
         <div className="flex items-center gap-2">
@@ -110,7 +110,7 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -161,7 +161,7 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
                       return [`${Number(value).toFixed(2)}%`, label]
                     }}
                   />
-                  <Bar yAxisId="rsi" dataKey="rsi" name="RSI" fill="#0ea5e9" radius={[2, 2, 0, 0]} />
+                  <Bar yAxisId="rsi" dataKey="rsi" name="RSI" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
                   <Line yAxisId="risk" type="monotone" dataKey="overbought" name="Overbought %" stroke={dirColors.negative} strokeWidth={2} dot={false} />
                   <Line yAxisId="risk" type="monotone" dataKey="oversold" name="Oversold %" stroke={dirColors.positive} strokeWidth={2} dot={false} />
                 </ComposedChart>
@@ -177,8 +177,8 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
                   <span className={`font-mono ${rsiClass(row.rsi)}`}>{row.rsi.toFixed(2)}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[10px]">
-                  <div className="text-red-300">OB: {row.overbought.toFixed(1)}%</div>
-                  <div className="text-emerald-300">OS: {row.oversold.toFixed(1)}%</div>
+                  <div className="text-[var(--color-negative)]">OB: {row.overbought.toFixed(1)}%</div>
+                  <div className="text-[var(--color-positive)]">OS: {row.oversold.toFixed(1)}%</div>
                 </div>
               </div>
             ))}

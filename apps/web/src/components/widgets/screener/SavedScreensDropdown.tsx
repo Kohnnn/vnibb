@@ -210,10 +210,10 @@ export function SavedScreensDropdown({
         }}
         className={cn(
             "flex h-8 items-center gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[11px] font-bold uppercase tracking-tight text-[var(--text-primary)] transition-all hover:bg-[var(--bg-tertiary)]",
-            isOpen && "border-blue-500 bg-[var(--bg-tertiary)]"
+            isOpen && "border-[var(--color-state-border)] bg-[var(--bg-tertiary)]"
         )}
       >
-        <Bookmark size={12} className="text-blue-500" />
+        <Bookmark size={12} className="text-[var(--color-accent-primary)]" />
         <span className="truncate max-w-[100px]">{currentScreen.name}</span>
         <ChevronDown size={10} className={cn("transition-transform duration-200 opacity-50", isOpen ? 'rotate-180' : '')} />
       </button>
@@ -246,10 +246,10 @@ export function SavedScreensDropdown({
                     }}
                     className={cn(
                         "w-full flex items-center gap-2 px-2 py-2 text-left text-[11px] font-medium rounded transition-colors group",
-                        activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
+                        activeScreenId === screen.id ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                     )}
                 >
-                    <Star size={10} className={cn(activeScreenId === screen.id ? "fill-blue-500 text-blue-500" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]")} />
+                    <Star size={10} className={cn(activeScreenId === screen.id ? "fill-[var(--color-accent-primary)] text-[var(--color-accent-primary)]" : "text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]")} />
                     {screen.name}
                 </button>
                 ))}
@@ -280,10 +280,10 @@ export function SavedScreensDropdown({
                             }}
                             className={cn(
                                 "flex-1 flex items-center gap-2 px-2 py-2 text-left text-[11px] font-medium rounded transition-colors",
-                                activeScreenId === screen.id ? 'bg-blue-600/10 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
+                                activeScreenId === screen.id ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                             )}
                         >
-                            <Bookmark size={10} className={activeScreenId === screen.id ? "fill-blue-500 text-blue-500" : "text-[var(--text-muted)]"} />
+                            <Bookmark size={10} className={activeScreenId === screen.id ? "fill-[var(--color-accent-primary)] text-[var(--color-accent-primary)]" : "text-[var(--text-muted)]"} />
                             {screen.name}
                         </button>
                         <button
@@ -298,7 +298,7 @@ export function SavedScreensDropdown({
                               });
                               onDelete(screen.id)
                             }}
-                            className="p-2 text-[var(--text-muted)] opacity-0 transition-colors group-hover:opacity-100 hover:text-red-500"
+                            className="p-2 text-[var(--text-muted)] opacity-0 transition-colors group-hover:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                             <Trash2 size={10} />
                         </button>
@@ -316,7 +316,7 @@ export function SavedScreensDropdown({
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="Save current as..."
-                className="flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] text-[var(--text-primary)] outline-none placeholder-[var(--text-muted)] focus:border-blue-500"
+                className="flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] text-[var(--text-primary)] outline-none placeholder-[var(--text-muted)] focus:border-[var(--color-state-border)]"
               />
               <button
                 disabled={!newName.trim()}
@@ -333,7 +333,7 @@ export function SavedScreensDropdown({
                     setNewName('');
                   }
                 }}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded text-[10px] font-bold uppercase hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-3 py-1.5 bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] rounded text-[10px] font-bold uppercase hover:brightness-105 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Plus size={12} />
               </button>

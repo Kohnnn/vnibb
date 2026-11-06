@@ -35,7 +35,7 @@ export function ConsensusOddsWidget() {
                     rel="noreferrer"
                     className="block rounded-lg border border-default bg-[var(--bg-tertiary)] p-3 text-xs transition-colors hover:bg-[var(--bg-hover)]"
                 >
-                    <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-300">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--color-accent-primary)]">
                         {row.source}
                     </div>
                     <h3 className="text-sm font-semibold leading-snug text-[var(--text-primary)]">

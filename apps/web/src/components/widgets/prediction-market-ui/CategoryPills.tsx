@@ -29,7 +29,7 @@ export function CategoryPills({ options, selected, onToggle, allLabel = 'All' }:
                 }}
                 className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
                     allSelected
-                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]'
                         : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                 }`}
                 aria-pressed={allSelected}
@@ -45,7 +45,7 @@ export function CategoryPills({ options, selected, onToggle, allLabel = 'All' }:
                         onClick={() => onToggle(option.value)}
                         className={`rounded-full border px-2 py-0.5 text-[11px] transition ${
                             active
-                                ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)]'
                                 : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                         }`}
                         aria-pressed={active}

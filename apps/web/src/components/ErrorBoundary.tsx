@@ -50,7 +50,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
             return (
                 <div className="flex flex-col items-center justify-center h-full min-h-[120px] p-4 text-center">
-                    <div className="flex items-center gap-2 text-red-400 mb-3">
+                    <div className="flex items-center gap-2 text-[var(--color-warning)] mb-3">
                         <AlertTriangle size={20} />
                         <span className="text-sm font-medium">Something went wrong</span>
                     </div>
@@ -65,7 +65,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                                 this.handleReset();
                             }
                         }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 rounded-md transition-colors"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-[var(--color-accent-primary)] bg-[var(--color-state-bg)] hover:bg-[var(--bg-hover)] rounded-md transition-colors"
                         aria-label="Try again"
                     >
                         <RefreshCw size={12} />
@@ -91,7 +91,7 @@ export function WidgetErrorFallback({
 }) {
     return (
         <div className="flex flex-col items-center justify-center h-full min-h-[80px] p-3">
-            <div className="flex items-center gap-1.5 text-amber-400 mb-2">
+            <div className="flex items-center gap-1.5 text-[var(--color-warning)] mb-2">
                 <AlertTriangle size={14} />
                 <span className="text-xs font-medium">{message}</span>
             </div>

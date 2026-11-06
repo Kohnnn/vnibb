@@ -193,8 +193,8 @@ describe('KeyMetricsWidget', () => {
     ['certified zero remains zero', 'percent', 0, 'percent', '0.00%', 'Ratios'],
     ['unknown ratio falls back to certified screener', 'unknown', 0.25, 'percent', '0.75%', 'Screener'],
     ['missing ratio units fall back to certified screener', undefined, 0.25, 'percent', '0.75%', 'Screener'],
-    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', '-', undefined],
-    ['missing units are unavailable', undefined, 0.25, undefined, '-', undefined],
+    ['unknown units are unavailable', 'unknown', 0.25, 'unknown', 'n/a', undefined],
+    ['missing units are unavailable', undefined, 0.25, undefined, 'n/a', undefined],
   ] as const)('renders dividend yield when %s', (_name, ratioUnit, ratioYield, screenerUnit, expected, source) => {
     mockUseFinancialRatios.mockReturnValue(makeQueryResult<FinancialRatiosResponse>({
       symbol: 'VCB', count: 1,

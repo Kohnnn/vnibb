@@ -141,7 +141,7 @@ export function TabBar(_props: TabBarProps) {
 
     if (!activeDashboard) {
         return (
-            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80 h-9 flex items-center px-4">
+            <div className="flex h-9 items-center border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4">
                 <span className="text-[var(--text-muted)] text-xs">No dashboard selected</span>
             </div>
         );
@@ -335,7 +335,7 @@ export function TabBar(_props: TabBarProps) {
 
     return (
         <>
-            <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/80" {...swipeHandlers}>
+            <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]" {...swipeHandlers}>
                 <div className="flex items-center gap-0.5 px-2 sm:px-3">
                     {/* Tabs */}
                     <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
@@ -356,13 +356,13 @@ export function TabBar(_props: TabBarProps) {
                                     onDragLeave={dashboardEditable ? handleDragLeave : undefined}
                                     className={`
                                         group relative flex items-center gap-1 px-1 py-1 text-xs font-medium 
-                                        transition-all whitespace-nowrap rounded-t cursor-pointer
+                                        transition-colors whitespace-nowrap rounded-t cursor-pointer focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]
                                         ${isActive
-                                            ? 'text-[var(--text-primary)] bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]'
-                                            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/50'
+                                            ? 'border border-b-0 border-[var(--border-strong)] bg-[var(--bg-primary)] font-semibold text-[var(--text-primary)]'
+                                            : 'border border-transparent text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                         }
                                         ${isDragging ? 'opacity-50' : ''}
-                                        ${isDragOver ? 'ring-2 ring-blue-500 ring-inset' : ''}
+                                        ${isDragOver ? 'ring-2 ring-[var(--focus-ring-color)] ring-inset' : ''}
                                     `}
                                     role="button"
                                     tabIndex={0}
@@ -401,7 +401,7 @@ export function TabBar(_props: TabBarProps) {
                                             onBlur={handleRenameConfirm}
                                             onKeyDown={handleRenameKeyDown}
                                             onClick={(e) => e.stopPropagation()}
-                                            className="w-20 bg-[var(--bg-secondary)] border border-blue-500 rounded px-1 py-0.5 text-xs text-[var(--text-primary)] focus:outline-none"
+                                            className="w-20 rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-1 py-0.5 text-xs text-[var(--text-primary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                                         />
                                     ) : (
                                         <span className="flex items-center gap-1 px-1">
@@ -422,8 +422,8 @@ export function TabBar(_props: TabBarProps) {
                                             className={`
                                                 p-0.5 rounded transition-colors
                                                 ${isDeleteConfirm
-                                                    ? 'text-red-400 bg-red-500/20 hover:bg-red-500/30 opacity-100'
-                                                    : `text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/70 ${isActive ? 'opacity-60' : 'opacity-0'} group-hover:opacity-100`
+                                                    ? 'bg-[var(--color-state-bg)] text-[var(--color-warning)] ring-1 ring-inset ring-[var(--color-state-border)] opacity-100'
+                                                    : `text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${isActive ? 'opacity-60' : 'opacity-0'} group-hover:opacity-100`
                                                 }
                                             `}
                                             title={isDeleteConfirm ? 'Click again to confirm delete' : 'Close tab'}
@@ -442,10 +442,10 @@ export function TabBar(_props: TabBarProps) {
                             <button
                                 onClick={handleAddTab}
                                 disabled={reachedTabLimit || isCreatingTab}
-                                className={`ml-1 shrink-0 rounded p-1.5 transition-colors ${
+                                className={`ml-1 shrink-0 rounded p-1.5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] ${
                                     reachedTabLimit || isCreatingTab
-                                        ? 'text-[var(--text-muted)]/50 cursor-not-allowed'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]/60'
+                                        ? 'cursor-not-allowed text-[var(--text-muted)] opacity-50'
+                                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                                 }`}
                                 title={reachedTabLimit ? `Maximum ${MAX_TABS} tabs` : `Add new tab (${shortcutModifier}+T)`}
                             >
@@ -461,7 +461,7 @@ export function TabBar(_props: TabBarProps) {
                                     });
                                     setIsManageModalOpen(true);
                                 }}
-                                className="hidden shrink-0 rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-tertiary)]/60 hover:text-[var(--text-secondary)] sm:block"
+                                className="hidden shrink-0 rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] sm:block"
                                 title="Manage tabs"
                             >
                                 <Settings2 size={14} />
@@ -474,9 +474,9 @@ export function TabBar(_props: TabBarProps) {
 
                     {/* Keyboard shortcuts hint */}
                     <div className="mr-2 hidden shrink-0 items-center gap-2 text-[10px] text-[var(--text-muted)] xl:flex">
-                        <span className="px-1 py-0.5 bg-[var(--bg-tertiary)] rounded">{shortcutModifier}1-9</span>
+                        <span className="rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-1 py-0.5">{shortcutModifier}1-9</span>
                         <span>quick switch</span>
-                        {reachedTabLimit && <span className="text-amber-400">max {MAX_TABS} tabs</span>}
+                        {reachedTabLimit && <span className="text-[var(--color-warning)]">max {MAX_TABS} tabs</span>}
                     </div>
                 </div>
             </div>

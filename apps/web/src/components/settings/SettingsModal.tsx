@@ -535,10 +535,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const decimalOptions = [0, 1, 2, 3];
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(2,6,23,0.72)] backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgb(2_6_23_/_0.72)] animate-in fade-in duration-200">
       <div
         ref={dialogRef}
-        className="bg-[var(--bg-modal)] rounded-xl border border-[var(--border-default)] w-full max-w-3xl max-h-[80vh] flex shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden"
+        className="flex max-h-[80vh] w-full max-w-3xl overflow-hidden rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] shadow-lg"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
@@ -547,7 +547,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         {/* Sidebar */}
         <div className="w-48 bg-[var(--bg-secondary)] border-r border-[var(--border-default)] p-4 shrink-0 hidden md:block">
           <h2 id="settings-modal-title" className="text-lg font-bold text-[var(--text-primary)] mb-6 flex items-center gap-2">
-            <SettingsIcon size={20} className="text-blue-500" />
+            <SettingsIcon size={20} className="text-[var(--color-accent-primary)]" />
             Settings
           </h2>
           <nav className="space-y-1">
@@ -556,9 +556,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left",
+                  "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
                   activeTab === tab.id 
-                    ? "bg-blue-600/20 text-blue-400 font-bold" 
+                    ? "bg-[var(--color-state-bg)] font-semibold text-[var(--color-info)] ring-1 ring-inset ring-[var(--color-state-border)]" 
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                 )}
               >
@@ -576,7 +576,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           id="settings-section-select"
           value={activeTab}
           onChange={event => setActiveTab(event.target.value as SettingTab)}
-          className="md:hidden mx-4 mt-4 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          className="mx-4 mt-4 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] md:hidden"
         >
           {tabs.map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
         </select>
@@ -588,7 +588,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] rounded-lg transition-colors"
+              className="rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               aria-label="Close settings"
             >
               <X size={20} />
@@ -625,10 +625,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         applyPreferences();
                       }
                     }}
-                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] focus:border-blue-500 outline-none"
+                    className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                   />
                   {isTickerMenuOpen && tickerSuggestions.length > 0 && (
-                    <div className="mt-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
+                    <div className="mt-2 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
                       {tickerSuggestions.map((stock) => (
                         <button
                           key={stock.symbol}
@@ -656,16 +656,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <button
                       type="button"
                       onClick={applyPreferences}
-                      className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-1.5 text-[11px] font-bold text-blue-300 transition-colors hover:bg-blue-600/25"
+                      className="rounded-md border border-[var(--border-strong)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       Save Preferences
                     </button>
                   </div>
                   {defaultTickerError && (
-                    <p className="mt-2 text-[11px] text-amber-300">{defaultTickerError}</p>
+                    <p className="mt-2 text-[11px] text-[var(--color-warning)]">{defaultTickerError}</p>
                   )}
                   {preferenceStatus && (
-                    <p className="mt-2 text-[11px] text-emerald-300">{preferenceStatus}</p>
+                    <p className="mt-2 text-[11px] text-[var(--color-info)]">{preferenceStatus}</p>
                   )}
                 </div>
                 <div>
@@ -682,7 +682,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       setDefaultTab(event.target.value as DefaultTabPreference);
                       if (preferenceStatus) setPreferenceStatus(null);
                     }}
-                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] outline-none"
+                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-md px-3 py-2 text-[var(--text-primary)] outline-none"
                   >
                     {DEFAULT_TAB_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -703,7 +703,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </label>
                   <select
                     id="settings-refresh-interval"
-                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg px-3 py-2 text-[var(--text-primary)] outline-none"
+                    className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-md px-3 py-2 text-[var(--text-primary)] outline-none"
                   >
                     <option value="10">10 seconds</option>
                     <option value="30">30 seconds</option>
@@ -711,7 +711,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </select>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">Quick Walkthrough</h4>
@@ -723,7 +723,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="button"
                       data-tour="settings-restart-walkthrough"
                       onClick={handleRestartWalkthrough}
-                      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-[11px] font-bold text-blue-300 transition-colors hover:bg-blue-600/25"
+                      className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-strong)] px-3 py-2 text-[11px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <RotateCcw size={14} />
                       Restart Walkthrough
@@ -731,7 +731,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">Release Notes</h4>
@@ -746,7 +746,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           window.dispatchEvent(new CustomEvent(WHATS_NEW_REOPEN_EVENT));
                         }
                       }}
-                      className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-[11px] font-bold text-blue-300 transition-colors hover:bg-blue-600/25"
+                      className="inline-flex shrink-0 items-center gap-2 rounded-md border border-[var(--border-strong)] px-3 py-2 text-[11px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <Sparkles size={14} />
                       Show Release Notes
@@ -757,21 +757,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             )}
             {activeTab === 'ai' && (
               <div className="space-y-6">
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h4 className="text-sm font-bold text-[var(--text-primary)]">VniAgent Providers</h4>
                       <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                        VniAgent uses a VNIBB database-first workflow. The VNIBB Postgres market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
+                        VniAgent uses a VniBB database-first workflow. The VniBB Postgres market database stays the intended research corpus, while temporary quota-pressure writes can spill into Supabase without changing that preference.
                       </p>
                     </div>
-                    <div className="rounded-full border border-blue-500/30 bg-blue-600/10 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-300">
+                    <div className="rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
                       Settings saved locally
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-3">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-3">
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-primary)]">Current Runtime Summary</h4>
                     <p className="mt-1 text-[11px] text-[var(--text-muted)]">
@@ -785,11 +785,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                       {aiMode === 'browser_key' ? 'Browser Key' : 'App Default'}
                     </span>
-                    <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 font-semibold uppercase tracking-[0.16em] text-blue-200">
+                    <span className="rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                       {aiMode === 'browser_key' ? aiModelInput || 'Set model' : publicRuntimeModel || 'Admin runtime model'}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                      {aiPreferDatabaseData ? 'VNIBB DB first' : 'External-first'}
+                      {aiPreferDatabaseData ? 'VniBB DB first' : 'External-first'}
                     </span>
                     <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-1 font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                       {aiEnableSidebarWorkflowOutputs ? 'Workflow panels on' : 'Answer-first sidebar'}
@@ -815,9 +815,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         if (aiSettingsError) setAiSettingsError(null)
                       }}
                       className={cn(
-                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        'rounded-md border px-3 py-3 text-left transition-all',
                         aiProvider === 'openrouter'
-                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                           : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
                       )}
                     >
@@ -836,9 +836,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         if (aiSettingsError) setAiSettingsError(null)
                       }}
                       className={cn(
-                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        'rounded-md border px-3 py-3 text-left transition-all',
                         aiProvider === 'openai_compatible'
-                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                           : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
                       )}
                     >
@@ -859,9 +859,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         if (aiSettingsError) setAiSettingsError(null)
                       }}
                       className={cn(
-                        'rounded-lg border px-3 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                        'rounded-md border px-3 py-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50',
                         aiMode === 'app_default'
-                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                           : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
                       )}
                     >
@@ -875,9 +875,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         if (aiSettingsError) setAiSettingsError(null)
                       }}
                       className={cn(
-                        'rounded-lg border px-3 py-3 text-left transition-all',
+                        'rounded-md border px-3 py-3 text-left transition-all',
                         aiMode === 'browser_key'
-                          ? 'border-blue-500 bg-blue-600/15 text-blue-300'
+                          ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                           : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
                       )}
                     >
@@ -888,12 +888,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 {aiMode === 'browser_key' && (
-                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-5 text-amber-100/90">
+                  <div className="rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-4 py-3 text-xs leading-5 text-[var(--text-primary)]">
                     <div className="flex items-start gap-2">
-                      <Shield size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                      <Shield size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" />
                       <div>
-                        <div className="font-bold uppercase tracking-[0.14em] text-amber-200">Browser-local key risk</div>
-                        <p className="mt-1 text-[11px] text-amber-100/80">
+                        <div className="font-bold uppercase tracking-[0.14em] text-[var(--color-warning)]">Browser-local key risk</div>
+                        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
                           Browser Key mode stores the provider key in localStorage and sends requests from this tab. Browser extensions, injected scripts, or shared devices can read or use that key, so prefer a restricted key and switch back to App Default on shared machines.
                         </p>
                       </div>
@@ -920,7 +920,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     }}
                     placeholder="openai/gpt-4o-mini"
                     disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
-                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] disabled:cursor-not-allowed disabled:opacity-60"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
                     {aiProvider === 'openrouter' && aiMode === 'app_default'
@@ -939,7 +939,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           href={adminOpenRouterFreeModelsUrl || 'https://openrouter.ai/collections/free-models'}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-cyan-300 underline underline-offset-2"
+                          className="text-[var(--color-accent-primary)] underline underline-offset-2"
                         >
                           OpenRouter free models
                         </a>
@@ -956,7 +956,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             type="button"
                             onClick={() => setAiModelInput(model.id)}
                             disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
-                            className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-semibold text-blue-300 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                             title={model.description || model.name}
                           >
                             {model.name}
@@ -968,7 +968,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             type="button"
                             onClick={() => setAiModelInput(model.id)}
                             disabled={aiProvider === 'openrouter' && aiMode === 'app_default'}
-                            className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold text-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                             title={model.description || model.name}
                           >
                             {model.name} · free
@@ -978,7 +978,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           <span className="text-[10px] text-[var(--text-muted)]">Loading OpenRouter models…</span>
                         )}
                         {openRouterModelsError && !isOpenRouterModelsLoading && (
-                          <span className="text-[10px] text-amber-300">{openRouterModelsError}</span>
+                          <span className="text-[10px] text-[var(--color-warning)]">{openRouterModelsError}</span>
                         )}
                       </div>
                     </>
@@ -1008,10 +1008,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       if (aiSettingsError) setAiSettingsError(null)
                     }}
                     placeholder={aiMode === 'browser_key' ? 'Required for browser-local mode' : 'Optional unless Browser Key mode is enabled'}
-                    className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                    className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                   />
                   <p className="mt-2 text-[10px] text-[var(--text-muted)]">
-                    This key stays in browser localStorage. VNIBB does not persist it server-side, but scripts running in this browser profile can access localStorage.
+                    This key stays in browser localStorage. VniBB does not persist it server-side, but scripts running in this browser profile can access localStorage.
                   </p>
                 </div>
 
@@ -1032,7 +1032,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         if (aiSettingsError) setAiSettingsError(null)
                       }}
                       placeholder="https://api.openai.com/v1"
-                      className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                      className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                     />
                     <p className="mt-2 text-[10px] text-[var(--text-muted)]">
                       This must expose an OpenAI-style `/chat/completions` endpoint.
@@ -1043,12 +1043,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div>
                   <h4 className="mb-2 text-sm font-bold uppercase tracking-wider text-[var(--text-secondary)] text-[10px]">Data & Behavior</h4>
                   <p className="mb-3 text-[11px] text-[var(--text-muted)]">
-                    Control whether VniAgent stays VNIBB database-first, whether it can reach the web, and whether the sidebar keeps workflow detail panels visible.
+                    Control whether VniAgent stays VniBB database-first, whether it can reach the web, and whether the sidebar keeps workflow detail panels visible.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <label className="flex items-start gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                     <input
                       type="checkbox"
                       checked={aiPreferDatabaseData}
@@ -1056,11 +1056,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       className="mt-0.5 h-4 w-4 rounded"
                     />
                     <span>
-                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VNIBB database</span>
-                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the VNIBB database first and only fall back when context is missing.</span>
+                      <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Prefer VniBB database</span>
+                      <span className="mt-1 block text-[11px] text-[var(--text-muted)]">Use the VniBB database first and only fall back when context is missing.</span>
                     </span>
                   </label>
-                  <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <label className="flex items-start gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                     <input
                       type="checkbox"
                       checked={aiWebSearch}
@@ -1071,11 +1071,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <span>
                       <span className="block text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">Allow web search</span>
                       <span className="mt-1 block text-[11px] text-[var(--text-muted)]">{aiProvider === 'openrouter'
-                        ? 'Keep this off unless you want the model to supplement VNIBB database context with external web context.'
+                        ? 'Keep this off unless you want the model to supplement VniBB database context with external web context.'
                         : 'Web search is currently available only through the OpenRouter path.'}</span>
                     </span>
                   </label>
-                  <label className="flex items-start gap-3 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <label className="flex items-start gap-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                     <input
                       type="checkbox"
                       checked={aiEnableSidebarWorkflowOutputs}
@@ -1090,17 +1090,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 {aiSettingsError && (
-                  <p className="text-[11px] text-amber-300">{aiSettingsError}</p>
+                  <p className="text-[11px] text-[var(--color-warning)]">{aiSettingsError}</p>
                 )}
                 {preferenceStatus && (
-                  <p className="text-[11px] text-emerald-300">{preferenceStatus}</p>
+                  <p className="text-[11px] text-[var(--color-info)]">{preferenceStatus}</p>
                 )}
 
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={applyAISettings}
-                    className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-300 transition-colors hover:bg-blue-600/25"
+                    className="rounded-md border border-[var(--border-strong)] px-4 py-2 text-sm font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   >
                     Save VniAgent Settings
                   </button>
@@ -1124,7 +1124,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       setAiSettingsError(null)
                       setPreferenceStatus('VniAgent settings reset to defaults for this browser.')
                     }}
-                    className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    className="rounded-md border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                   >
                     Reset VniAgent Settings
                   </button>
@@ -1147,9 +1147,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           setPreferredVnstockSource(src)
                         }}
                         className={cn(
-                          "px-3 py-2 rounded-lg border text-sm transition-all",
+                          "px-3 py-2 rounded-md border text-sm transition-all",
                           preferredVnstockSource === src
-                            ? "bg-blue-600/20 border-blue-500 text-blue-400 font-bold"
+                            ? "bg-[var(--color-state-bg)] font-semibold text-[var(--color-info)] ring-1 ring-inset ring-[var(--color-state-border)]"
                             : "bg-[var(--bg-secondary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]"
                         )}
                       >
@@ -1167,7 +1167,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
                 <McpToolCatalogPanel />
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                   <div className="text-sm font-bold text-[var(--text-primary)]">Display Units, FX overrides, and decimal precision moved</div>
                   <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                     These controls now live under <span className="font-semibold text-[var(--text-secondary)]">Appearance</span> alongside Theme, Density, and Chart Style.
@@ -1175,7 +1175,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <button
                     type="button"
                     onClick={() => setActiveTab('appearance')}
-                    className="mt-3 inline-flex items-center rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold text-blue-300 hover:bg-blue-500/20"
+                    className="mt-3 inline-flex items-center rounded-md border border-[var(--border-strong)] px-3 py-1.5 text-[11px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   >
                     Open Appearance →
                   </button>
@@ -1184,9 +1184,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             )}
             {activeTab === 'notifications' && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
                   <div className="flex items-start gap-3">
-                    <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2 text-blue-300">
+                    <div className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)]">
                       <Bell size={16} />
                     </div>
                     <div>
@@ -1198,12 +1198,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
-                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-300">Available Now</div>
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Available Now</div>
                     <div className="mt-2 text-xs text-[var(--text-secondary)]">In-workspace price alerts, alert history, and widget-level thresholds.</div>
                   </div>
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
-                    <div className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-300">Planned</div>
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-warning)]">Planned</div>
                     <div className="mt-2 text-xs text-[var(--text-secondary)]">Email, browser push, and default notification policies.</div>
                   </div>
                 </div>
@@ -1213,8 +1213,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="space-y-6">
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Theme</h4>
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                    <div className="text-sm font-bold text-blue-300">Theme mode</div>
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-bold text-[var(--text-primary)]">Theme mode</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
                       Choose the shell theme for this browser.
                     </div>
@@ -1227,14 +1227,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           className={cn(
                             'rounded-full border px-3 py-1 text-[11px] font-semibold capitalize transition-colors',
                             theme === option
-                              ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                              ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                               : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                           )}
                         >
                           {option}
                         </button>
                       ))}
-                      <div className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-[11px] font-semibold text-blue-300">
+                      <div className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
                         Active theme: {resolvedTheme}
                       </div>
                     </div>
@@ -1242,8 +1242,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Density</h4>
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                    <div className="text-sm font-bold text-blue-300">Layout density</div>
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-bold text-[var(--text-primary)]">Layout density</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
                       Controls global spacing and row heights via the <code className="px-1 rounded bg-[var(--bg-tertiary)]">data-density</code> attribute on the document. Widgets that opt-in to density-aware styling will reflow accordingly.
                     </div>
@@ -1256,7 +1256,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           className={cn(
                             'rounded-full border px-3 py-1 text-[11px] font-semibold capitalize transition-colors',
                             density === option
-                              ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                              ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                               : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                           )}
                         >
@@ -1268,8 +1268,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Chart Style</h4>
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-                    <div className="text-sm font-bold text-blue-300">Default chart series</div>
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-bold text-[var(--text-primary)]">Default chart series</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
                       Sets the default rendering style for new price charts. Existing widgets with an explicit per-widget setting will keep their override.
                     </div>
@@ -1282,7 +1282,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           className={cn(
                             'rounded-full border px-3 py-1 text-[11px] font-semibold capitalize transition-colors',
                             chartStyle === option
-                              ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+                              ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                               : 'border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                           )}
                         >
@@ -1294,10 +1294,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Accessibility</h4>
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3 space-y-4">
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3 space-y-4">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="text-sm font-bold text-blue-300">Reduce visual effects</div>
+                        <div className="text-sm font-bold text-[var(--text-primary)]">Reduce visual effects</div>
                         <div className="mt-1 text-xs text-[var(--text-muted)]">
                           Disables widget background blur, hover lift, and shimmer animations for smoother performance on lower-end machines. Motion is also reduced automatically when your system requests it.
                         </div>
@@ -1310,7 +1310,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                     <div className="flex items-start justify-between gap-4 border-t border-[var(--border-subtle)] pt-4">
                       <div>
-                        <div className="text-sm font-bold text-blue-300">Colorblind-safe palette</div>
+                        <div className="text-sm font-bold text-[var(--text-primary)]">Colorblind-safe palette</div>
                         <div className="mt-1 text-xs text-[var(--text-muted)]">
                           Remaps positive, negative, and warning market colors to blue, orange, and amber cues for this browser.
                         </div>
@@ -1324,7 +1324,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                   <div className="text-sm font-bold text-[var(--text-primary)]">Display Units</div>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">Applies to financial values across all widgets.</p>
                   <div className="mt-3 grid grid-cols-3 gap-2 md:grid-cols-6">
@@ -1339,9 +1339,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           setUnit(option.value)
                         }}
                         className={cn(
-                          'px-3 py-2 rounded-lg border text-[11px] font-bold transition-all',
+                          'px-3 py-2 rounded-md border text-[11px] font-bold transition-all',
                           unitConfig.display === option.value
-                            ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                            ? 'bg-[var(--color-state-bg)] ring-1 ring-inset ring-[var(--color-state-border)] text-[var(--color-info)]'
                             : 'bg-[var(--bg-primary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
                         )}
                       >
@@ -1351,7 +1351,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-4">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 space-y-4">
                   <div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-sm font-bold text-[var(--text-primary)]">Currency &amp; FX</div>
@@ -1362,23 +1362,23 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <p className="mt-1 text-[10px] text-[var(--text-muted)]">
                       Financial and fundamental widgets convert VND values to USD using the rate for each report year. You can prepare yearly overrides here even while the site is still displaying VND.
                     </p>
-                    <p className="mt-1 text-[10px] text-cyan-300">
+                    <p className="mt-1 text-[10px] text-[var(--text-muted)]">
                       Admin fallback: {formatNumber(globalUsdVndDefaultRate, { decimals: 0 })} VND/USD. Shared yearly defaults loaded for {Object.keys(adminUsdVndRatesByYear).length} years.
                     </p>
                     {Object.keys(adminUsdVndRatesByYear).length === 0 ? (
-                      <p className="mt-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200">
+                      <p className="mt-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                         Historical USD conversion is using one global fallback for every year. Add yearly FX defaults before relying on long-range USD comparisons.
                       </p>
                     ) : null}
                     {unitConfig.display !== 'USD' ? (
-                      <p className="mt-1 text-[10px] text-amber-300">
+                      <p className="mt-1 text-[10px] text-[var(--color-warning)]">
                         These FX overrides take effect when Display Units is set to USD.
                       </p>
                     ) : null}
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {usdRateYears.map((year) => (
-                      <label key={year} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                      <label key={year} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
                         <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{year}</div>
                         <input
                           type="number"
@@ -1415,7 +1415,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             setUsdVndRate(year, parsed)
                           }}
                           placeholder={String(adminUsdVndRatesByYear[String(year)] || globalUsdVndDefaultRate)}
-                          className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                          className="mt-2 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         />
                         <div className="mt-1 text-[10px] text-[var(--text-muted)]">
                           {localUsdVndRatesByYear[String(year)]
@@ -1425,7 +1425,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                               : 'Using admin global default'}
                         </div>
                         {!localUsdVndRatesByYear[String(year)] && adminUsdVndRatesByYear[String(year)] ? (
-                          <div className="mt-1 text-[10px] text-cyan-300">
+                          <div className="mt-1 text-[10px] text-[var(--text-muted)]">
                             Admin default: {formatNumber(adminUsdVndRatesByYear[String(year)], { decimals: 0 })} VND/USD
                           </div>
                         ) : null}
@@ -1443,14 +1443,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         setUsdRateInputs({})
                         setPreferenceStatus('Local USD/VND yearly overrides cleared.')
                       }}
-                      className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      className="rounded-md border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                     >
                       Reset Local USD Overrides
                     </button>
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
                   <div className="text-sm font-bold text-[var(--text-primary)]">Decimal Places</div>
                   <div className="mt-3 grid grid-cols-4 gap-2">
                     {decimalOptions.map((value) => (
@@ -1464,9 +1464,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           setDecimalPlaces(value)
                         }}
                         className={cn(
-                          'px-3 py-2 rounded-lg border text-[11px] font-bold transition-all',
+                          'px-3 py-2 rounded-md border text-[11px] font-bold transition-all',
                           unitConfig.decimalPlaces === value
-                            ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                            ? 'bg-[var(--color-state-bg)] ring-1 ring-inset ring-[var(--color-state-border)] text-[var(--color-info)]'
                             : 'bg-[var(--bg-primary)] border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-accent)]'
                         )}
                       >
@@ -1476,11 +1476,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </div>
                 </div>
 
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                   <p className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mb-2">Preview</p>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-[var(--text-secondary)]">1,234,567,890</span>
-                    <span className="text-sm font-mono text-blue-300">
+                    <span className="font-mono text-sm text-[var(--text-secondary)]">
                       {formatUnitValue(1234567890, unitConfig)}
                     </span>
                   </div>
@@ -1492,7 +1492,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="space-y-6">
                 <div>
                   <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Admin Session</h4>
-                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
                     <div className="text-sm font-bold text-[var(--text-primary)]">Admin access</div>
                     <div className="mt-1 text-xs text-[var(--text-muted)]">
                       {adminStatus === 'authorized' ? 'Your signed-in account is authorized to edit admin settings and publish system dashboards.'
@@ -1501,12 +1501,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             : `Admin access denied: ${adminError || 'Your account does not have admin permission.'} Sign in with an authorized account or ask an administrator to grant access.`}
                     </div>
                     {adminStatus === 'denied' && (
-                      <button type="button" onClick={refreshAdminSession} className="mt-3 rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+                      <button type="button" onClick={refreshAdminSession} className="mt-3 rounded-md border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
                         Check admin access again
                       </button>
                     )}
                     {isAdmin ? (
-                      <div className="mt-4 flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
+                      <div className="mt-4 flex items-center justify-between rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3">
                         <div className="pr-4">
                           <div className="text-sm font-semibold text-[var(--text-primary)]">Show global layout controls</div>
                           <div className="mt-1 text-xs text-[var(--text-muted)]">
@@ -1532,17 +1532,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 {isAdmin && (
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">VniAgent Runtime Defaults</h4>
-                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
+                    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
                       <div className="text-sm font-bold text-[var(--text-primary)]">App default OpenRouter model</div>
                       <div className="mt-1 text-xs text-[var(--text-muted)]">
                         This controls the default model used when users select `App Default` in AI settings.
                       </div>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterConfigured ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
+                        <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterConfigured ? 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-primary)]' : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]'}`}>
                           OpenRouter: {adminOpenRouterConfigured ? 'configured' : 'missing key'}
                         </div>
                         {adminOpenRouterReachable !== null && (
-                          <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterReachable ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'}`}>
+                          <div className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${adminOpenRouterReachable ? 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-primary)]' : 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-warning)]'}`}>
                             Catalog: {adminOpenRouterReachable ? 'reachable' : (adminOpenRouterCatalogSource || 'fallback')}
                           </div>
                         )}
@@ -1556,7 +1556,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           href={adminOpenRouterFreeModelsUrl || 'https://openrouter.ai/collections/free-models'}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-cyan-300 underline underline-offset-2"
+                          className="text-[var(--color-accent-primary)] underline underline-offset-2"
                         >
                           OpenRouter free models
                         </a>
@@ -1567,7 +1567,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         value={adminAiModelInput}
                         onChange={(event) => setAdminAiModelInput(event.target.value)}
                         placeholder="openai/gpt-4o-mini"
-                        className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                        className="mt-4 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                       />
                       <datalist id="vniagent-admin-openrouter-models">
                         {openRouterModels.map((model) => (
@@ -1580,7 +1580,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             key={model.id}
                             type="button"
                             onClick={() => setAdminAiModelInput(model.id)}
-                            className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[10px] font-semibold text-blue-300"
+                            className="rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)]"
                             title={model.description || model.name}
                           >
                             {model.name}
@@ -1613,7 +1613,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             }
                           }}
                           disabled={isAdminAiRuntimeSaving || isAdminAiRuntimeLoading}
-                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminAiRuntimeSaving ? 'Saving…' : 'Save AI Model'}
                         </button>
@@ -1621,7 +1621,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           type="button"
                           onClick={() => void loadAdminAiRuntimeConfig()}
                           disabled={isAdminAiRuntimeSaving || isAdminAiRuntimeLoading}
-                          className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminAiRuntimeLoading ? 'Loading…' : 'Reload'}
                         </button>
@@ -1633,7 +1633,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 {isAdmin && (
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Admin USD/VND Defaults</h4>
-                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
+                    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
                       <div>
                         <div className="text-sm font-bold text-[var(--text-primary)]">Global fallback VND per USD rate</div>
                         <div className="mt-1 text-xs text-[var(--text-muted)]">
@@ -1646,7 +1646,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           step="0.01"
                           value={adminUsdVndDefaultRateInput}
                           onChange={(event) => setAdminUsdVndDefaultRateInput(event.target.value)}
-                          className="mt-4 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                          className="mt-4 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         />
                       </div>
 
@@ -1657,7 +1657,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </div>
                         <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                           {usdRateYears.map((year) => (
-                            <label key={year} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                            <label key={year} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
                               <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">{year}</div>
                               <input
                                 type="number"
@@ -1670,7 +1670,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                   setAdminUsdRateInputs((prev) => ({ ...prev, [String(year)]: nextValue }))
                                 }}
                                 placeholder={adminUsdVndRatesByYear[String(year)] ? String(adminUsdVndRatesByYear[String(year)]) : 'Use global fallback'}
-                                className="mt-2 w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                                className="mt-2 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                               />
                               <div className="mt-1 text-[10px] text-[var(--text-muted)]">
                                 {adminUsdVndRatesByYear[String(year)] ? 'Admin yearly default' : 'Using global fallback'}
@@ -1712,7 +1712,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             }
                           }}
                           disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
-                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminUnitRuntimeSaving ? 'Saving…' : 'Save Admin USD Defaults'}
                         </button>
@@ -1720,7 +1720,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           type="button"
                           onClick={() => void loadAdminUnitRuntimeConfig()}
                           disabled={isAdminUnitRuntimeSaving || isAdminUnitRuntimeLoading}
-                          className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminUnitRuntimeLoading ? 'Loading…' : 'Reload'}
                         </button>
@@ -1732,7 +1732,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 {isAdmin && (
                   <div>
                     <h4 className="text-sm font-bold text-[var(--text-secondary)] mb-2 uppercase tracking-wider text-[10px]">Shared VniAgent Prompt Library</h4>
-                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
+                    <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 space-y-4">
                       <div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         <span>Version {sharedPromptVersion}</span>
                         {sharedPromptHistory[0]?.updated_at ? <span>· Updated {sharedPromptHistory[0].updated_at}</span> : null}
@@ -1747,12 +1747,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           value={newSharedPromptLabel}
                           onChange={(event) => setNewSharedPromptLabel(event.target.value)}
                           placeholder="Prompt title"
-                          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         />
                         <select
                           value={newSharedPromptCategory}
                           onChange={(event) => setNewSharedPromptCategory(event.target.value as NonNullable<PromptTemplate['category']>)}
-                          className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                          className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         >
                           <option value="analysis">Analysis</option>
                           <option value="comparison">Comparison</option>
@@ -1764,7 +1764,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <button
                           type="button"
                           onClick={addSharedPromptDraft}
-                          className="rounded-lg border border-blue-500/40 bg-blue-600/15 px-4 py-2 text-sm font-semibold text-blue-300 transition-colors hover:bg-blue-600/25"
+                          className="rounded-md border border-[var(--border-strong)] px-4 py-2 text-sm font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                           Add Shared Prompt
                         </button>
@@ -1775,7 +1775,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         onChange={(event) => setNewSharedPromptTemplate(event.target.value)}
                         placeholder="Prompt template"
                         rows={3}
-                        className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus:border-blue-500"
+                        className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                       />
 
                       <div className="space-y-2">
@@ -1783,11 +1783,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           <div className="text-xs text-[var(--text-muted)]">Loading shared prompts…</div>
                         ) : sharedPrompts.length ? (
                           sharedPrompts.map((prompt, index) => (
-                            <div key={prompt.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                            <div key={prompt.id} className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
                               <div className="flex items-start justify-between gap-3">
                                 <div>
                                   <div className="text-sm font-semibold text-[var(--text-primary)]">{prompt.label}</div>
-                                  <div className="mt-1 text-[10px] uppercase tracking-wider text-cyan-300">{prompt.category || 'custom'}</div>
+                                  <div className="mt-1 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">{prompt.category || 'custom'}</div>
                                 </div>
                                 <button
                                   type="button"
@@ -1798,7 +1798,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                     })
                                     setSharedPrompts((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
                                   }}
-                                  className="rounded-lg border border-[var(--border-default)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                                  className="rounded-md border border-[var(--border-default)] px-3 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                                 >
                                   Remove
                                 </button>
@@ -1812,12 +1812,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       </div>
 
                       {sharedPromptHistory.length > 0 && (
-                        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
+                        <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
                           <div className="text-xs font-semibold uppercase tracking-wider text-[var(--text-primary)]">Version History</div>
                           <div className="mt-2 space-y-1 text-[11px] text-[var(--text-secondary)]">
                             {sharedPromptHistory.map((entry) => (
                               <div key={`${entry.version}-${entry.updated_at || 'na'}`} className="flex flex-wrap items-center gap-2">
-                                <span className="font-semibold text-cyan-300">v{entry.version}</span>
+                                <span className="font-semibold text-[var(--text-secondary)]">v{entry.version}</span>
                                 <span>{entry.prompt_count} prompts</span>
                                 {entry.updated_at ? <span className="text-[var(--text-muted)]">{entry.updated_at}</span> : null}
                               </div>
@@ -1831,7 +1831,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           type="button"
                           onClick={() => void loadAdminPromptLibrary()}
                           disabled={isAdminPromptLibraryLoading || isAdminPromptLibrarySaving}
-                          className="rounded-lg border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md border border-[var(--border-default)] px-4 py-2 text-sm font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminPromptLibraryLoading ? 'Loading…' : 'Reload Shared Prompts'}
                         </button>
@@ -1839,7 +1839,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           type="button"
                           onClick={() => void saveSharedPromptLibrary()}
                           disabled={isAdminPromptLibraryLoading || isAdminPromptLibrarySaving}
-                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          className="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isAdminPromptLibrarySaving ? 'Saving…' : 'Save Shared Prompts'}
                         </button>

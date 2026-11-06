@@ -1,4 +1,5 @@
 'use client'
+import { EMPTY_VALUE } from '@/lib/units'
 
 /**
  * Two-stage DCF and reverse-DCF math for the Valuation Lab widget.
@@ -128,7 +129,7 @@ export function dcfResultToRows(
   result: DcfResult,
   currentPrice: number | null,
 ): Array<Record<string, string | number>> {
-  const fmt = (v: number | null, digits = 2) => (v === null || !Number.isFinite(v) ? '—' : v.toFixed(digits))
+  const fmt = (v: number | null, digits = 2) => (v === null || !Number.isFinite(v) ? EMPTY_VALUE : v.toFixed(digits))
   const pct = (v: number) => `${(v * 100).toFixed(1)}%`
   const upside =
     currentPrice && currentPrice > 0 && result.intrinsicPerShare !== null
@@ -148,6 +149,6 @@ export function dcfResultToRows(
     { field: 'Equity value', value: fmt(result.equityValue) },
     { field: 'Intrinsic / share', value: fmt(result.intrinsicPerShare) },
     { field: 'Current price', value: fmt(currentPrice) },
-    { field: 'Upside vs price %', value: upside === null ? '—' : upside.toFixed(1) },
+    { field: 'Upside vs price %', value: upside === null ? EMPTY_VALUE : upside.toFixed(1) },
   ]
 }

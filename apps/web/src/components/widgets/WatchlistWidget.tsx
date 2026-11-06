@@ -309,15 +309,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
     };
     const getChangeColor = (change: number | null) => {
         if (change === null) return 'text-[var(--text-muted)]';
-        if (change > 0) return 'text-green-400';
-        if (change < 0) return 'text-red-400';
-        return 'text-yellow-400';
+        if (change > 0) return 'text-[var(--color-positive)]';
+        if (change < 0) return 'text-[var(--color-negative)]';
+        return 'text-[var(--text-secondary)]';
     };
     const getChangeIcon = (change: number | null) => {
         if (change === null) return <Minus size={14} className="text-[var(--text-muted)]" />;
-        if (change > 0) return <TrendingUp size={14} className="text-green-400" />;
-        if (change < 0) return <TrendingDown size={14} className="text-red-400" />;
-        return <Minus size={14} className="text-yellow-400" />;
+        if (change > 0) return <TrendingUp size={14} className="text-[var(--color-positive)]" />;
+        if (change < 0) return <TrendingDown size={14} className="text-[var(--color-negative)]" />;
+        return <Minus size={14} className="text-[var(--text-secondary)]" />;
     };
     const getSortIcon = (field: SortField) => {
         if (sortConfig.field !== field) return null;
@@ -334,15 +334,15 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
             <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)]">
                     <div className="flex items-center gap-2">
-                        <Star size={14} className="text-yellow-400" />
+                        <Star size={14} className="text-[var(--color-accent-primary)]" />
                         <span className="text-xs text-[var(--text-muted)] font-bold uppercase tracking-tighter">{symbols.length} symbols</span>
                     </div>
                     <div className="flex items-center gap-1">
-                        <button type="button" aria-label="Add watchlist symbol" onClick={() => setShowAddInput(!showAddInput)} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-colors">
+                        <button type="button" aria-label="Add watchlist symbol" onClick={() => setShowAddInput(!showAddInput)} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] transition-colors">
                             <Plus size={14} />
                         </button>
                         {symbols.length > 0 && (
-                            <button type="button" aria-label="Clear watchlist" onClick={() => setShowClearConfirm(true)} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:text-red-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-colors">
+                            <button type="button" aria-label="Clear watchlist" onClick={() => setShowClearConfirm(true)} className="min-h-11 min-w-11 rounded p-2 text-[var(--text-muted)] hover:text-[var(--color-negative)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] transition-colors">
                                 <Trash2 size={14} />
                             </button>
                         )}
@@ -359,16 +359,16 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                         sourceLabel={sourceLabel}
                         align="right"
                     />
-                    {warnings.map(warning => <p key={warning} role="status" className="mt-1 text-[10px] text-amber-400">{warning}</p>)}
+                    {warnings.map(warning => <p key={warning} role="status" className="mt-1 text-[10px] text-[var(--color-warning)]">{warning}</p>)}
                 </div>
 
                 {showClearConfirm && (
-                    <div className="px-3 py-2 border-b border-red-900/20 bg-red-900/10 text-left">
+                    <div className="px-3 py-2 border-b border-[var(--color-state-border)] bg-[var(--color-negative-bg)] text-left">
                         <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-red-400 font-bold uppercase">Clear watchlist?</span>
+                            <span className="text-[10px] text-[var(--color-negative)] font-bold uppercase">Clear watchlist?</span>
                             <div className="flex gap-2">
-                                <button type="button" onClick={handleClearAll} className="min-h-11 rounded bg-red-600 px-3 text-[10px] font-bold uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Clear</button>
-                                <button type="button" onClick={() => setShowClearConfirm(false)} className="min-h-11 rounded px-3 text-[var(--text-secondary)] text-[10px] font-bold uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Cancel</button>
+                                <button type="button" onClick={handleClearAll} className="min-h-11 rounded bg-[var(--color-negative-bg)] px-3 text-[10px] font-bold uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">Clear</button>
+                                <button type="button" onClick={() => setShowClearConfirm(false)} className="min-h-11 rounded px-3 text-[var(--text-secondary)] text-[10px] font-bold uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">Cancel</button>
                             </div>
                         </div>
                     </div>
@@ -385,13 +385,13 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                                 value={newSymbol}
                                 onChange={(e) => { setNewSymbol(e.target.value.toUpperCase()); setSymbolError(null); }}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
-                                className="min-h-11 flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus-visible:ring-2 focus-visible:ring-blue-500/40 outline-none"
+                                className="min-h-11 flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded px-2 py-1 text-xs text-[var(--text-primary)] uppercase font-bold focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] outline-none"
                                 placeholder="SYMBOL"
                                 autoFocus
                             />
-                            <button type="button" onClick={handleAddSymbol} className="min-h-11 rounded bg-blue-600 px-3 py-1 text-[10px] font-black uppercase tracking-tighter focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40">Add</button>
+                            <button type="button" onClick={handleAddSymbol} className="min-h-11 rounded bg-[var(--color-state-bg)] px-3 py-1 text-[10px] font-black uppercase tracking-tighter focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]">Add</button>
                         </div>
-                        {symbolError && <p id={symbolErrorId} role="alert" className="mt-2 text-xs text-red-400">{symbolError}</p>}
+                        {symbolError && <p id={symbolErrorId} role="alert" className="mt-2 text-xs text-[var(--color-negative)]">{symbolError}</p>}
                     </div>
                 )}
 
@@ -430,12 +430,12 @@ function WatchlistWidgetComponent({ id, config, isEditing, onRemove, widgetGroup
                                         role="button"
                                         tabIndex={0}
                                         aria-label={`View ${item.symbol}`}
-                                        className="border-b border-[var(--border-color)]/70 hover:bg-[var(--bg-secondary)]/50 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                                        className="border-b border-[var(--border-color)]/70 hover:bg-[var(--bg-secondary)]/50 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                                     >
                                         <td className="px-3 py-2">
                                             <div className="flex items-center gap-2">
                                                 {getChangeIcon(item.change)}
-                                                <span className="font-black text-blue-400 group-hover:text-blue-300 transition-colors">{item.symbol}</span>
+                                                <span className="font-black text-[var(--color-accent-primary)] group-hover:text-[var(--color-accent-primary)] transition-colors">{item.symbol}</span>
                                             </div>
                                         </td>
                                         <td className="text-right px-2 py-2 font-mono text-[var(--text-primary)]">

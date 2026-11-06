@@ -7,7 +7,7 @@ import { GapAnalysisWidget } from './GapAnalysisWidget'
 
 jest.mock('@/lib/queries', () => ({ useQuantMetrics: jest.fn() }))
 jest.mock('@/hooks/useLoadingTimeout', () => ({ useLoadingTimeout: jest.fn() }))
-jest.mock('@/hooks/useDirectionColors', () => ({ useDirectionColors: () => ({ positive: 'green', negative: 'red' }) }))
+jest.mock('@/hooks/useDirectionColors', () => ({ useDirectionColors: () => ({ positive: 'green', negative: 'red', neutral: 'gray', forValue: () => 'gray' }) }))
 jest.mock('@/components/ui/ChartMountGuard', () => ({ ChartMountGuard: () => null }))
 jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }))
 
@@ -35,7 +35,7 @@ function showGap(meta: Record<string, unknown> = { unit_status: 'confirmed_vnd' 
 describe('GapAnalysisWidget unavailable values', () => {
   it('renders missing values as unavailable while preserving genuine zero', () => {
     showGap()
-    expect(screen.getAllByText('N/A')).toHaveLength(4)
+    expect(screen.getAllByText('n/a')).toHaveLength(4)
     expect(screen.getAllByText('0.00%')).toHaveLength(1)
   })
 

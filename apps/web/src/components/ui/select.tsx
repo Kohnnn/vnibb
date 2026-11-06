@@ -1,4 +1,4 @@
-// Refined Select components for VNIBB Design System
+// Refined Select components for VniBB Design System
 import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 
@@ -39,7 +39,7 @@ export const SelectTrigger = ({ className = '', children }: any) => {
     return (
         <div
             onClick={() => context.setIsOpen(!context.isOpen)}
-            className={`flex h-9 w-full items-center justify-between rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] cursor-pointer hover:border-[var(--border-accent)] transition-all ${className}`}
+            className={`flex h-[var(--control-height)] w-full cursor-pointer items-center justify-between rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-primary)] transition-colors hover:border-[var(--color-accent-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] ${className}`}
         >
             <div className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                 {children}
@@ -62,7 +62,7 @@ export const SelectContent = ({ children, className = '' }: any) => {
     if (!context?.isOpen) return null;
 
     return (
-        <div className={`absolute z-50 mt-1 w-full min-w-[12rem] max-h-64 overflow-y-auto rounded-lg border border-[var(--border-default)] bg-[var(--bg-dropdown)] shadow-2xl animate-in fade-in zoom-in-95 duration-200 custom-scrollbar ${className}`}>
+        <div className={`absolute z-50 mt-1 max-h-64 w-full min-w-[12rem] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-dropdown)] shadow-lg animate-in fade-in zoom-in-95 duration-200 custom-scrollbar ${className}`}>
             <div className="p-1">{children}</div>
         </div>
     );
@@ -80,7 +80,7 @@ export const SelectItem = ({ children, value, className = '' }: any) => {
                 context.onValueChange?.(value);
                 context.setIsOpen(false);
             }}
-            className={`relative flex w-full cursor-pointer select-none items-center rounded-md py-2 px-3 text-xs outline-none transition-colors duration-150 ${isSelected ? 'bg-blue-600/20 text-blue-400' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            className={`relative flex w-full cursor-pointer select-none items-center rounded-md py-2 px-3 text-xs outline-none transition-colors duration-150 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] ${isSelected ? 'bg-[var(--color-state-bg)] font-semibold text-[var(--color-info)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                 } ${className}`}
         >
             <span className="flex-1">{children}</span>

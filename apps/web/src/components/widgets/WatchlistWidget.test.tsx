@@ -79,7 +79,7 @@ describe('WatchlistWidget quotes', () => {
         renderWatchlist(['VCI']);
 
         expect(screen.getByText('Unavailable')).toBeInTheDocument();
-        expect(screen.getAllByText('—')).toHaveLength(2);
+        expect(screen.getAllByText('n/a')).toHaveLength(2);
         expect(screen.queryByText('0')).not.toBeInTheDocument();
         expect(screen.getByText('Disconnected · Unavailable|No receipt|Current|As-of unknown')).toBeInTheDocument();
     });

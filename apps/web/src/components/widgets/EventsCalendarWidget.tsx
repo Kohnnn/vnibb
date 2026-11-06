@@ -10,7 +10,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
-import { formatShortDate } from '@/lib/format';
+import { formatShortDate } from '@/lib/formatDate';
 
 interface EventsCalendarWidgetProps {
     symbol: string;
@@ -27,9 +27,9 @@ const eventTypeIcons: Record<string, typeof Calendar> = {
 };
 
 const eventTypeColors: Record<string, string> = {
-    DIVIDEND: 'text-green-400 bg-green-400/10',
-    SPLIT: 'text-cyan-400 bg-cyan-400/10',
-    AGM: 'text-blue-400 bg-blue-400/10',
+    DIVIDEND: 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]',
+    SPLIT: 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]',
+    AGM: 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]',
     DEFAULT: 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]',
 };
 
@@ -173,7 +173,7 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
                         return (
                             <div
                                 key={index}
-                                className="p-2 rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors border-l-2 border-transparent hover:border-blue-500"
+                                className="p-2 rounded bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] cursor-pointer transition-colors border-l-2 border-transparent hover:border-[var(--color-state-border)]"
                                 onClick={() => setExpandedIndex(isExpanded ? null : index)}
                                 role="button"
                                 tabIndex={0}

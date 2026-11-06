@@ -12,6 +12,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { EMPTY_VALUE } from '@/lib/units'
 
 interface SortinoMonthlyWidgetProps {
   symbol: string
@@ -105,7 +106,7 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
-          <BarChart3 size={12} className="text-cyan-400" />
+          <BarChart3 size={12} className="text-[var(--color-accent-primary)]" />
           <span>Sortino Monthly</span>
         </div>
         <div className="flex items-center gap-2">
@@ -115,7 +116,7 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -153,11 +154,11 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Best Months</div>
-              <div className="mt-1 text-sm font-semibold text-emerald-300">{metric?.best_months?.join(', ') || '-'}</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-positive)]">{metric?.best_months?.join(', ') || '-'}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">Avoid Months</div>
-              <div className="mt-1 text-sm font-semibold text-red-300">{metric?.avoid_months?.join(', ') || '-'}</div>
+              <div className="mt-1 text-sm font-semibold text-[var(--color-negative)]">{metric?.avoid_months?.join(', ') || '-'}</div>
             </div>
           </div>
 
@@ -187,8 +188,8 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
                     formatter={(value: unknown, name?: string) => [Number(value ?? 0).toFixed(2), name || '']}
                   />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="sortino" name="Sortino" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="sharpe" name="Sharpe" fill="#06b6d4" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="sortino" name="Sortino" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="sharpe" name="Sharpe" fill="var(--chart-slate)" radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartMountGuard>
@@ -196,16 +197,27 @@ export function SortinoMonthlyWidget({ symbol, onDataChange }: SortinoMonthlyWid
 
           <div className="flex-1 overflow-auto space-y-1 pr-1">
             {rows.map((row) => {
-              const currentSortino = row.sortino ?? 0
-              const width = Math.max(2, (Math.abs(currentSortino) / maxAbs) * 100)
+              const sortino = row.sortino;
+              // A missing ratio has no bar and no "0.00": `?? 0` fabricated a
+              // measured zero (brand §13: missing is n/a, zero is ink).
+              const width = sortino === null ? 0 : Math.max(2, (Math.abs(sortino) / maxAbs) * 100);
               return (
                 <div key={row.month} className="flex items-center gap-2">
                   <div className="w-8 text-[10px] text-[var(--text-muted)]">{row.month}</div>
                   <div className="flex-1 h-4 bg-[var(--bg-tertiary)] rounded overflow-hidden">
-                    <div className={`h-full ${currentSortino >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'}`} style={{ width: `${width}%` }} />
+                    {sortino !== null && (
+                      <div
+                        className={`h-full ${sortino === 0 ? 'bg-[var(--color-neutral)]' : sortino > 0 ? 'bg-[var(--color-positive-bg)]' : 'bg-[var(--color-negative-bg)]'}`}
+                        style={{ width: `${width}%` }}
+                      />
+                    )}
                   </div>
-                  <div className="w-14 text-[10px] text-right font-mono text-[var(--text-primary)]">S {(row.sortino ?? 0).toFixed(2)}</div>
-                  <div className="w-14 text-[10px] text-right font-mono text-cyan-300">H {(row.sharpe ?? 0).toFixed(2)}</div>
+                  <div className="w-14 text-[10px] text-right font-mono text-[var(--text-primary)]">
+                    S {sortino === null ? EMPTY_VALUE : sortino.toFixed(2)}
+                  </div>
+                  <div className="w-14 text-[10px] text-right font-mono text-[var(--color-accent-primary)]">
+                    H {(row.sharpe ?? 0).toFixed(2)}
+                  </div>
                 </div>
               )
             })}

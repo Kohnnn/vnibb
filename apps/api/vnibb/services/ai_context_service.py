@@ -626,6 +626,7 @@ def _build_source_reference(
     source_system: str | None,
     symbol: str | None = None,
     as_of: str | None = None,
+    reference_checked: bool = False,
 ) -> dict[str, Any]:
     return _compact_dict(
         {
@@ -636,6 +637,10 @@ def _build_source_reference(
             "source": source_system,
             "symbol": symbol,
             "as_of": as_of,
+            # Only a real reference check may set this. Nothing in this request
+            # verifies the source document itself, so the client renders "Sources"
+            # until a check result exists.
+            "reference_checked": reference_checked,
             "priority": _source_priority_rank(source_system),
             "widget_target": _widget_target_for_source(kind, symbol),
         }

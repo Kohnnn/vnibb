@@ -55,15 +55,6 @@ const CATEGORY_ICONS: Record<DashboardTemplateCategory, any> = {
   global: Globe2,
 };
 
-const CATEGORY_PREVIEW_STYLES: Record<DashboardTemplateCategory, string> = {
-  market: 'from-blue-500/15 via-cyan-500/5 to-emerald-500/10',
-  fundamentals: 'from-amber-500/15 via-orange-500/5 to-yellow-500/10',
-  technical: 'from-emerald-500/15 via-teal-500/5 to-cyan-500/10',
-  quant: 'from-fuchsia-500/15 via-violet-500/5 to-cyan-500/10',
-  research: 'from-slate-200/10 via-slate-400/5 to-blue-500/10',
-  global: 'from-violet-500/15 via-fuchsia-500/5 to-cyan-500/10',
-};
-
 function formatWidgetType(type: string) {
   return getWidgetDefinition(type)?.name || type
     .split('_')
@@ -96,21 +87,22 @@ function getTemplateBadges(template: DashboardTemplate) {
 }
 
 function getWidgetIconClass(widgetType: string): { tone: string; label: string } {
-  // QA-v4 polish: render widget category icons + short labels in the
-  // mini-preview so users can recognize a template's contents at a
-  // glance without reading the badge list.
-  if (widgetType.startsWith('tradingview_')) return { tone: 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40', label: 'TV' };
-  if (widgetType.startsWith('world_news_')) return { tone: 'bg-amber-500/20 text-amber-200 border-amber-500/40', label: 'News' };
-  if (widgetType.includes('chart')) return { tone: 'bg-blue-500/20 text-blue-200 border-blue-500/40', label: 'Chart' };
-  if (widgetType.includes('news') || widgetType.includes('events')) return { tone: 'bg-amber-500/20 text-amber-200 border-amber-500/40', label: 'News' };
-  if (widgetType.includes('order') || widgetType.includes('intraday') || widgetType.includes('transaction')) return { tone: 'bg-cyan-500/20 text-cyan-200 border-cyan-500/40', label: 'Tape' };
-  if (widgetType.includes('financial') || widgetType.includes('income') || widgetType.includes('balance') || widgetType.includes('cash_flow') || widgetType.includes('ratio')) return { tone: 'bg-violet-500/20 text-violet-200 border-violet-500/40', label: 'FS' };
-  if (widgetType.includes('risk') || widgetType.includes('quant') || widgetType.includes('volume_profile') || widgetType.includes('drawdown') || widgetType.includes('sortino') || widgetType.includes('seasonality')) return { tone: 'bg-fuchsia-500/20 text-fuchsia-200 border-fuchsia-500/40', label: 'Quant' };
-  if (widgetType.includes('momentum') || widgetType.includes('rsi') || widgetType.includes('macd') || widgetType.includes('bollinger') || widgetType.includes('ichimoku') || widgetType.includes('fibonacci') || widgetType.includes('signal')) return { tone: 'bg-teal-500/20 text-teal-200 border-teal-500/40', label: 'TA' };
-  if (widgetType.includes('heatmap') || widgetType.includes('breadth') || widgetType.includes('sector') || widgetType.includes('movers')) return { tone: 'bg-blue-500/20 text-blue-200 border-blue-500/40', label: 'Mkt' };
-  if (widgetType.includes('peer') || widgetType.includes('comparison') || widgetType.includes('similar') || widgetType.includes('correlation')) return { tone: 'bg-pink-500/20 text-pink-200 border-pink-500/40', label: 'Peer' };
-  if (widgetType.includes('shareholder') || widgetType.includes('officer') || widgetType.includes('foreign') || widgetType.includes('insider')) return { tone: 'bg-orange-500/20 text-orange-200 border-orange-500/40', label: 'Own' };
-  return { tone: 'bg-slate-500/20 text-slate-200 border-slate-500/40', label: 'W' };
+  // Decorative category colours were retired (#199): the mini-preview uses one
+  // neutral tile with an accent border, and the short label carries the
+  // category. Colour never encodes category.
+  const tone = 'border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]';
+  if (widgetType.startsWith('tradingview_')) return { tone, label: 'TV' };
+  if (widgetType.startsWith('world_news_')) return { tone, label: 'News' };
+  if (widgetType.includes('chart')) return { tone, label: 'Chart' };
+  if (widgetType.includes('news') || widgetType.includes('events')) return { tone, label: 'News' };
+  if (widgetType.includes('order') || widgetType.includes('intraday') || widgetType.includes('transaction')) return { tone, label: 'Tape' };
+  if (widgetType.includes('financial') || widgetType.includes('income') || widgetType.includes('balance') || widgetType.includes('cash_flow') || widgetType.includes('ratio')) return { tone, label: 'FS' };
+  if (widgetType.includes('risk') || widgetType.includes('quant') || widgetType.includes('volume_profile') || widgetType.includes('drawdown') || widgetType.includes('sortino') || widgetType.includes('seasonality')) return { tone, label: 'Quant' };
+  if (widgetType.includes('momentum') || widgetType.includes('rsi') || widgetType.includes('macd') || widgetType.includes('bollinger') || widgetType.includes('ichimoku') || widgetType.includes('fibonacci') || widgetType.includes('signal')) return { tone, label: 'TA' };
+  if (widgetType.includes('heatmap') || widgetType.includes('breadth') || widgetType.includes('sector') || widgetType.includes('movers')) return { tone, label: 'Mkt' };
+  if (widgetType.includes('peer') || widgetType.includes('comparison') || widgetType.includes('similar') || widgetType.includes('correlation')) return { tone, label: 'Peer' };
+  if (widgetType.includes('shareholder') || widgetType.includes('officer') || widgetType.includes('foreign') || widgetType.includes('insider')) return { tone, label: 'Own' };
+  return { tone, label: 'W' };
 }
 
 function getTemplateStarter(template: DashboardTemplate): ResearchStarter | undefined {
@@ -131,9 +123,7 @@ function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
 
   return (
     <div className={cn(
-      "relative mb-3 aspect-video w-full overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 transition-all group-hover:border-blue-500/50 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]",
-      "bg-gradient-to-br",
-      CATEGORY_PREVIEW_STYLES[template.category]
+      "relative mb-3 aspect-video w-full overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] transition-colors group-hover:border-[var(--border-strong)]",
     )}>
       <div className="absolute inset-0 p-2">
         {visibleWidgets.map((widget, index) => {
@@ -340,7 +330,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
       <button
         type="button"
         onClick={onClose}
-        className="absolute inset-0 z-0 bg-slate-950/60"
+        className="absolute inset-0 z-0 bg-[rgb(2_6_23_/_0.72)]"
         aria-label="Close template selector"
       />
       <motion.div 
@@ -352,13 +342,13 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
         aria-modal={!pendingStarter}
         aria-labelledby="template-selector-title"
         tabIndex={-1}
-        className="relative z-10 w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-2xl shadow-[0_24px_80px_rgba(15,23,42,0.35)] overflow-hidden flex flex-col"
+        className="relative z-10 w-full max-w-6xl max-h-[88vh] bg-[var(--bg-surface)] border border-[var(--border-strong)] rounded-md shadow-lg overflow-hidden flex flex-col"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-[var(--border-default)] bg-[var(--bg-surface)]">
           <div>
-            <h2 id="template-selector-title" className="text-xl font-black text-[var(--text-primary)] uppercase tracking-tighter flex items-center gap-2">
-                <Layout className="text-blue-500" size={20} />
+            <h2 id="template-selector-title" className="text-xl font-bold text-[var(--text-primary)] uppercase tracking-tighter flex items-center gap-2">
+                <Layout className="text-[var(--color-accent-primary)]" size={20} />
                 Dashboard Templates
             </h2>
             <p className="text-xs text-[var(--text-muted)] font-medium">Choose by workflow, included widgets, and setup requirements.</p>
@@ -366,7 +356,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
           <button
             type="button"
             onClick={onClose}
-            className="p-2 hover:bg-[var(--bg-hover)] rounded-full transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            className="rounded-md p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             aria-label="Close template selector"
           >
             <X className="w-5 h-5" />
@@ -376,11 +366,11 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
         {/* Applied confirmation: the starter's purpose and its real ticker-group
             consequence stay visible in the modal that launched it. */}
         {appliedStarter ? (
-          <div className="border-b border-[var(--border-default)] bg-blue-500/10 px-5 py-3">
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-200">
+          <div className="border-b border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-5 py-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-info)]">
               Starter applied · {appliedStarter.name}
             </p>
-            <p className="mt-1 text-[11px] font-semibold text-blue-100">
+            <p className="mt-1 text-[11px] font-semibold text-[var(--text-primary)]">
               {getStarterDisclosure(appliedStarter, sharedTickerGroups ?? [])}
             </p>
             <p className="mt-1 text-[11px] text-[var(--text-muted)]">
@@ -398,7 +388,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search templates or included widgets..."
-              className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none transition-all focus:border-blue-500/50"
+              className="w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
             />
           </div>
           <div className="flex flex-wrap gap-2">
@@ -406,10 +396,10 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
               type="button"
               onClick={() => setSelectedCategory(null)}
               className={cn(
-                  "rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
+                  "rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
                   !selectedCategory
-                    ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
-                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
+                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
+                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
               )}
             >
               All Templates
@@ -422,10 +412,10 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                 type="button"
                 onClick={() => setSelectedCategory(category.id)}
                 className={cn(
-                  "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[10px] font-black uppercase tracking-widest transition-all",
+                  "flex items-center gap-2 rounded-md border px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]",
                   selectedCategory === category.id
-                    ? 'border-blue-400/50 bg-blue-600 text-white shadow-[0_0_0_1px_rgba(96,165,250,0.24)]'
-                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:border-blue-500/30'
+                    ? 'border-[var(--color-accent-primary)] bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
+                    : 'border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]'
                 )}
               >
                 <Icon className="w-3 h-3" />
@@ -441,12 +431,12 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
         <div className="flex-1 p-6 overflow-y-auto scrollbar-hide bg-[var(--bg-primary)]">
           {/* Save / Import row + Custom Templates section */}
           {currentDashboard ? (
-            <div className="mb-5 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+            <div className="mb-5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <Star className="text-blue-400" size={18} />
+                  <Star className="text-[var(--color-accent-primary)]" size={18} />
                   <div>
-                    <h3 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-tight">Your saved layouts</h3>
+                    <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-tight">Your saved layouts</h3>
                     <p className="text-[11px] text-[var(--text-muted)]">Saved on this device. Export a saved layout to back it up or import it on another browser.</p>
                   </div>
                 </div>
@@ -454,7 +444,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                   <button
                     type="button"
                     onClick={handleImportClick}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                   >
                     <Upload size={12} />
                     Import
@@ -466,7 +456,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                       setSaveError(null);
                       setSaveSuccess(null);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                   >
                     <Save size={12} />
                     Save current
@@ -474,19 +464,19 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                 </div>
               </div>
               {showSaveDialog ? (
-                <div className="mt-4 grid gap-2 rounded-xl border border-blue-500/20 bg-[var(--bg-primary)] p-3 md:grid-cols-[minmax(0,1fr)_140px_auto]">
+                <div className="mt-4 grid gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-primary)] p-3 md:grid-cols-[minmax(0,1fr)_140px_auto]">
                   <input
                     autoFocus
                     type="text"
                     value={saveName}
                     onChange={(event) => setSaveName(event.target.value)}
                     placeholder="Template name"
-                    className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-blue-400/50"
+                    className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                   />
                   <select
                     value={saveCategory}
                     onChange={(event) => setSaveCategory(event.target.value as DashboardTemplateCategory)}
-                    className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-blue-400/50"
+                    className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                   >
                     {DASHBOARD_TEMPLATE_CATEGORIES.map((category) => (
                       <option key={category.id} value={category.id}>{category.label}</option>
@@ -495,22 +485,22 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                   <button
                     type="button"
                     onClick={handleSaveCurrent}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-blue-500"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                   >
                     Save layout
                   </button>
                   {saveError ? (
-                    <div className="md:col-span-3 text-[11px] text-rose-300">{saveError}</div>
+                    <div className="md:col-span-3 text-[11px] text-[var(--color-error)]">{saveError}</div>
                   ) : null}
                 </div>
               ) : null}
               {!showSaveDialog && saveSuccess ? (
-                <div className="mt-3 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-[11px] font-semibold text-blue-100">
+                <div className="mt-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] font-semibold text-[var(--color-info)]">
                   {saveSuccess}
                 </div>
               ) : null}
               {!showSaveDialog && saveError ? (
-                <div className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-[11px] font-semibold text-rose-200">
+                <div className="mt-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] font-semibold text-[var(--color-text-primary)]">
                   {saveError}
                 </div>
               ) : null}
@@ -520,18 +510,18 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                   {filteredCustomTemplates.map((template) => (
                     <article
                       key={template.id}
-                      className="group flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)]/55 p-3 text-left transition-all hover:border-blue-500/30"
+                      className="group flex flex-col rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-left transition-colors hover:border-[var(--border-strong)]"
                     >
                       <TemplateLayoutPreview template={template} />
                       <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                        <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--color-info)]">
                           Custom
                         </span>
                         <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                           {template.widgets.length} widgets
                         </span>
                       </div>
-                      <h3 className="text-sm font-black text-[var(--text-primary)] group-hover:text-blue-400">
+                      <h3 className="text-sm font-bold text-[var(--text-primary)] group-hover:text-[var(--color-accent-primary)]">
                         {template.name}
                       </h3>
                       <p className="mt-1 line-clamp-2 text-[11px] text-[var(--text-muted)]">{template.description}</p>
@@ -546,14 +536,14 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                         <button
                           type="button"
                           onClick={() => handleDeleteCustom(template.id)}
-                          className="inline-flex items-center gap-1 rounded border border-rose-500/30 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-rose-300 hover:bg-rose-500/10"
+                          className="inline-flex items-center gap-1 rounded border border-[var(--border-strong)] px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         >
                           <Trash2 size={10} /> Delete
                         </button>
                         <button
                           type="button"
                           onClick={() => handleApplyTemplate(template)}
-                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-white hover:bg-blue-500"
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                         >
                           Use Layout <ChevronRight size={12} />
                         </button>
@@ -572,12 +562,12 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
           {recommendations.length > 0 && !searchQuery.trim() && !selectedCategory ? (
             <div className="mb-5">
               <div className="mb-3 flex items-center gap-2">
-                <Star className="text-amber-400" size={14} />
-                <h3 className="text-[10px] font-black uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                <Star className="text-[var(--color-accent-primary)]" size={14} />
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                   Recommended for you
                 </h3>
                 {currentSymbol ? (
-                  <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-blue-200">
+                  <span className="rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--color-info)]">
                     Context · {currentSymbol}
                   </span>
                 ) : null}
@@ -589,28 +579,28 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                   return (
                     <article
                       key={`rec-${template.id}`}
-                      className="group flex flex-col rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-left transition-all hover:border-amber-400/50"
+                      className="group flex flex-col rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-left transition-colors hover:border-[var(--border-strong)]"
                     >
                       <TemplateLayoutPreview template={template} />
                       <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-amber-200">
+                        <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--color-info)]">
                           {reason}
                         </span>
                         <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                           {categoryLabel}
                         </span>
                       </div>
-                      <h3 className="text-sm font-black text-[var(--text-primary)] group-hover:text-amber-200">
+                      <h3 className="text-sm font-bold text-[var(--text-primary)] group-hover:text-[var(--color-accent-primary)]">
                         {template.name}
                       </h3>
                       <p className="mt-1 line-clamp-2 text-[11px] text-[var(--text-muted)]">{template.description}</p>
                       {starter ? (
-                        <p className="mt-2 text-[11px] font-semibold leading-relaxed text-amber-200/90">{starter.purpose}</p>
+                        <p className="mt-2 text-[11px] font-semibold leading-relaxed text-[var(--text-secondary)]">{starter.purpose}</p>
                       ) : null}
                       <button
                         type="button"
                         onClick={() => handleApplyTemplate(template)}
-                        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-950 hover:bg-amber-400"
+                        className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"
                       >
                         Use Template <ChevronRight size={12} />
                       </button>
@@ -628,12 +618,12 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
               return (
                 <article
                   key={template.id}
-                  className="group flex flex-col rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)]/55 p-3 text-left transition-all duration-300 hover:border-blue-500/30 hover:bg-[var(--bg-surface)]/80"
+                  className="group flex flex-col rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--bg-secondary)]"
                 >
                   <TemplateLayoutPreview template={template} />
 
                   <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                    <span className="inline-flex items-center rounded-full border border-blue-500/15 bg-blue-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-blue-200/90">
+                    <span className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">
                       {categoryLabel}
                     </span>
                     {getTemplateBadges(template).map((badge) => (
@@ -642,12 +632,12 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                       </span>
                     ))}
                   </div>
-                  <h3 className="text-sm font-black text-[var(--text-primary)] transition-colors group-hover:text-blue-400">{template.name}</h3>
+                  <h3 className="text-sm font-bold text-[var(--text-primary)] transition-colors group-hover:text-[var(--color-accent-primary)]">{template.name}</h3>
                   <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
                     {template.description}
                   </p>
                   {starter ? (
-                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-blue-200/90">
+                    <p className="mt-2 text-[11px] font-semibold leading-relaxed text-[var(--text-secondary)]">
                       {starter.purpose}
                     </p>
                   ) : null}
@@ -672,7 +662,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                     <button
                       type="button"
                       onClick={() => handleApplyTemplate(template)}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
+                      className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                     >
                       Use Template
                       <ChevronRight size={13} />
@@ -698,7 +688,7 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/60 p-4"
+            className="absolute inset-0 z-20 flex items-center justify-center bg-[rgb(2_6_23_/_0.72)] p-4"
           >
             <div
               ref={starterDialogRef}
@@ -706,11 +696,11 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
               role="dialog"
               aria-modal="true"
               aria-labelledby="starter-disclosure-title"
-              className="w-full max-w-lg rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-[0_24px_80px_rgba(15,23,42,0.45)]"
+              className="w-full max-w-lg rounded-md border border-[var(--border-strong)] bg-[var(--bg-surface)] p-5 shadow-lg"
             >
               <h3
                 id="starter-disclosure-title"
-                className="text-sm font-black uppercase tracking-tight text-[var(--text-primary)]"
+                className="text-sm font-bold uppercase tracking-tight text-[var(--text-primary)]"
               >
                 {pendingStarter.starter.name}
               </h3>
@@ -725,14 +715,14 @@ function TemplateSelectorComponent({ open, onClose, onSelectTemplate, onStarterP
                 <button
                   type="button"
                   onClick={() => setPendingStarter(null)}
-                  className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+                  className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmStarter}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-blue-500"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent-fill)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)]"
                 >
                   Apply {pendingStarter.template.name}
                   <ChevronRight size={13} />

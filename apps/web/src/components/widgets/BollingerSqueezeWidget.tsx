@@ -119,7 +119,7 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Minimize2 size={12} className="text-cyan-400" />
+          <Minimize2 size={12} className="text-[var(--color-accent-primary)]" />
           <span>Bollinger Squeeze</span>
         </div>
         <div className="flex items-center gap-2">
@@ -129,7 +129,7 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -153,17 +153,17 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Current BB%</div>
-              <div className="font-mono text-cyan-300">{bbPctProgress.toFixed(2)}%</div>
+              <div className="font-mono text-[var(--color-accent-primary)]">{bbPctProgress.toFixed(2)}%</div>
               <div className="mt-1 h-1.5 rounded bg-[var(--bg-tertiary)] overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-emerald-500 via-cyan-500 to-red-500"
+                  className="h-full bg-gradient-to-r from-[var(--color-positive)] via-[var(--color-accent-primary)] to-[var(--color-negative)]"
                   style={{ width: `${bbPctProgress}%` }}
                 />
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Width</div>
-              <div className="font-mono text-amber-300">{bbWidth.toFixed(3)}%</div>
+              <div className="font-mono text-[var(--color-warning)]">{bbWidth.toFixed(3)}%</div>
             </div>
           </div>
 
@@ -194,8 +194,8 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
                         return [`${Number(value).toFixed(3)}${withPercent ? '%' : ''}`, label]
                       }}
                     />
-                    <ReferenceLine y={threshold} stroke="#22c55e" strokeDasharray="4 3" ifOverflow="extendDomain" label={{ value: 'Squeeze Threshold', fill: '#22c55e', fontSize: 10, position: 'insideTopRight' }} />
-                    <Line type="monotone" dataKey="bbWidth" name="BB Width %" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                    <ReferenceLine y={threshold} stroke="var(--chart-slate)" strokeDasharray="4 3" ifOverflow="extendDomain" label={{ value: 'Squeeze Threshold', fill: 'var(--chart-slate)', fontSize: 10, position: 'insideTopRight' }} />
+                    <Line type="monotone" dataKey="bbWidth" name="BB Width %" stroke="var(--chart-blue)" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </ChartMountGuard>
@@ -207,8 +207,8 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
               <span className="text-[var(--text-muted)] uppercase tracking-widest">Squeeze State</span>
               <span className="text-[var(--text-secondary)]">Threshold: {threshold.toFixed(3)}%</span>
             </div>
-            <div className={`mt-1 flex items-center gap-2 text-sm font-semibold ${metric?.squeeze_active ? 'text-emerald-300' : 'text-[var(--text-secondary)]'}`}>
-              <CircleDot size={14} className={metric?.squeeze_active ? 'text-emerald-400' : 'text-[var(--text-muted)]'} />
+            <div className={`mt-1 flex items-center gap-2 text-sm font-semibold ${metric?.squeeze_active ? 'text-[var(--color-positive)]' : 'text-[var(--text-secondary)]'}`}>
+              <CircleDot size={14} className={metric?.squeeze_active ? 'text-[var(--color-positive)]' : 'text-[var(--text-muted)]'} />
               {metric?.squeeze_active ? 'SQUEEZE ACTIVE' : 'NORMAL'}
             </div>
           </div>
@@ -234,9 +234,9 @@ export function BollingerSqueezeWidget({ symbol, onDataChange }: BollingerSqueez
                       <td className="px-1 py-1 font-semibold text-[var(--text-secondary)]">
                         {row.label}{row.isBackendDefault ? ' ·' : ''}
                       </td>
-                      <td className="px-1 py-1 text-right font-mono text-amber-300">{row.threshold.toFixed(3)}%</td>
+                      <td className="px-1 py-1 text-right font-mono text-[var(--color-warning)]">{row.threshold.toFixed(3)}%</td>
                       <td className="px-1 py-1 text-right font-mono text-[var(--text-primary)]">{row.pctDaysIn.toFixed(1)}%</td>
-                      <td className={`px-1 py-1 text-right font-semibold ${row.activeNow ? 'text-emerald-300' : 'text-[var(--text-muted)]'}`}>
+                      <td className={`px-1 py-1 text-right font-semibold ${row.activeNow ? 'text-[var(--color-positive)]' : 'text-[var(--text-muted)]'}`}>
                         {row.activeNow ? 'IN' : 'OUT'}
                       </td>
                     </tr>

@@ -85,6 +85,63 @@ with `RECOVERY OK`, `RTO_seconds=376.0`: 42 public PostgreSQL tables, 1,754 stoc
 16 populated collections, 4,870,705 EOD prices and a sampled document present.
 Both disposable containers were removed before success.
 
+### 2026-11-04: `20261104T084539Z` restored off-box on deploy-01
+
+The OCI producer set `20261104T084539Z` was copied to `deploy-01` and restored
+into fresh `--network none` containers. The utility exited 0 with
+`RECOVERY OK` and `RTO_seconds=498.5` (8 minutes 18.5 seconds; excludes
+transfer and application cutover).
+
+- PostgreSQL: `stocks` and `stock_prices` nonempty in the restored database.
+  The dump TOC carries 90 `TABLE DATA` entries, which is a TOC measure, not a
+  table count. The restored public-table count was **not captured**: the
+  drill's `PostgreSQL OK` line was cut from the captured output by a `tail`
+  window, and the `42` public tables measured afterwards came from the **live
+  source** `vnibb-db`, after the restore containers were already gone. Do not
+  read that 42 as a restore result.
+- MongoDB: 8,116,702 documents restored, zero failures; 17 collections,
+  17 populated. Largest: `market_prices_eod`, 4,904,191 documents; sampled
+  document present.
+- PostgreSQL artifact: 217,785,983 bytes,
+  SHA-256 `b5978912ecd5c5ea2146337c39cb3d52aacf3e1e7d3bc748d7653be6c14eb1a6`.
+- Mongo artifact: 584,491,375 bytes,
+  SHA-256 `a0d3edc5262d399a2a29a7c644794b5e889480edc2698861d6e9c5e3119f42df`.
+- Host: Linux `7.0.0-38-generic`, Docker `29.1.3`.
+  Image `supabase/postgres:17.6.1.136`:
+  `sha256:f371b5f3f2ac0a05703f33d6e6134515fb2498cab708fb948a0aeb7481467c00`;
+  image `mongo:7`:
+  `sha256:8bb4442761a63a8dda452744082cdac9644b429807eb977b42324a63cef59ca4`.
+
+**Handling errors.** The transfer preserved the source modes, so the pair
+arrived `-rw-r--r--`, and the drill had already been started when
+`chmod 700`/`0600` was applied to the directory and files. Permissions were
+therefore restricted *during* the drill, not before it. The readable window
+began when the first artifact landed and its duration was never measured, so
+state it as unestablished rather than estimating an hour. Future drills must
+set `umask 077` and create the destination with `install -d -m 700` before the
+first byte lands, and must confirm modes before launching the utility.
+
+The plaintext pair was then packed into
+`20261104T084539Z-offbox.tar.age` (802,479,576 bytes,
+SHA-256 `e3846a3dfe057ccdbf210c6d72120805e58493b567370f620da9877648608afc`)
+for the retained `age1lu9gvw3vvrghvzqf5fkn5rr2td86h4z0egtrs6cdgrnt3jcyj5hq0y9akg`
+recipient, and the plaintext artifacts and staged utility were removed. The
+recovery containers were confirmed absent.
+
+**Custody split.** The archive was first written beside the identity on
+`deploy-01`, which defeats key/store separation and contradicts the rule that
+no archive persists on the custody host. It was then copied to the workstation
+at `backups/20261104T084539Z-offbox.tar.age` (0700 directory, `0600` file),
+confirmed byte-identical by SHA-256, and confirmed decryptable with the
+identity by streaming `age -d` into `tar -t` without writing plaintext to disk.
+The copy on `deploy-01` was deleted, leaving no recovery material under
+`~/offbox` there.
+
+This is still not full custodian independence: the identity is retained on
+`compute_01`, and the archive now also lives on `compute_01`. Ciphertext and key
+share a host again, just not the custody host. Independent encrypted custody
+requires an archive held where the identity is not, which remains open work.
+
 ### Historical drill and custody risks
 
 

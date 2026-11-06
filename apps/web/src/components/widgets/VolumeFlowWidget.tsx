@@ -23,6 +23,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { signedToneClass } from '@/lib/priceColor'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface VolumeFlowWidgetProps {
@@ -39,7 +40,8 @@ interface CumulativePoint {
   close: number | null
 }
 
-function formatCompact(value: number): string {
+function formatCompact(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a'
   const abs = Math.abs(value)
   if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`
   if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`
@@ -110,7 +112,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Waves size={12} className="text-cyan-400" />
+          <Waves size={12} className="text-[var(--color-accent-primary)]" />
           <span>Volume Flow (Order Flow Proxy)</span>
         </div>
         <div className="flex items-center gap-2">
@@ -120,7 +122,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -157,24 +159,24 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cumulative</div>
-              <div className={`font-mono ${Number(metric?.current_20d_cumulative_delta || 0) >= 0 ? 'price-up' : 'price-down'}`}>
-                {formatCompact(Number(metric?.current_20d_cumulative_delta || 0))}
+              <div className={`font-mono ${signedToneClass(metric?.current_20d_cumulative_delta)}`}>
+                {formatCompact(metric?.current_20d_cumulative_delta)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Divergence Months</div>
-              <div className="font-mono text-amber-300">{metric?.divergence_months ?? 0}</div>
+              <div className="font-mono text-[var(--color-warning)]">{metric?.divergence_months ?? 0}</div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Strongest Buy</div>
-              <div className="text-emerald-300 font-semibold">{metric?.strongest_buy_month || '-'}</div>
+              <div className="text-[var(--color-positive)] font-semibold">{metric?.strongest_buy_month || '-'}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Strongest Sell</div>
-              <div className="text-red-300 font-semibold">{metric?.strongest_sell_month || '-'}</div>
+              <div className="text-[var(--color-negative)] font-semibold">{metric?.strongest_sell_month || '-'}</div>
             </div>
           </div>
 
@@ -206,7 +208,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                     />
                     <Bar dataKey="value" radius={[2, 2, 0, 0]}>
                       {monthRows.map((entry) => (
-                        <Cell key={`month-bar-${entry.month}`} fill={entry.value >= 0 ? dirColors.positive : dirColors.negative} />
+                        <Cell key={`month-bar-${entry.month}`} fill={dirColors.forValue(entry.value)} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -237,8 +239,8 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                           fontSize: '11px',
                         }}
                       />
-                      <Line yAxisId="delta" type="monotone" dataKey="cumulativeDelta" stroke="#06b6d4" strokeWidth={2} dot={false} name="Cumulative Delta" />
-                      <Line yAxisId="price" type="monotone" dataKey="close" stroke="#f59e0b" strokeWidth={1.5} dot={false} name="Close" />
+                      <Line yAxisId="delta" type="monotone" dataKey="cumulativeDelta" stroke="var(--chart-blue)" strokeWidth={2} dot={false} name="Cumulative Delta" />
+                      <Line yAxisId="price" type="monotone" dataKey="close" stroke="var(--chart-slate)" strokeWidth={1.5} strokeDasharray="5 3" dot={false} name="Close" />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>

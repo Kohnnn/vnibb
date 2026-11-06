@@ -1,4 +1,4 @@
-// Checkbox component for VNIBB Design System
+// Checkbox component for VniBB Design System
 import React from 'react';
 
 interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
@@ -18,16 +18,16 @@ export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
                     aria-labelledby={props['aria-labelledby']}
                     onChange={(e) => onCheckedChange?.(e.target.checked)}
                     className={`
-                        peer h-4 w-4 shrink-0 rounded border border-[var(--border-default)] bg-[var(--bg-secondary)]
-                        text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 
-                        disabled:cursor-not-allowed disabled:opacity-50 transition-all duration-200
-                        appearance-none cursor-pointer checked:bg-blue-600 checked:border-blue-600
+                        peer h-4 w-4 shrink-0 cursor-pointer appearance-none rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)]
+                        text-white transition-colors duration-150 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]
+                        disabled:cursor-not-allowed disabled:opacity-50
+                        checked:border-[var(--color-accent-fill)] checked:bg-[var(--color-accent-fill)]
                         ${className}
                     `}
                     {...props}
                 />
                 <svg
-                    className="absolute h-3 w-3 text-white pointer-events-none opacity-0 peer-checked:opacity-100 left-0.5 top-0.5 transition-opacity duration-200"
+                    className="absolute h-3 w-3 text-[var(--color-on-accent)] pointer-events-none opacity-0 peer-checked:opacity-100 left-0.5 top-0.5 transition-opacity duration-200"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"

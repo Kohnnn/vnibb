@@ -10,7 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useDerivativesContracts, useDerivativesHistory } from '@/lib/queries';
-import { formatDate } from '@/lib/format';
+import { formatDate } from '@/lib/formatDate';
 import { formatAxisValue, formatNumber } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
@@ -60,7 +60,7 @@ export function DerivativesPriceHistoryWidget({
       empty: chartData.length === 0,
       apiGroup: '/derivatives',
       endpoint: `/api/v1/derivatives/history/${symbol || ':symbol'}`,
-      sourceLabel: 'VNIBB derivatives history',
+      sourceLabel: 'VniBB derivatives history',
       lastDataDate: latest?.time ?? null,
       fetchedAt: historyQuery.dataUpdatedAt,
       extra: { symbol: symbol || null, count: historyQuery.data?.count ?? chartData.length },
@@ -93,7 +93,7 @@ export function DerivativesPriceHistoryWidget({
                   }
                 }}
                 placeholder="Select contract"
-                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               />
               <datalist id={`derivatives-contracts-${id}`}>
                 {(contractsQuery.data?.data || []).map((item) => (
@@ -139,7 +139,7 @@ export function DerivativesPriceHistoryWidget({
                       <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval={chartData.length > 12 ? Math.max(1, Math.ceil(chartData.length / 8)) - 1 : 0} minTickGap={12} />
                       <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(value) => formatAxisValue(value)} width={56} />
                       <Tooltip formatter={(value) => formatNumber(Number(Array.isArray(value) ? value[0] : value), { decimals: 2 })} />
-                      <Area type="monotone" dataKey="close" stroke="#38bdf8" fill="rgba(56,189,248,0.18)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="close" stroke="var(--chart-blue)" fill="color-mix(in srgb, var(--chart-blue) 18%, transparent)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>

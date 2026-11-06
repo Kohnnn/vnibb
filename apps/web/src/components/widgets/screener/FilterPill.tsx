@@ -41,7 +41,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
       <div className={cn(
           "inline-flex items-center rounded-full border h-7 transition-all duration-200 overflow-hidden",
           value
-            ? 'bg-blue-600/10 border-blue-500/30 text-blue-300'
+            ? 'bg-[var(--color-state-bg)] border-[var(--color-state-border)] text-[var(--color-accent-secondary)]'
             : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
       )}>
         <button
@@ -52,7 +52,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
           {value && (
               <>
                 <span className="font-black text-[var(--text-muted)]">|</span>
-                <span className="text-blue-400">{value}</span>
+                <span className="text-[var(--color-accent-secondary)]">{value}</span>
               </>
           )}
           <ChevronDown size={10} className={cn("transition-transform duration-200", isOpen ? 'rotate-180' : '')} />
@@ -63,7 +63,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
               e.stopPropagation();
               onRemove();
             }}
-            className="flex items-center justify-center w-6 h-full hover:bg-red-500/20 text-red-500/60 hover:text-red-400 transition-colors border-l border-blue-500/20"
+            className="flex items-center justify-center w-6 h-full text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors border-l border-[var(--border-subtle)]"
           >
             <X size={10} strokeWidth={3} />
           </button>
@@ -79,7 +79,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search..."
-              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] font-medium text-[var(--text-primary)] outline-none placeholder-[var(--text-muted)] focus:border-blue-500"
+              className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11px] font-medium text-[var(--text-primary)] outline-none placeholder-[var(--text-muted)] focus:border-[var(--color-state-border)]"
             />
           </div>
           <div className="max-h-48 overflow-y-auto p-1 scrollbar-hide">
@@ -91,7 +91,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
                   setIsOpen(false);
                   setSearchQuery('');
                 }}
-                className="group flex w-full items-center justify-between rounded px-3 py-2 text-left text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-blue-600 hover:text-white"
+                className="group flex w-full items-center justify-between rounded px-3 py-2 text-left text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--color-accent-fill)] hover:text-[var(--color-on-accent)]"
               >
                 {preset.label}
                 <ChevronDown size={10} className="opacity-0 group-hover:opacity-50 -rotate-90" />
@@ -102,7 +102,7 @@ export function FilterPill({ label, value, presets, onSelect, onRemove }: Filter
             )}
           </div>
           <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
-            <button className="w-full py-1 text-center text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] transition-colors hover:text-blue-400">
+            <button className="w-full py-1 text-center text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)] transition-colors hover:text-[var(--color-accent-primary)]">
               Advanced Filter...
             </button>
           </div>

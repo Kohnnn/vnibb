@@ -59,9 +59,9 @@ function money(value: unknown): string | null {
 }
 
 function verdictTone(verdict?: string | null): string {
-  if (verdict === 'undervalued' || verdict === 'fair_plus') return 'text-emerald-300 border-emerald-400/30 bg-emerald-500/10';
-  if (verdict === 'expensive' || verdict === 'stretched') return 'text-rose-300 border-rose-400/30 bg-rose-500/10';
-  return 'text-blue-300 border-blue-400/30 bg-blue-500/10';
+  if (verdict === 'undervalued' || verdict === 'fair_plus') return 'text-[var(--color-positive)] border-[var(--color-state-border)] bg-[var(--color-positive-bg)]';
+  if (verdict === 'expensive' || verdict === 'stretched') return 'text-[var(--color-negative)] border-[var(--color-state-border)] bg-[var(--color-negative-bg)]';
+  return 'text-[var(--color-accent-primary)] border-[var(--color-state-border)] bg-[var(--color-state-bg)]';
 }
 
 export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalAnalysisWidgetProps) {
@@ -82,7 +82,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   const hasData = Boolean(summary || strengths.length || risks.length || sections.length || valuation || competitiveAdvantage);
   const sectionErrors = Object.entries(payload?.section_errors ?? {});
   const partialWarning = (textValue(data?.error) || sectionErrors.length > 0) ? (
-    <div role="alert" aria-label="Partial fundamental analysis" className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+    <div role="alert" aria-label="Partial fundamental analysis" className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-xs text-[var(--color-warning)]">
       <p>Partial data unavailable</p>
       {sectionErrors.length > 0 && (
         <ul className="mt-1 list-inside list-disc">
@@ -144,7 +144,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
                 {valuationVerified ? textValue(valuation.valuation_verdict)?.replace('_', ' ') ?? 'no verdict' : 'unverified units'}
               </div>
             </div>
-            {!valuationVerified && <p role="status" className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">{comparisonUnavailableReason}</p>}
+            {!valuationVerified && <p role="status" className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-xs text-[var(--color-warning)]">{comparisonUnavailableReason}</p>}
             <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
               <Metric label="MoS" value={valuationVerified ? pct(valuation.margin_of_safety) : null} />
               <Metric label="Method" value={textValue(valuation.valuation_method)?.toUpperCase()} />
@@ -162,7 +162,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Moat</div>
                 <div className="mt-2 text-2xl font-black capitalize text-[var(--text-primary)]">{competitiveAdvantage.moat ?? 'n/a'}</div>
               </div>
-              <div className="rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-300">
+              <div className="rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-1 text-xs font-black text-[var(--color-accent-primary)]">
                 {ratio(competitiveAdvantage.moat_score, '/100') ?? 'score n/a'}
               </div>
             </div>
@@ -214,7 +214,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
             <div key={`${itemTitle(item)}-${index}`} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/50 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-xs font-semibold text-[var(--text-primary)]">{itemTitle(item)}</div>
-                {typeof item.score === 'number' && <div className="text-xs font-bold text-blue-300">{item.score.toFixed(1)}</div>}
+                {typeof item.score === 'number' && <div className="text-xs font-bold text-[var(--color-accent-primary)]">{item.score.toFixed(1)}</div>}
               </div>
               {itemBody(item) && <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">{itemBody(item)}</p>}
             </div>
@@ -236,7 +236,7 @@ function Metric({ label, value }: { label: string; value?: string | null }) {
 
 function PointList({ title, items, tone }: { title: string; items: FundamentalAnalysisItem[]; tone: 'positive' | 'negative' }) {
   if (items.length === 0) return null;
-  const toneClass = tone === 'positive' ? 'text-emerald-300' : 'text-amber-300';
+  const toneClass = tone === 'positive' ? 'text-[var(--color-positive)]' : 'text-[var(--color-warning)]';
 
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">

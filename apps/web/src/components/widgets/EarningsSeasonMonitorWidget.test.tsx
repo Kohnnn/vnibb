@@ -91,7 +91,7 @@ describe('EarningsSeasonMonitorWidget', () => {
       expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
         resultCount: 2,
         latestDate: '2026-05-01T00:00:00Z',
-        source: 'VNIBB stored income statements',
+        source: 'VniBB stored income statements',
         yoyCoverage: { available: 2, total: 2 },
       }));
     });

@@ -498,7 +498,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                         aria-label="Cash flow chart mode"
                         value={effectiveChartType}
                         onChange={(e) => setChartType(e.target.value as 'overview' | 'fcf' | 'waterfall')}
-                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-blue-500 uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
+                        className="shrink-0 bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)] border border-[var(--border-color)] rounded px-2 py-1 focus:outline-none focus:border-[var(--color-state-border)] uppercase tracking-tighter cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                         <option value="overview">Cash Flows</option>
                         <option value="fcf">Free Cash Flow</option>
@@ -541,13 +541,13 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {(drawOverview && chartedSeries.some((entry) => entry.key === 'operatingCF')) ? (
-                                        <Bar dataKey="operatingCF" name="Operating" fill="#3b82f6" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="operatingCF" name="Operating" fill="var(--chart-blue)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'investingCF') ? (
-                                        <Bar dataKey="investingCF" name="Investing" fill="#f59e0b" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="investingCF" name="Investing" fill="var(--chart-slate)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'financingCF') ? (
-                                        <Bar dataKey="financingCF" name="Financing" fill="#ef4444" radius={[2, 2, 2, 2]} />
+                                        <Bar dataKey="financingCF" name="Financing" fill="var(--chart-cat-4)" radius={[2, 2, 2, 2]} />
                                     ) : null}
                                 </ComposedChart>
                             ) : chartedSeries.length > 0 ? (
@@ -573,10 +573,10 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                     />
                                     <Legend iconType="circle" wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
                                     {chartedSeries.some((entry) => entry.key === 'freeCashFlow') ? (
-                                        <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="#10b981" stroke="#10b981" fillOpacity={0.1} />
+                                        <Area type="monotone" dataKey="freeCashFlow" name="Free Cash Flow" fill="var(--color-positive)" stroke="var(--color-positive)" fillOpacity={0.1} />
                                     ) : null}
                                     {chartedSeries.some((entry) => entry.key === 'netCashFlow') ? (
-                                        <Line type="monotone" dataKey="netCashFlow" name="Net Cash Change" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                                        <Line type="monotone" dataKey="netCashFlow" name="Net Cash Change" stroke="var(--chart-blue)" strokeWidth={2} dot={{ r: 3 }} />
                                     ) : null}
                                 </ComposedChart>
                             ) : (
@@ -621,7 +621,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                 className={cn(
                                     "p-1 rounded transition-all",
                                     viewMode === 'table'
-                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                                         : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 )}
                                 title="Table View"
@@ -636,7 +636,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                                 className={cn(
                                     "p-1 rounded transition-all",
                                     viewMode === 'chart'
-                                        ? "bg-[var(--bg-tertiary)] text-blue-400 shadow-sm"
+                                        ? "bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] shadow-sm"
                                         : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
                                 )}
                                 title="Chart View"
@@ -659,7 +659,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                 </div>
                 <div className="flex-1 overflow-auto scrollbar-hide pt-1">
                     {statementNote && (
-                        <div className="mb-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+                        <div className="mb-2 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             {statementNote}
                         </div>
                     )}

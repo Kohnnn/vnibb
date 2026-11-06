@@ -251,7 +251,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     // Screener
     {
         type: 'screener',
-        name: 'VNIBB Screener Pro',
+        name: 'VniBB Screener Pro',
         description: 'Native backend-powered Vietnam stock screener and saved scans',
         category: 'screener',
         defaultConfig: {},
@@ -1038,7 +1038,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'valuation_lab',
         name: 'Valuation Lab',
-        description: 'Transparent DCF and reverse-DCF with editable assumptions seeded from VNIBB TTM data',
+        description: 'Transparent DCF and reverse-DCF with editable assumptions seeded from VniBB TTM data',
         category: 'estimates',
         defaultConfig: {},
         defaultLayout: { w: 5, h: 8, minW: 4, minH: 6 },

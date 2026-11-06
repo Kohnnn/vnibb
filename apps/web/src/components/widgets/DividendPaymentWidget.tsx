@@ -9,7 +9,14 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { formatDividendPayout, formatDividendYield } from '@/lib/formatters';
+import { EMPTY_VALUE } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+
+/** Payout is a magnitude, not a signed direction: brand §13 leaves it in ink. */
+function payoutCell(row: Parameters<typeof formatDividendPayout>[0]) {
+    const payout = formatDividendPayout(row);
+    return <span className={payout === EMPTY_VALUE ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}>{payout}</span>;
+}
 
 interface DividendPaymentWidgetProps {
     symbol: string;
@@ -115,7 +122,7 @@ export function DividendPaymentWidget({ symbol, onDataChange }: DividendPaymentW
                                     <td className="py-2 pr-3 text-[var(--text-secondary)]">{formatDividendType(row.dividend_type || row.type)}</td>
                                     <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.year || row.fiscal_year || row.issue_year || '-'}</td>
                                     <td className="py-2 pr-3 text-right text-[var(--text-secondary)]">{formatDividendYield(row.dividend_yield)}</td>
-                                    <td className="py-2 text-right text-green-400 font-medium">{formatDividendPayout(row)}</td>
+                                    <td className="py-2 text-right font-medium">{payoutCell(row)}</td>
                                 </tr>
                             ))}
                         </tbody>

@@ -45,6 +45,16 @@ describe('financial comparison language and navigation', () => {
     expect(screen.getByText('loss narrowed +100.0%')).toBeInTheDocument()
     expect(screen.getByText('EPS').closest('tr')).not.toHaveTextContent('%')
   })
+  test('renders measured zero growth without a positive sign and uses numeric typography', () => {
+    render(<DenseFinancialTable columns={columns} showTrend={false} rows={[
+      { id: 'revenue', label: 'Revenue', values: { '2024': 100, '2025': 100 } },
+    ]} />)
+
+    const row = screen.getByText('Revenue').closest('tr')!
+    expect(within(row).getByText('0.0%')).toBeInTheDocument()
+    expect(within(row).queryByText('+0.0%')).not.toBeInTheDocument()
+    expect(within(row).getAllByText('100').every((cell) => cell.classList.contains('font-mono'))).toBe(true)
+  })
 
   test('exposes native scrolling as a focusable named region without hiding table semantics', () => {
     render(<DenseFinancialTable columns={columns} sortable={false} showTrend={false} rows={[

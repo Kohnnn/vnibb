@@ -31,7 +31,7 @@ describe('SectorBreakdownWidget', () => {
     expect(screen.getByText('Admitted market cap: 2 of 4 returned stocks (partial coverage)')).toBeInTheDocument();
     expect(within(screen.getByText('Banking').closest('.rounded-md')!).getByText('25.0%')).toBeInTheDocument();
     expect(within(screen.getByText('Retail').closest('.rounded-md')!).getByText('75.0%')).toBeInTheDocument();
-    expect(within(screen.getByText('Unknown').closest('.rounded-md')!).getByText('—')).toBeInTheDocument();
+    expect(within(screen.getByText('Unknown').closest('.rounded-md')!).getByText('n/a')).toBeInTheDocument();
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ totalMarketCap: 400, capCount: 2 }));
   });
 
@@ -39,7 +39,7 @@ describe('SectorBreakdownWidget', () => {
     setSectors([{ sector: 'Legacy', stocks: [], stock_count: 1, total_market_cap: 123, avg_change_pct: null }]);
     const onDataChange = jest.fn();
     render(<SectorBreakdownWidget id="sectors" onDataChange={onDataChange} />);
-    expect(within(screen.getByText('Legacy').closest('.rounded-md')!).getByText('—')).toBeInTheDocument();
+    expect(within(screen.getByText('Legacy').closest('.rounded-md')!).getByText('n/a')).toBeInTheDocument();
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ totalMarketCap: null, capCount: 0 }));
     fireEvent.click(screen.getByRole('button', { name: 'Stock Count' }));
     expect(within(screen.getByText('Legacy').closest('.rounded-md')!).getByText('1')).toBeInTheDocument();

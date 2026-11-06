@@ -8,9 +8,21 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 
+// Quotes are shown beside a 2dp spread, so rounding them to whole units made a
+// 12.4 / 12.6 pair read as Buy 12, Sell 13, Spread +0.2. Keep the meaningful
+// fractional digits and drop only trailing zeros.
 function formatPrice(value: number | null | undefined): string {
-    if (value === null || value === undefined) return '--';
-    return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
+    return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+// A spread is a price difference, so it keeps the sub-unit precision the
+// quotes carry. The sign follows the rendered magnitude: 0.4 rounds to `0`
+// and must not read as a negative.
+function formatSpread(value: number): string {
+    const magnitude = Math.abs(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
+    if (Number(magnitude.replace(/,/g, '')) === 0) return magnitude;
+    return `${value > 0 ? '+' : '-'}${magnitude}`;
 }
 
 export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
@@ -58,7 +70,10 @@ export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: Widg
                     <WidgetEmpty message="No commodities data available" icon={<Gem size={18} />} />
                 ) : (
                     rows.map((row, index) => {
-                        const spread = (row.sell_price ?? 0) - (row.buy_price ?? 0);
+                        // A missing quote is unavailable, not a zero spread.
+                        const spread = row.sell_price != null && row.buy_price != null
+                            ? row.sell_price - row.buy_price
+                            : null;
                         return (
                             <div
                                 key={`${row.source}-${row.symbol}-${index}`}
@@ -77,8 +92,8 @@ export function CommoditiesWidget({ onDataChange }: { onDataChange?: (data: Widg
                                     <div className="text-[11px] text-[var(--text-secondary)] font-mono">
                                         Sell {formatPrice(row.sell_price)}
                                     </div>
-                                    <div className={`text-[10px] font-mono ${spread >= 0 ? 'text-amber-400' : 'text-red-400'}`}>
-                                        Spread {spread >= 0 ? '+' : ''}{formatPrice(spread)}
+                                    <div className={`text-[10px] font-mono ${spread !== null && spread >= 0 ? 'text-[var(--color-warning)]' : 'text-[var(--color-negative)]'}`}>
+                                        Spread {spread === null ? 'n/a' : formatSpread(spread)}
                                     </div>
                                 </div>
                             </div>

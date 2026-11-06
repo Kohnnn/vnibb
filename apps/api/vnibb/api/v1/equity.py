@@ -894,6 +894,60 @@ def _build_financial_metric_lookup(raw_payload: Any) -> dict[str, Any]:
     return lookup
 
 
+def _metric_evidence(row: FinancialStatementData, field_name: str) -> dict | None:
+    for name in (field_name, *_FINANCIAL_METRIC_ALIASES.get(field_name, ())):
+        evidence = row.unit_metadata.get(name)
+        if isinstance(evidence, dict) and evidence:
+            return evidence
+    lineage = (row.raw_data or {}).get("_financial_lineage")
+    if not isinstance(lineage, dict):
+        return None
+    sources = (
+        (lineage.get("canonical_data") or {}).get("unit_metadata") or {},
+        lineage.get("unit_metadata") or {},
+    )
+    for source in sources:
+        for name in (field_name, *_FINANCIAL_METRIC_ALIASES.get(field_name, ())):
+            evidence = source.get(name)
+            if isinstance(evidence, dict) and evidence:
+                return evidence
+    return None
+
+
+def _record_derivation(
+    row: FinancialStatementData,
+    field_name: str,
+    expression: str,
+    sources: list[tuple[FinancialStatementData, str]],
+) -> None:
+    """Attach unit evidence to a value `row` derived from other admitted fields.
+
+    A derived figure has no provider record of its own, so its unit is only as
+    good as its components. Missing component evidence leaves the field without
+    evidence, and admission withholds it instead of asserting a unit (#206).
+    """
+    if field_name in row.unit_metadata or not sources:
+        return
+    components = []
+    for source_row, name in sources:
+        evidence = _metric_evidence(source_row, name)
+        if evidence is None:
+            return
+        components.append(evidence)
+    row.unit_metadata[field_name] = {
+        "unit": "VND",
+        "value_unit": "VND",
+        "derivation": expression,
+        "unitEvidence": {
+            "kind": "derived_from_admitted_fields",
+            "expression": expression,
+            "fields": [name for _, name in sources],
+            "value_unit": "VND",
+        },
+        "components": components,
+    }
+
+
 def _lookup_financial_metric(raw_payload: Any, *aliases: str) -> Optional[float]:
     lookup = _build_financial_metric_lookup(raw_payload)
     for alias in aliases:
@@ -1051,7 +1105,9 @@ def _enrich_financial_statement_rows(
             metric for metric, metadata in item.unit_metadata.items()
             if isinstance(metadata, dict) and metadata.get("unavailable_reason")
         }
-
+        pre_fill = {
+            name: getattr(item, name, None) for name in FinancialStatementData.model_fields
+        }
         if item.total_equity is None:
             item.total_equity = _pick_optional_float(
                 item.total_equity,
@@ -1073,6 +1129,12 @@ def _enrich_financial_statement_rows(
                 and item.total_liabilities not in (None, 0)
             ):
                 item.total_equity = item.total_assets - item.total_liabilities
+                _record_derivation(
+                    item,
+                    "total_equity",
+                    "total_assets - total_liabilities",
+                    [(item, "total_assets"), (item, "total_liabilities")],
+                )
 
         if item.cash_and_equivalents is None:
             item.cash_and_equivalents = _lookup_financial_metric(
@@ -1097,29 +1159,37 @@ def _enrich_financial_statement_rows(
             )
 
         if item.selling_general_admin is None:
-            selling_expense = _lookup_financial_metric(
-                raw_data, "selling_expenses", "chi_phi_ban_hang"
-            )
-            admin_expense = _lookup_financial_metric(
-                raw_data,
-                "general_and_administrative_expenses",
-                "general_and_admin_expenses",
-                "chi_phi_quan_ly_dn",
-                "chi_phi_quan_ly_doanh_nghiep",
-            )
-            item.selling_general_admin = _sum_financial_metrics(
-                raw_data,
-                "selling_general_admin",
-                "selling_expenses",
-                "general_and_administrative_expenses",
-                "general_and_admin_expenses",
-                "chi_phi_ban_hang",
-                "chi_phi_quan_ly_dn",
-                "chi_phi_quan_ly_doanh_nghiep",
-            )
-            if item.selling_general_admin is None:
-                if selling_expense is not None or admin_expense is not None:
-                    item.selling_general_admin = (selling_expense or 0.0) + (admin_expense or 0.0)
+            # A direct `selling_general_admin` is a reported figure; the sum of
+            # the expense families is not, so its unit is only as good as the
+            # operands that produced it (#206).
+            combined = _lookup_financial_metric(raw_data, "selling_general_admin")
+            if combined is not None:
+                item.selling_general_admin = combined
+            else:
+                operands = [
+                    (item, name, value)
+                    for name, value in (
+                        ("selling_expenses", _lookup_financial_metric(
+                            raw_data, "selling_expenses", "chi_phi_ban_hang"
+                        )),
+                        ("general_and_administrative_expenses", _lookup_financial_metric(
+                            raw_data,
+                            "general_and_administrative_expenses",
+                            "general_and_admin_expenses",
+                            "chi_phi_quan_ly_dn",
+                            "chi_phi_quan_ly_doanh_nghiep",
+                        )),
+                    )
+                    if value is not None
+                ]
+                if operands:
+                    item.selling_general_admin = sum(value for _, _, value in operands)
+                    _record_derivation(
+                        item,
+                        "selling_general_admin",
+                        " + ".join(name for _, name, _ in operands),
+                        [(row, name) for row, name, _ in operands],
+                    )
 
         if item.research_development is None:
             item.research_development = _lookup_financial_metric(
@@ -1209,6 +1279,12 @@ def _enrich_financial_statement_rows(
             and capex_value is not None
         ):
             item.free_cash_flow = item.operating_cash_flow + capex_value
+            _record_derivation(
+                item,
+                "free_cash_flow",
+                "operating_cash_flow + capex",
+                [(item, "operating_cash_flow"), (item, "capex")],
+            )
 
         if (
             item.statement_type == StatementType.INCOME.value
@@ -1217,13 +1293,18 @@ def _enrich_financial_statement_rows(
         ):
             cashflow_match = rows_by_period.get(str(item.period or "").upper())
             if cashflow_match is not None and cashflow_match is not item:
-                item.depreciation = _pick_optional_float(
+                depreciation_value = _pick_optional_float(
                     item.depreciation,
                     cashflow_match.depreciation,
                     _lookup_financial_metric(
                         cashflow_match.raw_data, "depreciation", "depreciation_and_amortisation"
                     ),
                 )
+                item.depreciation = depreciation_value
+                if depreciation_value is not None:
+                    evidence = _metric_evidence(cashflow_match, "depreciation")
+                    if evidence is not None:
+                        item.unit_metadata.setdefault("depreciation", evidence)
 
         if item.ebitda is None and "ebitda" not in rejected:
             item.ebitda = _lookup_financial_metric(raw_data, "ebitda", "ebitda_bn_vnd")
@@ -1234,6 +1315,25 @@ def _enrich_financial_statement_rows(
             and item.depreciation is not None
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
+            _record_derivation(
+                item,
+                "ebitda",
+                "operating_income + abs(depreciation)",
+                [(item, "operating_income"), (item, "depreciation")],
+            )
+
+        # A value this function filled in has no provider record of its own. Its
+        # unit is only as good as the field it was copied from, so carry that
+        # field's evidence forward. Without it admission withholds the value
+        # rather than asserting an unsourced unit (#206).
+        for name in FinancialStatementData.model_fields:
+            if getattr(item, name, None) is None or pre_fill.get(name) is not None:
+                continue
+            evidence = _metric_evidence(item, name)
+            if evidence is not None:
+                # Aliases need no copy: admission resolves `cash`/`equity` to
+                # `cash_and_equivalents`/`total_equity` itself.
+                item.unit_metadata.setdefault(name, evidence)
 
         # A provider-rejected metric is not a missing value. Filling it from a raw
         # lookup or an accounting identity would publish a number the lineage refused.
@@ -1301,6 +1401,12 @@ async def _cross_fill_income_statement_rows(
             and item.depreciation is not None
         ):
             item.ebitda = item.operating_income + abs(item.depreciation)
+            _record_derivation(
+                item,
+                "ebitda",
+                "operating_income + abs(depreciation)",
+                [(item, "operating_income"), (item, "depreciation")],
+            )
 
     return _sort_financial_statement_rows(rows)
 
@@ -2314,6 +2420,56 @@ def _pick_optional_text(*values: Any) -> Optional[str]:
         if text:
             return text
     return None
+
+
+# #207: a legal form answers "what kind of entity", never "what industry".
+# Matched on the whole normalized value so a real classification that merely
+# starts with these words is unaffected.
+LEGAL_FORM_LABELS = frozenset({
+    "cong_ty_co_phan",
+    "cong_ty_cp",
+    "ctcp",
+    "tong_cong_ty_co_phan",
+    "cong_ty_trach_nhiem_huu_han",
+    "cong_ty_tnhh",
+    "tnhh",
+    "cong_ty_hop_danh",
+    "doanh_nghiep_tu_nhan",
+    "cong_ty_lien_doanh",
+    "joint_stock_company",
+    "joint_stock_corporation",
+})
+
+
+def _is_legal_form_label(value: Any) -> bool:
+    return _normalize_financial_metric_key(value) in LEGAL_FORM_LABELS
+
+
+def _pick_taxonomy_text(*values: Any) -> str | None:
+    """First value that is a classification rather than a legal form (#207)."""
+    return _pick_optional_text(*(v for v in values if not _is_legal_form_label(v)))
+
+
+def _pick_sector_text(industry: Any, *values: Any) -> str | None:
+    """First sourced sector-level candidate; empty when none is sourced (#207).
+
+    Only values that came from a sector-level field qualify. A stored or provider
+    sector equal to the industry is the exact legacy `sector = industry` signature,
+    so it is not a broader classification and is dropped. Nothing is inferred from
+    a keyword/manual-symbol grouping: that is a market grouping, not a taxonomy
+    level with a traceable source.
+
+    ponytail: an equal `icb_name2`/`icb_name3` pair is indistinguishable from the
+    legacy copy without per-field provenance; upgrade when the provider records it.
+    """
+    industry_text = str(industry or "").strip().casefold()
+    return _pick_taxonomy_text(
+        *(
+            value
+            for value in values
+            if not (industry_text and str(value or "").strip().casefold() == industry_text)
+        )
+    )
 
 
 def _normalize_share_count(value: Any) -> Optional[float]:
@@ -4426,19 +4582,22 @@ async def get_profile(
                 ).first()
 
                 exchange = company.exchange or (stock_row[0] if stock_row else None)
-                industry = _pick_optional_text(
+                industry = _pick_taxonomy_text(
                     company.industry,
                     raw_profile.get("industry"),
                     raw_profile.get("icb_name3"),
                     raw_profile.get("icb_name4"),
                     stock_row[2] if stock_row else None,
                 )
-                sector = _pick_optional_text(
+                # #207: sector and industry are different taxonomy levels, so the
+                # chain stops at sourced sector evidence and stays unavailable
+                # otherwise instead of restating the industry string.
+                sector = _pick_sector_text(
+                    industry,
                     company.sector,
                     raw_profile.get("sector"),
                     raw_profile.get("icb_name2"),
                     stock_row[3] if stock_row else None,
-                    industry,
                 )
                 listing_date = (
                     _coerce_iso_date(company.listing_date)
@@ -4555,8 +4714,11 @@ async def get_profile(
                     company_name=stock.company_name,
                     short_name=stock.short_name,
                     exchange=stock.exchange,
-                    industry=stock.industry,
-                    sector=stock.sector or stock.industry,
+                    industry=_pick_taxonomy_text(stock.industry),
+                    sector=_pick_sector_text(
+                        _pick_taxonomy_text(stock.industry),
+                        _pick_taxonomy_text(stock.sector),
+                    ),
                     listing_date=_coerce_iso_date(stock.listing_date),
                     market_cap=market_cap_provenance["value"],
                     market_cap_provenance=market_cap_provenance,
@@ -4639,19 +4801,19 @@ async def get_profile(
                     raw_profile.get("noEmployees"),
                 )
 
-            profile_data.industry = _pick_optional_text(
+            profile_data.industry = _pick_taxonomy_text(
                 profile_data.industry,
                 raw_profile.get("industry"),
                 raw_profile.get("icb_name3"),
                 raw_profile.get("icb_name4"),
                 stock_row[2] if stock_row else None,
             )
-            profile_data.sector = _pick_optional_text(
+            profile_data.sector = _pick_sector_text(
+                profile_data.industry,
                 profile_data.sector,
                 raw_profile.get("sector"),
                 raw_profile.get("icb_name2"),
                 stock_row[3] if stock_row else None,
-                profile_data.industry,
             )
 
             profile_data.outstanding_shares = _pick_optional_share_count(
@@ -6852,7 +7014,7 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="income_statement_v5_eps_admitted")
+@cached(ttl=86400, key_prefix="income_statement_v6_fully_admitted")
 async def get_income_statement(
     symbol: str,
     period: Literal[
@@ -6901,14 +7063,14 @@ async def get_income_statement(
             rows=data,
             db=db,
         )
-        for row, admitted in zip(data, admit_statement_rows(data, period), strict=True):
-            row.eps, row.eps_diluted = admitted.eps, admitted.eps_diluted
-            for field in ("eps", "eps_diluted"):
-                if field in admitted.unit_metadata:
-                    row.unit_metadata[field] = admitted.unit_metadata[field]
+        # Return the admitted rows, not the pre-admission ones. Enrichment and
+        # cross-fill add values after `admit_statement_rows` has run, so copying
+        # back only EPS let SG&A survive with `currency=null` and
+        # `value_unit=null` while revenue and net income were withheld (#206).
+        admitted_rows = admit_statement_rows(data, period)
         return StandardResponse(
-            data=data,
-            meta=MetaData(count=len(data), last_data_date=last_data_date),
+            data=admitted_rows,
+            meta=MetaData(count=len(admitted_rows), last_data_date=last_data_date),
         )
     except BaseException as e:
         if _is_control_flow_exception(e):
@@ -6935,15 +7097,11 @@ async def get_income_statement(
                 rows=fallback_data,
                 db=db,
             )
-            for row, admitted in zip(fallback_data, admit_statement_rows(fallback_data, period), strict=True):
-                row.eps, row.eps_diluted = admitted.eps, admitted.eps_diluted
-                for field in ("eps", "eps_diluted"):
-                    if field in admitted.unit_metadata:
-                        row.unit_metadata[field] = admitted.unit_metadata[field]
-            if fallback_data:
+            admitted_rows = admit_statement_rows(fallback_data, period)
+            if admitted_rows:
                 return StandardResponse(
-                    data=fallback_data,
-                    meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
+                    data=admitted_rows,
+                    meta=MetaData(count=len(admitted_rows), last_data_date=last_data_date),
                 )
         except Exception:
             pass
@@ -6982,8 +7140,11 @@ async def get_balance_sheet(
         else:
             data = fallback_data
         data = _enrich_financial_statement_rows(data)
+        # #206: enrichment fills from `raw_data` after admission, so its output
+        # is gated again. Without this, a metric admission withheld came back
+        # with no unit evidence behind it.
         return StandardResponse(
-            data=data,
+            data=admit_statement_rows(data, period),
             meta=MetaData(count=len(data), last_data_date=last_data_date),
         )
     except BaseException as e:
@@ -7000,7 +7161,7 @@ async def get_balance_sheet(
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
-                    data=fallback_data,
+                    data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 )
         except Exception:
@@ -7038,8 +7199,9 @@ async def get_cash_flow(
         else:
             data = fallback_data
         data = _enrich_financial_statement_rows(data)
+        # #206: same final gate as the balance sheet, for the same reason.
         return StandardResponse(
-            data=data,
+            data=admit_statement_rows(data, period),
             meta=MetaData(count=len(data), last_data_date=last_data_date),
         )
     except BaseException as e:
@@ -7056,7 +7218,7 @@ async def get_cash_flow(
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
-                    data=fallback_data,
+                    data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 )
         except Exception:

@@ -279,7 +279,7 @@ describe('IncomeStatementWidget table selection', () => {
             raw_data: { revenue: 900_000_000_000, financial_expenses: 90_000_000_000 },
         }] }) as never);
         render(<IncomeStatementWidget id="income-unverified" symbol="FPT" onDataChange={onDataChange} />);
-        expect(screen.getByText('Revenue').closest('tr')).toHaveTextContent('—');
+        expect(screen.getByText('Revenue').closest('tr')).toHaveTextContent('n/a');
         openChart();
         expect(JSON.parse(screen.getByTestId('charted-periods').getAttribute('data-periods')!)[0].revenue).toBeNull();
         expect(onDataChange.mock.calls.at(-1)?.[0].data[0].revenue).toBeNull();

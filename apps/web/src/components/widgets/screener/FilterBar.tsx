@@ -204,7 +204,7 @@ export function FilterBar({ filters, onChange, analyticsContext }: FilterBarProp
           className={cn(
               "inline-flex items-center gap-1 px-3 h-7 text-[10px] font-bold border border-dashed rounded-full transition-all uppercase tracking-tight",
               showAddMenu 
-                ? "bg-blue-600 border-blue-500 text-white"
+                ? "bg-[var(--color-accent-fill)] border-[var(--color-state-border)] text-[var(--color-on-accent)]"
                 : "border-[var(--border-color)] bg-transparent text-[var(--text-muted)] hover:border-[var(--border-default)] hover:text-[var(--text-secondary)]"
           )}
         >
@@ -222,7 +222,7 @@ export function FilterBar({ filters, onChange, analyticsContext }: FilterBarProp
                 <button
                     key={filter.id}
                     onClick={() => addFilter(filter.id)}
-                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-blue-600 hover:text-white"
+                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--color-accent-fill)] hover:text-[var(--color-on-accent)]"
                 >
                     {filter.label}
                     <Plus size={10} className="opacity-30" />

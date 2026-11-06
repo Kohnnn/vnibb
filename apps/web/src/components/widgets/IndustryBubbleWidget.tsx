@@ -58,7 +58,7 @@ function metricLabel(metric: string) {
 }
 
 function formatBubbleMetric(metric: string, value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'N/A';
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
   if (metric.includes('growth') || metric === 'roe' || metric === 'roa' || metric === 'roic') {
     return formatPercent(value, { input: 'percent', decimals: 2 });
   }
@@ -79,7 +79,7 @@ function BubbleShape(props: any) {
         r={radius}
         fill={payload.color}
         fillOpacity={payload.is_reference ? 0.9 : 0.75}
-        stroke={payload.is_reference ? '#f8fafc' : 'rgba(255,255,255,0.3)'}
+        stroke={payload.is_reference ? 'var(--color-on-accent)' : 'var(--border-default)'}
         strokeWidth={payload.is_reference ? 2.5 : 1.25}
       />
       <text
@@ -88,7 +88,7 @@ function BubbleShape(props: any) {
         textAnchor="middle"
         fontSize={11}
         fontWeight={700}
-        fill="#f8fafc"
+        fill="var(--color-on-accent)"
       >
         {payload.symbol}
       </text>
@@ -151,7 +151,7 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex items-center gap-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                <CircleDot size={12} className="text-fuchsia-300" />
+                <CircleDot size={12} className="text-[var(--color-accent-primary)]" />
                 <span>{data?.sector || 'Sector peers'}</span>
               </div>
 
@@ -173,7 +173,7 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                     className={cn(
                     'rounded px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
                     topN === value
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                       : 'border border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   )}
                 >
@@ -273,14 +273,14 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
               <div className="grid grid-cols-1 gap-2 xl:grid-cols-3">
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Reference</div>
-                  <div className="mt-1 text-sm font-semibold text-fuchsia-200">{referencePoint?.symbol || upperSymbol}</div>
+                  <div className="mt-1 text-sm font-semibold text-[var(--color-accent-primary)]">{referencePoint?.symbol || upperSymbol}</div>
                   <div className="mt-1 text-xs text-[var(--text-secondary)]">
                     {metricLabel(xMetric)} {formatBubbleMetric(xMetric, referencePoint?.x)} · {metricLabel(yMetric)} {formatBubbleMetric(yMetric, referencePoint?.y)}
                   </div>
                 </div>
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] p-3">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Sector Average</div>
-                  <div className="mt-1 text-sm font-semibold text-cyan-200">{data?.sector || 'Peer set'}</div>
+                  <div className="mt-1 text-sm font-semibold text-[var(--color-accent-primary)]">{data?.sector || 'Peer set'}</div>
                   <div className="mt-1 text-xs text-[var(--text-secondary)]">
                     {metricLabel(xMetric)} {formatBubbleMetric(xMetric, data?.sector_average?.x)} · {metricLabel(yMetric)} {formatBubbleMetric(yMetric, data?.sector_average?.y)}
                   </div>
@@ -332,10 +332,10 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                         }}
                       />
                       {data?.sector_average?.x != null && (
-                        <ReferenceLine x={data.sector_average.x} stroke="#94a3b8" strokeDasharray="4 4" />
+                        <ReferenceLine x={data.sector_average.x} stroke="var(--chart-slate)" strokeDasharray="4 4" />
                       )}
                       {data?.sector_average?.y != null && (
-                        <ReferenceLine y={data.sector_average.y} stroke="#94a3b8" strokeDasharray="4 4" />
+                        <ReferenceLine y={data.sector_average.y} stroke="var(--chart-slate)" strokeDasharray="4 4" />
                       )}
                       <Scatter data={points} shape={<BubbleShape />} />
                     </ScatterChart>
@@ -364,7 +364,7 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                     {legendItems.map((item) => (
                       <div key={item.symbol} className="flex items-center gap-2">
                         <span className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color }} />
-                        <span className={cn('font-medium', item.is_reference && 'text-fuchsia-300')}>
+                        <span className={cn('font-medium', item.is_reference && 'text-[var(--color-accent-primary)]')}>
                           {item.symbol}{item.is_reference ? ' · Ref' : ''}
                         </span>
                       </div>

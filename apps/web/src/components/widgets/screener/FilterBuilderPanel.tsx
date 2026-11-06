@@ -257,8 +257,8 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <div className="bg-blue-600/20 p-2 rounded-lg">
-                        <Settings2 className="text-blue-500" size={18} />
+                    <div className="bg-[var(--color-state-bg)] p-2 rounded-lg">
+                        <Settings2 className="text-[var(--color-accent-primary)]" size={18} />
                     </div>
                     <div>
                         <h3 className="text-sm font-semibold text-[var(--text-primary)]">Advanced Filter Builder</h3>
@@ -270,7 +270,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                         <button
                             onClick={() => handleLogicChange('AND')}
                             className={`px-3 py-1 text-xs rounded-md transition-all ${filterGroup.logic === 'AND'
-                                ? 'bg-blue-600 text-white shadow-lg'
+                                ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                         >
@@ -279,7 +279,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                         <button
                             onClick={() => handleLogicChange('OR')}
                             className={`px-3 py-1 text-xs rounded-md transition-all ${filterGroup.logic === 'OR'
-                                ? 'bg-orange-600 text-white shadow-lg'
+                                ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                         >
@@ -306,7 +306,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                         <div key={cond.id} className="flex items-center gap-3 bg-[var(--bg-secondary)] border border-[var(--border-default)] hover:border-[var(--border-color)] p-3 rounded-lg group transition-all">
                             {/* Logic connector */}
                             {index > 0 && (
-                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${filterGroup.logic === 'AND' ? 'bg-blue-600/20 text-blue-400' : 'bg-orange-600/20 text-orange-400'}`}>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded bg-[var(--color-state-bg)] ${filterGroup.logic === 'AND' ? 'text-[var(--color-accent-secondary)]' : 'text-[var(--text-secondary)]'}`}>
                                     {filterGroup.logic}
                                 </span>
                             )}
@@ -331,7 +331,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                                         placeholder="Search metrics..."
                                                         value={searchQuery}
                                                         onChange={(e) => setSearchQuery(e.target.value)}
-                                                        className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded pl-7 pr-2 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:border-blue-500"
+                                                        className="w-full bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded pl-7 pr-2 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--color-state-border)]"
                                                     />
                                                 </div>
                                             </div>
@@ -363,7 +363,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                         <SelectContent className="bg-[var(--bg-dropdown)] border-[var(--border-default)]">
                                             {OPERATORS.map(op => (
                                                 <SelectItem key={op.id} value={op.id} className="text-xs">
-                                                    <span className="font-mono mr-2 text-blue-400">{op.symbol}</span>
+                                                    <span className="font-mono mr-2 text-[var(--color-accent-secondary)]">{op.symbol}</span>
                                                     {op.name}
                                                 </SelectItem>
                                             ))}
@@ -425,7 +425,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => removeCondition(cond.id)}
-                                className="h-8 w-8 text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-8 w-8 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] opacity-0 group-hover:opacity-100 transition-opacity"
                             >
                                 <Trash2 size={16} />
                             </Button>
@@ -461,7 +461,7 @@ export function FilterBuilderPanel({ filterGroup, onFilterChange, onClose }: Fil
                     <Button
                         size="sm"
                         onClick={onClose}
-                        className="bg-blue-600 hover:bg-blue-500 text-white text-xs h-9 shadow-lg shadow-blue-600/20"
+                        className="bg-[var(--color-accent-fill)] hover:brightness-105 text-[var(--color-on-accent)] text-xs h-9 shadow-lg shadow-[var(--color-state-bg)]"
                     >
                         Apply Filters
                     </Button>

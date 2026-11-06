@@ -14,6 +14,7 @@ import {
   type QuantRunWidget,
 } from '@/lib/quantRunHistory'
 import { exportToCSV } from '@/lib/exportWidget'
+import { EMPTY_VALUE } from '@/lib/units'
 
 interface QuantRunHistoryPanelProps {
   widget: QuantRunWidget
@@ -40,7 +41,7 @@ function useRuns(widget: QuantRunWidget): QuantRun[] {
 function formatHeadline(run: QuantRun, key?: string): string {
   if (!key) return ''
   const value = run.summary[key]
-  if (value === null || value === undefined) return '—'
+  if (value === null || value === undefined) return EMPTY_VALUE
   return typeof value === 'number' ? value.toFixed(2) : String(value)
 }
 
@@ -68,7 +69,14 @@ export function QuantRunHistoryPanel({
 
   const handleExport = () => {
     if (!runs.length) return
-    exportToCSV(runsToRows(runs), `quant-runs-${widget}`)
+    exportToCSV(runsToRows(runs), `quant-runs-${widget}`, {
+      widgetType: widget,
+      widgetTitle: `Quant runs · ${widget}`,
+      sourceLabel: 'Browser-local run history',
+      apiGroup: 'local',
+      endpoint: 'local:quant-runs',
+      localOnly: true,
+    })
   }
 
   const compareRuns = compare
@@ -81,7 +89,7 @@ export function QuantRunHistoryPanel({
         <button
           type="button"
           onClick={handleSave}
-          className="flex items-center gap-1 rounded bg-blue-600/20 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200 hover:bg-blue-600/30"
+          className="flex items-center gap-1 rounded bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-accent-primary)] hover:bg-[var(--color-state-bg)]"
         >
           <Save size={10} /> Save run
         </button>
@@ -104,7 +112,7 @@ export function QuantRunHistoryPanel({
             <button
               type="button"
               onClick={() => clearUnpinned(widget)}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-red-300"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--color-negative)]"
             >
               Clear unpinned
             </button>
@@ -129,7 +137,7 @@ export function QuantRunHistoryPanel({
                     type="button"
                     onClick={() => togglePin(run.id)}
                     title={run.pinned ? 'Unpin' : 'Pin'}
-                    className={run.pinned ? 'text-amber-300' : 'text-[var(--text-muted)] hover:text-amber-300'}
+                    className={run.pinned ? 'text-[var(--color-warning)]' : 'text-[var(--text-muted)] hover:text-[var(--color-warning)]'}
                   >
                     {run.pinned ? <Pin size={10} /> : <PinOff size={10} />}
                   </button>
@@ -155,7 +163,7 @@ export function QuantRunHistoryPanel({
                       })
                     }
                     title="Add to compare"
-                    className="text-[var(--text-muted)] hover:text-cyan-300"
+                    className="text-[var(--text-muted)] hover:text-[var(--color-accent-primary)]"
                   >
                     cmp
                   </button>
@@ -163,7 +171,7 @@ export function QuantRunHistoryPanel({
                     type="button"
                     onClick={() => deleteRun(run.id)}
                     title="Delete"
-                    className="text-[var(--text-muted)] hover:text-red-300"
+                    className="text-[var(--text-muted)] hover:text-[var(--color-negative)]"
                   >
                     <Trash2 size={10} />
                   </button>
@@ -189,7 +197,7 @@ function CompareTable({ a, b, onClose }: { a: QuantRun; b: QuantRun; onClose: ()
     <div className="mt-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1 text-[10px]">
       <div className="mb-1 flex items-center justify-between">
         <span className="font-semibold text-[var(--text-secondary)]">Compare runs</span>
-        <button type="button" onClick={onClose} className="text-[var(--text-muted)] hover:text-red-300">
+        <button type="button" onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--color-negative)]">
           <X size={10} />
         </button>
       </div>
@@ -203,9 +211,9 @@ function CompareTable({ a, b, onClose }: { a: QuantRun; b: QuantRun; onClose: ()
           const bv = b.summary[key]
           const an = num(av)
           const bn = num(bv)
-          const delta = an !== null && bn !== null ? (bn - an).toFixed(2) : '—'
+          const delta = an !== null && bn !== null ? (bn - an).toFixed(2) : EMPTY_VALUE
           return (
-            <Row key={key} k={key} a={av ?? '—'} b={bv ?? '—'} d={delta} />
+            <Row key={key} k={key} a={av ?? EMPTY_VALUE} b={bv ?? EMPTY_VALUE} d={delta} />
           )
         })}
       </div>
@@ -220,7 +228,7 @@ function Row({ k, a, b, d }: { k: string; a: number | string; b: number | string
       <span className="truncate text-[var(--text-secondary)]">{k}</span>
       <span className="text-right font-mono text-[var(--text-primary)]">{fmt(a)}</span>
       <span className="text-right font-mono text-[var(--text-primary)]">{fmt(b)}</span>
-      <span className="text-right font-mono text-cyan-300">{d}</span>
+      <span className="text-right font-mono text-[var(--color-accent-primary)]">{d}</span>
     </>
   )
 }

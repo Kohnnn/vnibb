@@ -12,6 +12,8 @@ import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import type { WidgetGroupId } from '@/types/widget';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { priceDirection } from '@/lib/priceColor';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface TopMoversWidgetProps {
   isEditing?: boolean;
@@ -112,11 +114,14 @@ export function TopMoversWidget({
       <div className="h-full flex flex-col">
         <div className="flex items-center justify-center px-3 py-2 border-b border-[var(--border-subtle)]">
           <div className="flex bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-lg p-0.5 text-[10px]">
+            {/* Mode is a control state, not a price direction: neutral/blue
+                selection with the up/down glyph carrying direction (#197). */}
             <button
               onClick={() => setMode('gainer')}
+              aria-pressed={mode === 'gainer'}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'gainer'
-                  ? 'bg-green-600 text-white shadow-lg shadow-green-600/20'
+                  ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
@@ -124,9 +129,10 @@ export function TopMoversWidget({
             </button>
             <button
               onClick={() => setMode('loser')}
+              aria-pressed={mode === 'loser'}
               className={`px-4 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
                 mode === 'loser'
-                  ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                  ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                   : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
             >
@@ -180,16 +186,25 @@ export function TopMoversWidget({
                   }
                 }
 
-                const hasChangePct = changePct !== null;
-                const isUp = (changePct ?? 0) >= 0;
-                const changeLabel = hasChangePct
-                  ? `${isUp ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`
-                  : '--';
-                const rowHoverClass = hasChangePct
-                  ? isUp
-                    ? 'hover:bg-green-500/10 hover:border-green-500/20'
-                    : 'hover:bg-red-500/10 hover:border-red-500/20'
-                  : 'hover:bg-[var(--bg-secondary)]/70 hover:border-[var(--border-subtle)]';
+                // A measured zero is flat and a missing change is no reading:
+                // neither is a gain. Colour and sign both key off the direction
+                // so `0.00%` never prints as `+0.00%` in gain green (#200).
+                const direction = priceDirection(changePct);
+                const changeLabel = direction === 'none'
+                  ? 'n/a'
+                  : `${(changePct ?? 0) > 0 ? '+' : ''}${(changePct ?? 0).toFixed(2)}%`;
+                const changeClass = direction === 'up'
+                  ? 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]'
+                  : direction === 'down'
+                    ? 'text-[var(--color-negative)] bg-[var(--color-negative-bg)]'
+                    : direction === 'flat'
+                      ? 'text-[var(--text-primary)] bg-[var(--bg-secondary)]'
+                      : 'text-[var(--text-muted)] bg-[var(--bg-secondary)]';
+                const rowHoverClass = direction === 'up'
+                  ? 'hover:bg-[var(--color-positive-bg)] hover:border-[var(--color-positive)]'
+                  : direction === 'down'
+                    ? 'hover:bg-[var(--color-negative-bg)] hover:border-[var(--color-negative)]'
+                    : 'hover:bg-[var(--bg-secondary)]/70 hover:border-[var(--border-subtle)]';
                 return (
                   <button
                     key={`${stock.symbol}-${index}`}
@@ -201,16 +216,16 @@ export function TopMoversWidget({
                         handleSymbolSelect(stock.symbol);
                       }
                     }}
-                    className={`w-full flex items-center justify-between py-2 px-2.5 rounded-lg group transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 ${rowHoverClass} border border-transparent`}
+                    className={`w-full flex items-center justify-between py-2 px-2.5 rounded-lg group transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] ${rowHoverClass} border border-transparent`}
                   >
                     <div className="flex items-center gap-2.5">
                       <span
-                        className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded ${
-                          index < 3
-                            ? isUp
-                              ? 'bg-green-600/20 text-green-600'
-                              : 'bg-red-600/20 text-red-600'
-                            : 'bg-[var(--bg-secondary)] text-[var(--text-muted)]'
+                        className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded border ${
+                          (direction === 'up' || direction === 'down') && index < 3
+                            ? direction === 'up'
+                              ? 'bg-[var(--color-positive-bg)] border-[var(--color-positive)] text-[var(--color-positive)]'
+                              : 'bg-[var(--color-negative-bg)] border-[var(--color-negative)] text-[var(--color-negative)]'
+                            : 'bg-[var(--bg-secondary)] border-transparent text-[var(--text-muted)]'
                         }`}
                       >
                         {index + 1}
@@ -222,16 +237,10 @@ export function TopMoversWidget({
                     </div>
                     <div className="flex items-center gap-4">
                       <span className="text-[var(--text-primary)] text-xs font-mono tabular-nums">
-                        {price !== null ? price.toLocaleString() : '--'}
+                        {price !== null ? price.toLocaleString() : EMPTY_VALUE}
                       </span>
                       <span
-                        className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${
-                          hasChangePct
-                            ? isUp
-                              ? 'text-green-600 bg-green-500/10'
-                              : 'text-red-600 bg-red-500/10'
-                            : 'text-[var(--text-muted)] bg-[var(--bg-secondary)]'
-                        }`}
+                        className={`text-[11px] font-bold min-w-[55px] text-right px-1.5 py-0.5 rounded ${changeClass}`}
                       >
                         {changeLabel}
                       </span>

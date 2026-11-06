@@ -12,6 +12,7 @@ import { buildGrowthBridgeRows } from '@/lib/financialDiscovery';
 import { formatPercent } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+import { signedToneClass, priceBgVar, priceDirection } from '@/lib/priceColor';
 
 interface GrowthBridgeWidgetProps {
   id: string;
@@ -115,14 +116,14 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                     <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Annual</div>
                     <div className="relative h-7 overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)]">
                       <div
-                        className={`absolute inset-y-0 left-0 ${row.annual !== null && row.annual >= 0 ? 'bg-emerald-500/35' : 'bg-rose-500/30'}`}
+                        className={`absolute inset-y-0 left-0 ${priceBgVar(priceDirection(row.annual))}`}
                         style={{ width: `${widthForChange(row.annual)}%` }}
                       />
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
                         <span>{annualLabel}</span>
-                        <span className={row.annual !== null && row.annual >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
-                          {formatPercent(row.annual, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
-                          {row.annualLabel && <span className="ml-1 text-[10px] text-amber-300">({row.annualLabel})</span>}
+                        <span className={signedToneClass(row.annual)}>
+                          {formatPercent(row.annual, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}
+                          {row.annualLabel && <span className="ml-1 text-[10px] text-[var(--color-warning)]">({row.annualLabel})</span>}
                         </span>
                       </div>
                     </div>
@@ -131,14 +132,14 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                     <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Latest Comparable Quarter</div>
                     <div className="relative h-7 overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)]">
                       <div
-                        className={`absolute inset-y-0 left-0 ${row.quarter !== null && row.quarter >= 0 ? 'bg-cyan-500/35' : 'bg-amber-500/30'}`}
+                        className="absolute inset-y-0 left-0 bg-[var(--color-state-bg)]"
                         style={{ width: `${widthForChange(row.quarter)}%` }}
                       />
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
                         <span>{quarterLabel}</span>
-                        <span className={row.quarter !== null && row.quarter >= 0 ? 'text-cyan-300' : 'text-amber-300'}>
-                          {formatPercent(row.quarter, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}
-                          {row.quarterLabel && <span className="ml-1 text-[10px] text-amber-300">({row.quarterLabel})</span>}
+                        <span className={row.quarter !== null && row.quarter >= 0 ? 'text-[var(--color-accent-primary)]' : 'text-[var(--color-warning)]'}>
+                          {formatPercent(row.quarter, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}
+                          {row.quarterLabel && <span className="ml-1 text-[10px] text-[var(--color-warning)]">({row.quarterLabel})</span>}
                         </span>
                       </div>
                     </div>

@@ -3,7 +3,7 @@
 import { memo } from 'react';
 import { ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatTimestamp } from '@/lib/format';
+import { formatTimestamp } from '@/lib/formatDate';
 import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
 
 interface NewsCardProps {
@@ -28,10 +28,10 @@ interface NewsCardProps {
 }
 
 const SENTIMENT_CONFIG = {
-  positive: { icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10' },
-  bullish: { icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10' },
-  negative: { icon: TrendingDown, color: 'text-red-400', bg: 'bg-red-500/10' },
-  bearish: { icon: TrendingDown, color: 'text-red-400', bg: 'bg-red-500/10' },
+  positive: { icon: TrendingUp, color: 'text-[var(--color-positive)]', bg: 'bg-[var(--color-positive-bg)]' },
+  bullish: { icon: TrendingUp, color: 'text-[var(--color-positive)]', bg: 'bg-[var(--color-positive-bg)]' },
+  negative: { icon: TrendingDown, color: 'text-[var(--color-negative)]', bg: 'bg-[var(--color-negative-bg)]' },
+  bearish: { icon: TrendingDown, color: 'text-[var(--color-negative)]', bg: 'bg-[var(--color-negative-bg)]' },
   neutral: { icon: Minus, color: 'text-[var(--text-muted)]', bg: 'bg-[var(--bg-hover)]' },
 };
 
@@ -55,7 +55,7 @@ function NewsCardComponent({ news }: NewsCardProps) {
 
         <div className="flex-1 min-w-0">
           {/* Title */}
-          <h4 className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 mb-1 group-hover:text-blue-400 transition-colors leading-snug">
+          <h4 className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 mb-1 group-hover:text-[var(--color-accent-secondary)] transition-colors leading-snug">
             {news.title}
           </h4>
 
@@ -64,14 +64,14 @@ function NewsCardComponent({ news }: NewsCardProps) {
               {news.matched_symbols?.slice(0, 3).map((symbol) => (
                 <span
                   key={`${news.id}-${symbol}`}
-                  className="rounded border border-blue-500/20 bg-blue-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-blue-300"
+                  className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-secondary)]"
                 >
                   {symbol}
                 </span>
               ))}
               {typeof news.relevance_score === 'number' && !news.is_market_wide_fallback && (
                 <span
-                  className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-300"
+                  className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-secondary)]"
                   title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
                 >
                   {news.match_reason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(news.relevance_score * 100)}/100
@@ -100,7 +100,7 @@ function NewsCardComponent({ news }: NewsCardProps) {
                 <span>•</span>
                 <div className="flex gap-1">
                   {news.symbols.slice(0, 3).map(s => (
-                    <span key={s} className="px-1.5 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded">
+                    <span key={s} className="px-1.5 py-0.5 bg-[var(--color-state-bg)] text-[var(--color-accent-secondary)] border border-[var(--color-state-border)] rounded">
                       {s}
                     </span>
                   ))}

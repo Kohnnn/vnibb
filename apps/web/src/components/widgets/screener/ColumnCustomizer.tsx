@@ -64,7 +64,7 @@ export function ColumnCustomizer({ columns, onChange, analyticsContext }: Column
         }}
         className={cn(
             "p-1.5 rounded transition-colors",
-            isOpen ? "bg-blue-600 text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+            isOpen ? "bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
         )}
         title="Customize Columns"
       >
@@ -85,7 +85,7 @@ export function ColumnCustomizer({ columns, onChange, analyticsContext }: Column
               >
                 <GripVertical size={12} className="text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]" />
                 {column.visible ? (
-                  <Eye size={12} className="text-blue-400" />
+                  <Eye size={12} className="text-[var(--color-accent-primary)]" />
                 ) : (
                   <EyeOff size={12} className="text-[var(--text-muted)]" />
                 )}
@@ -110,7 +110,7 @@ export function ColumnCustomizer({ columns, onChange, analyticsContext }: Column
                   })
                   onChange(columns.map(c => ({ ...c, visible: true })))
                 }}
-                className="text-[9px] font-bold text-blue-500 hover:text-blue-400 uppercase tracking-tighter"
+                className="text-[9px] font-bold text-[var(--color-accent-primary)] hover:text-[var(--color-accent-secondary)] uppercase tracking-tighter"
               >
                   Reset to Default
               </button>

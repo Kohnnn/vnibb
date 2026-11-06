@@ -21,9 +21,9 @@ interface MarketSentimentWidgetProps {
 const sentimentConfig = {
   bullish: {
     icon: TrendingUp,
-    color: 'text-green-400',
-    bg: 'bg-green-500/20',
-    border: 'border-green-500/40',
+    color: 'text-[var(--color-positive)]',
+    bg: 'bg-[var(--color-positive-bg)]',
+    border: 'border-[var(--color-state-border)]',
   },
   neutral: {
     icon: Minus,
@@ -33,9 +33,9 @@ const sentimentConfig = {
   },
   bearish: {
     icon: TrendingDown,
-    color: 'text-red-400',
-    bg: 'bg-red-500/20',
-    border: 'border-red-500/40',
+    color: 'text-[var(--color-negative)]',
+    bg: 'bg-[var(--color-negative-bg)]',
+    border: 'border-[var(--color-state-border)]',
   },
 } as const;
 
@@ -61,7 +61,7 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
   const awaitingNewsHealth: WidgetHealthState = {
     status: 'awaiting_update',
     label: 'Awaiting news',
-    detail: 'No classified market-news items are available in the current VNIBB sentiment snapshot.',
+    detail: 'No classified market-news items are available in the current VniBB sentiment snapshot.',
   };
   const noTrendingTopicsHealth: WidgetHealthState = {
     status: 'limited',
@@ -153,30 +153,30 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
             <span>{sentiment.trend_direction}</span>
           </div>
           <div className="flex h-8 overflow-hidden rounded border border-[var(--border-subtle)]">
-            <div className="flex items-center justify-center bg-green-500/80 text-xs font-medium text-white" style={{ width: `${sentiment.bullish_percentage}%` }}>
+            <div className="flex items-center justify-center bg-[var(--color-positive)] text-xs font-medium text-[var(--color-bg-primary)]" style={{ width: `${sentiment.bullish_percentage}%` }}>
               {sentiment.bullish_percentage > 15 ? `${sentiment.bullish_percentage.toFixed(0)}%` : ''}
             </div>
             <div className="flex items-center justify-center bg-[var(--bg-tertiary)] text-xs font-medium text-[var(--text-primary)]" style={{ width: `${neutralPercentage}%` }}>
               {neutralPercentage > 15 ? `${neutralPercentage.toFixed(0)}%` : ''}
             </div>
-            <div className="flex items-center justify-center bg-red-500/80 text-xs font-medium text-white" style={{ width: `${sentiment.bearish_percentage}%` }}>
+            <div className="flex items-center justify-center bg-[var(--color-negative)] text-xs font-medium text-[var(--color-bg-primary)]" style={{ width: `${sentiment.bearish_percentage}%` }}>
               {sentiment.bearish_percentage > 15 ? `${sentiment.bearish_percentage.toFixed(0)}%` : ''}
             </div>
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2 mb-3">
-          <div className="rounded-lg border border-green-500/20 bg-green-500/10 p-2">
-            <div className="text-[10px] uppercase tracking-widest text-green-300">Bullish</div>
-            <div className="mt-1 text-lg font-bold text-green-300">{sentiment.bullish_count}</div>
+          <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] p-2">
+            <div className="text-[10px] uppercase tracking-widest text-[var(--color-positive)]">Bullish</div>
+            <div className="mt-1 text-lg font-bold text-[var(--color-positive)]">{sentiment.bullish_count}</div>
           </div>
           <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-2">
             <div className="text-[10px] uppercase tracking-widest text-[var(--text-secondary)]">Neutral</div>
             <div className="mt-1 text-lg font-bold text-[var(--text-primary)]">{sentiment.neutral_count}</div>
           </div>
-          <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-2">
-            <div className="text-[10px] uppercase tracking-widest text-red-300">Bearish</div>
-            <div className="mt-1 text-lg font-bold text-red-300">{sentiment.bearish_count}</div>
+          <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-negative-bg)] p-2">
+            <div className="text-[10px] uppercase tracking-widest text-[var(--color-negative)]">Bearish</div>
+            <div className="mt-1 text-lg font-bold text-[var(--color-negative)]">{sentiment.bearish_count}</div>
           </div>
         </div>
 
@@ -207,7 +207,7 @@ export function MarketSentimentWidget({ id, onRemove, onDataChange }: MarketSent
                     key={ticker}
                     type="button"
                     onClick={() => setLinkedSymbol(ticker)}
-                    className="rounded-full border border-blue-500/20 bg-blue-500/10 px-2.5 py-1 text-[10px] font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
+                    className="rounded-full border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-1 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)]"
                   >
                     {ticker}
                   </button>

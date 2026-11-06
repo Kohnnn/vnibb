@@ -175,7 +175,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
             empty: responseCount === 0,
             apiGroup: '/copilot',
             endpoint: '/api/v1/copilot/chat/stream',
-            sourceLabel: 'VNIBB copilot stream',
+            sourceLabel: 'VniBB copilot stream',
             derived: true,
             extra: { messages: messages.length, responses: responseCount, streaming: isLoading },
         }))
@@ -418,15 +418,15 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
             {/* Header */}
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border-color)]">
                 <div className="flex items-center gap-2">
-                    <Sparkles size={16} className="text-cyan-400" />
+                    <Sparkles size={16} className="text-[var(--color-accent-primary)]" />
                     <span className="text-sm font-medium text-[var(--text-primary)]">VniAgent</span>
                     {context?.symbol && (
-                        <span className="text-xs px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded">
+                        <span className="text-xs px-2 py-0.5 bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] rounded">
                             {context.symbol}
                         </span>
                     )}
                     {currentStatus && (
-                        <span className="text-[10px] text-cyan-300">{currentStatus}</span>
+                        <span className="text-[10px] text-[var(--color-accent-primary)]">{currentStatus}</span>
                     )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -446,7 +446,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
             {isDegraded && (
                 <div
                     role="status"
-                    className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200"
+                    className="mb-3 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]"
                 >
                     VniAgent is unavailable: no AI model is configured on the server. Add a browser-local API key in AI Settings to chat without server configuration.
                 </div>
@@ -471,11 +471,11 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                 {messages.map((message) => (
                     <div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
                         <div className={`relative max-w-[90%] rounded-lg px-3 py-2 text-sm group ${message.role === 'user'
-                            ? 'bg-blue-600 text-white'
+                            ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                             : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] border border-[var(--border-subtle)]'
                             }`}>
                             {message.isStreaming && !message.content ? (
-                                <div className="flex items-center gap-2 text-xs text-cyan-200">
+                                <div className="flex items-center gap-2 text-xs text-[var(--color-accent-primary)]">
                                     <Loader2 size={14} className="animate-spin" />
                                     <span>{currentStatus || 'VniAgent is analyzing...'}</span>
                                 </div>
@@ -489,7 +489,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
 
                             {/* Streaming indicator */}
                             {message.isStreaming && (
-                                <span className="inline-block w-2 h-4 bg-cyan-400 animate-pulse ml-1" />
+                                <span className="inline-block w-2 h-4 bg-[var(--color-state-bg)] animate-pulse ml-1" />
                             )}
 
                             {/* Copy button */}
@@ -515,7 +515,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                         {message.role === 'assistant' && showDetails[message.id] && (
                             <div className="mt-2 w-full max-w-[90%] space-y-2">
                                 {message.reasoning && (
-                                    <div className="rounded border border-cyan-500/20 bg-cyan-500/5 p-2 text-[10px] leading-relaxed text-cyan-100/80 whitespace-pre-wrap">
+                                    <div className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-[10px] leading-relaxed text-[var(--color-accent-primary)] whitespace-pre-wrap">
                                         {message.reasoning}
                                     </div>
                                 )}
@@ -570,12 +570,12 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                     onKeyDown={handleKeyDown}
                     placeholder={isDegraded ? 'AI unavailable — configure a key in AI Settings' : context?.symbol ? `Ask about ${context.symbol}...` : 'Ask about stocks...'}
                     disabled={isLoading || isDegraded}
-                    className="flex-1 px-3 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg focus:border-cyan-500 focus:outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] disabled:opacity-50"
+                    className="flex-1 px-3 py-2 text-sm bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg focus:border-[var(--color-state-border)] focus:outline-none text-[var(--text-primary)] placeholder-[var(--text-muted)] disabled:opacity-50"
                 />
                 {isLoading ? (
                     <button
                         onClick={handleCancel}
-                        className="p-2 bg-red-600 hover:bg-red-500 text-white rounded-lg transition-colors"
+                        className="p-2 bg-[var(--color-negative)] hover:brightness-110 text-[var(--color-bg-primary)] rounded-lg transition-colors"
                         title="Cancel"
                     >
                         <X size={16} />
@@ -584,7 +584,7 @@ export function AICopilotWidget({ isEditing, onRemove, initialContext, onDataCha
                     <button
                         onClick={() => sendMessage()}
                         disabled={!input.trim() || isDegraded}
-                        className="p-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-[var(--bg-tertiary)] disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                        className="p-2 bg-[var(--color-accent-fill)] hover:brightness-110 disabled:bg-[var(--bg-tertiary)] disabled:cursor-not-allowed text-[var(--color-on-accent)] rounded-lg transition-colors"
                         aria-label="Send message"
                     >
                         <Send size={16} />

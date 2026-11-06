@@ -20,13 +20,13 @@ export function QuantWarningBanner({ warning, forwardLooking, className }: Quant
   return (
     <div className={className}>
       {warning && (
-        <div className="flex items-start gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] leading-4 text-amber-300">
+        <div className="flex items-start gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] leading-4 text-[var(--color-warning)]">
           <AlertTriangle size={11} className="mt-px shrink-0" />
           <span>{warning}</span>
         </div>
       )}
       {forwardLooking && (
-        <div className="mt-1 rounded border border-violet-500/25 bg-violet-500/5 px-2 py-1 text-[9px] leading-3 text-violet-200/90">
+        <div className="mt-1 rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1 text-[9px] leading-3 text-[var(--text-secondary)]">
           Forward-looking statistic: uses future bars relative to the signal date. Not a point-in-time tradable signal.
         </div>
       )}

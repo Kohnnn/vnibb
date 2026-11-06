@@ -12,7 +12,7 @@ export interface WidgetDescription {
 export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>> = {
   price_chart: {
     purpose: 'Provides a live lightweight chart for the selected ticker with timeframe switching and multiple display modes.',
-    calculation: 'Fetches VNIBB historical OHLCV data for the chosen range, merges the latest quote when available, and renders it with lightweight-charts.',
+    calculation: 'Fetches VniBB historical OHLCV data for the chosen range, merges the latest quote when available, and renders it with lightweight-charts.',
     interpretation: 'Use candlesticks for structure, line mode for clean trend reading, and area mode for quick momentum context. The volume bars help confirm participation.',
     advanced_insights: [
       '1D and 5D are best for tactical tape reading, while 1Y and 3Y are better for regime and swing structure.',
@@ -63,7 +63,7 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
   },
   listing_browser: {
     purpose: 'Explores the listed universe through exchange, index-group, industry, and search filters with saved discovery views.',
-    calculation: 'Starts from the VNIBB symbol universe, then layers local filters and optional saved views without mutating the underlying market dataset.',
+    calculation: 'Starts from the VniBB symbol universe, then layers local filters and optional saved views without mutating the underlying market dataset.',
     interpretation: 'Use it when you want to scan the universe before moving into single-stock analysis. It is a discovery surface, not a ranking engine.',
     pro_tips: [
       'Save recurring exchange or index-group views so you can reopen the same discovery slice quickly.',

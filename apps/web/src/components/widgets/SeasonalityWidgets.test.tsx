@@ -133,3 +133,46 @@ describe.each(seasonalityWidgets)('%s seasonality source quality', (_name, Widge
     expect(screen.queryByText(/metrics withheld/)).not.toBeInTheDocument()
   })
 })
+describe('seasonality display semantics', () => {
+  it.each(seasonalityWidgets)('%s renders near-zero returns without a negative sign', (_name, Widget) => {
+    const nearZeroData = {
+      ...baseData,
+      rows: [{ ...rows[1], return_pct: -0.04 }],
+      averages: { '02': -0.04 },
+      current_period: { ...baseData.current_period, return_pct: -0.04 },
+    }
+    const { container } = showSeasonality(Widget, { data: nearZeroData, meta: { unit_status: 'confirmed_vnd' } })
+
+    expect(container.textContent).not.toContain('-0.0')
+    if (Widget === SeasonalitySpiralHeatmapWidget) {
+      expect(container.querySelector('svg path title')?.textContent).toContain('0.0%')
+      // The fill must agree with the printed digits: -0.04 at 1dp is flat, so it
+      // takes the neutral flat swatch rather than a loss tint.
+      const nearZeroPath = Array.from(container.querySelectorAll('svg path')).find(
+        (el) => el.querySelector('title')?.textContent?.includes('0.0%'),
+      )
+      expect(nearZeroPath?.getAttribute('fill')).toContain('--text-muted')
+      expect(nearZeroPath?.getAttribute('fill')).not.toContain('--color-negative')
+    } else {
+      // Month cells carry `"<row> <column>: <pct>"`; the February 2024 cell must
+      // read 0.0% and use the neutral flat fill, not a loss tint.
+      const cell = container.querySelector('[title="2024 02: 0.0%"]')
+      expect(cell).toHaveClass('bg-[var(--bg-tertiary)]')
+    }
+  })
+
+  it('labels flat and missing spiral cells separately', () => {
+    const { container } = showSeasonality(SeasonalitySpiralHeatmapWidget, {
+      data: baseData,
+      meta: { unit_status: 'confirmed_vnd' },
+    })
+
+    // Legend labels are sibling text nodes inside one flex row, so match the
+    // row rather than each label element.
+    const legend = Array.from(container.querySelectorAll('div')).find(
+      (el) => /flat\b[\s\S]*missing/.test(el.textContent ?? '') && el.children.length > 0,
+    )
+    expect(legend?.textContent).toContain('flat')
+    expect(legend?.textContent).toContain('missing')
+  })
+})

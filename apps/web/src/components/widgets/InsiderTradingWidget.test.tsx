@@ -75,7 +75,7 @@ describe('InsiderTradingWidget summary footer', () => {
 
         show();
 
-        expect((await screen.findAllByText('—')).length).toBeGreaterThan(0);
+        expect((await screen.findAllByText('n/a')).length).toBeGreaterThan(0);
         expect(screen.queryByText(/\+-/)).not.toBeInTheDocument();
     });
 
@@ -127,7 +127,7 @@ describe('InsiderTradingWidget aggregate unit admission', () => {
 
         expect(await screen.findByText('Buy:')).toBeInTheDocument();
         for (const label of ['Buy:', 'Sell:', 'Net:']) {
-            expect(screen.getByText(label).parentElement?.textContent).toBe(`${label}—`);
+            expect(screen.getByText(label).parentElement?.textContent).toBe(`${label}n/a`);
         }
         // Counts survive withholding: an unknown unit is not an unknown count.
         expect(screen.getByText(/Money withheld/)).toBeInTheDocument();
@@ -149,7 +149,7 @@ describe('InsiderTradingWidget aggregate unit admission', () => {
 
         expect(await screen.findByText('Buy:')).toBeInTheDocument();
         for (const label of ['Buy:', 'Sell:', 'Net:']) {
-            expect(screen.getByText(label).parentElement?.textContent).toBe(`${label}—`);
+            expect(screen.getByText(label).parentElement?.textContent).toBe(`${label}n/a`);
         }
     });
 
@@ -177,6 +177,6 @@ describe('InsiderTradingWidget aggregate unit admission', () => {
         // evidence is not a window denominator.
         expect(await screen.findAllByText('BUY')).toHaveLength(2);
         expect(screen.getByText('VND1.0mn')).toBeInTheDocument();
-        expect(screen.getByText('Buy:').parentElement?.textContent).toBe('Buy:—');
+        expect(screen.getByText('Buy:').parentElement?.textContent).toBe('Buy:n/a');
     });
 });

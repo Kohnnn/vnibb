@@ -444,9 +444,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await _register_vnstock_on_startup()
 
     if settings.environment != "test":
-        from vnibb.providers.vnstock.runtime import validate_runtime
+        # Policy only (tier + source). The persisted-credential probe talks to
+        # the SDK's auth status, which reaches the network and can raise for a
+        # stale device registration; running it here turned that into a total
+        # startup failure. Acquisition still refuses through
+        # `import_vnstock_symbol`, where a paid credential actually matters.
+        from vnibb.providers.vnstock.runtime import validate_runtime_policy
 
-        validate_runtime()
+        validate_runtime_policy()
         import threading
 
         skip_warmup_default = "true" if settings.environment == "production" else "false"

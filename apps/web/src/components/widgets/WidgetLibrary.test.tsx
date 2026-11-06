@@ -1,11 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { WidgetLibrary } from './WidgetLibrary';
+
+const mockAddWidget = jest.fn();
 
 jest.mock('@/contexts/DashboardContext', () => ({
     useDashboard: () => ({
         activeDashboard: { id: 'personal', name: 'Personal', isEditable:true },
         activeTab: { id: 'tab', name: 'Tab', widgets:[] },
-        addWidget: jest.fn(),
+        addWidget: mockAddWidget,
     }),
 }));
 
@@ -52,5 +54,48 @@ describe('WidgetLibrary drawer recovery', () => {
         expect(document.activeElement).toBe(opener);
 
         opener.remove();
+    });
+});
+
+function bundleCard(name: string): HTMLElement {
+    // Bundle name sits at card > row > name column > label.
+    return screen.getByText(name).parentElement!.parentElement!.parentElement!;
+}
+
+// The bundle button is the user path that actually inserts widgets. A previous
+// regression dropped `market_heatmap` from the pack while the description still
+// advertised a heatmap, so assert the click result, not the internal array.
+describe('WidgetLibrary bundle insertion', () => {
+    beforeEach(() => mockAddWidget.mockClear());
+
+    it('inserts every widget the Market Pulse Pack advertises', () => {
+        render(<WidgetLibrary isOpen onClose={jest.fn()} />);
+
+        const card = bundleCard('Market Pulse Pack');
+        expect(within(card).getByText('4 widgets')).toBeInTheDocument();
+        expect(card).not.toHaveTextContent(/heatmap/i);
+
+        fireEvent.click(within(card).getByRole('button', { name: 'Add' }));
+
+        expect(mockAddWidget.mock.calls.map((call) => call[2].type)).toEqual([
+            'market_overview',
+            'top_movers',
+            'market_breadth',
+            'market_news',
+        ]);
+        expect(mockAddWidget.mock.calls.every((call) => call[0] === 'personal' && call[1] === 'tab')).toBe(true);
+    });
+
+    it('stacks inserted widgets downwards instead of overlapping them', () => {
+        render(<WidgetLibrary isOpen onClose={jest.fn()} />);
+
+        fireEvent.click(within(bundleCard('Market Pulse Pack')).getByRole('button', { name: 'Add' }));
+
+        const layouts = mockAddWidget.mock.calls.map((call) => call[2].layout);
+        expect(layouts[0].y).toBe(0);
+        layouts.slice(1).forEach((layout, index) => {
+            expect(layout.y).toBeGreaterThanOrEqual(layouts[index].y + layouts[index].h);
+            expect(layout.x).toBe(0);
+        });
     });
 });

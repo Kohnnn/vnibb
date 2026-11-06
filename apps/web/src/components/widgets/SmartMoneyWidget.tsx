@@ -7,6 +7,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
+import { signedToneClass } from '@/lib/priceColor'
 
 interface SmartMoneyWidgetProps {
   symbol: string
@@ -15,18 +16,21 @@ interface SmartMoneyWidgetProps {
   onDataChange?: (data: WidgetDataPayload) => void
 }
 
-function formatBillions(value: number): string {
+function formatBillions(value: number | null): string {
+  if (value === null) return 'n/a'
   const abs = Math.abs(value)
-  if (abs >= 1e9) return `${value >= 0 ? '+' : '-'}${(abs / 1e9).toFixed(1)}B`
-  if (abs >= 1e6) return `${value >= 0 ? '+' : '-'}${(abs / 1e6).toFixed(1)}M`
-  return `${value >= 0 ? '+' : '-'}${abs.toFixed(0)}`
+  // A measured zero carries no sign character.
+  const sign = value > 0 ? '+' : value < 0 ? '-' : ''
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(1)}B`
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(1)}M`
+  return `${sign}${abs.toFixed(0)}`
 }
 
+// Signed score: direction only. The cyan/amber middle steps read as extra states.
 function smartMoneyTone(score: number): string {
-  if (score >= 2) return 'text-emerald-400'
-  if (score >= 1) return 'text-cyan-400'
-  if (score <= -2) return 'text-red-400'
-  return 'text-amber-400'
+  if (score >= 1) return 'text-[var(--color-positive)]'
+  if (score <= -1) return 'text-[var(--color-negative)]'
+  return 'text-[var(--text-secondary)]'
 }
 
 function smartMoneyLabel(value: string, score: number): string {
@@ -58,6 +62,12 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
   const flowScore = payload?.flow_score ?? 0
   const blockTrades = payload?.block_trades ?? []
   const hasData = Boolean(payload)
+  // Absent is not zero: a missing flow prints n/a and takes no direction colour.
+  const netForeign = payload?.net_foreign_20d_value ?? null
+  const blockNet = payload?.block_buy_20d_value === null || payload?.block_buy_20d_value === undefined
+    || payload?.block_sell_20d_value === null || payload?.block_sell_20d_value === undefined
+    ? null
+    : payload.block_buy_20d_value - payload.block_sell_20d_value
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -84,7 +94,7 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Landmark size={12} className="text-cyan-400" />
+          <Landmark size={12} className="text-[var(--color-accent-primary)]" />
           <span>Smart Money Flow</span>
         </div>
         <WidgetMeta
@@ -124,28 +134,14 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
           <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Foreign Net (20d)</div>
-              <div
-                className={
-                  (payload?.net_foreign_20d_value || 0) >= 0
-                    ? 'font-mono text-emerald-400'
-                    : 'font-mono text-red-400'
-                }
-              >
-                {formatBillions(Number(payload?.net_foreign_20d_value || 0))}
+              <div className={`font-mono ${signedToneClass(netForeign)}`}>
+                {formatBillions(netForeign)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Block Net (20 trades)</div>
-              <div
-                className={
-                  Number(payload?.block_buy_20d_value || 0) - Number(payload?.block_sell_20d_value || 0) >= 0
-                    ? 'font-mono text-emerald-400'
-                    : 'font-mono text-red-400'
-                }
-              >
-                {formatBillions(
-                  Number(payload?.block_buy_20d_value || 0) - Number(payload?.block_sell_20d_value || 0)
-                )}
+              <div className={`font-mono ${signedToneClass(blockNet)}`}>
+                {formatBillions(blockNet)}
               </div>
             </div>
           </div>
@@ -168,9 +164,9 @@ export function SmartMoneyWidget({ symbol, onDataChange }: SmartMoneyWidgetProps
                   <span
                     className={
                       row.type === 'accumulation'
-                        ? 'text-emerald-400 font-mono'
+                        ? 'text-[var(--color-positive)] font-mono'
                         : row.type === 'distribution'
-                          ? 'text-red-400 font-mono'
+                          ? 'text-[var(--color-negative)] font-mono'
                           : 'text-[var(--text-secondary)] font-mono'
                     }
                   >

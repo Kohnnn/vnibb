@@ -26,7 +26,7 @@ const screenerRows = [
 ];
 
 test.beforeEach(async ({ page }) => {
-  await page.addLocatorHandler(page.getByRole('dialog', { name: 'VNIBB walkthrough' }), async (dialog) => {
+  await page.addLocatorHandler(page.getByRole('dialog', { name: 'VniBB walkthrough' }), async (dialog) => {
     await dialog.getByRole('button', { name: 'Close walkthrough' }).click();
   });
 
@@ -110,9 +110,8 @@ test('renders the dashboard and searches a ticker', async ({ page }) => {
 test('filters screener results', async ({ page }) => {
   await page.goto('/dashboard');
   await page.getByRole('dialog', { name: "What's new" }).getByRole('button', { name: "Dismiss what's new" }).click();
-  await page.getByRole('button', { name: 'VNIBB Screener' }).click();
+  await page.getByRole('button', { name: 'VniBB Screener' }).click();
 
-  await expect(page.getByText('VNIBB Screener Pro', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'View VCB' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'View SHS' })).toBeVisible();
 

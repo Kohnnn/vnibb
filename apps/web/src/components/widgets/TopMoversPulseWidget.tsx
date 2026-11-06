@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { TrendingUp } from 'lucide-react';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
+import { signedToneClass } from '@/lib/priceColor';
 import { API_BASE_URL } from '@/lib/api';
 import { Sparkline, usePersistedWidgetConfig } from './prediction-market-ui';
 import { PredictionMarketContextMenu } from './PredictionMarketContextMenu';
@@ -146,7 +147,7 @@ export function TopMoversPulseWidget() {
                                 aria-pressed={config.window === key}
                                 className={`rounded-full border px-2 py-0.5 text-[10px] ${
                                     config.window === key
-                                        ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                         : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                 }`}
                             >
@@ -168,7 +169,6 @@ export function TopMoversPulseWidget() {
             ) : (
                 <div className="flex flex-1 items-stretch gap-2 overflow-x-auto">
                     {state.rows.map((row) => {
-                        const direction: 'up' | 'down' = row.absoluteMovement >= 0 ? 'up' : 'down';
                         return (
                             <PredictionMarketContextMenu
                                 key={`${row.source}:${row.sourceId}`}
@@ -202,13 +202,9 @@ export function TopMoversPulseWidget() {
                                             {row.question}
                                         </span>
                                         <span
-                                            className={
-                                                direction === 'up'
-                                                    ? 'rounded-md px-1.5 py-0.5 text-[10px] text-emerald-400'
-                                                    : 'rounded-md px-1.5 py-0.5 text-[10px] text-red-400'
-                                            }
+                                            className={`rounded-md px-1.5 py-0.5 text-[10px] ${signedToneClass(row.absoluteMovement)}`}
                                         >
-                                            {direction === 'up' ? '+' : ''}
+                                            {(row.absoluteMovement > 0 ? '+' : '')}
                                             {(row.absoluteMovement * 100).toFixed(1)}pp
                                         </span>
                                     </div>

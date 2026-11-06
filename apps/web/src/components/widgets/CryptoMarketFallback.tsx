@@ -8,6 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getLatestTimestampValue } from '@/lib/dataFreshness';
+import { priceDirection, signedToneClass } from '@/lib/priceColor';
 
 interface CryptoCoin {
   id: string;
@@ -110,7 +111,7 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
           <div className="flex items-center gap-2">
-            <Coins size={12} className="text-amber-300" />
+            <Coins size={12} className="text-[var(--color-warning)]" />
             <span>Top {coins.length} by market cap · CoinGecko</span>
           </div>
           <WidgetMeta updatedAt={sourceUpdatedAt} fetchedAt={fetchedAt} note="TradingView fallback" align="right" />
@@ -147,8 +148,8 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
               </thead>
               <tbody>
                 {coins.map((coin) => {
-                  const change = coin.price_change_percentage_24h ?? 0;
-                  const isUp = change >= 0;
+                  const change = coin.price_change_percentage_24h;
+                  const dir = priceDirection(change);
                   return (
                     <tr key={coin.id} className="border-b border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)]/60">
                       <td className="px-2 py-1.5 font-mono text-[var(--text-muted)]">{coin.market_cap_rank}</td>
@@ -160,13 +161,10 @@ export function CryptoMarketFallback({ id, onRemove, onDataChange }: CryptoMarke
                         {formatPrice(coin.current_price)}
                       </td>
                       <td
-                        className={`whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums ${
-                          isUp ? 'text-emerald-300' : 'text-rose-300'
-                        }`}
+                        className={`whitespace-nowrap px-2 py-1.5 text-right font-mono tabular-nums ${signedToneClass(change)}`}
                         style={{ minWidth: 88 }}
                       >
-                        {isUp ? '+' : ''}
-                        {change.toFixed(2)}%
+                        {dir === 'none' ? 'n/a' : `${(change ?? 0) > 0 ? '+' : ''}${(change ?? 0).toFixed(2)}%`}
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-[var(--text-secondary)] tabular-nums">
                         {formatLargeNumber(coin.market_cap)}

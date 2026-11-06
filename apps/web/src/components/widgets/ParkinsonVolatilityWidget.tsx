@@ -39,18 +39,22 @@ type SeriesPoint = {
   regime: Regime | null
 }
 
+// Volatility regime is an ordinal level, not a direction: low volatility is not
+// a gain and an extreme regime is not a loss. Gain/loss colours stay reserved
+// for real signed values, so the level climbs the accent ramp instead.
 function regimeTone(regime: string): string {
-  if (regime === 'low') return 'text-emerald-300'
-  if (regime === 'high') return 'text-amber-300'
-  if (regime === 'extreme') return 'text-red-300'
-  return 'text-cyan-300'
+  if (regime === 'low') return 'text-[var(--text-secondary)]'
+  if (regime === 'high') return 'text-[var(--color-accent-primary)]'
+  if (regime === 'extreme') return 'text-[var(--color-accent-primary)] font-bold'
+  return 'text-[var(--text-primary)]'
 }
 
 function regimeBand(regime: string): string {
-  if (regime === 'low') return 'from-emerald-900/20 to-emerald-700/5'
-  if (regime === 'high') return 'from-amber-900/25 to-amber-700/10'
-  if (regime === 'extreme') return 'from-red-900/30 to-red-700/12'
-  return 'from-slate-900/20 to-slate-700/8'
+  // A tint, not a solid fill: the panel carries text, so the fill has to stay
+  // subordinate to the ink in both themes.
+  if (regime === 'high') return 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]'
+  if (regime === 'extreme') return 'border-[var(--color-state-border)] bg-[var(--color-state-bg)]'
+  return 'border-[var(--border-color)] bg-[var(--bg-secondary)]'
 }
 
 export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVolatilityWidgetProps) {
@@ -83,17 +87,22 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
       | undefined
   const backendError = typeof data?.error === 'string' ? data.error : ''
 
-  const rows = (metric?.series ||[]).map((row) => ({
+  const rows = (metric?.series || []).map((row) => ({
     date: row.date,
-    parkinson: Number(row.parkinson_vol_pct ?? 0),
-    closeVol: Number(row.close_close_vol_pct ?? 0),
-    z: Number(row.z_score ?? 0),
+    parkinson: row.parkinson_vol_pct,
+    closeVol: row.close_close_vol_pct,
+    z: row.z_score,
   }))
 
   const hasData = rows.length > 30
   const currentRegime = metric?.current_regime || 'normal'
   const quantWarning = extractQuantWarning(data, 'parkinson_volatility')
-  const maxVol = Math.max(...rows.map((row) => Math.max(row.parkinson, row.closeVol)), 20)
+  // Missing observations stay null in the series; a null must not enter the
+  // axis maximum as 0, but it also must not be drawn as a volatility reading.
+  const maxVol = Math.max(
+    ...rows.flatMap((row) => [row.parkinson, row.closeVol]).filter((v): v is number => v != null),
+    20
+  )
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 })
 
   useEffect(() => {
@@ -121,7 +130,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Activity size={12} className="text-cyan-400" />
+          <Activity size={12} className="text-[var(--color-accent-primary)]" />
           <span>Parkinson Volatility</span>
         </div>
         <div className="flex items-center gap-2">
@@ -131,7 +140,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
                 key={option}
                 type="button"
                 onClick={() => setPeriod(option)}
-                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${period === option ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
               >
                 {option}
               </button>
@@ -168,20 +177,20 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
           <div className="grid grid-cols-4 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Park 30D</div>
-              <div className="font-mono text-cyan-300">
-                {Number(metric?.current_parkinson_vol_30d_pct ?? 0).toFixed(2)}%
+              <div className="font-mono text-[var(--color-accent-primary)]">
+                {metric?.current_parkinson_vol_30d_pct == null ? 'n/a' : `${metric.current_parkinson_vol_30d_pct.toFixed(2)}%`}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Close 30D</div>
-              <div className="font-mono text-amber-300">
-                {Number(metric?.current_close_close_vol_30d_pct ?? 0).toFixed(2)}%
+              <div className="font-mono text-[var(--text-secondary)]">
+                {metric?.current_close_close_vol_30d_pct == null ? 'n/a' : `${metric.current_close_close_vol_30d_pct.toFixed(2)}%`}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Ratio</div>
               <div className="font-mono text-[var(--text-primary)]">
-                {Number(metric?.close_to_park_ratio ?? 0).toFixed(3)}x
+                {metric?.close_to_park_ratio == null ? 'n/a' : `${metric.close_to_park_ratio.toFixed(3)}x`}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -190,10 +199,10 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
             </div>
           </div>
 
-          <div className={`mb-2 flex min-h-[220px] flex-col rounded-md border border-[var(--border-color)] bg-gradient-to-br ${regimeBand(currentRegime)} p-2`}>
+          <div className={`mb-2 flex min-h-[220px] flex-col rounded-md border p-2 ${regimeBand(currentRegime)}`}>
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">30D Volatility Regime</div>
-              <div className="text-[10px] text-[var(--text-secondary)]">Z-score {Number(metric?.current_regime_z_score ?? 0).toFixed(2)}</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">Z-score {metric?.current_regime_z_score == null ? 'n/a' : metric.current_regime_z_score.toFixed(2)}</div>
             </div>
             <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>
               <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
@@ -206,9 +215,11 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
                     tickLine={false}
                     domain={[0, Math.ceil(maxVol + 5)]}
                   />
-                  <ReferenceLine y={20} stroke="rgba(34,197,94,0.25)" strokeDasharray="4 4" />
-                  <ReferenceLine y={35} stroke="rgba(245,158,11,0.25)" strokeDasharray="4 4" />
-                  <ReferenceLine y={50} stroke="rgba(239,68,68,0.25)" strokeDasharray="4 4" />
+                  {/* 20/35/50% are regime thresholds, not gain/loss levels: the
+                      ramp runs neutral -> accent so severity still reads. */}
+                  <ReferenceLine y={20} stroke="color-mix(in srgb, var(--text-muted) 55%, transparent)" strokeDasharray="4 4" />
+                  <ReferenceLine y={35} stroke="color-mix(in srgb, var(--color-accent-primary) 45%, transparent)" strokeDasharray="4 4" />
+                  <ReferenceLine y={50} stroke="color-mix(in srgb, var(--color-accent-primary) 80%, transparent)" strokeDasharray="4 4" />
                   <Tooltip
                     contentStyle={{
                       background: 'var(--bg-secondary)',
@@ -216,13 +227,13 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
                       borderRadius: '8px',
                       fontSize: '11px',
                     }}
-                    formatter={(value: unknown, name?: string) => [`${Number(value).toFixed(2)}%`, name || '']}
+                    formatter={(value: unknown, name?: string) => [value == null ? 'n/a' : `${Number(value).toFixed(2)}%`, name || '']}
                   />
                   <Area
                     type="monotone"
                     dataKey="parkinson"
-                    stroke="#22d3ee"
-                    fill="rgba(34,211,238,0.18)"
+                    stroke="var(--chart-blue)"
+                    fill="color-mix(in srgb, var(--chart-blue) 18%, transparent)"
                     strokeWidth={2}
                     dot={false}
                     name="Parkinson"
@@ -230,7 +241,7 @@ export function ParkinsonVolatilityWidget({ symbol, onDataChange }: ParkinsonVol
                   <Line
                     type="monotone"
                     dataKey="closeVol"
-                    stroke="#f59e0b"
+                    stroke="var(--chart-slate)"
                     strokeWidth={1.8}
                     dot={false}
                     name="Close-Close"

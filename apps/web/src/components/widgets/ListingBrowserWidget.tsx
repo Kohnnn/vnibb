@@ -132,7 +132,7 @@ export function ListingBrowserWidget({
       empty: !hasData,
       apiGroup: '/listing',
       endpoint: group === 'ALL' ? '/api/v1/symbols' : `/api/v1/symbols/group/${group}`,
-      sourceLabel: 'VNIBB listing universe',
+      sourceLabel: 'VniBB listing universe',
       derived: hasActiveFilters,
       // The listing universe exposes no source observation date, so freshness
       // stays unknown and the query receipt is reported separately.
@@ -197,7 +197,7 @@ export function ListingBrowserWidget({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search symbol, company, or industry..."
-                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-blue-500"
+                className="w-full rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
               />
             </div>
             <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isLoading && hasData} note={`${rows.length} matches`} align="right" />
@@ -209,14 +209,14 @@ export function ListingBrowserWidget({
                 <button
                   key={item}
                   onClick={() => setExchange(item)}
-                  className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors ${exchange === item ? 'bg-blue-600 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+                  className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors ${exchange === item ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                 >
                   {item === 'ALL' ? `All (${(symbolsQuery.data?.count || 0)})` : `${item} (${exchangeCounts[item] || 0})`}
                 </button>
               ))}
             </div>
 
-            <select aria-label="Group filter" value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
+            <select aria-label="Group filter" value={group} onChange={(event) => setGroup(event.target.value as GroupFilter)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]">
               {GROUP_OPTIONS.map((option) => (
                 <option key={option} value={option}>{option === 'ALL' ? 'All groups' : option}</option>
               ))}
@@ -226,7 +226,7 @@ export function ListingBrowserWidget({
               value={industry}
               onChange={(event) => setIndustry(event.target.value)}
               aria-label="Industry filter"
-              className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500"
+              className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]"
             >
               {industryOptions.map((option) => (
                 <option key={option} value={option}>
@@ -235,7 +235,7 @@ export function ListingBrowserWidget({
               ))}
             </select>
 
-            <select aria-label="Sort listings" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-blue-500">
+            <select aria-label="Sort listings" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[11px] text-[var(--text-primary)] outline-none focus:border-[var(--color-state-border)]">
               <option value="symbol">Sort: Symbol</option>
               <option value="company">Sort: Company</option>
               <option value="industry">Sort: Industry</option>
@@ -244,7 +244,7 @@ export function ListingBrowserWidget({
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-secondary)]">
             <div className="flex flex-wrap items-center gap-2">
-              <Filter size={12} className="text-cyan-300" />
+              <Filter size={12} className="text-[var(--color-accent-primary)]" />
               <span>{filterSummary}</span>
             </div>
             <div className="flex flex-wrap items-center gap-1">
@@ -259,7 +259,7 @@ export function ListingBrowserWidget({
               <button
                 type="button"
                 onClick={saveCurrentView}
-                className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 font-semibold text-blue-200 transition-colors hover:bg-blue-500/20"
+                className="inline-flex items-center gap-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)]"
               >
                 <Save size={11} /> Save View
               </button>
@@ -273,7 +273,7 @@ export function ListingBrowserWidget({
                   <button type="button" onClick={() => applySavedView(view)} className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]">
                     <FolderOpen size={11} /> {view.name}
                   </button>
-                  <button type="button" aria-label={`Delete saved view ${view.name}`} onClick={() => setSavedViews(removeListingBrowserView(view.id))} className="text-[var(--text-muted)] hover:text-rose-300">
+                  <button type="button" aria-label={`Delete saved view ${view.name}`} onClick={() => setSavedViews(removeListingBrowserView(view.id))} className="text-[var(--text-muted)] hover:text-[var(--color-negative)]">
                     <X size={11} />
                   </button>
                 </div>
@@ -302,7 +302,7 @@ export function ListingBrowserWidget({
                     type={selectSymbol ? 'button' : undefined}
                     onClick={selectSymbol ? () => selectSymbol(item.symbol) : undefined}
                     title={selectSymbol ? undefined : 'Ticker local to this widget; use its ticker selector to change it'}
-                    className="block w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3 text-left transition-colors hover:border-blue-500/30 hover:bg-[var(--bg-hover)]"
+                    className="block w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3 text-left transition-colors hover:border-[var(--color-state-border)] hover:bg-[var(--bg-hover)]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>

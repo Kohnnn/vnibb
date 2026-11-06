@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart3, ExternalLink } from 'lucide-react';
+import { EMPTY_VALUE } from '@/lib/units';
 import { WidgetEmpty, WidgetError, WidgetLoading } from '@/components/ui/widget-states';
 import { API_BASE_URL } from '@/lib/api';
 import { CategoryPills, ProbabilityBar, SearchBar, SortButton, type SortDirection } from './prediction-market-ui';
@@ -333,9 +334,9 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                     <span
                         className={
                             healthRow?.status === 'synced'
-                                ? 'text-emerald-400'
+                                ? 'text-[var(--color-positive)]'
                                 : healthRow?.status === 'stale'
-                                    ? 'text-amber-300'
+                                    ? 'text-[var(--color-warning)]'
                                     : undefined
                         }
                     >
@@ -390,7 +391,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                                     }}
                                     className={`rounded-md border px-2 py-1 text-[11px] uppercase tracking-wide ${
                                         sortKey === option.key
-                                            ? 'border-blue-500/60 bg-blue-500/10 text-blue-400'
+                                            ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]'
                                             : 'border-default bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                                     }`}
                                 >
@@ -442,7 +443,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                             >
                                 <div className="mb-2 flex items-start justify-between gap-3">
                                     <div className="flex flex-col">
-                                        <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300">
+                                        <div className="mb-1 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--color-accent-primary)]">
                                             <span>{String(market.category)}</span>
                                             <span className="text-[var(--text-muted)]">
                                                 ·
@@ -460,7 +461,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                                             href={market.url}
                                             target="_blank"
                                             rel="noreferrer"
-                                            className="rounded-md p-1 text-[var(--text-muted)] hover:bg-blue-500/10 hover:text-blue-300"
+                                            className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]"
                                             aria-label={`Open ${market.question}`}
                                             onClick={(event) => event.stopPropagation()}
                                         >
@@ -485,7 +486,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
                                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--text-muted)]">
                                     <span>Updated {formatMarketTime(market.lastSyncedAt)} · Closes {formatMarketTime(market.endDate)}</span>
                                     <span>Latest reported prices · bounded catalogue</span>
-                                    {props.onSelect && <span className="font-semibold text-blue-300">Analyse →</span>}
+                                    {props.onSelect && <span className="font-semibold text-[var(--color-accent-primary)]">Analyse →</span>}
                                 </div>
                             </article>
                         </PredictionMarketContextMenu>
@@ -499,7 +500,7 @@ export function PredictionMarketSourceWidget(props: PredictionMarketSourceWidget
 export function formatProb(value: number | null | undefined): string {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
         ? `${(value * 100).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`
-        : '—';
+        : EMPTY_VALUE;
 }
 
 export function formatMarketTime(value: string | null | undefined): string {
@@ -510,7 +511,7 @@ export function formatMarketTime(value: string | null | undefined): string {
 }
 
 export function formatMarketAmount(value: number | null, source: string, metric: 'volume' | 'liquidity'): string {
-    if (value === null || !Number.isFinite(value)) return '—';
+    if (value === null || !Number.isFinite(value)) return EMPTY_VALUE;
     const amount = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
     if (source === 'kalshi') return `${amount.format(value)} contracts`;
     if (source === 'polymarket') return `$${amount.format(value)}`;

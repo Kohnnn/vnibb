@@ -8,6 +8,7 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import type { QuantPeriod } from '@/lib/api';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface BacktestLabWidgetProps {
   symbol: string;
@@ -16,7 +17,7 @@ interface BacktestLabWidgetProps {
 
 function formatNumber(value: unknown, suffix = ''): string {
   const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return '-';
+  if (!Number.isFinite(numeric)) return 'n/a';
   return `${numeric.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 }
 
@@ -56,7 +57,7 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       symbol: upperSymbol,
       empty: !hasData,
       endpoint: `/quant/${upperSymbol}/backtest`,
-      sourceLabel: 'VNIBB quant backtest',
+      sourceLabel: 'VniBB quant backtest',
       response: data,
       fetchedAt: dataUpdatedAt,
       extra: hasData ? {
@@ -100,7 +101,7 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       {displayWarnings.length > 0 && (
         <div className="mb-2 space-y-1">
           {displayWarnings.map((message) => (
-            <div key={message} className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-300">
+            <div key={message} className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
               {message}
             </div>
           ))}
@@ -108,8 +109,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <Metric label="Return" value={formatNumber(metrics.total_return_pct, '%')} tone={(metrics.total_return_pct ?? 0) >= 0 ? 'good' : 'bad'} />
-        <Metric label="Max DD" value={formatNumber(metrics.max_drawdown_pct, '%')} tone="bad" />
+        <Metric label="Return" value={formatNumber(metrics.total_return_pct, '%')} valueClass={signedToneClass(metrics.total_return_pct)} />
+        <Metric label="Max DD" value={formatNumber(metrics.max_drawdown_pct, '%')} valueClass={signedToneClass(metrics.max_drawdown_pct)} />
         <Metric label="Sharpe" value={formatNumber(metrics.sharpe_daily_rf0)} />
         <Metric label="Trades" value={formatNumber(metrics.trade_count)} />
       </div>
@@ -122,8 +123,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
           <div key={`${trade.entry_date}-${index}`} className="grid grid-cols-4 gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-xs last:border-b-0">
             <span className="truncate text-[var(--text-secondary)]">{trade.entry_date || '-'}</span>
             <span className="truncate text-[var(--text-secondary)]">{trade.exit_date || trade.status || '-'}</span>
-            <span className={(trade.return_pct ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}>{formatNumber(trade.return_pct, '%')}</span>
-            <span className={(trade.pnl ?? 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}>{formatNumber(trade.pnl)}</span>
+            <span className={signedToneClass(trade.return_pct)}>{formatNumber(trade.return_pct, '%')}</span>
+            <span className={signedToneClass(trade.pnl)}>{formatNumber(trade.pnl)}</span>
           </div>
         ))}
         {trades.length === 0 && <div className="px-3 py-4 text-xs text-[var(--text-muted)]">No completed trades in this window.</div>}
@@ -143,8 +144,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
-  const toneClass = tone === 'good' ? 'text-emerald-300' : tone === 'bad' ? 'text-red-300' : 'text-[var(--text-primary)]';
+function Metric({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+  const toneClass = valueClass ?? 'text-[var(--text-primary)]';
   return (
     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/50 px-3 py-2">
       <div className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">{label}</div>

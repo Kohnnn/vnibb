@@ -1,4 +1,5 @@
 'use client';
+import { EMPTY_VALUE } from '@/lib/units';
 
 import { BarChart3 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -23,7 +24,7 @@ type EstimateRow = {
 
 function formatEstimate(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return '—';
+    return EMPTY_VALUE;
   }
 
   return value.toLocaleString('en-US', {
@@ -137,7 +138,7 @@ export function AnalystEstimatesWidget({ symbol, onDataChange }: AnalystEstimate
             <div className="text-sm font-semibold text-[var(--text-primary)]">No analyst coverage available</div>
             <p className="text-xs text-[var(--text-secondary)]">
               Consensus estimates are not yet published for this symbol in the Vietnam market.
-              The VNIBB team is working with broker sources to add coverage; check back later or
+              The VniBB team is working with broker sources to add coverage; check back later or
               open the source endpoint directly.
             </p>
             {payload?.source && (

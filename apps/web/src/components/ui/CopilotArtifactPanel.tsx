@@ -1,4 +1,5 @@
 'use client';
+import { EMPTY_VALUE } from '@/lib/units';
 
 import { useEffect, useMemo, useState } from 'react';
 import { BookMarked, Check, ExternalLink, Loader2, Plus, ThumbsDown, ThumbsUp } from 'lucide-react';
@@ -62,7 +63,7 @@ function formatArtifactValue(
   kind?: CopilotArtifactValueKind,
 ): string {
   if (value === null || value === undefined || value === '') {
-    return '—';
+    return EMPTY_VALUE;
   }
 
   if (typeof value !== 'number') {
@@ -155,7 +156,7 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
                 key={series.key}
                 dataKey={series.key}
                 name={series.label}
-                fill={series.color || '#22d3ee'}
+                fill={series.color || 'var(--chart-cat-4)'}
                 radius={[4, 4, 0, 0]}
               />
             ))}
@@ -182,7 +183,7 @@ function renderChartArtifact(artifact: CopilotChartArtifact) {
                 type="monotone"
                 dataKey={series.key}
                 name={series.label}
-                stroke={series.color || '#22d3ee'}
+                stroke={series.color || 'var(--chart-cat-4)'}
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 4 }}
@@ -572,7 +573,7 @@ function ArtifactCard({
   }
 
   return (
-        <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/40 p-3">
+        <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1 basis-40">
               <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-primary)]">{artifact.title}</div>
@@ -581,7 +582,7 @@ function ArtifactCard({
               )}
             </div>
             <div className="flex min-w-0 max-w-full flex-col items-end gap-2">
-              <div className="text-[10px] text-blue-300">
+              <div className="text-[10px] text-[var(--text-muted)]">
                 {artifact.type === 'chart' ? artifact.chartType : artifact.type}
                 {artifact.sourceIds?.length ? ` · ${artifact.sourceIds.length} source refs` : ''}
               </div>
@@ -589,7 +590,7 @@ function ArtifactCard({
                 <button
                   type="button"
                   onClick={() => { void rateArtifact('liked') }}
-                  className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/20"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                 >
                   {pendingRating === 'liked' ? <Loader2 size={11} className="animate-spin" /> : ratingStatus === 'liked' ? <Check size={11} /> : <ThumbsUp size={11} />}
                   Useful
@@ -597,7 +598,7 @@ function ArtifactCard({
                 <button
                   type="button"
                   onClick={() => { void rateArtifact('disliked') }}
-                  className="inline-flex items-center gap-1 rounded-md border border-rose-500/30 bg-rose-500/10 px-2 py-1 text-[10px] font-semibold text-rose-200 hover:bg-rose-500/20"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   {pendingRating === 'disliked' ? <Loader2 size={11} className="animate-spin" /> : ratingStatus === 'disliked' ? <Check size={11} /> : <ThumbsDown size={11} />}
                   Not useful
@@ -607,13 +608,13 @@ function ArtifactCard({
                 <button
                   type="button"
                   onClick={handleSaveToNotebook}
-                  className="inline-flex items-center gap-1 rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-semibold text-violet-200 hover:bg-violet-500/20"
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
                   {savedArtifacts[notebookDedupeKey] ? <Check size={11} /> : <BookMarked size={11} />}
                   {savedArtifacts[notebookDedupeKey] ? 'Saved to research notebook' : 'Save table to research notebook'}
                 </button>
               )}
-              {notebookError && <p role="status" className="text-[10px] text-rose-300">{notebookError}</p>}
+              {notebookError && <p role="status" className="text-[10px] text-[var(--color-error)]">{notebookError}</p>}
               {intent && (
                 <div className="flex flex-wrap justify-end gap-2">
                   {existingTarget && (
@@ -621,7 +622,7 @@ function ArtifactCard({
                       type="button"
                       onClick={() => { void handleJumpToWidget() }}
                       title={`Open ${intent.label} without changing the destination workspace ticker`}
-                      className="inline-flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                      className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <ExternalLink size={11} />
                       Open {intent.label}
@@ -640,7 +641,7 @@ function ArtifactCard({
                             const picked = destinations.find((item) => item.tabId === event.target.value)
                             if (picked) onDestinationChange(artifact.id, picked)
                           }}
-                          className="w-full min-w-0 max-w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)] focus-visible:outline-blue-400"
+                          className="w-full min-w-0 max-w-full rounded border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         >
                           {destinations.map((item) => <option key={item.tabId} value={item.tabId}>{item.label}</option>)}
                         </select>
@@ -652,7 +653,7 @@ function ArtifactCard({
                       <button
                         type="button"
                         onClick={() => { void handleCreateWidget() }}
-                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-[var(--border-strong)] px-2 py-1 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                       >
                         <Plus size={11} />
                         Add {intent.symbol ? `${intent.symbol} ` : ''}{intent.label}
@@ -668,7 +669,7 @@ function ArtifactCard({
             <p
               role="status"
               data-provenance-widget={promotedWidget?.widgetId}
-              className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-emerald-300"
+              className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-[var(--color-info)]"
             >
               <Check size={11} />
               Added to {addedToLabel}

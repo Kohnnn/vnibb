@@ -257,6 +257,21 @@ async def test_missing_durable_envelope_fails_closed(admission_stores, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_empty_universe_clears_reused_publication_progress(admission_stores):
+    progress = {"cohort_published": True}
+    assert await DataPipeline().sync_screener_data(
+        enrich_ratios=False, acquire_sessions=True, progress=progress,
+    ) == 0
+    assert progress["cohort_published"] is False
+    assert progress["committed_count"] == 0
+    async with admission_stores.sessions() as session:
+        assert not (await session.scalars(select(ScreenerSnapshot))).all()
+        assert not (await session.scalars(select(SyncStatus).where(
+            SyncStatus.sync_type == "screener_universe"
+        ))).all()
+
+
+@pytest.mark.asyncio
 async def test_interrupted_same_day_rerun_preserves_admitted_cohort(admission_stores, monkeypatch):
     stores = admission_stores
     symbols = [f"B{index:02d}" for index in range(50)]
@@ -285,11 +300,14 @@ async def test_interrupted_same_day_rerun_preserves_admitted_cohort(admission_st
 
     async def interrupt_progress(progress, *args, **kwargs):
         assert progress["stage_stats"]["screener"]["success"] == 20
+        assert progress["cohort_published"] is False
         raise Interrupted()
 
     monkeypatch.setattr(pipeline, "_save_progress", interrupt_progress)
+    progress = {"cohort_published": True}
     with pytest.raises(Interrupted):
-        await pipeline.sync_screener_data(enrich_ratios=False, progress={}, sync_id=123)
+        await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123)
+    assert progress["cohort_published"] is False
     async with stores.sessions() as session:
         after = await CacheManager(db=session).get_screener_data()
         assert after.hit

@@ -10,6 +10,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketState } from '@/hooks/useMarketState';
 import { describeIntradayUnavailable } from '@/lib/marketHours';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { signedToneClass } from '@/lib/priceColor';
 
 interface FootprintProxyWidgetProps {
   symbol: string;
@@ -94,7 +95,7 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <Rows3 size={12} className="text-cyan-400" />
+          <Rows3 size={12} className="text-[var(--color-accent-primary)]" />
           <span>Footprint Proxy</span>
         </div>
         <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo match-type proxy" align="right" />
@@ -108,7 +109,7 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
             <div key={`${String(bar.time)}-${index}`} className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
               <div className="mb-1 flex items-center justify-between text-[10px]">
                 <span className="font-mono text-[var(--text-muted)]">{String(bar.time).slice(11, 16)}</span>
-                <span className={`font-mono ${Number(bar.delta || 0) >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>{formatCompact(Number(bar.delta || 0))}</span>
+                <span className={`font-mono ${signedToneClass(Number(bar.delta))}`}>{formatCompact(Number(bar.delta || 0))}</span>
               </div>
               <div className="space-y-1">
                 {levels.map((level: any, levelIndex: number) => {
@@ -116,9 +117,9 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
                   const bid = Number(level.bid_volume || 0);
                   return (
                     <div key={`${level.price}-${levelIndex}`} className="grid grid-cols-[1fr_52px_1fr] items-center gap-1 text-[10px]">
-                      <div className="h-3 rounded bg-red-500/25 text-right" style={{ width: `${Math.max(4, (bid / maxVolume) * 100)}%`, justifySelf: 'end' }} title={`Bid ${formatCompact(bid)}`} />
+                      <div className="h-3 rounded bg-[var(--color-negative-bg)] text-right" style={{ width: `${Math.max(4, (bid / maxVolume) * 100)}%`, justifySelf: 'end' }} title={`Bid ${formatCompact(bid)}`} />
                       <div className="text-center font-mono text-[var(--text-secondary)]">{Number(level.price || 0).toFixed(2)}</div>
-                      <div className="h-3 rounded bg-emerald-500/30" style={{ width: `${Math.max(4, (ask / maxVolume) * 100)}%` }} title={`Ask ${formatCompact(ask)}`} />
+                      <div className="h-3 rounded bg-[var(--color-positive-bg)]" style={{ width: `${Math.max(4, (ask / maxVolume) * 100)}%` }} title={`Ask ${formatCompact(ask)}`} />
                     </div>
                   );
                 })}
