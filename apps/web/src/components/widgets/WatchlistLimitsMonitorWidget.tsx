@@ -87,7 +87,7 @@ export function WatchlistLimitsMonitorWidget({ id, config, widgetGroup, onRemove
 
 function LimitRow({ row, onSelect }: { row: BoardRow; onSelect: (symbol: string) => void }) {
   const { status, distance } = classifyLimit(row);
-  const tone = status === 'At ceiling' ? 'text-[var(--color-positive)]' : status === 'At floor' ? 'text-[var(--color-negative)]' : status === 'Inside range' ? 'text-[var(--color-accent-primary)]' : 'text-[var(--text-muted)]';
+  const tone = status === 'Unavailable' ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]';
   const icon = status === 'At ceiling' ? <ArrowUpToLine size={13} /> : status === 'At floor' ? <ArrowDownToLine size={13} /> : <Minus size={13} />;
   return <button type="button" onClick={() => onSelect(row.symbol)} className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-left hover:border-[var(--color-state-border)]"><div className="flex items-center justify-between gap-3"><span className="font-semibold text-[var(--text-primary)]">{row.symbol}</span><span className={`flex items-center gap-1 text-xs font-semibold ${tone}`}>{icon}{status}</span></div><div className="mt-2 grid grid-cols-2 gap-2 text-[10px] text-[var(--text-muted)] md:grid-cols-4"><span>Price {row.price ?? EMPTY_VALUE}</span><span>Distance {distance === null ? 'Unavailable' : `${(distance * 100).toFixed(1)}%`}</span><span>Bid size {formatSize(row.bestBidVol)}</span><span>Ask size {formatSize(row.bestAskVol)}</span></div></button>;
 }
