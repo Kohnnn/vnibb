@@ -24,7 +24,7 @@ check_path() {
   local path="$2"
   local code
 
-  code="$($CURL_BIN -ksS -o /dev/null -w "%{http_code}" --http1.1 --max-time "$TIMEOUT" --resolve "${HOSTNAME}:443:${LB_PUBLIC_IP}" "https://${HOSTNAME}${path}" || true)"
+  code="$($CURL_BIN -sS -o /dev/null -w "%{http_code}" --http1.1 --max-time "$TIMEOUT" --resolve "${HOSTNAME}:443:${LB_PUBLIC_IP}" "https://${HOSTNAME}${path}" || true)"
   printf '%-18s https://%s%s -> %s\n' "$label" "$HOSTNAME" "$path" "$code"
 
   if [[ "$code" != "200" ]]; then
@@ -46,7 +46,7 @@ check_path "screener" "/api/v1/screener/?limit=5"
 
 echo
 echo "Checking CORS preflight"
-headers="$($CURL_BIN -ksS -D - -o /dev/null --http1.1 --max-time "$TIMEOUT" --resolve "${HOSTNAME}:443:${LB_PUBLIC_IP}" -X OPTIONS "https://${HOSTNAME}/api/v1/equity/VNM/profile" -H "Origin: ${CORS_TEST_ORIGIN}" -H "Access-Control-Request-Method: GET" || true)"
+headers="$($CURL_BIN -sS -D - -o /dev/null --http1.1 --max-time "$TIMEOUT" --resolve "${HOSTNAME}:443:${LB_PUBLIC_IP}" -X OPTIONS "https://${HOSTNAME}/api/v1/equity/VNM/profile" -H "Origin: ${CORS_TEST_ORIGIN}" -H "Access-Control-Request-Method: GET" || true)"
 printf '%s\n' "$headers"
 
 if ! printf '%s\n' "$headers" | grep -qi "access-control-allow-origin: ${CORS_TEST_ORIGIN}"; then
