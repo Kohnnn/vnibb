@@ -16,6 +16,10 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- Listing Browser filters wrap to their widget width rather than the viewport breakpoint. Native selects stay compact and long industry labels cannot force them outside a narrow widget; exchange, sort, search and clear behavior is retained (#222).
+- Comparison-derived OCF/Sales requires retained statement evidence matching the actual stored revenue and operating cash flow, with explicit VND units, field evidence, compatible source/consolidation and annual or single-quarter flow. Unknown or contradictory bases remain unavailable; measured zero OCF remains zero and TTM requires four consecutive compatible paired quarters. Other metrics and production financial acceptance are unchanged (#224, #106).
+- Watchlist ceiling/floor status uses neutral ink, not gain/loss colors. Status labels and icons remain visible; missing price-limit evidence stays muted (#200).
+
 - Add a provider-free screener recovery preflight and a bounded one-shot operator command with exact universe/session checks, durable outcome reporting and cache verification. Lost SQL commit acknowledgements remain unknown rather than becoming successful on a later write. Offline preparation only: acquisition remains blocked on source permission, coverage and fresh paired backup/restore proof (#168, #171).
 - Heatmap timeout coverage synchronizes coordinator start and cleanup explicitly, proving that repeated timed-out requests retain one acquisition until its running children finish. The regression no longer depends on thread submission speed; production deadlines are unchanged.
 - OCI canary and health probes now verify certificate trust and hostname instead of accepting untrusted TLS; a real loopback HTTPS self-check covers trusted and rejected certificates, including CORS (#213).

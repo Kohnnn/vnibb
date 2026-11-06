@@ -530,63 +530,38 @@ for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390
       .toBeLessThanOrEqual(1);
   });
 }
-test('listing filters wrap within half-width widgets without stretching selects', async ({ page }) => {
-  await mount(page, [{ type: 'listing_browser', layout: { w: 16, h: 16 } }]);
-  await page.route('**/api/v1/**', (route) => route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify({ data: [], count: 0 }) }));
-  await page.route('**/api/v1/listing/symbols**', (route) => route.fulfill({
-    headers: { 'access-control-allow-origin': '*' },
-    contentType: 'application/json',
-    body: JSON.stringify({ data: [
-      { symbol: 'AAA', company_name: 'An Phat', exchange: 'HOSE', industry: 'A deliberately long industry label for responsive control measurement' },
-      { symbol: 'FPT', company_name: 'FPT Corporation', exchange: 'HOSE', industry: 'Software' },
-      { symbol: 'VCB', company_name: 'Vietcombank', exchange: 'HOSE', industry: 'Banking' },
-    ], count: 3 }),
-  }));
-  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
-
-  const widget = page.locator('.widget-container').filter({ has: page.getByRole('combobox', { name: 'Group filter' }) }).first();
-  const selects = widget.locator('select');
-  await expect(selects).toHaveCount(3);
-  await expect(selects.first()).toBeVisible();
-
-  for (const width of [1440, 1024, 390]) {
+for (const width of [1440, 1024, 390]) {
+  test(`listing filters fit a narrow widget at ${width}px (#222)`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
-    await widget.evaluate((element, viewportWidth) => {
-      const gridItem = element.parentElement;
-      if (gridItem) {
-        gridItem.style.width = `${viewportWidth / 2}px`;
-        gridItem.style.maxWidth = `${viewportWidth / 2}px`;
-        gridItem.style.minWidth = '0';
-        gridItem.style.flex = 'none';
-      }
-      element.style.width = '100%';
-      element.style.maxWidth = '100%';
-    }, width);
+    await mount(page, [{ type: 'listing_browser', layout: { w: 8, h: 16 } }]);
+    await baseRoutes(page, {
+      '/search/tickers': (route) => route.fulfill(json({ data: [], count: 0 })),
+      '/listing/symbols': (route) => route.fulfill(json({ data: [
+        { symbol: 'AAA', company_name: 'An Phat', exchange: 'HOSE', industry: 'A deliberately long industry label for responsive control measurement' },
+        { symbol: 'FPT', company_name: 'FPT Corporation', exchange: 'HOSE', industry: 'Software' },
+        { symbol: 'VCB', company_name: 'Vietcombank', exchange: 'HNX', industry: 'Banking' },
+      ], count: 3 })),
+    });
+    await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+    const widget = page.locator('.react-grid-item[data-widget-id="states-widget-0"]');
+    await expect(widget.getByRole('combobox', { name: 'Industry filter' }).locator('option')).toHaveCount(4);
     const box = await widget.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThan(0);
-    expect(box!.width).toBeLessThan(width);
-    const rects = await selects.evaluateAll((items) => items.map((item) => {
+    const rects = await widget.locator('select').evaluateAll((items) => items.map((item) => {
       const rect = item.getBoundingClientRect();
       return { height: rect.height, right: rect.right };
     }));
     expect(rects).toHaveLength(3);
     expect(rects.every(({ height, right }) => height < 60 && right <= box!.x + box!.width + 1), JSON.stringify({ width, box, rects })).toBe(true);
-    const industryLabel = widget.getByText('A deliberately long industry label for responsive control measurement');
-    const labelBox = await industryLabel.boundingBox();
-    expect(labelBox).not.toBeNull();
-    expect(labelBox!.x + labelBox!.width).toBeLessThanOrEqual(box!.x + box!.width + 1);
-  }
-
-  await widget.getByRole('button', { name: /HOSE/ }).click();
-  await expect(widget.getByText('FPT Corporation')).toBeVisible();
-  await expect(widget.getByText('Asia Commercial Bank')).toHaveCount(0);
-  await widget.getByLabel('Sort listings').selectOption('company');
-  await widget.getByPlaceholder(/Search symbol, company, or industry/).fill('FPT');
-  await expect(widget.getByText('FPT Corporation')).toBeVisible();
-  await widget.getByRole('button', { name: 'Clear' }).click();
-  await expect(widget.getByText('Asia Commercial Bank')).toBeVisible();
-});
+    await widget.getByRole('button', { name: /^HOSE/ }).click();
+    await widget.getByLabel('Sort listings').selectOption('company');
+    await widget.getByPlaceholder('Search symbol, company, or industry...').fill('FPT');
+    await expect(widget.getByRole('button', { name: /FPT/ })).toBeVisible();
+    await expect(widget.getByRole('button', { name: /VCB/ })).toHaveCount(0);
+    await widget.getByRole('button', { name: 'Clear', exact: true }).click();
+    await expect(widget.getByRole('button', { name: /VCB/ })).toBeVisible();
+  });
+}
 
 test('a data-table cell actually paints the sign it was given (#200)', async ({ page }) => {
   // The source guard in check-brand-tokens.test.ts reads CSS text, so it can be

@@ -203,8 +203,8 @@ export function ListingBrowserWidget({
             <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isLoading && hasData} note={`${rows.length} matches`} align="right" />
           </div>
 
-          <div style={{ display: 'flex', width: '100%', minWidth: 0, flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', flex: '1 0 100%', minWidth: 0, flexWrap: 'wrap', alignItems: 'center', gap: '0.25rem' }} className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 basis-full flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5">
               {(['ALL', 'HOSE', 'HNX', 'UPCOM'] as ExchangeFilter[]).map((item) => (
                 <button
                   key={item}
