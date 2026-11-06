@@ -52,7 +52,11 @@ from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
 from vnibb.services.data_quality import latest_market_business_day
-from vnibb.services.market_session import expected_market_session
+from vnibb.services.market_session import (
+    expected_market_session,
+    market_session_date,
+    market_sessions_are_adjacent,
+)
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
@@ -856,28 +860,44 @@ def _reconcile_index_change_pct(row: dict[str, Any]) -> dict[str, Any]:
     base belongs to a different session (#205). The percentage is then checked
     against the admitted base, and a contradictory one is withheld with
     `change_pct_status` so a later normalization pass cannot re-derive it.
+    A dropped base records why, and only an admitted replacement clears it.
     """
     current_value = _coerce_market_number(
         row.get("current_value") or row.get("close") or row.get("price")
     )
     change = _coerce_market_number(row.get("change"))
     change_pct = _coerce_market_number(row.get("change_pct"))
-    base = _coerce_market_number(
-        row.get("previous_close") or row.get("prev_close") or row.get("ref_price")
-    )
+    previous_close_status = row.get("previous_close_status")
+    if previous_close_status is not None:
+        # An incoming withholding reason means a base was already refused. Only
+        # a canonical replacement may be reconsidered here: reading an alias
+        # back would resurrect exactly the base that reason withheld (#205).
+        supplied_base = _coerce_market_number(row.get("previous_close"))
+    else:
+        supplied_base = _coerce_market_number(
+            row.get("previous_close") or row.get("prev_close") or row.get("ref_price")
+        )
+    if supplied_base in (None, 0):
+        supplied_base = None
 
-    if change is None and current_value is not None and base not in (None, 0):
-        change = current_value - base
+    if change is None and current_value is not None and supplied_base is not None:
+        change = current_value - supplied_base
 
-    if base in (None, 0):
-        base = None
-    elif (
-        current_value is not None
+    base = supplied_base
+    if (
+        base is not None
+        and current_value is not None
         and change is not None
         and abs((current_value - base) - change) > _INDEX_CHANGE_TOLERANCE
     ):
         # The base does not belong to the change this row reports.
         base = None
+
+    if base is not None:
+        # A replacement base was admitted, so an earlier withholding is stale.
+        previous_close_status = None
+    elif supplied_base is not None:
+        previous_close_status = "inconsistent_with_retained_change"
 
     # Only an admitted base may anchor the percentage. Otherwise the base the
     # retained change implies is the sole honest reference, and it is never
@@ -917,6 +937,10 @@ def _reconcile_index_change_pct(row: dict[str, Any]) -> dict[str, Any]:
         result.pop(key, None)
     if base is not None:
         result["previous_close"] = base
+    if previous_close_status is not None:
+        result["previous_close_status"] = previous_close_status
+    else:
+        result.pop("previous_close_status", None)
     if status is not None:
         result["change_pct_status"] = status
     else:
@@ -1003,21 +1027,27 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
         if observed_previous_close in (None, 0):
             observed_previous_close = None
 
-        previous_close = observed_previous_close
-        previous_close_status = "observed"
-        if observed_previous_close is not None and change is not None and current_value is not None:
-            if abs((current_value - observed_previous_close) - change) > 0.011:
-                # The observed row is not the base this change was measured
-                # from. Withhold it rather than publish a mismatched base or
-                # invent the unobserved close that `close - change` implies.
-                previous_close = None
-                previous_close_status = "previous_session_not_retained"
-        elif observed_previous_close is not None:
-            # No change was retained on this row, so adjacency cannot be
-            # proven from arithmetic. Deriving `close - base` would report a
-            # multi-session move as one session's change (#205).
-            previous_close = None
+        # Dates prove the base, arithmetic never does: two rows with a matching
+        # `close - change` may still be two sessions apart (#205).
+        previous_close = None
+        if previous is None or observed_previous_close is None:
             previous_close_status = "previous_session_not_retained"
+        else:
+            previous_session = market_session_date(previous.time)
+            latest_session = market_session_date(latest.time)
+            if previous_session is None or latest_session is None:
+                previous_close_status = "previous_session_unconfirmed"
+            elif not market_sessions_are_adjacent(previous_session, latest_session):
+                # The retained row is not the session before this one, so its
+                # close is not this row's base. The unobserved close is never
+                # synthesized from `close - change`.
+                previous_close_status = "previous_session_not_retained"
+            else:
+                previous_close = observed_previous_close
+                previous_close_status = "observed"
+                if change is None and current_value is not None:
+                    # A proven adjacent base may derive the change it implies.
+                    change = current_value - previous_close
 
         row = _reconcile_index_change_pct(
             {
@@ -1040,14 +1070,15 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
     return results
 
 
-def _index_session_date(row: dict[str, Any]) -> str | None:
-    """Date part of a row's own observation time, or `None` when it is unknown."""
-    raw = _first_non_none(row.get("time"), row.get("date"), row.get("updated_at"))
-    text = str(raw).strip() if raw is not None else ""
-    if len(text) < 10:
-        return None
-    candidate = text[:10]
-    return candidate if candidate[4] == "-" and candidate[7] == "-" else None
+def _index_session_date(row: dict[str, Any]) -> date | None:
+    """Session date of a row's own source observation, or `None` if unknown.
+
+    Only the row's published source time is evidence. `updated_at` (or a
+    response envelope) describes the fetch, not the session observed (#205).
+    """
+    return market_session_date(
+        _first_non_none(row.get("time"), row.get("date"), row.get("trading_date"))
+    )
 
 
 def _merge_market_index_rows(
@@ -1079,24 +1110,26 @@ def _merge_market_index_rows(
         db_change_pct = _coerce_market_number(normalized_db_row.get("change_pct"))
         provider_level = _coerce_market_number(existing_row.get("current_value"))
         db_level = _coerce_market_number(normalized_db_row.get("current_value"))
-        # The two sources describe the same session only when their levels agree
-        # and their dates do not contradict. An unchanged level on another day is
-        # a different observation, so a known disagreement is never a match.
+        # Two sources describe the same session only when both dates are known,
+        # equal, and their levels agree. An undated row proves nothing, and an
+        # unchanged level on another day is a different observation (#205).
         provider_date = _index_session_date(existing_row)
         db_date = _index_session_date(normalized_db_row)
         same_session = (
-            provider_level is not None
+            provider_date is not None
+            and provider_date == db_date
+            and provider_level is not None
             and db_level is not None
             and abs(provider_level - db_level) <= 0.011
-            and (provider_date is None or db_date is None or provider_date == db_date)
         )
 
         # The merged row is the provider observation, not a field-by-field blend.
         # Spreading the DB row in first lent its date, volume, range and base to
-        # a provider row from another session (#205).
+        # a provider row from another session (#205). `time` is not fillable:
+        # the observation time is the provider's own, never a borrowed clock.
         combined_row = dict(existing_row)
         if same_session:
-            for key in ["volume", "high", "low", "time", "previous_close"]:
+            for key in ["volume", "high", "low", "previous_close"]:
                 if combined_row.get(key) is None and normalized_db_row.get(key) is not None:
                     combined_row[key] = normalized_db_row.get(key)
             if (
@@ -1105,18 +1138,6 @@ def _merge_market_index_rows(
                 and db_change_pct is not None
             ):
                 combined_row["change_pct"] = db_change_pct
-        # A base from another session would let the final normalization derive a
-        # change (or a percentage) the provider never reported (#205). The base
-        # must reconcile with whichever change this row publishes.
-        base = _coerce_market_number(combined_row.get("previous_close"))
-        published_change = _coerce_market_number(combined_row.get("change"))
-        if (
-            provider_level is not None
-            and base is not None
-            and published_change is not None
-            and abs((provider_level - base) - published_change) > 0.011
-        ):
-            combined_row.pop("previous_close", None)
         merged[code] = _normalize_market_index_metrics(combined_row)
 
     ordered_codes = [code for code in MARKET_INDEX_ORDER if code in merged]
@@ -2867,7 +2888,7 @@ async def get_foreign_flow_leaderboard(
 
 
 @router.get("/indices", response_model=MarketIndicesResponse)
-@cached(key_prefix="market_indices_v2")
+@cached(key_prefix="market_indices_v3")
 @_market_deadline
 async def get_market_indices(
     limit: int = Query(default=10, ge=1, le=20),

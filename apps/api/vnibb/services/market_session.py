@@ -35,6 +35,69 @@ def expected_market_session(*, now: datetime | None = None) -> date:
     return session
 
 
+def market_session_date(value: Any) -> date | None:
+    """Resolve a source timestamp to its market-zone session date.
+
+    Date-only values stay dates. Aware timestamps resolve in the configured
+    market timezone, where a late-evening UTC instant can fall on the next
+    Vietnamese date. The whole string must parse; anything else is `None`, and
+    a missing date never becomes "today".
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.date()
+        return value.astimezone(ZoneInfo(settings.vn_timezone)).date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    parsed: datetime | None = None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            return date.fromisoformat(text)
+        except ValueError:
+            return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return parsed.date()
+    return parsed.astimezone(ZoneInfo(settings.vn_timezone)).date()
+
+
+def _is_market_business_day(anchor: date, holidays: set[date]) -> bool:
+    return anchor.weekday() < 5 and anchor not in holidays
+
+
+def market_sessions_are_adjacent(earlier: Any, later: Any) -> bool:
+    """True when `later` is the first market session after `earlier`.
+
+    `df.iloc[-2]` is only the previous session when no session is missing in
+    between. HNX is missing 2026-10-29, so its second row is 2026-10-28 and
+    deriving a change from it reports a two-session move as one session's
+    (#205). Both endpoints must themselves be market business days: a closure
+    or a weekend beside the other date is not a session boundary.
+    """
+    start = market_session_date(earlier)
+    end = market_session_date(later)
+    if start is None or end is None or end <= start:
+        return False
+    holidays = _market_holidays()
+    if not _is_market_business_day(start, holidays) or not _is_market_business_day(end, holidays):
+        return False
+    cursor = end
+    while cursor > start:
+        cursor -= timedelta(days=1)
+        if cursor == start:
+            return True
+        if _is_market_business_day(cursor, holidays):
+            # A session between them means they are not adjacent.
+            return False
+    return False
+
+
 def _timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str):
         return None
