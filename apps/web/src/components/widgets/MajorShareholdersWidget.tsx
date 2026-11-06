@@ -177,7 +177,7 @@ export function MajorShareholdersWidget({ symbol: requestedSymbol, onDataChange 
                                         <td className={`text-right py-1.5 px-1 ${missingShares ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--text-secondary)]'}`}>
                                             {formatShares(sharesOwned as number | null | undefined)}
                                         </td>
-                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--color-positive)]'}`}>
+                                        <td className={`text-right py-1.5 px-1 font-medium ${missingOwnership ? 'text-[var(--text-muted)] text-[10px]' : 'text-[var(--text-primary)]'}`}>
                                             {formatPct(ownershipPct as number | null | undefined)}
                                         </td>
                                     </tr>

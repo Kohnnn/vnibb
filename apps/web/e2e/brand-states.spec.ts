@@ -291,3 +291,303 @@ test('PNG export downloads a real image for a chart widget', async ({ page }) =>
   expect(await page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('dark');
 });
 
+
+test('market indices report each observation against its own source date', async ({ page }) => {
+  // #205: the widget published one latest-across-rows date, so an HNX close from
+  // 2026-10-30 appeared as current as a 2026-11-02 VNINDEX close.
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 2,
+      source: 'db_fallback',
+      updated_at: '2026-11-02T00:00:00',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' },
+        { index_name: 'HNX', current_value: 252.74, change: -3.87, change_pct: -1.51, time: '2026-10-30' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+
+  await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
+  await expect(widget.getByText('As of: 30 Oct 2026')).toBeVisible({ timeout: 30_000 });
+});
+test('an index date stays on the traded day west of UTC', async ({ browser }) => {
+  // The API sends a bare `YYYY-MM-DD`. `new Date('2026-11-02')` is midnight UTC,
+  // so a browser at a negative offset rendered that Monday as 01 Nov (Sunday).
+  // A unit test cannot catch this: Jest freezes the ICU zone at startup, so the
+  // assertion passes whatever `process.env.TZ` is set to. Only a real browser
+  // with a real zone shows the defect.
+  const context = await browser.newContext({ timezoneId: 'America/New_York' });
+  const page = await context.newPage();
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 1,
+      source: 'db_fallback',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+
+  await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
+  await expect(widget.getByText('As of: 01 Nov 2026')).toHaveCount(0);
+  await context.close();
+});
+
+
+test('a missing index change is unavailable, not a flat session', async ({ page }) => {
+  // A null change and a measured 0 both used to land on `index-card flat`, so
+  // "no reading" and "unchanged" were the same colour. They must not be.
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 2,
+      source: 'db_fallback',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 0, change_pct: 0, time: '2026-11-02' },
+        { index_name: 'HNX', current_value: 252.74, change: null, change_pct: null, time: '2026-11-02' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  // The cards paint after the query resolves; probe once both are on screen.
+  await expect(widget.locator('.index-card')).toHaveCount(2, { timeout: 30_000 });
+  await expect(widget.locator('.index-card.none')).toHaveCount(1);
+
+  const tones = await widget.evaluate((element) => {
+    const cards = Array.from(element.querySelectorAll('.index-card'));
+    const change = (card: Element) =>
+      getComputedStyle(card.querySelector('.index-card__change')!).color;
+    return {
+      flat: change(cards.find((card) => card.classList.contains('flat'))!),
+      missing: change(cards.find((card) => card.classList.contains('none'))!),
+    };
+  });
+
+  // Distinct readings: a genuine zero is ink/secondary, a null is muted.
+  expect(tones.missing).not.toBe(tones.flat);
+});
+
+test('color-vision mode remaps the direction tokens and reduced effects reach the root', async ({ page }) => {
+  // #202: these two accessibility modes were only ever checked by reading CSS.
+  // Seed them the way a returning user has them, then measure the resolved
+  // colour on a real gain/loss pair instead of the stylesheet source.
+  await mount(page, [{ type: 'market_overview' }]);
+  await page.addInitScript(() => {
+    localStorage.setItem('vnibb-colorblind-mode', 'true');
+    localStorage.setItem('vnibb-reduce-effects', 'true');
+  });
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 2,
+      source: 'db_fallback',
+      data: [
+        { index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' },
+        { index_name: 'HNX', current_value: 252.74, change: -3.87, change_pct: -1.51, time: '2026-11-02' },
+      ],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  await expect(widget.getByText('As of: 02 Nov 2026')).toHaveCount(2);
+
+  const resolved = await page.evaluate(() => {
+    const root = document.documentElement;
+    const style = getComputedStyle(root);
+    const changeColor = (selector: string) => {
+      const node = document.querySelector(selector);
+      return node ? getComputedStyle(node).color : null;
+    };
+    const card = document.querySelector('.widget-card-premium') as HTMLElement | null;
+    // Read the attributes the app itself applied, before touching them. Toggling
+    // first and reading afterwards would assert our own write, not hydration.
+    const colorMode = root.getAttribute('data-color-mode');
+    const reduceEffects = root.getAttribute('data-reduce-effects');
+    // `backdrop-filter` is `none` app-wide since #199 retired glass, so it
+    // cannot prove this preference applied. The rule's real effect is
+    // `box-shadow: var(--shadow-sm)`; measure it with the pref on and then
+    // with it off, so an attribute that stops reaching the root fails.
+    const withPref = card ? getComputedStyle(card).boxShadow : null;
+    root.setAttribute('data-reduce-effects', 'false');
+    const withoutPref = card ? getComputedStyle(card).boxShadow : null;
+    root.setAttribute('data-reduce-effects', reduceEffects ?? 'false');
+    // A computed shadow is resolved to rgb()/px, so the raw token string never
+    // matches it. Resolve the token the same way through a probe element.
+    const probe = document.createElement('div');
+    probe.style.boxShadow = 'var(--shadow-sm)';
+    document.body.appendChild(probe);
+    const shadowSm = getComputedStyle(probe).boxShadow;
+    probe.remove();
+    return {
+      colorMode,
+      reduceEffects,
+      positive: style.getPropertyValue('--color-positive').trim(),
+      negative: style.getPropertyValue('--color-negative').trim(),
+      shadowSm,
+      withPref,
+      withoutPref,
+      up: changeColor('.index-card.up .index-card__change'),
+      down: changeColor('.index-card.down .index-card__change'),
+    };
+  });
+  expect(resolved.colorMode).toBe('colorblind');
+  expect(resolved.reduceEffects).toBe('true');
+  // Okabe–Ito pair, not the default green/red: #6CB6F0 / #F0A35E on dark.
+  expect(resolved.positive.toLowerCase()).toBe('#6cb6f0');
+  expect(resolved.negative.toLowerCase()).toBe('#f0a35e');
+  // The measurement, not the token declaration: a gain row must paint blue.
+  expect(resolved.up).toBe('rgb(108, 182, 240)');
+  expect(resolved.down).toBe('rgb(240, 163, 94)');
+
+  // Reduced effects collapse the card shadow to the single --shadow-sm value,
+  // and the same card differs when the preference is off.
+  expect(resolved.shadowSm).not.toBe('');
+  expect(resolved.withPref).toBe(resolved.shadowSm);
+  expect(resolved.withoutPref).not.toBe(resolved.withPref);
+});
+
+test('OS reduced-motion actually shortens animations and transitions', async ({ page }) => {
+  // `prefers-reduced-motion: reduce` has had a rule in accessibility.css the
+  // whole time and nothing ever measured it. `data-reduce-effects` is a separate
+  // app preference; this is the OS setting, so it cannot be seeded in
+  // localStorage and must be emulated.
+  await mount(page, [{ type: 'market_overview' }]);
+  await baseRoutes(page, {
+    '/market/indices': (route) => route.fulfill(json({
+      count: 1,
+      source: 'db_fallback',
+      data: [{ index_name: 'VNINDEX', current_value: 1829.04, change: 12.04, change_pct: 0.66, time: '2026-11-02' }],
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  await expect(widget.locator('.index-card')).toHaveCount(1, { timeout: 30_000 });
+
+  // Measure an element whose motion comes from the universal guard in
+  // accessibility.css, not from its own media query: `.react-grid-item` has a
+  // sibling `prefers-reduced-motion` rule in globals.css, so measuring it would
+  // still pass with the universal guard deleted. The widget card carries a real
+  // transition and has no such override.
+  const measure = () => page.evaluate(() => {
+    const card = document.querySelector('[data-widget-id] .widget-card-premium');
+    if (!card) return null;
+    const style = getComputedStyle(card);
+    return { transition: style.transitionDuration, animation: style.animationDuration };
+  });
+  const seconds = (value: string) => Math.max(...value.split(',').map((part) => parseFloat(part) || 0));
+
+  // Baseline first: with motion allowed the card must actually be animating, or
+  // the reduced reading below would be zero for both cases and prove nothing.
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const unmuted = await measure();
+  expect(unmuted, 'the widget card must exist to measure its motion').not.toBeNull();
+  expect(Math.max(seconds(unmuted!.transition), seconds(unmuted!.animation))).toBeGreaterThan(0.05);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const reduced = await measure();
+  expect(Math.max(seconds(reduced!.transition), seconds(reduced!.animation))).toBeLessThan(0.001);
+});
+
+for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390', width: 390, height: 844 }] as const) {
+  test(`states hold at ${viewport.name}px: a provider failure is a retryable error, not blank`, async ({ page }) => {
+    // The state suite only ever ran at the desktop preset, so every state was
+    // unverified on a tablet and a phone width.
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await mount(page, [{ type: 'financial_ratios' }]);
+    await baseRoutes(page, {
+      '/ratios': (route) =>
+        route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'provider failed' }) }),
+    });
+
+    await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+    const widget = page.locator('[data-widget-id]').first();
+    await expect(widget).toBeVisible({ timeout: 30_000 });
+    await expect(widget.getByRole('button', { name: /try again/i })).toBeVisible({ timeout: 45_000 });
+    // A narrow viewport must not lose its scroll containment. Read after the
+    // grid has settled: an early read caught a mid-resize frame once, which
+    // failed webkit at 1024 while the document itself never overflowed.
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), {
+        timeout: 15_000,
+        message: 'the document must not scroll horizontally',
+      })
+      .toBeLessThanOrEqual(1);
+  });
+}
+
+test('a data-table cell actually paints the sign it was given (#200)', async ({ page }) => {
+  // The source guard in check-brand-tokens.test.ts reads CSS text, so it can be
+  // bypassed by a rule that merely looks layered (" .data-table td { color }").
+  // This measures the outcome instead: the colour that reaches a rendered cell.
+  // Earnings History renders net margin per quarter, so one payload can carry a
+  // gain, a loss, a measured zero and a missing reading at once.
+  await mount(page, [{ type: 'earnings_history' }]);
+  await baseRoutes(page, {
+    '/income-statement': (route) => route.fulfill(json({
+      data: [
+        { period: '2026-Q4', revenue: 100, net_income: 25, gross_profit: 40 },
+        { period: '2026-Q3', revenue: 100, net_income: -25, gross_profit: 40 },
+        { period: '2026-Q2', revenue: 100, net_income: 0, gross_profit: 40 },
+        { period: '2026-Q1', revenue: 0, net_income: 5, gross_profit: 40 },
+      ],
+      count: 4,
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+  // Net Margin is the only right-aligned percentage column carrying the tone.
+  const cells = widget.locator('td.font-medium');
+  await expect(cells.first()).toBeVisible({ timeout: 30_000 });
+
+  const painted = await page.evaluate(() => {
+    const tokens = getComputedStyle(document.documentElement);
+    const resolve = (name: string) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${name})`;
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    };
+    return {
+      positive: resolve('--color-positive'),
+      negative: resolve('--color-negative'),
+      ink: resolve('--text-primary'),
+      muted: resolve('--text-muted'),
+      rows: Array.from(document.querySelectorAll('[data-widget-id] td.font-medium'))
+        .map((cell) => ({ text: cell.textContent?.trim() ?? '', color: getComputedStyle(cell).color })),
+    };
+  });
+
+  const byText = (fragment: string) => painted.rows.find((row) => row.text.includes(fragment));
+  const gain = byText('25.00%');
+  const loss = byText('-25.00%');
+  expect(gain, `gain cell missing; saw ${JSON.stringify(painted.rows)}`).toBeDefined();
+  expect(loss, `loss cell missing; saw ${JSON.stringify(painted.rows)}`).toBeDefined();
+
+  // The measurement, not the class name: an unlayered `.data-table td { color }`
+  // made every one of these render as ordinary table text.
+  expect(gain!.color).toBe(painted.positive);
+  expect(loss!.color).toBe(painted.negative);
+  // A measured zero is ink, and a ratio with no revenue basis is n/a in muted.
+  expect(byText('0.00%')?.color ?? painted.ink).not.toBe(painted.positive);
+  expect(byText('n/a')?.color ?? painted.muted).not.toBe(painted.negative);
+});

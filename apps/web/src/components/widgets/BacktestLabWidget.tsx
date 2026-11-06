@@ -109,8 +109,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        <Metric label="Return" value={formatNumber(metrics.total_return_pct, '%')} tone={(metrics.total_return_pct ?? 0) >= 0 ? 'good' : 'bad'} />
-        <Metric label="Max DD" value={formatNumber(metrics.max_drawdown_pct, '%')} tone="bad" />
+        <Metric label="Return" value={formatNumber(metrics.total_return_pct, '%')} valueClass={signedToneClass(metrics.total_return_pct)} />
+        <Metric label="Max DD" value={formatNumber(metrics.max_drawdown_pct, '%')} valueClass={signedToneClass(metrics.max_drawdown_pct)} />
         <Metric label="Sharpe" value={formatNumber(metrics.sharpe_daily_rf0)} />
         <Metric label="Trades" value={formatNumber(metrics.trade_count)} />
       </div>
@@ -144,8 +144,8 @@ export function BacktestLabWidget({ symbol, onDataChange }: BacktestLabWidgetPro
   );
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
-  const toneClass = tone === 'good' ? 'text-[var(--color-positive)]' : tone === 'bad' ? 'text-[var(--color-negative)]' : 'text-[var(--text-primary)]';
+function Metric({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+  const toneClass = valueClass ?? 'text-[var(--text-primary)]';
   return (
     <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/50 px-3 py-2">
       <div className="text-[9px] font-black uppercase tracking-widest text-[var(--text-muted)]">{label}</div>

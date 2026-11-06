@@ -1040,6 +1040,16 @@ async def _load_latest_market_indices_from_db(db: AsyncSession) -> list[dict[str
     return results
 
 
+def _index_session_date(row: dict[str, Any]) -> str | None:
+    """Date part of a row's own observation time, or `None` when it is unknown."""
+    raw = _first_non_none(row.get("time"), row.get("date"), row.get("updated_at"))
+    text = str(raw).strip() if raw is not None else ""
+    if len(text) < 10:
+        return None
+    candidate = text[:10]
+    return candidate if candidate[4] == "-" and candidate[7] == "-" else None
+
+
 def _merge_market_index_rows(
     db_rows: list[dict[str, Any]],
     provider_rows: list[dict[str, Any]],
@@ -1064,29 +1074,37 @@ def _merge_market_index_rows(
             merged[code] = normalized_db_row
             continue
 
-        combined_row = {**normalized_db_row, **existing_row}
         provider_change = _coerce_market_number(existing_row.get("change"))
         provider_change_pct = _coerce_market_number(existing_row.get("change_pct"))
         db_change_pct = _coerce_market_number(normalized_db_row.get("change_pct"))
         provider_level = _coerce_market_number(existing_row.get("current_value"))
         db_level = _coerce_market_number(normalized_db_row.get("current_value"))
-        # The two sources describe the same session only when their levels agree.
+        # The two sources describe the same session only when their levels agree
+        # and their dates do not contradict. An unchanged level on another day is
+        # a different observation, so a known disagreement is never a match.
+        provider_date = _index_session_date(existing_row)
+        db_date = _index_session_date(normalized_db_row)
         same_session = (
             provider_level is not None
             and db_level is not None
             and abs(provider_level - db_level) <= 0.011
+            and (provider_date is None or db_date is None or provider_date == db_date)
         )
 
-        if (
-            provider_change_pct in (None, 0.0)
-            and provider_change not in (None, 0.0)
-            and db_change_pct is not None
-            and same_session
-        ):
-            combined_row["change_pct"] = db_change_pct
-        for key in ["volume", "high", "low", "time"]:
-            if combined_row.get(key) is None and normalized_db_row.get(key) is not None:
-                combined_row[key] = normalized_db_row.get(key)
+        # The merged row is the provider observation, not a field-by-field blend.
+        # Spreading the DB row in first lent its date, volume, range and base to
+        # a provider row from another session (#205).
+        combined_row = dict(existing_row)
+        if same_session:
+            for key in ["volume", "high", "low", "time", "previous_close"]:
+                if combined_row.get(key) is None and normalized_db_row.get(key) is not None:
+                    combined_row[key] = normalized_db_row.get(key)
+            if (
+                provider_change_pct in (None, 0.0)
+                and provider_change not in (None, 0.0)
+                and db_change_pct is not None
+            ):
+                combined_row["change_pct"] = db_change_pct
         # A base from another session would let the final normalization derive a
         # change (or a percentage) the provider never reported (#205). The base
         # must reconcile with whichever change this row publishes.

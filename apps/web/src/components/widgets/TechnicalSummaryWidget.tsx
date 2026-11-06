@@ -70,9 +70,9 @@ function buildSignalGaugeBackground(buyCount: number, neutralCount: number, sell
     }
 
     const segments = [
-        { value: buyCount, color: '#4ade80' },
-        { value: neutralCount, color: '#94a3b8' },
-        { value: sellCount, color: '#f87171' },
+        { value: buyCount, color: 'var(--color-positive)' },
+        { value: neutralCount, color: 'var(--chart-slate)' },
+        { value: sellCount, color: 'var(--color-negative)' },
     ];
 
     let cursor = 0;

@@ -7,7 +7,7 @@ import { GapAnalysisWidget } from './GapAnalysisWidget'
 
 jest.mock('@/lib/queries', () => ({ useQuantMetrics: jest.fn() }))
 jest.mock('@/hooks/useLoadingTimeout', () => ({ useLoadingTimeout: jest.fn() }))
-jest.mock('@/hooks/useDirectionColors', () => ({ useDirectionColors: () => ({ positive: 'green', negative: 'red' }) }))
+jest.mock('@/hooks/useDirectionColors', () => ({ useDirectionColors: () => ({ positive: 'green', negative: 'red', neutral: 'gray', forValue: () => 'gray' }) }))
 jest.mock('@/components/ui/ChartMountGuard', () => ({ ChartMountGuard: () => null }))
 jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }))
 

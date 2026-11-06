@@ -79,7 +79,7 @@ function BubbleShape(props: any) {
         r={radius}
         fill={payload.color}
         fillOpacity={payload.is_reference ? 0.9 : 0.75}
-        stroke={payload.is_reference ? '#f8fafc' : 'rgba(255,255,255,0.3)'}
+        stroke={payload.is_reference ? 'var(--color-on-accent)' : 'var(--border-default)'}
         strokeWidth={payload.is_reference ? 2.5 : 1.25}
       />
       <text
@@ -88,7 +88,7 @@ function BubbleShape(props: any) {
         textAnchor="middle"
         fontSize={11}
         fontWeight={700}
-        fill="#f8fafc"
+        fill="var(--color-on-accent)"
       >
         {payload.symbol}
       </text>
@@ -332,10 +332,10 @@ function IndustryBubbleWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                         }}
                       />
                       {data?.sector_average?.x != null && (
-                        <ReferenceLine x={data.sector_average.x} stroke="#94a3b8" strokeDasharray="4 4" />
+                        <ReferenceLine x={data.sector_average.x} stroke="var(--chart-slate)" strokeDasharray="4 4" />
                       )}
                       {data?.sector_average?.y != null && (
-                        <ReferenceLine y={data.sector_average.y} stroke="#94a3b8" strokeDasharray="4 4" />
+                        <ReferenceLine y={data.sector_average.y} stroke="var(--chart-slate)" strokeDasharray="4 4" />
                       )}
                       <Scatter data={points} shape={<BubbleShape />} />
                     </ScatterChart>

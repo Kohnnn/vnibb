@@ -469,7 +469,7 @@ function TransactionFlowWidgetComponent({ id, symbol, onRemove, onDataChange }: 
                         yAxisId="price"
                         type="monotone"
                         dataKey="price"
-                        stroke="#93c5fd"
+                        stroke="var(--chart-blue)"
                         strokeWidth={2}
                         dot={false}
                         strokeDasharray="4 4"

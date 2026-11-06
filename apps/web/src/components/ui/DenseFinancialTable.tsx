@@ -558,7 +558,7 @@ export function DenseFinancialTable({
                                 }}
                                 formatter={(value) => [valueFormatter ? valueFormatter(Array.isArray(value) ? value[0] : value, row, visibleColumns[0]?.key || '') : defaultFormatter(Array.isArray(value) ? value[0] : value), row.label]}
                               />
-                              <Area type="monotone" dataKey="value" stroke="#38bdf8" strokeWidth={2} fill="rgba(56,189,248,0.18)" />
+                              <Area type="monotone" dataKey="value" stroke="var(--chart-blue)" strokeWidth={2} fill="color-mix(in srgb, var(--chart-blue) 18%, transparent)" />
                             </AreaChart>
                           </ResponsiveContainer>
                           </ChartMountGuard>

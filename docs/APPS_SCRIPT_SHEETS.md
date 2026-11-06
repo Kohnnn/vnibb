@@ -27,6 +27,8 @@ Source: `apps/api/vnibb/api/v1/apps_script.py`.
 | `GET /market/indices` | Index rows |
 | `GET /health` | Service health |
 
+`/financials/{symbol}` keeps the flat array shape, but a metric whose currency, unit or reporting basis was not admitted is `null`, exactly as REST and MCP withhold it. A blank cell is a withheld value, not a zero (#206).
+
 `writeRowsToSheet()` routes every value through `cellValue_()`: secret-like columns (`api_key`, `X-API-Key`, …) are redacted, nested values are JSON-stringified because `setValues()` accepts scalar cell values only, and numbers pass through unchanged — the serving pipeline owns their scale, so the client never silently re-units prices. Before any `setValues()` call, it enforces `CONFIG.maxSheetCells` (default `10000000`); narrow the request rather than increasing it past the Sheets limit.
 
 ## Bounded pulls with provenance

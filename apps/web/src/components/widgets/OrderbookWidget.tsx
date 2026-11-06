@@ -232,12 +232,12 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                     <AreaChart data={depthSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="orderbookBidFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#4ade80" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#4ade80" stopOpacity={0.04} />
+                          <stop offset="5%" stopColor="var(--color-positive)" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="var(--color-positive)" stopOpacity={0.04} />
                         </linearGradient>
                         <linearGradient id="orderbookAskFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#f87171" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#f87171" stopOpacity={0.04} />
+                          <stop offset="5%" stopColor="var(--color-negative)" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="var(--color-negative)" stopOpacity={0.04} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.14)" vertical={false} />
@@ -271,10 +271,10 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                         labelFormatter={(label) => `Price ${formatNumber(Number(label), { decimals: 0 })}`}
                       />
                       {lastPrice !== null ? (
-                        <ReferenceLine x={lastPrice} stroke="rgba(56,189,248,0.65)" strokeDasharray="4 4" />
+                        <ReferenceLine x={lastPrice} stroke="var(--chart-blue)" strokeDasharray="4 4" />
                       ) : null}
-                      <Area type="monotone" dataKey="bidCumulative" stroke="#4ade80" strokeWidth={2} fill="url(#orderbookBidFill)" />
-                      <Area type="monotone" dataKey="askCumulative" stroke="#f87171" strokeWidth={2} fill="url(#orderbookAskFill)" />
+                      <Area type="monotone" dataKey="bidCumulative" stroke="var(--color-positive)" strokeWidth={2} fill="url(#orderbookBidFill)" />
+                      <Area type="monotone" dataKey="askCumulative" stroke="var(--color-negative)" strokeWidth={2} fill="url(#orderbookAskFill)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>

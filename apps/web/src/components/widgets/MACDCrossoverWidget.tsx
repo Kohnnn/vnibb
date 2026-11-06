@@ -23,6 +23,8 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
+import { formatNumber } from '@/lib/formatters'
+import { signedToneClass } from '@/lib/priceColor'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 
 interface MACDCrossoverWidgetProps {
@@ -182,18 +184,18 @@ export function MACDCrossoverWidget({ symbol, onDataChange }: MACDCrossoverWidge
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">MACD</div>
-              <div className="text-[var(--color-accent-primary)] font-mono">{Number(metric?.current_macd ?? 0).toFixed(4)}</div>
+              <div className="text-[var(--color-accent-primary)] font-mono">{formatNumber(metric?.current_macd, 4)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Signal</div>
-              <div className="text-[var(--color-warning)] font-mono">{Number(metric?.current_signal ?? 0).toFixed(4)}</div>
+              <div className="text-[var(--color-warning)] font-mono">{formatNumber(metric?.current_signal, 4)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">Histogram</div>
               <div
-                className={`font-mono ${Number(metric?.current_histogram ?? 0) >= 0 ? 'price-up' : 'price-down'}`}
+                className={`font-mono ${signedToneClass(metric?.current_histogram)}`}
               >
-                {Number(metric?.current_histogram ?? 0).toFixed(4)}
+                {formatNumber(metric?.current_histogram, 4)}
               </div>
             </div>
           </div>

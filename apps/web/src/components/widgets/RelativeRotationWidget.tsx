@@ -53,7 +53,7 @@ function RotationDot(props: {
       cx={cx}
       cy={cy}
       r={payload?.radius ?? (payload?.isSelected ? 6 : 4)}
-      fill={payload?.color || '#94a3b8'}
+      fill={payload?.color || 'var(--chart-slate)'}
       fillOpacity={payload?.opacity ?? 0.85}
       stroke={payload?.isSelected ? '#e0f2fe' : 'rgba(255,255,255,0.32)'}
       strokeWidth={payload?.isSelected ? 2 : 1}

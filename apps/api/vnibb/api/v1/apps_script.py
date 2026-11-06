@@ -106,6 +106,7 @@ from vnibb.providers.vnstock.financials import (
     VnstockFinancialsFetcher,
     FinancialsQueryParams,
 )
+from vnibb.services.financial_service import admit_statement_rows
 
 
 @router.get(
@@ -138,7 +139,10 @@ async def gs_financials(
         limit=limit,
     )
     data = await VnstockFinancialsFetcher.fetch(params)
-    return [row.model_dump(mode="json") for row in data]
+    # #206: a provider row is not an admitted row. Publishing it verbatim let a
+    # statement whose currency/unit basis was never certified put numbers into
+    # a spreadsheet, so this legacy array runs the same gate as REST and MCP.
+    return [row.model_dump(mode="json") for row in admit_statement_rows(data, period)]
 
 
 # ---------------------------------------------------------------------------

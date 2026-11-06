@@ -322,12 +322,19 @@ html[data-theme="light"],
   z-index: 1;
 }
 
+/* Header cells are still cells: the colour belongs in a layer for the same
+   reason as the body default below, so a utility on a `<th>` can win. */
+@layer base {
+  .data-table th {
+    color: var(--text-muted);
+  }
+}
+
 .data-table th {
   text-align: left;
   padding: 0.25rem 0.5rem;
   font-size: 0.74rem;
   font-weight: 600;
-  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--border-color);
@@ -335,13 +342,22 @@ html[data-theme="light"],
   height: 22px;
 }
 
+/* The default text colour lives in `@layer base`: Tailwind v4 puts utilities in
+   `@layer utilities`, and unlayered CSS outranks every layer whatever its
+   specificity, so an unlayered `color` here made each cell's gain/loss/muted
+   class a no-op. Padding and metrics stay unlayered so values do not shift. */
 .data-table td {
   padding: 0.2rem 0.5rem;
   font-size: 0.82rem;
-  color: var(--text-secondary);
   border-bottom: 1px solid var(--border-subtle);
   line-height: 1.35;
   height: 20px;
+}
+
+@layer base {
+  .data-table td {
+    color: var(--text-secondary);
+  }
 }
 
 .data-table tr:hover td {
@@ -403,13 +419,21 @@ html[data-theme="light"],
   background: var(--bg-surface);
 }
 
+/* Section-header rows are labels, but their cells are still cells: an unlayered
+   `color` here outranks any utility on the same `<td>`, the same defect that
+   greyed every signed figure. Only the colour moves into the layer. */
+@layer base {
+  .data-table .section-header-row td {
+    color: var(--text-secondary);
+  }
+}
+
 .data-table .section-header-row td {
   border-left: 2px solid var(--accent-blue);
   font-size: 0.625rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-secondary);
 }
 
 .data-table .section-header-row td:first-child {

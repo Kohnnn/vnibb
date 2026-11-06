@@ -253,7 +253,10 @@ class VnstockEquityProfileFetcher(BaseFetcher[EquityProfileQueryParams, EquityPr
                     # fallback here — doing so showed the legal type in the
                     # Industry field for non-bank tickers like FPT/HPG (DEF-05).
                     industry=row.get("icb_name3") or row.get("icb_name4"),
-                    sector=row.get("icb_name2") or row.get("icb_name3"),
+                    # #207: sector must come from a sector level. `icb_name3` is
+                    # the industry level, so falling back to it restated the
+                    # industry as a sector before the endpoint could map it.
+                    sector=row.get("icb_name2"),
                     established_date=_pick_first(
                         row.get("founded_date"), row.get("established_date")
                     ),

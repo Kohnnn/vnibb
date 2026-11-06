@@ -23,6 +23,7 @@ import { ChartMountGuard } from '@/components/ui/ChartMountGuard'
 import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner'
 import { extractQuantWarning } from '@/lib/quantWidgetHelpers'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
+import { signedToneClass } from '@/lib/priceColor'
 import { useDirectionColors } from '@/hooks/useDirectionColors'
 
 interface VolumeFlowWidgetProps {
@@ -39,7 +40,8 @@ interface CumulativePoint {
   close: number | null
 }
 
-function formatCompact(value: number): string {
+function formatCompact(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a'
   const abs = Math.abs(value)
   if (abs >= 1e9) return `${(value / 1e9).toFixed(2)}B`
   if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`
@@ -157,8 +159,8 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
           <div className="grid grid-cols-2 gap-2 mb-2 text-[10px]">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="text-[var(--text-muted)] uppercase tracking-widest">20D Cumulative</div>
-              <div className={`font-mono ${Number(metric?.current_20d_cumulative_delta || 0) >= 0 ? 'price-up' : 'price-down'}`}>
-                {formatCompact(Number(metric?.current_20d_cumulative_delta || 0))}
+              <div className={`font-mono ${signedToneClass(metric?.current_20d_cumulative_delta)}`}>
+                {formatCompact(metric?.current_20d_cumulative_delta)}
               </div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -206,7 +208,7 @@ export function VolumeFlowWidget({ symbol, onDataChange }: VolumeFlowWidgetProps
                     />
                     <Bar dataKey="value" radius={[2, 2, 0, 0]}>
                       {monthRows.map((entry) => (
-                        <Cell key={`month-bar-${entry.month}`} fill={entry.value >= 0 ? dirColors.positive : dirColors.negative} />
+                        <Cell key={`month-bar-${entry.month}`} fill={dirColors.forValue(entry.value)} />
                       ))}
                     </Bar>
                   </BarChart>

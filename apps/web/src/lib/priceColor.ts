@@ -9,6 +9,8 @@
  * light theme in `app/globals.css`.
  */
 
+import { normalizePercentValue } from './units';
+
 /**
  * Direction of a measured change, or `none` when there is no measurement.
  *
@@ -52,6 +54,19 @@ export function priceBgVar(direction: PriceDirection): string {
 }
 
 /**
+ * CSS background for a signed bar/meter fill: gain, loss, and the neutral
+ * token for both a measured zero and a missing reading. Use this instead of
+ * `value >= 0 ? positive : negative`, which paints a zero as a gain and a
+ * missing value as a loss.
+ */
+export function colorForDirection(change: number | null | undefined): string {
+  const dir = priceDirection(change);
+  if (dir === 'up' || dir === 'down') return priceBgVar(dir);
+  // Brand §13: a measured zero is ink, i.e. the neutral family, not a gain tint.
+  return dir === 'flat' ? 'color-mix(in srgb, var(--color-neutral) 20%, transparent)' : 'transparent';
+}
+
+/**
  * Utility-class name backed by tokens. Pairs with the `.price-up`/`.price-down`/
  * `.price-flat` rules in globals.css. Prefer this in className props.
  */
@@ -78,6 +93,22 @@ export function signedToneClass(change: number | null | undefined): string {
   if (dir === 'none') return 'text-[var(--text-muted)]';
   if (dir === 'flat') return 'text-[var(--text-primary)]';
   return dir === 'up' ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]';
+}
+
+/**
+ * Tone for a percentage that is rendered through `formatPercent` with a clamp.
+ *
+ * `formatPercent` prints `n/m` for a finite value that its clamp rejects (a
+ * margin beyond ±200%, a YoY change beyond ±999%), so toning the raw value
+ * painted a green or red `n/m` — a direction claimed for a figure the UI
+ * refused to state. This normalizes through the same clamp first, so the tone
+ * cannot disagree with the digits beside it.
+ */
+export function percentToneClass(
+  value: number | null | undefined,
+  clamp: 'yoy_change' | 'margin' | 'yield' | 'ratio',
+): string {
+  return signedToneClass(normalizePercentValue(value, { input: 'percent', clamp }));
 }
 
 

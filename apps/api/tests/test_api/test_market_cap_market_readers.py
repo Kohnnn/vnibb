@@ -503,3 +503,108 @@ def test_evidence_naming_another_currency_cannot_admit_a_vnd_value():
     assert not _monetary_evidence_admitted(
         {"source_unit": "vnd", "value_unit": "VND", "unavailable_reason": "rejected"}, "VND"
     )
+
+
+def test_merge_does_not_lend_a_foreign_session_date_to_a_provider_row():
+    """#205: an index date is an observation, not a fillable field.
+
+    The provider row carries no date and its level disagrees with the DB row, so
+    the two describe different sessions. Copying the DB date onto the provider
+    observation would claim a source date nothing established.
+    """
+    db_rows = [
+        {
+            "index_name": "HNX",
+            "current_value": 259.86,
+            "change": 0.36,
+            "time": "2026-10-28",
+        }
+    ]
+    provider_rows = [
+        {"index_name": "HNX", "current_value": 252.74, "change": -3.87, "time": None}
+    ]
+
+    merged = market._merge_market_index_rows(db_rows, provider_rows)
+    row = next(item for item in merged if item["index_name"] == "HNX")
+
+    assert row["current_value"] == pytest.approx(252.74)
+    assert row.get("time") is None
+
+
+def test_merge_keeps_the_date_of_an_agreeing_same_session_row():
+    """An agreeing pair is one session, so its observed date still applies."""
+    db_rows = [
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "time": "2026-10-30",
+        }
+    ]
+    provider_rows = [
+        {"index_name": "VNINDEX", "current_value": 1250.0, "change": 10.0, "time": None}
+    ]
+
+    merged = market._merge_market_index_rows(db_rows, provider_rows)
+    row = next(item for item in merged if item["index_name"] == "VNINDEX")
+
+    assert row["time"] == "2026-10-30"
+
+
+def test_balance_sheet_readmission_keeps_a_refilled_metric_withheld():
+    """#206: a value that arrives after admission is not an admitted value.
+
+    A retained legacy row has no unit lineage, so admission withholds its
+    numbers. `_enrich_financial_statement_rows` then refills `cash_and_equivalents`
+    from `raw_data`, which has no unit evidence of its own. The dedicated
+    balance-sheet endpoint returned that refilled number without a second gate.
+    """
+    from vnibb.api.v1 import equity
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    legacy = FinancialStatementData(
+        symbol="VNM",
+        period="2023",
+        statement_type="balance_sheet",
+        raw_data={"cash_and_equivalents": 12_345.0},
+        unit_metadata={"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}},
+    )
+    admitted = equity.admit_statement_rows([legacy], "year")[0]
+    assert admitted.cash_and_equivalents is None
+
+    refilled = equity._enrich_financial_statement_rows([admitted])[0]
+    assert refilled.cash_and_equivalents == pytest.approx(12_345.0)
+
+    final = equity.admit_statement_rows([refilled], "year")[0]
+    assert final.cash_and_equivalents is None
+    assert "cash_and_equivalents" in final.unit_metadata
+
+
+def test_merge_does_not_treat_an_equal_level_on_another_day_as_the_same_session():
+    """#205: an unchanged level is not proof of one session.
+
+    Both rows report 1250.0, but they observed different dates. Borrowing the
+    DB percentage (or date) would publish a figure from another session.
+    """
+    db_rows = [
+        {
+            "index_name": "VNINDEX",
+            "current_value": 1250.0,
+            "change": 10.0,
+            "volume": 900_000,
+            "high": 1255.0,
+            "time": "2026-10-29",
+        }
+    ]
+    provider_rows = [
+        {"index_name": "VNINDEX", "current_value": 1250.0, "change": 10.0, "time": "2026-10-30"}
+    ]
+
+    merged = market._merge_market_index_rows(db_rows, provider_rows)
+    row = next(item for item in merged if item["index_name"] == "VNINDEX")
+
+    # The level did not move, but 2026-10-29's volume and range describe that
+    # session, not the provider's 2026-10-30 observation.
+    assert "volume" not in row
+    assert "high" not in row
+    assert row["time"] == "2026-10-30"

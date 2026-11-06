@@ -128,6 +128,59 @@ describe("controls and focus", () => {
   });
 });
 
+describe("semantic cell colour can reach the cell (#200)", () => {
+  // Tailwind v4 puts utilities in `@layer utilities`, and an unlayered rule beats
+  // every layer regardless of specificity. An unlayered `.data-table td { color }`
+  // therefore cancelled each cell's gain/loss/muted class, so a loss-making row
+  // rendered as ordinary table text and nothing failed.
+  it("declares every data-table cell colour inside a layer", () => {
+    // Any rule whose selector ends in a cell (`td` / `th`) and sets `color`
+    // must sit inside a layer, including `.section-header-row td`, which kept an
+    // unlayered colour after the first fix.
+    const cellRule = /(?:^|\n)([^@{}\n][^\n{]*\b(?:td|th)\b[^\n{]*)\{([^}]*)\}/g;
+    const files = [
+      { name: "tables.css", source: readFileSync(join(stylesDir, "tables.css"), "utf8") },
+      { name: "globals.css", source: globals },
+    ];
+    for (const file of files) {
+      // Strip every layered block, then look for a remaining cell colour rule.
+      const unlayered = file.source.replace(/@layer[\s\S]*?\n\}/g, "");
+      const offenders = Array.from(unlayered.matchAll(cellRule))
+        .filter((match) => /\bcolor\s*:/.test(match[2]))
+        .map((match) => match[1].trim());
+      expect([file.name, offenders]).toEqual([file.name, []]);
+    }
+  });
+});
+
+describe("root attribute ownership (#202)", () => {
+  // Two providers used to write the same four attributes, so which value won
+  // depended on mount order and a test could agree with either writer. There is
+  // exactly one React owner now: the boot script in layout.tsx (first paint)
+  // plus UiPreferencesContext (after hydration).
+  const contextsDir = join(appDir, "..", "contexts");
+  const writers = (attribute: string) => {
+    // `setAttribute` calls in this codebase wrap onto the next line.
+    const call = new RegExp(`setAttribute\\(\\s*'${attribute}'`);
+    return walk(contextsDir)
+      .filter((file) => file.endsWith(".tsx") && !file.includes(".test."))
+      .filter((file) => call.test(readFileSync(file, "utf8")));
+  };
+
+  it.each(["data-density", "data-chart-style", "data-reduce-effects", "data-color-mode"])(
+    "has a single React writer for %s",
+    (attribute) => {
+      const owners = writers(attribute).map((file) => file.slice(contextsDir.length + 1));
+      expect(owners).toEqual(["UiPreferencesContext.tsx"]);
+    },
+  );
+
+  it("leaves data-theme to ThemeContext alone", () => {
+    const appContext = readFileSync(join(contextsDir, "AppContext.tsx"), "utf8");
+    expect(appContext).not.toContain("setAttribute('data-theme'");
+  });
+});
+
 describe("colorblind direction colours (#197 a11y)", () => {
   // Contrast is computed from the declared values, not trusted to comments.
   const luminance = (hex: string) => {
@@ -193,6 +246,32 @@ describe("probability-band and loss-mode remap (brand §13)", () => {
         const source = readFileSync(file, "utf8");
         expect([file, source.match(rawPalette)?.[0]]).toEqual([file, undefined]);
       }
+    }
+  });
+});
+
+describe("chart colour reaching an SVG surface (#200)", () => {
+  // `var()` resolves in SVG presentation attributes on all three engines
+  // (checked in chromium, firefox and webkit), so a series colour belongs in a
+  // token. A raw hex in `stroke`/`fill`/`stopColor` opts that series out of the
+  // light theme and of color-vision mode at once, which is why this guard reads
+  // the attribute rather than any class.
+  const rawSeriesColor =
+    /(?:stroke|fill|stopColor|color)=(?:"|\{')#[0-9a-fA-F]{6}(?:"|'\})/;
+  // The world-news map is a fixed instrument palette on a forced dark canvas
+  // (`bg-[#030711]`): ocean gradient, graticules and continent labels are
+  // scenery, not series, and re-tinting them for the light theme would leave
+  // white labels on a pale ocean. Everything that plots data reads a token.
+  const fixedCanvas: Record<string, true> = { "widgets/WorldNewsMapWidget.tsx": true };
+
+  it("declares no hardcoded series colour in a rendered component", () => {
+    const componentsDir = join(stylesDir, "..", "components");
+    for (const file of walk(componentsDir)) {
+      if (file.endsWith(".test.ts") || file.endsWith(".test.tsx")) continue;
+      const relative = file.slice(componentsDir.length + 1);
+      if (fixedCanvas[relative]) continue;
+      const source = readFileSync(file, "utf8");
+      expect([relative, source.match(rawSeriesColor)?.[0]]).toEqual([relative, undefined]);
     }
   });
 });

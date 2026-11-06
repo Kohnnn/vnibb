@@ -408,25 +408,49 @@ export function WidgetWrapper({
         });
     };
 
-    const trackedParameters = useMemo(() => parameters.map((parameter) => ({
-        ...parameter,
-        onChange: (value: string) => {
-            captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
-                control_type: 'parameter',
-                parameter_id: parameter.id,
-                parameter_label: parameter.label,
-                previous_value: parameter.currentValue,
-                value,
-                widget_id: id,
-                widget_type: widgetType,
-                widget_title: title,
-                symbol: displaySymbol,
-                dashboard_id: dashboardId,
-                tab_id: tabId,
-            });
-            parameter.onChange(value);
-        },
-    })), [dashboardId, displaySymbol, id, parameters, tabId, title, widgetType]);
+    // #209: a widget's inner controls own the value actually on screen. In a
+    // protected workspace the wrapper never receives onConfigChange, so deriving
+    // the header label from saved `config` alone published the stale default
+    // while the chart rendered something else. Widgets publish live control
+    // values as top-level `extra` fields of the runtime payload; those win.
+    const liveParameterValues = useMemo<Record<string, string>>(() => {
+        if (
+            !internalData
+            || typeof internalData !== 'object'
+            || Array.isArray(internalData)
+        ) {
+            return {};
+        }
+        const values: Record<string, string> = {};
+        for (const [key, value] of Object.entries(internalData as Record<string, unknown>)) {
+            if (key !== '__widgetRuntime' && typeof value === 'string') values[key] = value;
+        }
+        return values;
+    }, [internalData]);
+
+    const trackedParameters = useMemo(() => parameters.map((parameter) => {
+        const currentValue = liveParameterValues[parameter.id] ?? parameter.currentValue;
+        return {
+            ...parameter,
+            currentValue,
+            onChange: (value: string) => {
+                captureAnalyticsEvent(ANALYTICS_EVENTS.widgetControlChanged, {
+                    control_type: 'parameter',
+                    parameter_id: parameter.id,
+                    parameter_label: parameter.label,
+                    previous_value: currentValue,
+                    value,
+                    widget_id: id,
+                    widget_type: widgetType,
+                    widget_title: title,
+                    symbol: displaySymbol,
+                    dashboard_id: dashboardId,
+                    tab_id: tabId,
+                });
+                parameter.onChange(value);
+            },
+        };
+    }), [dashboardId, displaySymbol, id, liveParameterValues, parameters, tabId, title, widgetType]);
 
     const trackedMultiSelectParams = useMemo(() => multiSelectParams.map((parameter) => ({
         ...parameter,
@@ -771,7 +795,7 @@ export function WidgetWrapper({
                             {trackedParameters.map(parameter => (
                                 <label key={parameter.id} className="flex min-w-0 flex-col gap-1 text-xs text-[var(--text-secondary)]">
                                     {parameter.label}
-                                    <select value={parameter.currentValue} onChange={event => parameter.onChange(event.target.value)} className="max-w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1 text-[var(--text-primary)]">
+                                    <select value={parameter.currentValue} onChange={event => parameter.onChange(event.target.value)} disabled={parameter.readOnly} className="max-w-full rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1 text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-70">
                                         {parameter.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                                     </select>
                                 </label>

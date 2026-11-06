@@ -161,7 +161,7 @@ export function RSISeasonalWidget({ symbol, onDataChange }: RSISeasonalWidgetPro
                       return [`${Number(value).toFixed(2)}%`, label]
                     }}
                   />
-                  <Bar yAxisId="rsi" dataKey="rsi" name="RSI" fill="#0ea5e9" radius={[2, 2, 0, 0]} />
+                  <Bar yAxisId="rsi" dataKey="rsi" name="RSI" fill="var(--chart-blue)" radius={[2, 2, 0, 0]} />
                   <Line yAxisId="risk" type="monotone" dataKey="overbought" name="Overbought %" stroke={dirColors.negative} strokeWidth={2} dot={false} />
                   <Line yAxisId="risk" type="monotone" dataKey="oversold" name="Oversold %" stroke={dirColors.positive} strokeWidth={2} dot={false} />
                 </ComposedChart>
