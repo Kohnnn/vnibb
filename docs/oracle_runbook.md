@@ -95,7 +95,7 @@ New Vietnamese ingestion uses Vietcap IQ/Trading as primary and explicitly sourc
 
 Verify the exact FPT income-statement GET and OPTIONS separately for the current origin, both approved Vercel aliases and an unrelated denied origin. Include validation responses and native browser response consumption. Successful CORS transport does not certify financial values or freshness.
 
-Detailed health reads the same certified screener Universe partition as consumers. Legacy partitions retain the oldest-actual-trade-date gate. Typed session receipts additionally require exact current active membership and independently revalidated raw provider records; every new record is scoped `vietcap_board`. A provider-board zero-volume/suspension observation may have no actual price, so missing prices and historical trade dates are reported separately from provider session coverage. They must never become zero prices or current trade dates. Provider-only coverage keeps whole-market readiness degraded because odd-lot/put-through completeness is unproved. Completed-session calculations use the official HOSE/HNX 2026 closure notices and January 2 amendment plus additive `MARKET_HOLIDAY_DATES`; other years remain unverified. Before recovery, require exchange-session authority, complete segment coverage, source-use permission, exact active membership, a genuine full-run receipt and independently admitted constituent observations. New `acquire_sessions=True` materialization is opt-in and is not enabled by the daily worker without source-use authorization; private captured-source replay is not public-serving permission.
+Detailed health reads the same certified screener Universe partition as consumers. Legacy partitions retain the oldest-actual-trade-date gate. Typed session receipts additionally require exact current active membership and independently revalidated raw provider records; every new record is scoped `vietcap_board`. A provider-board zero-volume/suspension observation may have no actual price, so missing prices and historical trade dates are reported separately from provider session coverage. They must never become zero prices or current trade dates. Provider-only coverage keeps whole-market readiness degraded because odd-lot/put-through completeness is unproved. Completed-session calculations use the official HOSE/HNX 2026 closure notices and January 2 amendment plus additive `MARKET_HOLIDAY_DATES`; other years remain unverified. Before recovery, require exchange-session authority, complete segment coverage, source-use permission, exact active membership, a genuine full-run receipt and independently admitted constituent observations. The daily worker already requests `acquire_sessions=True`, but runtime acquisition is not accepted or enabled: keep it stopped pending source permission and coverage (#168), accepted bounded recovery (#171), and the credential-state and one-owner gates (#172). Private captured-source replay is not public-serving permission.
 
 `sync_screener_data` publishes snapshot changes and the Universe receipt in one PostgreSQL transaction; twenty-row checkpoints do not commit snapshot batches. A failed/incomplete same-day rerun rolls back its snapshot savepoint when a prior admitted partition exists, while independently valid Mongo observations and daily `StockPrice` rows remain durable. A complete current-session recovery may replace the old same-day partition atomically; there is no blanket daily freeze or duplicate run-key schema. Per-symbol savepoints isolate real PostgreSQL constraint failures. Before the receipt, read back the exact retained request/session envelope, immutable qualified record, snapshot session and matching traded OHLCV/source/stock identity; hold the stock membership table against changes through commit. No-trade/suspended actual prices remain nullable. Identical replay preserves snapshot/price IDs, `created_at`, lineage and receipt count; absent ratio-unit markers stay absent. Redis publication happens only after a complete database commit; an unavailable cache cannot certify or expose a partial database cohort.
 
@@ -461,40 +461,36 @@ Before a release pull or rollback, stop the timer and wait for any active onesho
 
 ### Release the stack
 
+These commands are for a separately authorized release only: complete the prerequisites in `database-oci-redeploy-plan.md` first, independently pin `EXPECTED_REVISION`, and verify the serving Compose files, existing stores, and stopped scheduler. Pass API and then MCP canary checks before executing this release against a traffic-bearing target. Verify the effective Compose configuration keeps `API_SKIP_SCHEDULER_STARTUP=true`; this release does not enable a producer. Rendered Compose configuration can contain secrets; review it only in a private environment.
+
 ```bash
-git pull --ff-only
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml pull
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate current
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --force-recreate api mcp caddy
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler up -d --no-build --force-recreate scheduler
+test -n "${EXPECTED_REVISION:-}" &&
+test "$(git rev-parse --verify HEAD)" = "$EXPECTED_REVISION" &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config >/dev/null &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml pull api mcp migrate &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate -c /app/alembic.ini current &&
+read -r -p 'After confirming current matches the approved migration head, enter the release SHA: ' accepted_revision &&
+test "$accepted_revision" = "$EXPECTED_REVISION" &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --no-deps --force-recreate api mcp caddy
 ```
 
 ### Scheduler cutover and rollback
 
-The API defaults to `API_SKIP_SCHEDULER_STARTUP=true`; it does not execute APScheduler jobs. Enable the isolated worker only after the API is recreated with that default and `REDIS_URL` is reachable.
+The API defaults to `API_SKIP_SCHEDULER_STARTUP=true`; it does not execute APScheduler jobs. Keep the scheduler and other producers stopped until [#168](https://github.com/Kohnnn/vnibb/issues/168) has accepted source permission for storage/public serving and explicit exchange/instrument/segment/finality/no-trade coverage, [#171](https://github.com/Kohnnn/vnibb/issues/171) has accepted bounded recovery after a fresh paired backup and off-source restore, and [#172](https://github.com/Kohnnn/vnibb/issues/172) has resolved credential-state readability without bypassing fail-closed behavior and established exactly one authorized owner. The current daily entrypoint already requests session acquisition. Recreate the API with the scheduler disabled, confirm `REDIS_URL` is reachable and the required lock is working, then start the isolated worker only under separate authorization. Acceptance additionally requires the next completed trading session and the strict consumer/watch gates in [#173](https://github.com/Kohnnn/vnibb/issues/173); starting a container does not meet them.
 
 ```bash
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler config
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler up -d --no-build scheduler
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs scheduler --tail=200
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler config >/dev/null &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler up -d --no-build scheduler &&
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml logs scheduler --tail=200 &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler ps
 ```
 
 The scheduler service uses the same pinned repository and digest and requires `SCHEDULER_LOCK_MODE=required`; a Redis failure skips jobs rather than risking duplicates. Verify `/api/v1/data/sync/status` reports API role and `scheduler_lock_*` configuration under `/health/`.
 
-Rollback the worker before restoring API-owned scheduling:
+To stop the worker on a failed gate or rollback, use `docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler stop scheduler`. Keep API-owned scheduling disabled; do not switch producers or start a competing worker to bypass these prerequisites.
 
-```bash
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler stop scheduler
-docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler rm -f scheduler
-API_SKIP_SCHEDULER_STARTUP=false docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --force-recreate api
-```
-
-Use API-owned scheduling only for a single API replica and only after the scheduler container has stopped.
-
-Always include `--env-file deployment/env.oracle`. Compose does not use the service-level `env_file` for `${...}` interpolation, and Caddy requires `SITE_HOSTNAME` plus `ACME_EMAIL` before it can obtain a public TLS certificate. A migration failure stops this release sequence before API or MCP is recreated, leaving the currently running services untouched.
+Always include `--env-file deployment/env.oracle` and any independently verified serving overrides: Compose does not use the service-level `env_file` for `${...}` interpolation, and Caddy requires `SITE_HOSTNAME` plus `ACME_EMAIL`. The `&&` chain stops before recreation on any failed command, a missing revision, or an unconfirmed migration head. The operator must actually compare the displayed current revision with the approved head before entering the SHA; command success alone is not schema-compatibility or rollback proof.
 
 ### Verify container health
 
