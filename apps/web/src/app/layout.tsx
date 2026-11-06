@@ -70,8 +70,9 @@ export const metadata: Metadata = {
     description: SITE_DESCRIPTION,
     images: ["/brand/og-vnibb.png"],
   },
-  /* Brand §10: no approved symbol or favicon exists. The plain-text browser
-     title stands in until a small-size asset is designed and approved. */
+  /* Brand §10/§207: no standalone symbol or invented monogram exists, so the
+     icon is the unchanged wordmark on the required white plate
+     (`src/app/icon.svg`, picked up by Next's file convention). */
 };
 
 // Theme and UI preferences pre-hydration scripts

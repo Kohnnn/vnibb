@@ -2,7 +2,10 @@
 
 <div align="center">
 
-<img src="./apps/web/public/brand/vnibb-wordmark-master.svg" alt="VniBB" width="224">
+<!-- Brand §10: the master wordmark is pure black with a transparent field, so it
+     vanishes on GitHub's dark theme. The plate variant is the same artwork on the
+     opaque white plate the brand requires for dark surroundings. -->
+<img src="./apps/web/public/brand/vnibb-wordmark-plate.svg" alt="VniBB" width="224">
 
 **Research cockpit for Vietnamese equities**
 

@@ -7,11 +7,17 @@
     "background_color": "#FFFFFF",
     "theme_color": "#0A0A0A",
     "orientation": "portrait-primary",
-    "icons": [],
+    "icons": [
+        {
+            "src": "/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ],
     "categories": [
         "finance",
         "business"
     ],
-    "screenshots": [],
-    "_icons_note": "Favicon/app-icon artwork is not in the VniBB brand pack v1.1 and needs approval before any icon is published. Entries stay unresolved rather than reusing the old mark."
+    "screenshots": []
 }
