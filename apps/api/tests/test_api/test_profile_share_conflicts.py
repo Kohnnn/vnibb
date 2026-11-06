@@ -2,7 +2,6 @@ from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.models.company import Company
 from vnibb.models.stock import Stock

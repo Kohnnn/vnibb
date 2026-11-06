@@ -571,7 +571,7 @@ def test_provider_uses_an_asserted_base_and_never_an_open_fallback():
 
 
 def test_sessions_are_adjacent_uses_the_market_calendar():
-    from datetime import date, datetime, timezone
+    from datetime import UTC, date, datetime
 
     from vnibb.services.market_session import market_sessions_are_adjacent
 
@@ -607,7 +607,7 @@ def test_sessions_are_adjacent_uses_the_market_calendar():
     # 2026-10-29 is 2026-10-30 00:30 ICT, so it can only ever be 10-30.
     from vnibb.services.market_session import market_session_date
 
-    late_utc = datetime(2026, 10, 29, 17, 30, tzinfo=timezone.utc)
+    late_utc = datetime(2026, 10, 29, 17, 30, tzinfo=UTC)
     assert market_session_date(late_utc) == date(2026, 10, 30)
     assert market_sessions_are_adjacent(date(2026, 10, 29), late_utc)
 
