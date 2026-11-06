@@ -78,12 +78,19 @@ never used at runtime, so a re-pushed tag cannot silently change what runs.
 2. Set `VNIBB_API_IMAGE_DIGEST` in `deployment/env.oracle` back to the
    previous digest.
 
-3. Recreate only the affected services (never `down` the stack):
+3. Recreate only the affected API and MCP services (never `down` the stack):
 
    ```
    docker compose --env-file deployment/env.oracle \
-     -f docker-compose.oracle.yml up -d --no-deps api scheduler mcp
+     -f docker-compose.oracle.yml up -d --no-deps api mcp
    ```
+
+   Do not add `scheduler` to this command. Keep `API_SKIP_SCHEDULER_STARTUP=true`
+   so the recreated API does not start jobs. Rolling back restores application
+   image identity only; it does not restore producers or satisfy the #168, #171
+   or #172 gates. The scheduler remains a separate producer gate in
+   `docs/oracle_runbook.md`, stopped unless all three are current and its
+   enablement is separately authorized.
 
 4. Confirm the rollback took effect by re-reading `/health/detailed` and
    checking `revision` matches the intended commit.
@@ -91,7 +98,7 @@ never used at runtime, so a re-pushed tag cannot silently change what runs.
 5. Run the smoke gate against the host:
 
    ```
-   scripts/oracle/smoke_test.sh
+   BASE_URL=https://<host> bash scripts/oracle/smoke_test.sh
    ```
 
 ### Migration caveat
