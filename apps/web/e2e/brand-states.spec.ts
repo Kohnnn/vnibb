@@ -18,12 +18,12 @@ const SCREENER_ROWS = [
 
 type Widget = { type: string; syncGroupId?: number; config?: Record<string, unknown>; layout?: Record<string, number> };
 
-async function mount(page: Page, widgets: Widget[]) {
+async function mount(page: Page, widgets: Widget[], options: { isEditable?: boolean } = {}) {
   await page.addLocatorHandler(page.getByRole('dialog', { name: 'VniBB walkthrough' }), async (dialog) => {
     await dialog.getByRole('button', { name: 'Close walkthrough' }).click();
   });
 
-  await page.addInitScript((mounted) => {
+  await page.addInitScript(({ widgets: mounted, options }) => {
     localStorage.setItem('vnibb-dashboard-version', 'v74');
     localStorage.setItem('vnibb_migration_version', '27');
     // The read path treats a missing commit marker as unreadable storage and
@@ -32,7 +32,7 @@ async function mount(page: Page, widgets: Widget[]) {
     localStorage.setItem('vnibb_folders', JSON.stringify([{ id: 'f-states', name: 'States', order: 0, isExpanded: true }]));
     localStorage.setItem('vnibb_dashboards', JSON.stringify([{
       id: 'states-dashboard', name: 'States', folderId: 'f-states', order: 0,
-      isDefault: false, isEditable: true, adminUnlocked: false, showGroupLabels: false,
+      isDefault: false, isEditable: options.isEditable ?? true, adminUnlocked: false, showGroupLabels: false,
       tabs: [{
         id: 'states-tab', name: 'Overview', order: 0,
         dashboardId: 'states-dashboard',
@@ -67,7 +67,7 @@ async function mount(page: Page, widgets: Widget[]) {
       defaultTab: 'fundamentals',
       onboarding: { dashboardWalkthroughVersion: 4, dashboardWalkthroughDismissedVersion: 4 },
     }));
-  }, widgets);
+  }, { widgets, options });
 }
 
 const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
@@ -494,8 +494,15 @@ test('OS reduced-motion actually shortens animations and transitions', async ({ 
 
   // Baseline first: with motion allowed the card must actually be animating, or
   // the reduced reading below would be zero for both cases and prove nothing.
+  // The entrance transition only runs after the first frame, so poll instead of
+  // reading computed style the moment the card exists.
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  const unmuted = await measure();
+  let unmuted: { transition: string; animation: string } | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    unmuted = await measure();
+    if (unmuted && Math.max(seconds(unmuted.transition), seconds(unmuted.animation)) > 0.05) break;
+    await page.waitForTimeout(250);
+  }
   expect(unmuted, 'the widget card must exist to measure its motion').not.toBeNull();
   expect(Math.max(seconds(unmuted!.transition), seconds(unmuted!.animation))).toBeGreaterThan(0.05);
 
@@ -637,7 +644,9 @@ test('mobile Close menu receives pointer input at 390x844 (#208)', async ({ page
   const close = dialog.getByRole('button', { name: 'Close menu' });
   const open = page.getByRole('button', { name: 'Open menu' });
 
-  for (const input of ['pointer', 'keyboard'] as const) {
+  // The ticket requires all three dismissals to keep working, not just the one
+  // this fix touches.
+  for (const input of ['pointer', 'overlay', 'keyboard'] as const) {
     await open.click();
     await expect(dialog).toBeVisible();
 
@@ -652,10 +661,57 @@ test('mobile Close menu receives pointer input at 390x844 (#208)', async ({ page
 
     if (input === 'pointer') {
       await close.click();
+    } else if (input === 'overlay') {
+      // Tap the scrim where the drawer (max 18rem = 288px) has ended. The
+      // "What's new" panel floats above the scrim at the right edge, so aim
+      // just past the drawer instead of the viewport centre-right.
+      await page.mouse.click(300, 200);
     } else {
       await close.focus();
       await page.keyboard.press('Enter');
     }
     await expect(dialog).toBeHidden();
   }
+});
+
+test('protected workspace chart header follows the control actually rendering (#209)', async ({ page }) => {
+  // A locked workspace is the #209 case: the reducer drops UPDATE_WIDGET, the
+  // wrapper gets no onConfigChange, so the header can only stay honest by
+  // following the live runtime payload the widget publishes.
+  await mount(page, [{
+    type: 'price_chart', syncGroupId: 1,
+    config: { timeframe: '1Y', chartType: 'candles' },
+    layout: { x: 0, y: 0, w: 32, h: 12, minW: 8, minH: 6 },
+  }], { isEditable: false });
+  await baseRoutes(page, {
+    '/equity/historical': (route) => route.fulfill(json({
+      data: Array.from({ length: 60 }, (_, i) => ({
+        time: `2026-09-${String((i % 28) + 1).padStart(2, '0')}T00:00:00`,
+        open: 90000 + i * 30, high: 90500 + i * 30, low: 89500 + i * 30,
+        close: 90100 + i * 30, volume: 1_000_000 + i * 1000, price_unit: 'VND',
+      })),
+      count: 60,
+    })),
+  });
+
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const widget = page.locator('[data-widget-id]').first();
+  await expect(widget).toBeVisible({ timeout: 30_000 });
+
+  // Locked: the header is a readout, not an editor. Clicking it cannot change
+  // the value, so it must keep publishing the saved period after the chart's
+  // inner control moves on.
+  // Locked, so the header renders as text: no dropdown and nothing to click.
+  const readout = widget.locator('span', { hasText: /^Period:/ }).first().locator('..');
+  await expect(readout).toContainText('1Y');
+  await expect(widget.getByRole('button', { name: /^Period:/ })).toHaveCount(0);
+
+  const chartTimeframe = widget.getByRole('group', { name: 'Chart timeframe' });
+  await expect(chartTimeframe).toBeVisible({ timeout: 45_000 });
+  await chartTimeframe.getByRole('button', { name: '1M', exact: true }).click();
+  await expect(chartTimeframe.getByRole('button', { name: '1M', exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+  // Before #209 the header kept saying 1Y while the chart rendered 1M.
+  await expect(readout).toContainText('1M', { timeout: 15_000 });
+  await expect(widget.getByRole('button', { name: /^Period:/ })).toHaveCount(0);
 });
