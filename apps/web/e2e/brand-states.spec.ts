@@ -623,3 +623,39 @@ test('a data-table cell actually paints the sign it was given (#200)', async ({ 
   expect(byText('0.00%')?.color ?? painted.ink).not.toBe(painted.positive);
   expect(byText('n/a')?.color ?? painted.muted).not.toBe(painted.negative);
 });
+
+test('mobile Close menu receives pointer input at 390x844 (#208)', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mount(page, [{ type: 'listing_browser' }]);
+  await baseRoutes(page, {
+    '/search/tickers': (route) => route.fulfill(json({ data: [], count: 0 })),
+    '/listing/symbols': (route) => route.fulfill(json({ data: [], count: 0 })),
+  });
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+
+  const dialog = page.getByRole('dialog', { name: 'Navigation menu' });
+  const close = dialog.getByRole('button', { name: 'Close menu' });
+  const open = page.getByRole('button', { name: 'Open menu' });
+
+  for (const input of ['pointer', 'keyboard'] as const) {
+    await open.click();
+    await expect(dialog).toBeVisible();
+
+    // The defect was a stacking-order overlap: the button existed and was
+    // keyboard-operable, but the sidebar brand bar owned its centre pixel.
+    const owner = await close.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return { hit: hit?.tagName ?? null, owned: Boolean(hit && button.contains(hit)) };
+    });
+    expect(owner.owned, JSON.stringify(owner)).toBe(true);
+
+    if (input === 'pointer') {
+      await close.click();
+    } else {
+      await close.focus();
+      await page.keyboard.press('Enter');
+    }
+    await expect(dialog).toBeHidden();
+  }
+});
