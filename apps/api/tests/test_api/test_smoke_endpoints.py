@@ -1439,6 +1439,46 @@ async def test_profile_keeps_sector_unavailable_rather_than_restating_industry(
 
 
 @pytest.mark.asyncio
+async def test_refresh_falls_through_a_legal_form_provider_row_to_the_stock_taxonomy(
+    client, test_db, monkeypatch
+):
+    # #207: the `?refresh=true` path is a separate taxonomy chain from the
+    # cached Company chain (equity.py:4809-4821 vs 4590-4605). A provider that
+    # answers with the legal form must still land on the sourced Stock labels
+    # rather than publishing the legal form or dropping to unavailable.
+    async def no_schedule(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("vnibb.api.v1.equity._schedule_refresh", no_schedule)
+    test_db.add(
+        Stock(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Phần mềm",
+            sector="Công nghệ Thông tin",
+        )
+    )
+    await test_db.commit()
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.VnstockEquityProfileFetcher.fetch",
+        AsyncMock(return_value=[EquityProfileData(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            industry="Công ty cổ phần",
+            sector="Công ty cổ phần",
+            exchange="HOSE",
+        )]),
+    )
+
+    response = await client.get("/api/v1/equity/FPT/profile?refresh=true")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["industry"] == "Phần mềm"
+    assert data["sector"] == "Công nghệ Thông tin"
+
+
+@pytest.mark.asyncio
 async def test_historical_endpoint_uses_recent_price_cache(client, monkeypatch):
     async def fake_cache_lookup(*args, **kwargs):
         return SimpleNamespace(hit=False, data=None)
