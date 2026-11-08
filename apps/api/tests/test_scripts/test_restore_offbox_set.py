@@ -67,9 +67,11 @@ def test_rejects_a_size_mismatch(drill, tmp_path):
 
 
 def test_rejects_a_digest_mismatch(drill, tmp_path):
+    # Same byte length, different content: only SHA-256 can catch this, so the
+    # case cannot pass on the size check.
     _write_set(tmp_path)
-    (tmp_path / f"mongo-vnibb-market-{STAMP}.archive.gz").write_bytes(b"other-bytes")
-    with pytest.raises(Exception, match="SHA256 mismatch|size mismatch"):
+    (tmp_path / f"mongo-vnibb-market-{STAMP}.archive.gz").write_bytes(b"mongo-archivE")
+    with pytest.raises(Exception, match="SHA256 mismatch"):
         drill.load_set(tmp_path, STAMP)
 
 
