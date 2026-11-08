@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { MobileNav } from './MobileNav';
+import { captureAnalyticsEvent } from '@/lib/analytics';
 
 jest.mock('./Sidebar', () => ({
     Sidebar: () => <a href="/dashboard">Dashboard</a>,
@@ -35,5 +36,31 @@ describe('MobileNav', () => {
             expect(screen.queryByRole('link', { name: 'Dashboard' })).not.toBeInTheDocument();
             expect(opener).toHaveFocus();
         });
+    });
+
+    it('keeps all three dismissals: overlay, close button and Escape (#208)', async () => {
+        render(
+            <MobileNav
+                onOpenWidgetLibrary={jest.fn()}
+                onOpenAppsLibrary={jest.fn()}
+                onOpenPromptsLibrary={jest.fn()}
+            />,
+        );
+        const opener = screen.getByRole('button', { name: 'Open menu' });
+        const dismissals = [
+            { name: 'overlay', close: () => fireEvent.click(screen.getByRole('button', { name: 'Close navigation overlay' })) },
+            { name: 'close button', close: () => fireEvent.click(screen.getByRole('button', { name: 'Close menu' })) },
+            { name: 'escape', close: () => fireEvent.keyDown(screen.getByRole('dialog', { name: 'Navigation menu' }), { key: 'Escape' }) },
+        ];
+
+        for (const { name, close } of dismissals) {
+            fireEvent.click(opener);
+            await screen.findByRole('dialog', { name: 'Navigation menu' });
+            close();
+            await waitFor(() => {
+                if (screen.queryByRole('dialog')) throw new Error(`dialog still open after ${name}`);
+            });
+        }
+        expect(captureAnalyticsEvent).toHaveBeenCalledWith('closed', expect.objectContaining({ source: 'overlay_click' }));
     });
 });

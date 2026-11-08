@@ -1190,6 +1190,54 @@ async def test_income_statement_falls_back_to_db_on_timeout(client, test_db, mon
 
 
 @pytest.mark.asyncio
+async def test_income_statement_withholds_enriched_sga_without_admitted_units(
+    client, test_db, monkeypatch
+):
+    """#206: SG&A filled after admission must not reach the REST payload.
+
+    Production FPT/VNM/HPG FY2025 rows published `selling_general_admin` with
+    `currency=null`, `value_unit=null` and `legacy_unit_basis_unconfirmed`.
+    The value only exists after `_enrich_financial_statement_rows` adds it, so
+    the endpoint's own returned rows - not the admission helper - are the
+    contract under test. Delete the final `admit_statement_rows` in
+    `get_income_statement` and this test fails with the production number.
+    """
+    test_db.add(
+        IncomeStatement(
+            id=2,
+            symbol="FPT",
+            period="2025",
+            period_type="year",
+            fiscal_year=2025,
+            fiscal_quarter=None,
+            revenue=None,
+            net_income=None,
+            source="vnstock",
+            updated_at=datetime(2026, 5, 20, 15, 48, 45),
+            # No canonical lineage: the row admits nothing, so SG&A only
+            # appears from the post-admission enrichment pass.
+            raw_data={"selling_expenses": -14899986038258.0},
+        )
+    )
+    await test_db.commit()
+
+    async def no_provider_rows(*, symbol: str, statement_type: str, period: str, limit: int):
+        return []
+
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.get_financials_with_ttm", no_provider_rows
+    )
+
+    response = await client.get("/api/v1/equity/FPT/income-statement?period=FY&limit=5")
+    assert response.status_code == 200
+    payload = response.json()
+    row = payload["data"][0]
+
+    assert row["selling_general_admin"] is None
+    assert row["unit_metadata"]["selling_general_admin"]["unavailable_reason"]
+
+
+@pytest.mark.asyncio
 async def test_shareholders_falls_back_to_db_on_timeout_with_unverified_ownership(client, test_db, monkeypatch):
     test_db.add(
         Company(
