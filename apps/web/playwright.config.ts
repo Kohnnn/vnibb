@@ -7,7 +7,17 @@ export default defineConfig({
     testDir: './e2e',
     /* fonts.spec.ts needs the dev-only /zz-font-fixture route; production smoke
        builds 404 it, and this spec is run separately with playwright.fonts.config.ts. */
-    testIgnore: ['**/fonts.spec.ts'],
+    testIgnore: [
+        '**/fonts.spec.ts',
+        /* Brand specs belong to playwright.brand.config.ts (25 tests x 3
+           engines). Ignored here so the engine matrix above runs only the
+           smoke specs, and the brand matrix runs them from its own config. */
+        '**/brand.spec.ts',
+        '**/brand-states.spec.ts',
+        /* zz-vis3 keeps a local screenshot under /tmp for eyeballing widget
+           surfaces; it must not run in CI where that path is useless. */
+        '**/zz-vis3.spec.ts',
+    ],
     /* Run tests in files in parallel */
     fullyParallel: true,
     /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -30,12 +40,27 @@ export default defineConfig({
         screenshot: 'only-on-failure',
     },
 
-    /* Configure projects for major browsers */
+    /* Engine matrix (#202): the smoke specs run on all three engines so
+       app-surface regressions cannot pass on one engine. `chromium` stays
+       first and keeps `pnpm test:e2e:smoke` (--project=chromium) intact.
+       All smoke specs ran unmodified on firefox and webkit, so there is no
+       chromium-only spec to exclude here. */
     projects: [
         {
             name: 'chromium',
             use: { ...devices['Desktop Chrome'] },
         },
+        {
+            name: 'firefox',
+            use: { ...devices['Desktop Firefox'] },
+        },
+        {
+            name: 'webkit',
+            use: { ...devices['Desktop Safari'] },
+        },
+        /* No chromium-brand project: Playwright resolves projects[].testMatch
+           against the top-level testIgnore, so it lists zero tests. Chromium
+           brand runs use playwright.brand.config.ts in CI. */
     ],
 
     webServer: [

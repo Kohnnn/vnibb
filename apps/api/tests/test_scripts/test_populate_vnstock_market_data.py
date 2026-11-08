@@ -364,14 +364,58 @@ def test_status_call_that_raises_fails_closed(sdk):
         fetch("quote.history")
 
 
-def test_unregistered_device_status_error_fails_closed(sdk):
-    """AuthError does not establish guest entitlement."""
+def _sdk_auth_error(message: str) -> Exception:
+    """Build the SDK's own AuthError shape without importing the private module."""
+    vnstock_error = type("VnstockError", (Exception,), {"__module__": "_core"})
+    auth_error = type("AuthError", (vnstock_error,), {"__module__": "_core"})
+    return auth_error(message)
+
+
+def test_sdk_auth_failure_is_reported_as_a_rejected_credential(sdk):
+    """A rejected credential is not an unreadable state, and no remedy is implied."""
     from vnibb.providers.vnstock import runtime
 
-    auth_error = type("AuthError", (Exception,), {})
-    sdk.status = lambda: (_ for _ in ()).throw(auth_error("device not registered"))
-    with pytest.raises(RuntimeError, match="could not read"):
+    failure = _sdk_auth_error("Thiết bị đã bị vô hiệu hoá")
+    sdk.status = lambda: (_ for _ in ()).throw(failure)
+    with pytest.raises(RuntimeError) as raised:
         runtime.validate_free_runtime()
+    assert raised.value.__cause__ is failure
+    assert "rejected by the SDK" in str(raised.value)
+    assert "could not read" not in str(raised.value)
+    # AuthError also covers login/entitlement/server rejections, so the message
+    # must not guess a cause or prescribe an operator remedy (#172 authority).
+    assert "deactivated" not in str(raised.value)
+    assert "register" not in str(raised.value).lower()
+
+
+def test_authenticated_paid_credential_refusal_is_unchanged(sdk):
+    """Classifying auth failures must not touch a readable paid credential."""
+    from vnibb.providers.vnstock import runtime
+
+    sdk.status = lambda: {"authenticated": True, "tier": "golden"}
+    with pytest.raises(RuntimeError) as raised:
+        runtime.validate_free_runtime()
+    assert "free or guest account" in str(raised.value)
+    assert "deactivated" not in str(raised.value)
+    assert raised.value.__cause__ is None
+
+
+@pytest.mark.parametrize("failure", [
+    ValueError("boom"),
+    # SDK error family but not the auth subclass: same generic refusal.
+    type("VnstockError", (Exception,), {"__module__": "_core"})("boom"),
+    # Named AuthError outside the SDK lineage: not the known shape.
+    type("AuthError", (Exception,), {"__module__": "unrelated_sdk"})("boom"),
+])
+def test_unreadable_credential_state_keeps_the_generic_refusal(sdk, failure):
+    from vnibb.providers.vnstock import runtime
+
+    sdk.status = lambda: (_ for _ in ()).throw(failure)
+    with pytest.raises(RuntimeError) as raised:
+        runtime.validate_free_runtime()
+    assert raised.value.__cause__ is failure
+    assert "could not read" in str(raised.value)
+    assert "deactivated" not in str(raised.value)
 
 
 def test_guest_status_is_admitted_without_provider_fetch(sdk):

@@ -324,6 +324,64 @@ def test_compatible_merge_still_fills_genuinely_missing_metric():
     assert merged[0].total_assets == 55_677_822_007_000.0
     assert merged[0].inventory == 42.0
 
+def test_sga_enrichment_does_not_bypass_rejected_statement_basis():
+    # #206: FY2025 rows arrived with currency/value_unit unset but still carried
+    # raw selling/admin expense rows, so enrichment regrew numeric SG&A while the
+    # rest of the row stayed withheld.
+    row = FinancialStatementData(
+        symbol="FPT", period="2025", statement_type=StatementType.INCOME.value,
+        source="vnstock", currency=None, value_unit=None,
+        selling_general_admin=None,
+        raw_data={
+            "selling_expenses": -14_899_986_038_258.0,
+            "general_and_administrative_expenses": None,
+        },
+        unit_metadata={
+            "revenue": {"unavailable_reason": "unverified_statement_currency_or_unit"},
+            "net_income": {"unavailable_reason": "unverified_statement_currency_or_unit"},
+        },
+    )
+
+    enriched = _enrich_financial_statement_rows([row])
+
+    assert enriched[0].selling_general_admin is None
+    assert enriched[0].revenue is None
+
+
+def test_sga_enrichment_still_fills_certified_rows():
+    row = FinancialStatementData(
+        symbol="FPT", period="2025", statement_type=StatementType.INCOME.value,
+        source="vnstock", currency="VND", value_unit="VND",
+        selling_general_admin=None,
+        unit_metadata={
+            "selling_general_admin": {"source_unit": "VND", "value_unit": "VND"},
+        },
+        raw_data={"selling_expenses": -14_899_986_038_258.0},
+    )
+
+    enriched = _enrich_financial_statement_rows([row])
+
+    assert enriched[0].selling_general_admin == -14_899_986_038_258.0
+
+
+@pytest.mark.parametrize("value", [
+    "Công ty cổ phần", "CÔNG TY CỔ PHẦN", "Cong ty Co Phan", "Công ty TNHH ABC",
+    "Joint Stock Company", "JSC", "CTCP",
+])
+def test_profile_taxonomy_rejects_legal_company_forms(value):
+    # #207: FPT, VNM and HPG profiles returned "Công ty cổ phần" as both industry
+    # and sector, which is a legal form rather than an economic classification.
+    from vnibb.api.v1.equity import _pick_taxonomy_text
+
+    assert _pick_taxonomy_text(value, "Phần mềm") == "Phần mềm"
+
+
+def test_profile_taxonomy_keeps_real_classification_and_unavailable_state():
+    from vnibb.api.v1.equity import _pick_taxonomy_text
+
+    assert _pick_taxonomy_text("Thép và sản phẩm thép") == "Thép và sản phẩm thép"
+    assert _pick_taxonomy_text("Công ty cổ phần") is None
+    assert _pick_taxonomy_text(None, "") is None
 
 def test_normalize_statement_period_handles_mixed_formats():
     assert normalize_statement_period("2025-Q2") == "Q2-2025"

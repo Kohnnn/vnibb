@@ -1236,6 +1236,82 @@ async def test_income_statement_withholds_enriched_sga_without_admitted_units(
     assert row["selling_general_admin"] is None
     assert row["unit_metadata"]["selling_general_admin"]["unavailable_reason"]
 
+@pytest.mark.asyncio
+async def test_income_statement_does_not_republish_basis_rejected_operating_expenses(
+    client, test_db, monkeypatch
+):
+    """#206: a rejected currency/unit basis must also hold for enriched metrics."""
+    # Legacy row: no lineage, so the whole row's basis is unconfirmed. SG&A is
+    # absent from the table, so it can only arrive through raw enrichment under a
+    # basis this row never certified.
+    test_db.add(
+        IncomeStatement(
+            id=300, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+            revenue=1000.0, net_income=150.0, source="vnstock",
+            raw_data={"chi_phi_ban_hang": -90.0, "chi_phi_quan_ly_dn": -60.0},
+        )
+    )
+    await test_db.commit()
+
+    async def no_provider_rows(**kwargs):
+        return []
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", no_provider_rows)
+    monkeypatch.setattr("vnibb.api.v1.equity._cross_fill_income_statement_rows",
+                        AsyncMock(side_effect=lambda **kwargs: kwargs["rows"]))
+    response = await client.get("/api/v1/equity/FPT/income-statement?period=FY&limit=1")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["currency"] is None and row["value_unit"] is None
+    assert row["selling_general_admin"] is None
+    assert row["research_development"] is None and row["ebitda"] is None
+    # Main moved the row-level `basis` marker to a per-metric reason that keeps
+    # each key; the basis refusal is the same, it is just stated per metric.
+    assert row["unit_metadata"]["selling_general_admin"]["unavailable_reason"] == (
+        "unverified_statement_currency_or_unit"
+    )
+
+
+@pytest.mark.asyncio
+async def test_income_statement_withholds_initially_null_sga_filled_from_raw_lineage(
+    client, monkeypatch
+):
+    """#206: a metric absent at admission must not regrow from a raw lookup.
+
+    The row's currency and unit are certified, but SG&A itself carries no unit
+    evidence, so the value enrichment spells out from `selling_expenses` stays
+    withheld instead of publishing an uncertified number.
+    """
+    async def statements(**_kwargs):
+        return [FinancialStatementData(
+            symbol="FPT", period="2025", fiscal_year=2025,
+            statement_type="income",
+            source="vnstock", currency="VND", value_unit="VND",
+            consolidation_basis="consolidated", flow_basis="annual",
+            revenue=1_000.0, selling_general_admin=None,
+            raw_data={"selling_expenses": -90.0},
+            unit_metadata={"revenue": {"unit": "VND", "source_unit": "VND"}},
+        )]
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", statements)
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._load_financial_statement_fallback",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity._cross_fill_income_statement_rows",
+        AsyncMock(side_effect=lambda **kwargs: kwargs["rows"]),
+    )
+
+    response = await client.get("/api/v1/equity/FPT/income-statement?period=FY&limit=1")
+
+    row = response.json()["data"][0]
+    assert row["revenue"] == 1_000.0
+    assert row["selling_general_admin"] is None
+    assert row["unit_metadata"]["selling_general_admin"]["unavailable_reason"] == "unverified_monetary_unit"
+
+
 
 @pytest.mark.asyncio
 async def test_shareholders_falls_back_to_db_on_timeout_with_unverified_ownership(client, test_db, monkeypatch):

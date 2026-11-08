@@ -471,34 +471,27 @@ def test_merge_publishes_a_base_only_when_it_reconciles():
     assert row["change_pct"] == pytest.approx(10.0 / 1240.0 * 100, rel=1e-9)
 
 
-def test_admission_withholds_sga_after_enrichment_fills_it():
-    """#206: income-statement output must be the admitted rows.
+def test_enrichment_withholds_sga_it_would_derive_from_a_refused_basis():
+    """#206: enrichment must not publish a value the lineage refused.
 
     FPT FY2025 returned `selling_general_admin=-14899986038258.0` with
     `currency=null` and `value_unit=null`, while revenue and net income were
     correctly withheld. SG&A was filled by `_enrich_financial_statement_rows`
-    after admission, and the endpoint copied back only EPS.
+    from raw expense rows after admission, and the endpoint copied back only EPS.
     """
     from vnibb.api.v1 import equity
     from vnibb.providers.vnstock.financials import FinancialStatementData
 
-    enriched = FinancialStatementData(
+    row = FinancialStatementData(
         symbol="FPT",
         period="2025",
         statement_type="income_statement",
         raw_data={"selling_expenses": -100.0},
         unit_metadata={"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}},
     )
-    enriched = equity._enrich_financial_statement_rows([enriched])[0]
-    assert enriched.selling_general_admin == -100.0
+    enriched = equity._enrich_financial_statement_rows([row])[0]
 
-    row = equity.admit_statement_rows([enriched], "year")[0]
-
-    assert row.selling_general_admin is None
-    assert row.unit_metadata["selling_general_admin"]["unavailable_reason"] == (
-        "unverified_statement_currency_or_unit"
-    )
-
+    assert enriched.selling_general_admin is None
 
 def test_admission_keeps_metrics_with_real_unit_evidence():
     """A metric with admitted unit evidence survives the same gate."""
@@ -772,13 +765,13 @@ def test_merge_enriches_only_a_known_matching_session_date():
     assert row["high"] == pytest.approx(1255.0)
 
 
-def test_balance_sheet_readmission_keeps_a_refilled_metric_withheld():
+def test_admission_withholds_a_metric_filled_after_admission():
     """#206: a value that arrives after admission is not an admitted value.
 
     A retained legacy row has no unit lineage, so admission withholds its
-    numbers. `_enrich_financial_statement_rows` then refills `cash_and_equivalents`
-    from `raw_data`, which has no unit evidence of its own. The dedicated
-    balance-sheet endpoint returned that refilled number without a second gate.
+    numbers. Anything filling a metric afterwards (enrichment, cross-fill) must
+    clear the same gate; the dedicated balance-sheet endpoint returned a
+    post-admission number without a second check.
     """
     from vnibb.api.v1 import equity
     from vnibb.providers.vnstock.financials import FinancialStatementData
@@ -793,10 +786,11 @@ def test_balance_sheet_readmission_keeps_a_refilled_metric_withheld():
     admitted = equity.admit_statement_rows([legacy], "year")[0]
     assert admitted.cash_and_equivalents is None
 
-    refilled = equity._enrich_financial_statement_rows([admitted])[0]
-    assert refilled.cash_and_equivalents == pytest.approx(12_345.0)
+    # Inject the value directly so the gate is exercised regardless of origin.
+    injected = admitted.model_copy(deep=True)
+    injected.cash_and_equivalents = 12_345.0
 
-    final = equity.admit_statement_rows([refilled], "year")[0]
+    final = equity.admit_statement_rows([injected], "year")[0]
     assert final.cash_and_equivalents is None
     assert "cash_and_equivalents" in final.unit_metadata
 

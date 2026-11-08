@@ -28,6 +28,18 @@ def validate_free_runtime() -> None:
 
 
 
+def _is_sdk_auth_failure(exc: Exception) -> bool:
+    """Match the SDK's AuthError by type name/lineage, not a private import.
+
+    `vnstock._core` is a compiled extension module, so `__module__` is only
+    `_core`; the base class name is what identifies the SDK's error family.
+    """
+    mro = type(exc).__mro__
+    return any(cls.__name__ == "AuthError" for cls in mro) and any(
+        cls.__name__ == "VnstockError" for cls in mro
+    )
+
+
 def _refuse_persisted_paid_account() -> None:
     """Refuse acquisition when the installed SDK already holds a paid credential.
 
@@ -56,6 +68,11 @@ def _refuse_persisted_paid_account() -> None:
     try:
         state = status()
     except Exception as exc:
+        if _is_sdk_auth_failure(exc):
+            raise RuntimeError(
+                "Installed vnstock credential was rejected by the SDK (AuthError); "
+                "refusing to acquire."
+            ) from exc
         raise RuntimeError(
             "Free runtime could not read the installed vnstock credential state; "
             "refusing to acquire."

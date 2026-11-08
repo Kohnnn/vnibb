@@ -59,6 +59,159 @@ else:
 PY
 }
 
+# Index rows must publish one coherent basis (#205/#206): change and
+# change_pct re-derived from previous_close, and previous_close_session_date
+# the first market session before the row's own session. A withheld base is
+# the documented fail-closed state and must carry previous_close_unavailable_reason
+# (previous_close_status is still accepted). INDEX_COHERENCE_ENFORCE=false only
+# downgrades a coherence FAIL; transport and parse failures always fail.
+INDEX_PATH="${INDEX_PATH:-/api/v1/market/indices}"
+INDEX_COHERENCE_ENFORCE="${INDEX_COHERENCE_ENFORCE:-true}"
+# Tolerance the API's own reconciliation uses (INDEX_CHANGE_TOLERANCE).
+INDEX_LEVEL_TOLERANCE="${INDEX_LEVEL_TOLERANCE:-0.011}"
+INDEX_PCT_TOLERANCE="${INDEX_PCT_TOLERANCE:-0.011}"
+
+check_index_coherence() {
+  local payload_file="$1"
+  local level_tolerance="$2"
+  local pct_tolerance="$3"
+
+  "$PYTHON_BIN" - "$payload_file" "$level_tolerance" "$pct_tolerance" <<'PY'
+import json
+import sys
+from datetime import date, timedelta
+
+# Exchange-published closures for the only year the API certifies its calendar
+# for; keep in step with apps/api/vnibb/core/market_calendar.py. A session year
+# outside this set skips only the adjacency assertion, never the arithmetic.
+HOLIDAYS = {
+    date.fromisoformat(value)
+    for value in (
+        "2026-01-01", "2026-01-02",
+        "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",
+        "2026-04-27", "2026-04-30", "2026-05-01",
+        "2026-08-31", "2026-09-01", "2026-09-02",
+    )
+}
+CERTIFIED_YEARS = {2026}
+WITHHELD_REASONS = {"contradicts_recorded_change", "previous_session_not_retained"}
+
+LEVEL_TOLERANCE = float(sys.argv[2])
+PCT_TOLERANCE = float(sys.argv[3])
+
+
+def session_of(value):
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        payload = json.load(handle)
+except (OSError, ValueError) as parse_error:
+    # Never downgraded by INDEX_COHERENCE_ENFORCE.
+    print(f"index coherence ERROR      -> unreadable index payload: {parse_error}")
+    sys.exit(2)
+
+rows = payload.get("data") or []
+failures = []
+skipped_sessions = 0
+verified = 0
+
+if not rows:
+    failures.append(f"no index rows in {payload.get('source')!r} payload")
+
+for row in rows:
+    name = row.get("index_name") or "?"
+    close = row.get("current_value")
+    base = row.get("previous_close")
+    change = row.get("change")
+    pct = row.get("change_pct")
+    reason = row.get("previous_close_unavailable_reason") or row.get("previous_close_status")
+
+    if reason is not None:
+        # Withheld base: stated reason, no base beside it, and no percentage
+        # anchored on a session nobody observed.
+        if reason not in WITHHELD_REASONS:
+            failures.append(f"{name}: unknown previous_close_unavailable_reason {reason!r}")
+        if base is not None:
+            failures.append(f"{name}: withheld base ({reason}) still publishes previous_close={base}")
+        if reason == "contradicts_recorded_change":
+            # The row's own change is still published and anchors the percentage
+            # on the implied base (close - change).
+            if change is None:
+                failures.append(f"{name}: reconciled change withheld with {reason}")
+            elif close is None:
+                failures.append(f"{name}: change published without current_value")
+            else:
+                implied_base = close - change
+                if implied_base == 0:
+                    failures.append(f"{name}: change {change} leaves no base to anchor a percentage")
+                elif pct is None:
+                    failures.append(f"{name}: change_pct withheld although the change anchors it")
+                elif abs(pct - change / implied_base * 100) > PCT_TOLERANCE:
+                    failures.append(
+                        f"{name}: change_pct {pct} does not follow change {change} from "
+                        f"implied base {implied_base:.6f} (tolerance {PCT_TOLERANCE})"
+                    )
+        elif pct is not None:
+            failures.append(f"{name}: withheld base ({reason}) still publishes change_pct={pct}")
+        continue
+
+    if base is None or change is None:
+        failures.append(
+            f"{name}: incomplete basis without a reason -> "
+            f"current_value={close} previous_close={base} change={change} change_pct={pct}"
+        )
+        continue
+
+    verified += 1
+    if close is None:
+        failures.append(f"{name}: change published without current_value")
+        continue
+    delta = close - base
+    if abs(delta - change) > LEVEL_TOLERANCE:
+        failures.append(
+            f"{name}: current_value {close} - previous_close {base} = {delta:.6f} "
+            f"but change is {change} (tolerance {LEVEL_TOLERANCE})"
+        )
+    if pct is None:
+        failures.append(f"{name}: change_pct missing while previous_close {base} is published")
+    elif base != 0 and abs(pct - change / base * 100) > PCT_TOLERANCE:
+        failures.append(
+            f"{name}: change_pct {pct} != {change}/{base}*100 = {change / base * 100:.6f} "
+            f"(tolerance {PCT_TOLERANCE})"
+        )
+
+    session = session_of(row.get("time"))
+    if session is None:
+        failures.append(f"{name}: unparseable session time {row.get('time')!r}")
+        continue
+    expected_session = session - timedelta(days=1)
+    while expected_session.weekday() >= 5 or expected_session in HOLIDAYS:
+        expected_session -= timedelta(days=1)
+    claimed_session = session_of(row.get("previous_close_session_date"))
+    if claimed_session is not None and claimed_session != expected_session:
+        failures.append(
+            f"{name}: previous_close_session_date {claimed_session} is not the session "
+            f"before {session} (expected {expected_session})"
+        )
+    if session.year not in CERTIFIED_YEARS or expected_session.year not in CERTIFIED_YEARS:
+        skipped_sessions += 1
+
+for line in failures:
+    print(f"index coherence FAIL       -> {line}")
+if failures:
+    sys.exit(1)
+print(
+    f"index coherence ok         -> {verified} rows reconcile"
+    + (f"; {skipped_sessions} rows skipped the uncertified session-year check" if skipped_sessions else "")
+)
+PY
+}
+
 echo "Runtime verification target: ${BASE_URL}"
 
 health_json="$($CURL_BIN -sS --max-time "$TIMEOUT" "${BASE_URL}/health/")"
@@ -147,6 +300,32 @@ if [[ -n "${MCP_HEALTH_URL:-}" ]]; then
   printf 'mcp health endpoint        -> %s\n' "$mcp_code"
   if [[ "$mcp_code" != "200" ]]; then
     echo "Expected MCP health endpoint ${MCP_HEALTH_URL} to return 200"
+    status=1
+  fi
+fi
+index_payload_file="$(mktemp "${TMPDIR:-/tmp}/vnibb-index-coherence.XXXXXX")"
+trap 'rm -f "$index_payload_file"' EXIT
+if ! "$CURL_BIN" -sSk --max-time "$TIMEOUT" -o "$index_payload_file" \
+  "${BASE_URL}${INDEX_PATH}" || [[ ! -s "$index_payload_file" ]]; then
+  echo "Expected index endpoint ${INDEX_PATH} to return a payload"
+  status=1
+else
+  printf 'index endpoint             -> %s\n' "$INDEX_PATH"
+  # A failing checker under `set -e` must still have its report printed.
+  if index_result="$(check_index_coherence "$index_payload_file" "$INDEX_LEVEL_TOLERANCE" "$INDEX_PCT_TOLERANCE")"; then
+    index_rc=0
+  else
+    index_rc=$?
+  fi
+  [[ -n "$index_result" ]] && printf '%s\n' "$index_result"
+  if [[ "$index_rc" -eq 1 ]]; then
+    if [[ "$INDEX_COHERENCE_ENFORCE" == "true" ]]; then
+      status=1
+    else
+      echo "index coherence failure not enforced (INDEX_COHERENCE_ENFORCE=${INDEX_COHERENCE_ENFORCE})"
+    fi
+  elif [[ "$index_rc" -ne 0 ]]; then
+    # Transport or parse failure: never downgraded by the opt-out.
     status=1
   fi
 fi

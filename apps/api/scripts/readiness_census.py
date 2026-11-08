@@ -241,6 +241,38 @@ def _datastore_sockets(urls):
         socket.socket.connect = original
 
 
+def _receipt_query(cursor):
+    """Read the completion receipts through the columns the deployed schema has.
+
+    The serving database is migration-managed, so the receipt table and columns
+    are resolved from the catalog instead of assuming the ORM shape. A missing
+    table or column fails the capture with a precise reason rather than aborting
+    later on a missing column reference.
+    """
+    from psycopg2 import sql
+
+    cursor.execute("SELECT to_regclass('sync_status') AS status_table, to_regclass('screener_snapshots') AS snapshot_table")
+    resolved = cursor.fetchone()
+    if resolved["status_table"] is None or resolved["snapshot_table"] is None:
+        raise RuntimeError("Serving sync_status/screener_snapshots tables are absent")
+    cursor.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name='sync_status' AND table_schema=ANY(current_schemas(false))",
+    )
+    columns = {row["column_name"] for row in cursor.fetchall()}
+    known = ("id", "status", "error_count", "success_count", "completed_at", "additional_data")
+    missing = [name for name in known if name not in columns]
+    if missing:
+        raise RuntimeError(f"Serving sync_status lacks completion receipt columns: {missing}")
+    return sql.SQL(
+        "SELECT {columns} FROM {table} WHERE sync_type='screener_universe' "
+        "ORDER BY completed_at DESC NULLS LAST, id DESC LIMIT 1001"
+    ).format(
+        columns=sql.SQL(", ").join(sql.Identifier(name) for name in known),
+        table=sql.Identifier(*resolved["status_table"].split(".", 1)),
+    )
+
+
 def _postgres(settings, now):
     import psycopg2
     from psycopg2.extras import RealDictCursor
@@ -267,7 +299,7 @@ def _postgres(settings, now):
                 raise RuntimeError("Refusing sequential scan of serving price/snapshot stores")
             cursor.execute(query, (now.date(),))
             rows = [dict(row) for row in cursor.fetchall()]
-            cursor.execute("SELECT id,status,error_count,success_count,completed_at,additional_data FROM sync_status WHERE sync_type='screener_universe' ORDER BY completed_at DESC NULLS LAST,id DESC LIMIT 1001")
+            cursor.execute(_receipt_query(cursor))
             receipts = [dict(row) for row in cursor.fetchall()]
             if len(receipts) > 1000:
                 raise RuntimeError("Completion receipt bound exceeded; census is incomplete")
@@ -308,9 +340,30 @@ def _retained(settings, symbols, expected, max_time_ms):
     import redis
     from pymongo import MongoClient
 
-    mongo = MongoClient(settings.mongodb_url, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=5000)
     raw, cache = {}, {}
     client = redis.Redis.from_url(settings.redis_url, socket_connect_timeout=3, socket_timeout=3) if settings.redis_url else None
+    # Redis is observed even when the raw store is absent: an empty cache mapping
+    # would report a present key as absent.
+    if client:
+        for symbol in symbols:
+            cached = {}
+            for label in ("screener", "price"):
+                key = f"vnibb:{label}:latest:{symbol}"
+                # GETRANGE bounds the response without a cache-populating consumer call.
+                value = client.getrange(key, 0, 1048576)
+                if len(value) > 1048576:
+                    raise RuntimeError("Redis value exceeded 1 MiB census bound")
+                try:
+                    cached[label] = json.loads(value) if value else None
+                except (ValueError, UnicodeDecodeError):
+                    cached[label] = "invalid_json"
+                cached[label + "_ttl"] = client.ttl(key)
+            cache[symbol] = cached
+    if not settings.mongodb_url:
+        if client:
+            client.close()
+        return raw, cache, []
+    mongo = MongoClient(settings.mongodb_url, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000, socketTimeoutMS=5000)
     try:
         database = mongo[settings.mongodb_database]
         collection = database.market_vnstock_premium_records
@@ -334,20 +387,6 @@ def _retained(settings, symbols, expected, max_time_ms):
                 and isinstance(board.get("raw"), dict) and board["raw"] in value["raw"]
             ]
             raw[symbol] = {"board_count": count, "board": boards[0] if boards else None, "envelope_keys": envelope_keys, "latest_board": latest[0] if latest else None, "eod": eod[0] if eod else None}
-            cached = {}
-            if client:
-                for label in ("screener", "price"):
-                    key = f"vnibb:{label}:latest:{symbol}"
-                    # GETRANGE bounds the response without a cache-populating consumer call.
-                    value = client.getrange(key, 0, 1048576)
-                    if len(value) > 1048576:
-                        raise RuntimeError("Redis value exceeded 1 MiB census bound")
-                    try:
-                        cached[label] = json.loads(value) if value else None
-                    except (ValueError, UnicodeDecodeError):
-                        cached[label] = "invalid_json"
-                    cached[label + "_ttl"] = client.ttl(key)
-            cache[symbol] = cached
         return raw, cache, envelopes
     finally:
         mongo.close()
@@ -366,7 +405,7 @@ def readiness_census(expected_revision, max_time_ms=3000):
     if not expected_revision or revision != expected_revision:
         raise ValueError("Serving revision does not match independently pinned --expected-revision")
     expected = expected_market_session(now=now)
-    urls = [settings.database_url, settings.mongodb_url] + ([settings.redis_url] if settings.redis_url else [])
+    urls = [settings.database_url] + ([settings.mongodb_url] if settings.mongodb_url else []) + ([settings.redis_url] if settings.redis_url else [])
     with _datastore_sockets(urls):
         rows, receipts, counts, plan = _postgres(settings, now)
         raw, cache, envelopes = _retained(settings, [row["symbol"] for row in rows], expected, max_time_ms)
@@ -379,6 +418,7 @@ def readiness_census(expected_revision, max_time_ms=3000):
     report["received_envelopes"] = envelopes
     report["envelope_diagnostics"] = [_envelope_summary(value) for value in envelopes]
     report["durable"]["current_received_envelopes"] = len(envelopes)
+    policy = {"read_only": True, "provider_calls": 0, "consumer_http_calls": 0, "sql_statement_timeout_ms": 5000, "sql_lock_timeout_ms": 1000, "mongo_max_time_ms": max_time_ms, "redis_commands": ["GETRANGE", "TTL"], "cross_store_atomic": False, "mongo_configured": bool(settings.mongodb_url), "redis_configured": bool(settings.redis_url)}
     if revision_file.exists() and revision_file.read_text().strip() != revision:
         raise RuntimeError("Serving revision changed during census")
-    return {"contract": "database-readiness-census-v1", "at": now.isoformat(), "completed_at": datetime.now(UTC).isoformat(), "revision": revision, "revision_setting": settings.release_revision, "expected_completed_session": str(expected), "calendar": market_calendar_metadata(expected), "policy": {"read_only": True, "provider_calls": 0, "consumer_http_calls": 0, "sql_statement_timeout_ms": 5000, "sql_lock_timeout_ms": 1000, "mongo_max_time_ms": max_time_ms, "redis_commands": ["GETRANGE", "TTL"], "cross_store_atomic": False}, "sql_total_rows": counts, "sql_plan": plan, **report}
+    return {"contract": "database-readiness-census-v1", "at": now.isoformat(), "completed_at": datetime.now(UTC).isoformat(), "revision": revision, "revision_setting": settings.release_revision, "expected_completed_session": str(expected), "calendar": market_calendar_metadata(expected), "policy": policy, "sql_total_rows": counts, "sql_plan": plan, **report}

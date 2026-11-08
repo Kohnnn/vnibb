@@ -43,3 +43,53 @@ def test_census_ignores_float_roundoff_but_reports_real_cache_difference():
 
     assert "redis_screener_price_mismatch" not in report["rows"][0]["reasons"]
     assert "redis_screener_volume_mismatch" in report["rows"][0]["reasons"]
+
+
+def test_census_reports_a_completed_member_qualified_receipt():
+    now = datetime(2026, 10, 26, 10, tzinfo=UTC)
+    rows = [{"symbol": symbol, "exchange": "HOSE", "price_row": None, "snapshot_row": None} for symbol in ("AAA", "BBB")]
+    receipts = [{"id": 1, "status": "completed", "error_count": 0, "success_count": 2, "completed_at": datetime(2026, 10, 26, 9),
+                 "additional_data": {"snapshot_date": "2026-10-26", "expected_symbols": ["AAA", "BBB"], "expected_count": 2}}]
+    report = reconcile_census(rows, {}, {}, receipts, {"count": 0, "hit": False}, date(2026, 10, 26), now)
+
+    assert report["receipts"][0]["rejections"] == []
+    assert "completion_receipt_missing" not in report["reason_counts"]
+    assert "completion_receipt_not_current_member_qualified" not in report["reason_counts"]
+
+
+def test_receipt_reads_the_deployed_columns_and_rejects_a_missing_receipt_column():
+    from scripts.readiness_census import _receipt_query
+
+    class Cursor:
+        def __init__(self, columns):
+            self.columns, self.rows = columns, []
+
+        def execute(self, query):
+            self.rows = [{"status_table": "public.sync_status", "snapshot_table": "screener_snapshots"}] if "to_regclass" in query else [{"column_name": name} for name in self.columns]
+
+        def fetchone(self):
+            return self.rows[0]
+
+        def fetchall(self):
+            return self.rows
+
+    columns = ["id", "status", "error_count", "success_count", "completed_at", "additional_data"]
+    query = _receipt_query(Cursor(columns))
+    identifiers = [part for part in query._wrapped if hasattr(part, "strings")]
+    assert identifiers[-1].strings == ("public", "sync_status")
+
+    try:
+        _receipt_query(Cursor(columns[:-1]))
+    except RuntimeError as exc:
+        assert "additional_data" in str(exc)
+    else:
+        raise AssertionError("A missing receipt column must fail capture instead of being skipped")
+
+
+def test_census_without_retention_stores_still_completes():
+    from types import SimpleNamespace
+
+    from scripts.readiness_census import _retained
+
+    settings = SimpleNamespace(mongodb_url=None, mongodb_database="vnibb-market", redis_url="")
+    assert _retained(settings, ["AAA"], date(2026, 10, 26), 3000) == ({}, {}, [])

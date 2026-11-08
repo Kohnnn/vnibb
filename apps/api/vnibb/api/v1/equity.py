@@ -505,6 +505,9 @@ async def _load_financial_statement_fallback(
             statement = fallback_rows[index]
         else:
             statement.source = getattr(row, "source", None)
+            # No accepted lineage: the row's basis is unconfirmed, so `currency`
+            # and `value_unit` stay unset here. This annotation is the row's
+            # contract; enrichment adds per-metric reasons beside it (#206).
             statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
         statement.updated_at = getattr(row, "updated_at", None)
     fallback_rows = admit_statement_rows(fallback_rows, "quarter" if period_upper == "TTM" else period)
@@ -1098,6 +1101,14 @@ def _enrich_financial_statement_rows(
         if item.unavailable_reason:
             continue
         raw_data = item.raw_data if isinstance(item.raw_data, dict) else {}
+        # A row whose currency/unit basis was never certified cannot publish
+        # anything this pass derives, so mark the refusal once and withhold the
+        # fill at the end (#206).
+        refused_basis = (
+            "unverified_statement_currency_or_unit"
+            if item.currency != "VND" or item.value_unit != "VND"
+            else None
+        )
         # A provider-rejected metric is not a missing value, so it must not feed
         # a lookup or an accounting identity. Resolve the set before any
         # derivation and reset those fields once, at the end.
@@ -1335,6 +1346,18 @@ def _enrich_financial_statement_rows(
                 # `cash_and_equivalents`/`total_equity` itself.
                 item.unit_metadata.setdefault(name, evidence)
 
+        if refused_basis:
+            # Nothing this pass filled can claim the row's uncertified basis.
+            for name in FinancialStatementData.model_fields:
+                if getattr(item, name, None) is None or pre_fill.get(name) is not None:
+                    continue
+                setattr(item, name, None)
+                for alias in _FINANCIAL_METRIC_ALIASES.get(name, ()):
+                    setattr(item, alias, None)
+                item.unit_metadata.setdefault(name, {}).setdefault(
+                    "unavailable_reason", refused_basis
+                )
+
         # A provider-rejected metric is not a missing value. Filling it from a raw
         # lookup or an accounting identity would publish a number the lineage refused.
         for metric, metadata in item.unit_metadata.items():
@@ -1346,6 +1369,20 @@ def _enrich_financial_statement_rows(
                 setattr(item, alias, None)
 
     return _sort_financial_statement_rows(rows)
+
+
+def _final_statement_admission(
+    rows: list[FinancialStatementData], period: str,
+) -> list[FinancialStatementData]:
+    """Re-admit rows after enrichment so no uncertified value escapes.
+
+    #206: merge, enrichment and cross-fill run after the provider's admission, so
+    a metric absent at admission could be re-derived later and returned without
+    unit evidence. Every monetary field must clear the same gate before returning.
+    """
+    if not rows:
+        return rows
+    return admit_statement_rows(rows, period)
 
 
 async def _cross_fill_income_statement_rows(
@@ -2423,9 +2460,10 @@ def _pick_optional_text(*values: Any) -> Optional[str]:
 
 
 # #207: a legal form answers "what kind of entity", never "what industry".
-# Matched on the whole normalized value so a real classification that merely
-# starts with these words is unaffected.
-LEGAL_FORM_LABELS = frozenset({
+# `LEGAL_FORM_PREFIXES` matches a whole normalized value ("JSC", "CTCP");
+# `LEGAL_FORM_CORES` matches a token prefix ("Công ty TNHH ABC"), so
+# "JSC financial services" and "Phân tích cổ phần" stay classifications.
+LEGAL_FORM_PREFIXES = (
     "cong_ty_co_phan",
     "co_phan",
     "cong_ty_cp",
@@ -2443,11 +2481,35 @@ LEGAL_FORM_LABELS = frozenset({
     "limited_liability_company",
     "corporation",
     "joint_stock_corporation",
-})
+)
+
+
+LEGAL_FORM_CORES = (
+    ("cong", "ty"),
+    ("cong", "ty", "co", "phan"),
+    ("cong", "ty", "cp"),
+    ("cong", "ty", "tnhh"),
+    ("cong", "ty", "trach", "nhiem", "huu", "han"),
+    ("cong", "ty", "hop", "danh"),
+    ("doanh", "nghiep", "tu", "nhan"),
+    ("joint", "stock", "company"),
+    ("joint", "stock", "corporation"),
+    ("limited", "liability", "company"),
+)
 
 
 def _is_legal_form_label(value: Any) -> bool:
-    return _normalize_financial_metric_key(value) in LEGAL_FORM_LABELS
+    """A legal form, not a classification that merely mentions one (#207).
+
+    Matches a whole normalized value or one that starts with a legal-form core
+    ("Công ty TNHH ABC", "CTCP FPT", "JSC company"). "JSC financial services"
+    and "Phân tích cổ phần" stay classifications.
+    """
+    key = _normalize_financial_metric_key(value)
+    if key in LEGAL_FORM_PREFIXES:
+        return True
+    tokens = tuple(key.split("_"))
+    return any(tokens[: len(core)] == core for core in LEGAL_FORM_CORES)
 
 
 def _pick_taxonomy_text(*values: Any) -> str | None:
@@ -7019,7 +7081,7 @@ async def get_metrics_history(
 @router.get(
     "/{symbol}/income-statement", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="income_statement_v6_fully_admitted")
+@cached(ttl=86400, key_prefix="income_statement_v7_final_admission")
 async def get_income_statement(
     symbol: str,
     period: Literal[
@@ -7072,7 +7134,7 @@ async def get_income_statement(
         # cross-fill add values after `admit_statement_rows` has run, so copying
         # back only EPS let SG&A survive with `currency=null` and
         # `value_unit=null` while revenue and net income were withheld (#206).
-        admitted_rows = admit_statement_rows(data, period)
+        admitted_rows = _final_statement_admission(data, period)
         return StandardResponse(
             data=admitted_rows,
             meta=MetaData(count=len(admitted_rows), last_data_date=last_data_date),
@@ -7102,7 +7164,7 @@ async def get_income_statement(
                 rows=fallback_data,
                 db=db,
             )
-            admitted_rows = admit_statement_rows(fallback_data, period)
+            admitted_rows = _final_statement_admission(fallback_data, period)
             if admitted_rows:
                 return StandardResponse(
                     data=admitted_rows,
@@ -7116,7 +7178,7 @@ async def get_income_statement(
 @router.get(
     "/{symbol}/balance-sheet", response_model=StandardResponse[List[FinancialStatementData]]
 )
-@cached(ttl=86400, key_prefix="balance_sheet_v5")
+@cached(ttl=86400, key_prefix="balance_sheet_v6_final_admission")
 async def get_balance_sheet(
     symbol: str,
     period: Literal[
@@ -7149,7 +7211,7 @@ async def get_balance_sheet(
         # is gated again. Without this, a metric admission withheld came back
         # with no unit evidence behind it.
         return StandardResponse(
-            data=admit_statement_rows(data, period),
+            data=_final_statement_admission(data, period),
             meta=MetaData(count=len(data), last_data_date=last_data_date),
         )
     except BaseException as e:
@@ -7166,7 +7228,7 @@ async def get_balance_sheet(
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
-                    data=admit_statement_rows(fallback_data, period),
+                    data=_final_statement_admission(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 )
         except Exception:
@@ -7175,7 +7237,7 @@ async def get_balance_sheet(
 
 
 @router.get("/{symbol}/cash-flow", response_model=StandardResponse[List[FinancialStatementData]])
-@cached(ttl=86400, key_prefix="cash_flow_v5")
+@cached(ttl=86400, key_prefix="cash_flow_v6_final_admission")
 async def get_cash_flow(
     symbol: str,
     period: Literal[
@@ -7206,7 +7268,7 @@ async def get_cash_flow(
         data = _enrich_financial_statement_rows(data)
         # #206: same final gate as the balance sheet, for the same reason.
         return StandardResponse(
-            data=admit_statement_rows(data, period),
+            data=_final_statement_admission(data, period),
             meta=MetaData(count=len(data), last_data_date=last_data_date),
         )
     except BaseException as e:
@@ -7223,7 +7285,7 @@ async def get_cash_flow(
             if fallback_data:
                 fallback_data = _enrich_financial_statement_rows(fallback_data)
                 return StandardResponse(
-                    data=admit_statement_rows(fallback_data, period),
+                    data=_final_statement_admission(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
                 )
         except Exception:

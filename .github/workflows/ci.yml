@@ -132,6 +132,83 @@ jobs:
       - name: Run Chromium release smoke
         run: pnpm --filter frontend test:e2e:smoke
 
+  # #202: the app smoke and brand specs must pass on all three engines, not only
+  # on chromium. chromium-release-smoke above stays the required check; this job
+  # is additive and runs the same spec files (no new specs) per engine.
+  engine-release-smoke:
+    needs: chromium-release-smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        # Brand specs reuse their own config, which already declares all three
+        # engines, so this matrix covers both spec sets per engine.
+        engine: [chromium, firefox, webkit]
+    runs-on: ubuntu-24.04
+    env:
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+      NEXT_PUBLIC_WS_URL: ws://127.0.0.1:8000/api/v1/ws/prices
+      NEXT_PUBLIC_ENABLE_REALTIME: "false"
+      ENVIRONMENT: test
+      DATABASE_URL: sqlite+aiosqlite:////tmp/vnibb-release-smoke.db
+      DATABASE_URL_SYNC: sqlite+aiosqlite:////tmp/vnibb-release-smoke.db
+      REDIS_URL: ""
+      REDIS_HOST: ""
+      REDIS_PORT: "0"
+      MONGODB_ENABLED: "false"
+      SKIP_SCHEDULER_STARTUP: "1"
+      SKIP_WEBSOCKET_STARTUP: "1"
+      SKIP_WARMUP: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install API dependencies for local smoke service
+        run: |
+          python -m pip install --upgrade pip
+          pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ matrix.engine }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ matrix.engine }}-
+      # Same install form as chromium-release-smoke; only the engine differs.
+      - name: Install ${{ matrix.engine }}
+        run: pnpm --filter frontend exec playwright install --with-deps ${{ matrix.engine }}
+      - name: Build frontend
+        run: pnpm --filter frontend build
+      - name: Run ${{ matrix.engine }} smoke specs
+        run: pnpm --filter frontend exec playwright test --project=${{ matrix.engine }}
+      # Brand config has no webServer of its own and defaults to :3101, so the
+      # production bundle is served there explicitly and PW_BASE_URL pins it.
+      - name: Start frontend on :3101 for brand specs
+        working-directory: apps/web
+        run: |
+          CI=1 nohup pnpm exec next start -p 3101 > /tmp/brand-3101.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:3101/login; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/brand-3101.log
+          exit 1
+      - name: Run ${{ matrix.engine }} brand specs
+        env:
+          PW_BASE_URL: http://127.0.0.1:3101
+        run: pnpm --filter frontend exec playwright test --config=playwright.brand.config.ts --project=${{ matrix.engine }}
+
   vnstock-wheel-resolution:
     strategy:
       fail-fast: false
