@@ -139,82 +139,79 @@ for row in rows:
     reason = row.get("previous_close_unavailable_reason") or row.get("previous_close_status")
     pct_reason = row.get("change_pct_status")
 
+    # The base and the percentage are withheld independently: a row can publish
+    # a percentage anchored on the base its own change implies while publishing
+    # no base at all, and it can withhold a contradictory percentage while the
+    # base reconciles. Check each field against its own status instead of
+    # assuming one withheld field suppresses the other.
     if reason == "observed":
         # An adjacent retained close was admitted as the base; check it below.
         reason = None
 
     if reason is not None:
-        # Withheld base: stated reason, no base beside it, and no percentage
-        # anchored on a session nobody observed.
         if reason not in WITHHELD_REASONS:
             failures.append(f"{name}: unknown previous_close_unavailable_reason {reason!r}")
         if base is not None:
             failures.append(f"{name}: withheld base ({reason}) still publishes previous_close={base}")
-        if reason == "inconsistent_with_retained_change":
-            # The row's own change survives and anchors the percentage on the
-            # base it implies (close - change), so no percentage may be dropped.
-            if change is None:
-                failures.append(f"{name}: reconciled change withheld with {reason}")
-            elif close is None:
-                failures.append(f"{name}: change published without current_value")
-            else:
-                implied_base = close - change
-                if implied_base == 0:
-                    failures.append(f"{name}: change {change} leaves no base to anchor a percentage")
-                elif pct is None:
-                    failures.append(f"{name}: change_pct withheld although the change anchors it")
-                elif abs(pct - change / implied_base * 100) > PCT_TOLERANCE:
-                    failures.append(
-                        f"{name}: change_pct {pct} does not follow change {change} from "
-                        f"implied base {implied_base:.6f} (tolerance {PCT_TOLERANCE})"
-                    )
-        elif pct is not None:
-            failures.append(f"{name}: withheld base ({reason}) still publishes change_pct={pct}")
-        continue
+    elif base is None:
+        failures.append(
+            f"{name}: no previous_close and no stated reason -> "
+            f"current_value={close} change={change} change_pct={pct}"
+        )
 
     if pct_reason is not None:
-        # A retained percentage contradicted its own change, so the API withholds
-        # only the percentage and keeps the reconciled level/base/change.
         if pct_reason not in CHANGE_PCT_REASONS:
             failures.append(f"{name}: unknown change_pct_status {pct_reason!r}")
         if pct is not None:
             failures.append(f"{name}: withheld change_pct ({pct_reason}) still publishes {pct}")
-        if close is None or base is None or change is None:
-            failures.append(f"{name}: change_pct withheld but level/base/change incomplete")
-            continue
-        verified += 1
-        if abs(close - base - change) > LEVEL_TOLERANCE:
+
+    if base is not None:
+        if not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+            for value in (close, base, change)
+        ):
             failures.append(
-                f"{name}: current_value {close} - previous_close {base} "
-                f"!= change {change} (tolerance {LEVEL_TOLERANCE})"
+                f"{name}: unreadable level/base/change -> "
+                f"current_value={close!r} previous_close={base!r} change={change!r}"
             )
-        continue
+        elif abs(close - base - change) > LEVEL_TOLERANCE:
+            # An admitted base must explain the published change on its own.
+            failures.append(
+                f"{name}: current_value {close} - previous_close {base} = {close - base:.6f} "
+                f"but change is {change} (tolerance {LEVEL_TOLERANCE})"
+            )
 
+    # A published percentage follows the base the row admits, otherwise the
+    # base its own retained change implies (close - change). The published level
+    # is never that base: the API derives the percentage from close - change.
+    numeric = all(
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        for value in (close, change)
+    )
+    anchor = base if isinstance(base, (int, float)) and not isinstance(base, bool) else None
+    if anchor in (None, 0) and numeric:
+        anchor = close - change
+    if pct is not None:
+        if not numeric or anchor in (None, 0):
+            failures.append(
+                f"{name}: change_pct {pct!r} published with no base and no change to anchor it"
+            )
+        elif not isinstance(pct, (int, float)) or isinstance(pct, bool):
+            failures.append(f"{name}: non-numeric change_pct {pct!r}")
+        elif abs(pct - change / anchor * 100) > PCT_TOLERANCE:
+            failures.append(
+                f"{name}: change_pct {pct} != {change}/{anchor}*100 = {change / anchor * 100:.6f} "
+                f"(tolerance {PCT_TOLERANCE})"
+            )
+    elif numeric and anchor not in (None, 0) and pct_reason is None:
+        # The anchor exists and the API always derives the percentage from it,
+        # so a missing percentage without a withholding status is a gap.
+        failures.append(
+            f"{name}: change_pct missing although base {anchor} anchors change {change}"
+        )
 
-    if base is None or change is None:
-        failures.append(
-            f"{name}: incomplete basis without a reason -> "
-            f"current_value={close} previous_close={base} change={change} change_pct={pct}"
-        )
-        continue
-
-    verified += 1
-    if close is None:
-        failures.append(f"{name}: change published without current_value")
-        continue
-    delta = close - base
-    if abs(delta - change) > LEVEL_TOLERANCE:
-        failures.append(
-            f"{name}: current_value {close} - previous_close {base} = {delta:.6f} "
-            f"but change is {change} (tolerance {LEVEL_TOLERANCE})"
-        )
-    if pct is None:
-        failures.append(f"{name}: change_pct missing while previous_close {base} is published")
-    elif base != 0 and abs(pct - change / base * 100) > PCT_TOLERANCE:
-        failures.append(
-            f"{name}: change_pct {pct} != {change}/{base}*100 = {change / base * 100:.6f} "
-            f"(tolerance {PCT_TOLERANCE})"
-        )
+    if numeric:
+        verified += 1
 
     session = session_of(row.get("time"))
     if session is None:

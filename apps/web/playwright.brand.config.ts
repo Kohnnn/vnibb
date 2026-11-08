@@ -4,6 +4,9 @@ import { defineConfig, devices } from '@playwright/test';
 // already-running dev server; the default documents the isolated :3101 server.
 export default defineConfig({
   testDir: './e2e',
+  // Moving the brand suites here must not lose the default config's guard: a
+  // stray `.only` would otherwise make three engine jobs quietly pass.
+  forbidOnly: !!process.env.CI,
   testMatch: ['**/brand.spec.ts', '**/brand-states.spec.ts'],
   fullyParallel: false,
   reporter: 'line',
