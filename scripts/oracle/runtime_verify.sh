@@ -94,7 +94,14 @@ HOLIDAYS = {
     )
 }
 CERTIFIED_YEARS = {2026}
-WITHHELD_REASONS = {"contradicts_recorded_change", "previous_session_not_retained"}
+# The statuses `_reconcile_index_change_pct` actually emits. "observed" is not a
+# withholding: it means an adjacent retained close was admitted as the base.
+WITHHELD_REASONS = {
+    "inconsistent_with_retained_change",
+    "previous_session_not_retained",
+    "previous_session_unconfirmed",
+}
+CHANGE_PCT_REASONS = {"inconsistent_with_retained_change"}
 
 LEVEL_TOLERANCE = float(sys.argv[2])
 PCT_TOLERANCE = float(sys.argv[3])
@@ -130,6 +137,11 @@ for row in rows:
     change = row.get("change")
     pct = row.get("change_pct")
     reason = row.get("previous_close_unavailable_reason") or row.get("previous_close_status")
+    pct_reason = row.get("change_pct_status")
+
+    if reason == "observed":
+        # An adjacent retained close was admitted as the base; check it below.
+        reason = None
 
     if reason is not None:
         # Withheld base: stated reason, no base beside it, and no percentage
@@ -138,9 +150,9 @@ for row in rows:
             failures.append(f"{name}: unknown previous_close_unavailable_reason {reason!r}")
         if base is not None:
             failures.append(f"{name}: withheld base ({reason}) still publishes previous_close={base}")
-        if reason == "contradicts_recorded_change":
-            # The row's own change is still published and anchors the percentage
-            # on the implied base (close - change).
+        if reason == "inconsistent_with_retained_change":
+            # The row's own change survives and anchors the percentage on the
+            # base it implies (close - change), so no percentage may be dropped.
             if change is None:
                 failures.append(f"{name}: reconciled change withheld with {reason}")
             elif close is None:
@@ -159,6 +171,25 @@ for row in rows:
         elif pct is not None:
             failures.append(f"{name}: withheld base ({reason}) still publishes change_pct={pct}")
         continue
+
+    if pct_reason is not None:
+        # A retained percentage contradicted its own change, so the API withholds
+        # only the percentage and keeps the reconciled level/base/change.
+        if pct_reason not in CHANGE_PCT_REASONS:
+            failures.append(f"{name}: unknown change_pct_status {pct_reason!r}")
+        if pct is not None:
+            failures.append(f"{name}: withheld change_pct ({pct_reason}) still publishes {pct}")
+        if close is None or base is None or change is None:
+            failures.append(f"{name}: change_pct withheld but level/base/change incomplete")
+            continue
+        verified += 1
+        if abs(close - base - change) > LEVEL_TOLERANCE:
+            failures.append(
+                f"{name}: current_value {close} - previous_close {base} "
+                f"!= change {change} (tolerance {LEVEL_TOLERANCE})"
+            )
+        continue
+
 
     if base is None or change is None:
         failures.append(
