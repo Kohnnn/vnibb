@@ -1357,6 +1357,46 @@ async def test_profile_never_publishes_legal_form_as_industry_or_sector(client, 
 
 
 @pytest.mark.asyncio
+async def test_profile_falls_through_a_legal_form_company_row_to_the_stock_taxonomy(
+    client, test_db, monkeypatch
+):
+    # #207 production shape: the `companies` write path stored the legal form
+    # for 11 symbols while `stocks` carried the real classification. The profile
+    # must skip that row, not publish "unavailable", or the sourced labels the
+    # ticket asks for are lost by omission.
+    async def no_refresh(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("vnibb.api.v1.equity._schedule_refresh", no_refresh)
+    test_db.add(
+        Stock(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Phần mềm",
+            sector="Công nghệ Thông tin",
+        )
+    )
+    test_db.add(
+        Company(
+            symbol="FPT",
+            company_name="Công ty Cổ phần FPT",
+            exchange="HOSE",
+            industry="Công ty cổ phần",
+            sector="Công ty cổ phần",
+            updated_at=datetime(2026, 11, 2, 7, 14, 56),
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/profile")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["industry"] == "Phần mềm"
+    assert data["sector"] == "Công nghệ Thông tin"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cached", [True, False])
 async def test_profile_keeps_sector_unavailable_rather_than_restating_industry(
     client, test_db, monkeypatch, cached
