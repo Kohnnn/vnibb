@@ -479,7 +479,9 @@ docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up 
 
 #### 2026-11-09 application release (db19265)
 
-Authorized by the repository owner. Scope was the `api` and `mcp` services only; `caddy`, `auth`, `db`, `mongo` and `redis` were not recreated, and their start times confirm it (`vnibb-caddy` has been up since 2026-10-25, the data stores since August–October). The document's example command names `caddy`; recreating it was deliberately skipped because the proxy config was unchanged and that host also serves unrelated sites.
+Two independent artifacts were released from the same revision. The backend image is built from `apps/api` alone (`scripts/oracle/build_release_image.sh:47`) and no Compose service serves the web app, so the API digest says nothing about the frontend: `web.vnibb.xyz` is a Vercel production deployment and is recorded in its own row below.
+
+Authorized by the repository owner. Backend scope was the `api` and `mcp` services only; `caddy`, `auth`, `db`, `mongo` and `redis` were not recreated, and their start times confirm it (`vnibb-caddy` has been up since 2026-10-25, the data stores since August–October). The document's example command names `caddy`; recreating it was deliberately skipped because the proxy config was unchanged and that host also serves unrelated sites.
 
 | Item | Value |
 |---|---|
@@ -490,8 +492,10 @@ Authorized by the repository owner. Scope was the `api` and `mcp` services only;
 | Paired backup | `20261109T033001Z` — postgres `9219f347…`, mongo `0501c831…`, 90 Postgres tables, Mongo included |
 | Off-box restore | hashes matched the manifest after transfer; `RECOVERY OK`, 42 public tables / 1755 stocks / 1419653 stock_prices, 17 Mongo collections / 8,116,702 documents, RTO 157.7 s |
 | Rollback pointer | `deployment/env.oracle.bak-db19265-20261109T044624Z` (previous digest `sha256:5c91b1a08f13…`, revision `3d17cfdf`) |
+| Frontend | Not in the image or the Compose project. `web.vnibb.xyz` served Vercel production deployment `vnibb-6vx70tc8g-vphk2001-gmailcoms-projects.vercel.app` (state `READY`, created 2026-11-09T04:23Z); its GitHub deployment `7646996894` reports `state=success` for revision `db1926523c15…` at 04:26Z. Verified by inspecting the live alias, not inferred from the API digest |
+| Frontend rollback | Vercel project `vnibb-web`: promote the prior production deployment for revision `3d17cfdf…`. Recorded here as the project-level path only — no prior frontend deployment ID was captured for this release |
 
-Post-release state: `/health/` reports the new revision, `api` and `mcp` are `healthy` with `RestartCount=0`, and the effective Compose label on `vnibb-api` names `/srv/vnibb/docker-compose.oracle.yml` and `/srv/vnibb/deployment/env.oracle` with image `sha256:6c82cfd7…`. `API_SKIP_SCHEDULER_STARTUP=true` and `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` were left in place, so no producer was enabled.
+Post-release state (backend): `/health/` reports the new revision, `api` and `mcp` are `healthy` with `RestartCount=0`, and the effective Compose label on `vnibb-api` names `/srv/vnibb/docker-compose.oracle.yml` and `/srv/vnibb/deployment/env.oracle` with image `sha256:6c82cfd7…`. `API_SKIP_SCHEDULER_STARTUP=true` and `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` were left in place, so no producer was enabled.
 
 Deliberately not done, and therefore not claimed: no independent migration/rollback rehearsal, no isolated API+authenticated-MCP canary before cutover, and no 15-minute post-release monitoring window. The off-box drill above proves the stores can be reconstructed; it is not that canary. Detailed health remains `degraded` with `screener_verified_universe=false`, which this release did not change and does not claim to have fixed.
 
