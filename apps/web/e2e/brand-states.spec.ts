@@ -712,15 +712,25 @@ test('protected workspace chart header follows the control actually rendering (#
   await expect(chartTimeframe).toBeVisible({ timeout: 45_000 });
   await expect(chartMode).toBeVisible();
 
-  // The two combinations the ticket reported, in its order: 1M/Line, then 3M/Area.
-  for (const [timeframe, mode] of [['1M', 'Line'], ['3M', 'Area']] as const) {
+  // The chart's own caption comes from the same state the renderer uses, so it
+  // pins what is on screen, not just what a control claims.
+  const caption = widget.getByText(/lightweight chart$/);
+  await expect(caption).toHaveText('1Y lightweight chart');
+
+  // The ticket reports changing "inner timeframe OR chart mode" going wrong, so
+  // each click is checked on its own: a timeframe-only mismatch must not survive
+  // just because a following mode click happens to repair the header.
+  const combinations = [['1M', 'Line'], ['3M', 'Area']] as const;
+  for (const [timeframe, mode] of combinations) {
     await chartTimeframe.getByRole('button', { name: timeframe, exact: true }).click();
     await expect(chartTimeframe.getByRole('button', { name: timeframe, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(period).toContainText(timeframe, { timeout: 15_000 });
+    await expect(caption).toHaveText(`${timeframe} lightweight chart`);
+
     await chartMode.getByRole('button', { name: mode, exact: true }).click();
     await expect(chartMode.getByRole('button', { name: mode, exact: true })).toHaveAttribute('aria-pressed', 'true');
-
     // Before #209 the header kept the saved 1Y/Candles while the chart moved on.
-    await expect(period).toContainText(timeframe, { timeout: 15_000 });
     await expect(type).toContainText(mode, { timeout: 15_000 });
+    await expect(caption).toHaveText(`${timeframe} lightweight chart`);
   }
 });
