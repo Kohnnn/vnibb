@@ -699,19 +699,28 @@ test('protected workspace chart header follows the control actually rendering (#
   await expect(widget).toBeVisible({ timeout: 30_000 });
 
   // Locked: the header is a readout, not an editor. Clicking it cannot change
-  // the value, so it must keep publishing the saved period after the chart's
-  // inner control moves on.
-  // Locked, so the header renders as text: no dropdown and nothing to click.
-  const readout = widget.locator('span', { hasText: /^Period:/ }).first().locator('..');
-  await expect(readout).toContainText('1Y');
+  // the value, so it must keep publishing what the chart actually renders.
+  const period = widget.locator('span', { hasText: /^Period:/ }).first().locator('..');
+  const type = widget.locator('span', { hasText: /^Type:/ }).first().locator('..');
+  await expect(period).toContainText('1Y');
+  await expect(type).toContainText('Candles');
   await expect(widget.getByRole('button', { name: /^Period:/ })).toHaveCount(0);
+  await expect(widget.getByRole('button', { name: /^Type:/ })).toHaveCount(0);
 
   const chartTimeframe = widget.getByRole('group', { name: 'Chart timeframe' });
+  const chartMode = widget.getByRole('group', { name: 'Chart mode' });
   await expect(chartTimeframe).toBeVisible({ timeout: 45_000 });
-  await chartTimeframe.getByRole('button', { name: '1M', exact: true }).click();
-  await expect(chartTimeframe.getByRole('button', { name: '1M', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(chartMode).toBeVisible();
 
-  // Before #209 the header kept saying 1Y while the chart rendered 1M.
-  await expect(readout).toContainText('1M', { timeout: 15_000 });
-  await expect(widget.getByRole('button', { name: /^Period:/ })).toHaveCount(0);
+  // The two combinations the ticket reported, in its order: 1M/Line, then 3M/Area.
+  for (const [timeframe, mode] of [['1M', 'Line'], ['3M', 'Area']] as const) {
+    await chartTimeframe.getByRole('button', { name: timeframe, exact: true }).click();
+    await expect(chartTimeframe.getByRole('button', { name: timeframe, exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await chartMode.getByRole('button', { name: mode, exact: true }).click();
+    await expect(chartMode.getByRole('button', { name: mode, exact: true })).toHaveAttribute('aria-pressed', 'true');
+
+    // Before #209 the header kept the saved 1Y/Candles while the chart moved on.
+    await expect(period).toContainText(timeframe, { timeout: 15_000 });
+    await expect(type).toContainText(mode, { timeout: 15_000 });
+  }
 });

@@ -477,6 +477,24 @@ test "$accepted_revision" = "$EXPECTED_REVISION" &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --no-deps --force-recreate api mcp caddy
 ```
 
+#### 2026-11-09 application release (db19265)
+
+Authorized by the repository owner. Scope was the `api` and `mcp` services only; `caddy`, `auth`, `db`, `mongo` and `redis` were not recreated, and their start times confirm it (`vnibb-caddy` has been up since 2026-10-25, the data stores since August–October). The document's example command names `caddy`; recreating it was deliberately skipped because the proxy config was unchanged and that host also serves unrelated sites.
+
+| Item | Value |
+|---|---|
+| Revision | `db1926523c15c6e25b5673b0294e571574163ef5` |
+| Image | `ghcr.io/kohnnn/vnibb-api@sha256:6c82cfd789ed995c8b1416b8bb320529b942a926ffea64b4f9c61d87697d595c` (linux/arm64) |
+| Publish run | Actions `42562045910`, success; manifest artifact `release-image-release-db1926523c15` |
+| Migration head | `b8f2c5d91e40 (head)` before and after; `migrate` ran as a no-op, so no schema rollback is required |
+| Paired backup | `20261109T033001Z` — postgres `9219f347…`, mongo `0501c831…`, 90 Postgres tables, Mongo included |
+| Off-box restore | hashes matched the manifest after transfer; `RECOVERY OK`, 42 public tables / 1755 stocks / 1419653 stock_prices, 17 Mongo collections / 8,116,702 documents, RTO 157.7 s |
+| Rollback pointer | `deployment/env.oracle.bak-db19265-20261109T044624Z` (previous digest `sha256:5c91b1a08f13…`, revision `3d17cfdf`) |
+
+Post-release state: `/health/` reports the new revision, `api` and `mcp` are `healthy` with `RestartCount=0`, and the effective Compose label on `vnibb-api` names `/srv/vnibb/docker-compose.oracle.yml` and `/srv/vnibb/deployment/env.oracle` with image `sha256:6c82cfd7…`. `API_SKIP_SCHEDULER_STARTUP=true` and `PREDICTION_MARKET_POPULATE_ON_STARTUP=false` were left in place, so no producer was enabled.
+
+Deliberately not done, and therefore not claimed: no independent migration/rollback rehearsal, no isolated API+authenticated-MCP canary before cutover, and no 15-minute post-release monitoring window. The off-box drill above proves the stores can be reconstructed; it is not that canary. Detailed health remains `degraded` with `screener_verified_universe=false`, which this release did not change and does not claim to have fixed.
+
 ### Scheduler cutover and rollback
 
 The API defaults to `API_SKIP_SCHEDULER_STARTUP=true`; it does not execute APScheduler jobs. Keep the scheduler and other producers stopped until [#168](https://github.com/Kohnnn/vnibb/issues/168) has accepted source permission for storage/public serving and explicit exchange/instrument/segment/finality/no-trade coverage, [#171](https://github.com/Kohnnn/vnibb/issues/171) has accepted bounded recovery after a fresh paired backup and off-source restore, and [#172](https://github.com/Kohnnn/vnibb/issues/172) has resolved credential-state readability without bypassing fail-closed behavior and established exactly one authorized owner. The current daily entrypoint already requests session acquisition. Recreate the API with the scheduler disabled, confirm `REDIS_URL` is reachable and the required lock is working, then start the isolated worker only under separate authorization. Acceptance additionally requires the next completed trading session and the strict consumer/watch gates in [#173](https://github.com/Kohnnn/vnibb/issues/173); starting a container does not meet them.
