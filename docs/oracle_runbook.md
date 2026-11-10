@@ -892,6 +892,16 @@ registered by this candidate. `DNSE_ENABLED` or any other environment flag
 cannot bypass the hold.
 Never run the held published #239 candidate: its flag-enabled path is unsafe.
 
+The [official OHLC schema](https://developers.dnse.com.vn/docs/dnse/get-ohlc-history/)
+documents the literal candle arrays `t/o/h/l/c/v`, `nextTime`, and required
+authentication headers. The inspected documentation does not establish price or
+volume units, request time units, session coverage, finality, rate limits, or
+data-use rights. Do not infer a price multiplier, session date, entitlement, or
+safe storage/redistribution from the schema. The pages inspected do not establish
+that fundamentals are available or that they are absent. A future adapter still
+needs the missing semantics, source-use authorization, and an import-safe cold
+authorization seam; the source-neutral port alone does not provide that seam.
+
 **Operator-only custody, not an acquisition authorization.** If credentials are
 issued, create the private store without truncating an existing file. The root
 process must perform the existence-sensitive creation because an unprivileged
