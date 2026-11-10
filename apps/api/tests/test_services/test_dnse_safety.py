@@ -13,7 +13,10 @@ import pytest
     ("environment", "enabled"),
     [("test", "false"), ("development", "true"), ("staging", "true"), ("production", "true")],
 )
-def test_dnse_command_cold_start_refuses_before_credentials_or_side_effects(environment, enabled):
+@pytest.mark.parametrize("invocation", ["ordinary", "noargs", "malformed", "help", "shorthelp", "mixedhelp"])
+def test_dnse_command_cold_start_refuses_before_credentials_or_side_effects(
+    environment, enabled, invocation
+):
     script = Path(__file__).resolve().parents[2] / "scripts" / "import_dnse_daily.py"
     # Guard at process start, before imports: no actual provider values are used.
     probe = """
@@ -36,19 +39,25 @@ sys.argv = sys.argv[1:]
 try:
     runpy.run_path(sys.argv[0], run_name='__main__')
 except SystemExit as exc:
-    assert exc.code == 2
+    status = exc.code
 else:
-    raise AssertionError('command did not refuse')
+    raise AssertionError('command did not exit')
 assert not any(name.startswith('vnibb.') for name in sys.modules)
 assert 'sqlalchemy' not in sys.modules
+raise SystemExit(status)
 """
     # UUIDs are invented at runtime, never provider data or credentials.
     key, secret, signature = (uuid4().hex for _ in range(3))
+    arguments = {
+        "ordinary": ["--symbols", "DEMO", "--start", "2001-02-03", "--end", "2001-02-04"],
+        "noargs": [],
+        "malformed": ["--start", secret],
+        "help": ["--help"],
+        "shorthelp": ["-h"],
+        "mixedhelp": ["--help", secret],
+    }[invocation]
     result = subprocess.run(
-        [
-            sys.executable, "-c", probe, str(script), "--symbols", "DEMO",
-            "--start", secret, "--end", "2001-02-04",
-        ],
+        [sys.executable, "-c", probe, str(script), *arguments],
         env={
             "ENVIRONMENT": environment,
             "DNSE_ENABLED": enabled,
@@ -60,7 +69,11 @@ assert 'sqlalchemy' not in sys.modules
         capture_output=True,
         check=False,
     )
-    assert result.returncode == 0, result.stderr
-    assert not result.stdout
-    assert json.loads(result.stderr)["reason"] == "dnse_authorization_missing"
-    assert all(value not in result.stderr for value in (key, secret, signature))
+    assert result.returncode == (0 if invocation in {"help", "shorthelp"} else 2), result.stderr
+    if invocation in {"help", "shorthelp"}:
+        assert not result.stderr
+        assert "--symbols" in result.stdout and "unavailable" in result.stdout
+    else:
+        assert not result.stdout
+        assert json.loads(result.stderr)["reason"] == "dnse_authorization_missing"
+    assert all(value not in result.stdout + result.stderr for value in (key, secret, signature))

@@ -885,9 +885,11 @@ DNSE source-use rights are unknown (#232), and #168 has not accepted them.
 The local import command refuses unconditionally in every environment before
 reading provider credentials, importing application or provider modules,
 connecting to a provider, opening a database session, or writing a receipt.
-With or without command arguments it exits with status 2 and is not an import
-implementation. No DNSE provider, sync service, or scheduler is registered by
-this candidate. `DNSE_ENABLED` or any other environment flag cannot bypass it.
+`--help` and `-h` alone show the acquisition hold and exit 0; all other
+invocations, with or without arguments, refuse and exit 2. This is not an
+import implementation. No DNSE provider, sync service, or scheduler is
+registered by this candidate. `DNSE_ENABLED` or any other environment flag
+cannot bypass the hold.
 Never run the held published #239 candidate: its flag-enabled path is unsafe.
 
 **Operator-only custody, not an acquisition authorization.** If credentials are
