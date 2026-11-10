@@ -116,6 +116,11 @@ original source key remain non-comparable. Missing frozen references report
 Bank regulatory cells remain explicitly unavailable without the applicable
 circular/version, method, perimeter, observation date and reported/derived basis;
 accounting leverage or deposits never substitute for regulatory ratios.
+Insurer premium, claims and investment-income fields, and securities brokerage,
+margin-lending and investment-income fields, remain unavailable when only a raw
+field name is retained. Admission needs the original observation and its sector,
+business-line and gross/net or earned/written basis where applicable; a matching
+raw key alone cannot establish those definitions.
 
 Snapshots are owner-bound and immutable in the existing PostgreSQL `app_kv` store,
 one key per snapshot, with append-only revision-bound review events and separate

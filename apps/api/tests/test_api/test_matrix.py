@@ -268,10 +268,40 @@ async def test_http_auth_bounds_and_untrusted_overrides(test_db, stored, monkeyp
         assert response.status_code == 422
         assert (await client.get("/matrix/snapshots?limit=51")).status_code == 422
         assert (await client.get(f"/matrix/snapshots/{sid}/evidence", params={"result_id": str(uuid4())})).status_code == 404
+        # A cached 404 must not mask the same reference when its owner opens it.
+        missing = await client.get(f"/matrix/snapshots/{uuid4()}")
+        assert missing.status_code == 404
+        assert missing.headers["cache-control"] == "no-store"
+        assert missing.headers["vary"] == "Authorization"
         state["status"] = 401
         assert (await client.get(f"/matrix/snapshots/{sid}")).status_code == 401
         state["status"] = 503
         assert (await client.get(f"/matrix/snapshots/{sid}")).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_main_app_does_not_cache_private_denial_or_validation(client, stored):
+    from vnibb.core.auth import User, require_active_user
+
+    unauthorized = await client.get(f"/api/v1/matrix/snapshots/{uuid4()}")
+    assert unauthorized.status_code == 401
+    assert unauthorized.headers["www-authenticate"] == "Bearer"
+    assert unauthorized.headers["cache-control"] == "no-store"
+    assert unauthorized.json()["error"] == "http_error"
+
+    async def owner():
+        return User(id=str(uuid4()), email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    response = await client.get(f"/api/v1/matrix/snapshots/{stored['snapshot']['snapshot_id']}")
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert "authorization" in {value.strip().lower() for value in response.headers["vary"].split(",")}
+    assert response.json()["error"] == "http_error"
+    invalid = await client.post("/api/v1/matrix/selection", json={})
+    assert invalid.status_code == 422
+    assert invalid.headers["cache-control"] == "no-store"
+    assert invalid.json()["message"] == "Request validation failed"
 
 
 @pytest.mark.asyncio
