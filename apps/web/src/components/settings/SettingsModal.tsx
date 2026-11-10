@@ -30,7 +30,7 @@ import {
   writeStoredUserPreferences,
 } from '@/lib/userPreferences';
 import { CURRENT_RELEASE, CURRENT_RELEASE_DATE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
-import { formatNumber, formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
+import { DEFAULT_USD_VND_RATES_BY_YEAR, formatNumber, formatUnitValue, getUnitCaption, type UnitDisplay } from '@/lib/units';
 import {
   readAdminLayoutControlsVisible,
   writeAdminLayoutControlsVisible,
@@ -1367,7 +1367,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </p>
                     {Object.keys(adminUsdVndRatesByYear).length === 0 ? (
                       <p className="mt-1 rounded-md border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-1 text-[10px] text-[var(--color-warning)]">
-                        Historical USD conversion is using one global fallback for every year. Add yearly FX defaults before relying on long-range USD comparisons.
+                        No admin yearly FX defaults are set. Built-in yearly rates apply where available; other years use the global fallback unless you set a local override.
                       </p>
                     ) : null}
                     {unitConfig.display !== 'USD' ? (
@@ -1414,7 +1414,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             })
                             setUsdVndRate(year, parsed)
                           }}
-                          placeholder={String(adminUsdVndRatesByYear[String(year)] || globalUsdVndDefaultRate)}
+                          placeholder={String(unitConfig.usdVndRatesByYear?.[String(year)] ?? globalUsdVndDefaultRate)}
                           className="mt-2 w-full rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[var(--text-primary)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                         />
                         <div className="mt-1 text-[10px] text-[var(--text-muted)]">
@@ -1422,7 +1422,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             ? 'Local override'
                             : adminUsdVndRatesByYear[String(year)]
                               ? 'Using admin yearly default'
-                              : 'Using admin global default'}
+                              : DEFAULT_USD_VND_RATES_BY_YEAR[String(year)]
+                                ? 'Using built-in yearly default'
+                                : 'Using admin global default'}
                         </div>
                         {!localUsdVndRatesByYear[String(year)] && adminUsdVndRatesByYear[String(year)] ? (
                           <div className="mt-1 text-[10px] text-[var(--text-muted)]">
