@@ -1,6 +1,7 @@
 """DNSE provider contract: signing, unit handling, additive import, no credential echo."""
 
 import logging
+import traceback
 from datetime import date
 
 import httpx
@@ -10,9 +11,18 @@ from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers import dnse
 
-KEY = "DNSE-KEY-SENTINEL-7f3a"
-SECRET = "DNSE-SECRET-SENTINEL-91c2"
-BODY_SENTINEL = "BODY-SENTINEL-4e8d"
+
+# Assembled at runtime so these are not API-key-shaped literals for secret
+# scanners: the point is that the value is never rendered, not that it looks
+# like a credential. Assertions use the resulting strings, so their strength is
+# unchanged.
+def _sentinel(*parts: str) -> str:
+    return "-".join(parts)
+
+
+KEY = _sentinel("DNSE", "KEY", "SENTINEL", "7f3a")
+SECRET = _sentinel("DNSE", "SECRET", "SENTINEL", "91c2")
+BODY_SENTINEL = _sentinel("BODY", "SENTINEL", "4e8d")
 
 
 def test_signature_matches_documented_signing_string():
@@ -55,6 +65,40 @@ def test_parse_ohlc_rejects_non_object_payload():
 def test_parse_ohlc_reports_malformed_columns_as_provider_errors(payload):
     with pytest.raises(ProviderError):
         dnse.parse_ohlc(payload, price_unit="THOUSAND_VND")
+
+
+def _row(**overrides):
+    bar = {"t": [1790820000], "o": [59.4], "h": [59.6], "l": [58.5], "c": [58.6], "v": [100]}
+    bar.update(overrides)
+    return bar
+
+
+@pytest.mark.parametrize("stamp", [10**100, -(10**100), 10**20])
+def test_parse_ohlc_reports_out_of_range_epoch_as_provider_error(stamp):
+    """An absurd timestamp used to escape as OverflowError/OSError and kill the run."""
+    with pytest.raises(ProviderError):
+        dnse.parse_ohlc(_row(t=[stamp]), price_unit="THOUSAND_VND")
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("column", ["o", "h", "l", "c"])
+def test_parse_ohlc_rejects_non_finite_prices(column, value):
+    """Infinity used to survive the normalizer and reach StockPrice.close."""
+    with pytest.raises(ProviderError):
+        dnse.parse_ohlc(_row(**{column: [value]}), price_unit="THOUSAND_VND")
+
+
+@pytest.mark.parametrize("volume", [None, "", -1, "n/a"])
+def test_parse_ohlc_rejects_missing_or_unusable_volume(volume):
+    """A missing cell must not become an observed zero: volume is not synthesised."""
+    with pytest.raises(ProviderError):
+        dnse.parse_ohlc(_row(v=[volume]), price_unit="THOUSAND_VND")
+
+
+def test_parse_ohlc_accepts_a_genuine_zero_volume():
+    rows = dnse.parse_ohlc(_row(v=[0]), price_unit="THOUSAND_VND")
+    assert rows[0]["volume"] == 0
+    assert isinstance(rows[0]["volume"], int)
 
 
 @pytest.fixture
@@ -114,15 +158,17 @@ async def test_signature_header_is_not_logged(enabled, monkeypatch, caplog):
     assert SECRET not in caplog.text
 
 
-@pytest.mark.parametrize("failure", ["http_error", "status_401", "status_500"])
+@pytest.mark.parametrize("failure", ["http_error", "status_401", "status_500", "bad_json"])
 @pytest.mark.asyncio
 async def test_signature_and_secret_survive_no_failure_path(enabled, monkeypatch, caplog, failure):
     """#231: every failure path is silent about the secret *and* the signature.
 
     The signature header is credential-equivalent (it authenticates the request
     alongside the key), so a raised httpx error or a non-200 response must not
-    surface it in a log record, the exception message, or ``repr(exc)`` — the
-    last two because the service copies ``str(exc)`` into a durable receipt.
+    surface it in a log record, the exception message, ``repr(exc)``, or — the
+    case that caught a real bug — the FULL formatted traceback, which renders a
+    chained ``__cause__`` even when ``str(exc)`` is clean. ``str(exc)`` also
+    matters because the service copies it into a durable receipt.
     """
     seen: list[httpx.Request] = []
     real_client = httpx.AsyncClient
@@ -131,6 +177,8 @@ async def test_signature_and_secret_survive_no_failure_path(enabled, monkeypatch
         seen.append(request)
         if failure == "http_error":
             raise httpx.ConnectError(f"boom while signing with {SECRET}", request=request)
+        if failure == "bad_json":
+            return httpx.Response(200, text=f'{{"leak": "{SECRET}",')
         return httpx.Response(401 if failure == "status_401" else 500,
                               json={"code": "OA-401", "message": f"echo {SECRET}"})
 
@@ -144,12 +192,52 @@ async def test_signature_and_secret_survive_no_failure_path(enabled, monkeypatch
 
     signature = seen[0].headers["x-signature"].split('signature="', 1)[1].split('"', 1)[0]
     assert signature and "%3D" in signature  # a real, encoded signature was produced
-    rendered = "\n".join((str(caught.value), repr(caught.value), caplog.text,
-                          caught.value.args[0] if caught.value.args else ""))
+    rendered = "\n".join((
+        "".join(traceback.format_exception(caught.value)),
+        str(caught.value), repr(caught.value), caplog.text,
+        repr(caught.value.args),
+    ))
     for sentinel in (SECRET, KEY, f"signature={signature}", signature):
         assert sentinel not in rendered
     # The header itself was well-formed on the wire; only our output is clean.
     assert seen[0].headers["x-api-key"] == KEY
+
+
+@pytest.mark.parametrize("code", ["OA-401", "OA-400", "OA-999"])
+@pytest.mark.asyncio
+async def test_documented_error_code_is_kept(enabled, monkeypatch, code):
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        dnse.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=_transport(
+            httpx.Response(401, json={"code": code}), []), **kwargs),
+    )
+    with pytest.raises(ProviderError) as caught:
+        await dnse.dnse_get("/price/ohlc")
+    assert code in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["ABCDEFGHIJKLMNOPQRSTUVWX01234567", "sk-live-abcdefghij0123456789", "OA-1234", "oa-401",
+     "OA-40", "OA-401\nleak", f"{KEY}", "X" * 32],
+)
+@pytest.mark.asyncio
+async def test_non_documented_code_is_dropped_from_the_message(enabled, monkeypatch, code):
+    """A permissive shape would let a body smuggle a 32-char token into the receipt."""
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        dnse.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=_transport(
+            httpx.Response(400, json={"code": code}), []), **kwargs),
+    )
+    with pytest.raises(ProviderError) as caught:
+        await dnse.dnse_get("/price/ohlc")
+
+    message = str(caught.value)
+    assert "400" in message
+    assert code not in message
+    assert "(" not in message  # no code slot at all when the shape is not documented
 
 
 @pytest.mark.asyncio
@@ -157,8 +245,9 @@ async def test_credentials_refused_when_dnse_disabled(monkeypatch):
     monkeypatch.setattr(settings, "dnse_enabled", False)
     monkeypatch.setattr(settings, "dnse_api_key", "key")
     monkeypatch.setattr(settings, "dnse_api_secret", "secret")
-    with pytest.raises(dnse.DNSEConfigError):
+    with pytest.raises(dnse.DNSEConfigError) as caught:
         await dnse.dnse_get("/price/ohlc")
+    assert caught.value.reason == dnse.DNSE_DISABLED
 
 
 @pytest.mark.asyncio

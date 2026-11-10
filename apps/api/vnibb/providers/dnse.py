@@ -25,6 +25,7 @@ import re
 import urllib.parse
 from datetime import UTC, datetime
 from email.utils import format_datetime
+from math import isfinite
 from typing import Any
 from uuid import uuid4
 
@@ -38,26 +39,50 @@ logger = logging.getLogger(__name__)
 DNSE_BASE_URL = "https://openapi.dnse.com.vn"
 DNSE_TIMEOUT_SECONDS = 20.0
 _OHLC_SERIES = ("o", "h", "l", "c", "v")
-# DNSE error codes are short tokens ("OA-400", "OA-401"). Anything else in the
-# body — echoed request context, tokens — is dropped rather than sanitised.
-_ERROR_CODE = re.compile(r"[A-Za-z0-9_.:-]{1,32}")
+# DNSE's documented error shape is ``OA-<3 digits>`` (e.g. ``OA-400``, ``OA-401``).
+# Anything else is dropped rather than sanitised: this string is persisted into a
+# durable receipt, and a permissive class would let a body smuggle a 32-char
+# opaque token through. Widen only with evidence of another documented prefix.
+_ERROR_CODE = re.compile(r"OA-\d{3}")
 
 
 class DNSEConfigError(ProviderError):
-    """Raised when DNSE is requested but not configured or not enabled."""
+    """Raised when DNSE is requested but not configured or not enabled.
+
+    ``reason`` is a stable token, not prose: it is what a receipt records, so it
+    must not grow detail later (the message is for humans, this is for the DB).
+    """
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message, "dnse")
+        self.reason = reason
+
+
+DNSE_DISABLED = "dnse_disabled"
+DNSE_CREDENTIALS_MISSING = "dnse_credentials_missing"
 
 
 def _credentials() -> tuple[str, str]:
     if not settings.dnse_enabled:
         raise DNSEConfigError(
             "DNSE acquisition is disabled; set DNSE_ENABLED=true once source permission is recorded",
-            "dnse",
+            DNSE_DISABLED,
         )
     key = (settings.dnse_api_key or "").strip()
     secret = (settings.dnse_api_secret or "").strip()
     if not key or not secret:
-        raise DNSEConfigError("DNSE_API_KEY / DNSE_API_SECRET are not configured", "dnse")
+        raise DNSEConfigError(
+            "DNSE_API_KEY / DNSE_API_SECRET are not configured", DNSE_CREDENTIALS_MISSING
+        )
     return key, secret
+
+
+def ensure_configured() -> None:
+    """Raise ``DNSEConfigError`` unless acquisition is enabled and credentialed.
+
+    Callers use this to refuse a whole run up front, before any per-symbol work.
+    """
+    _credentials()
 
 
 def build_signature(
@@ -120,14 +145,19 @@ async def dnse_get(path: str, params: dict[str, Any] | None = None) -> Any:
         async with httpx.AsyncClient(timeout=DNSE_TIMEOUT_SECONDS) as client:
             response = await client.get(url, headers=_signed_headers(key, secret, "GET", path))
     except httpx.HTTPError as exc:
-        # The message stays path-only: an httpx exception can carry the full URL.
-        raise ProviderError(f"DNSE request failed for {path}", "dnse", cause=exc) from exc
+        # Keep only the exception type: an httpx error renders the full request
+        # URL, and `from exc` would keep that reachable through __cause__ in a
+        # standard traceback. Same for a JSON decode error, whose message quotes
+        # the offending body text verbatim.
+        raise ProviderError(
+            f"DNSE request failed for {path} ({type(exc).__name__})", "dnse"
+        ) from None
     if response.status_code != 200:
         raise _status_error(path, response)
     try:
         return response.json()
-    except ValueError as exc:
-        raise ProviderError(f"DNSE {path} returned a non-JSON body", "dnse", cause=exc) from exc
+    except ValueError:
+        raise ProviderError(f"DNSE {path} returned a non-JSON body", "dnse") from None
 
 
 def parse_ohlc(payload: Any, *, price_unit: str) -> list[dict[str, Any]]:
@@ -161,13 +191,28 @@ def parse_ohlc(payload: Any, *, price_unit: str) -> list[dict[str, Any]]:
         columns[name] = values
     rows: list[dict[str, Any]] = []
     for index, stamp in enumerate(times):
+        # Anything wrong with one row is a provider contract violation reported as
+        # ProviderError: OverflowError (t = 10**100), OSError (out-of-range epoch),
+        # a non-finite price, or a non-numeric cell must not abort the whole run as
+        # an uncaught TypeError/IndexError/OverflowError.
         try:
             session = datetime.fromtimestamp(int(stamp), UTC).date()
-            # Parallel arrays use t/o/h/l/c/v; rows use readable field names.
             open_, high, low, close = (float(columns[name][index]) for name in ("o", "h", "l", "c"))
-            volume = int(columns["v"][index] or 0)
-        except (TypeError, ValueError) as exc:
-            raise ProviderError(f"DNSE OHLC row {index} is not numeric", "dnse", cause=exc) from exc
+        except (TypeError, ValueError, OverflowError, OSError):
+            raise ProviderError(f"DNSE OHLC row {index} is not numeric", "dnse") from None
+        if not all(isfinite(value) for value in (open_, high, low, close)):
+            raise ProviderError(f"DNSE OHLC row {index} has a non-finite price", "dnse")
+        raw_volume = columns["v"][index]
+        # A missing cell is not observed zero volume: reject it, so "OHLCV is
+        # never synthesised" stays true for the volume column too.
+        if raw_volume is None or raw_volume == "":
+            raise ProviderError(f"DNSE OHLC row {index} has no volume", "dnse")
+        try:
+            volume = int(raw_volume)
+        except (TypeError, ValueError, OverflowError):
+            raise ProviderError(f"DNSE OHLC row {index} has a non-integer volume", "dnse") from None
+        if volume < 0:
+            raise ProviderError(f"DNSE OHLC row {index} has a negative volume", "dnse")
         rows.append({
             "time": session,
             "open": open_,
