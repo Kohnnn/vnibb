@@ -138,6 +138,7 @@ def _require_verified_sector_evidence(snapshot, cells, evidence=(), all_evidence
             and metric["key"] in UNVERIFIED_SECTOR_METRICS[(snapshot["playbook_id"], cell["dimension_id"])]
             for evidence_id in metric["evidence_ids"]
         ]
+        pending.extend(evidence_id for cell in unsafe for evidence_id in cell["evidence_ids"])
         seen = set()
         while pending and not unverified:
             evidence_id = pending.pop()

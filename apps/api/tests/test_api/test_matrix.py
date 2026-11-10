@@ -161,6 +161,55 @@ async def test_legacy_sector_evidence_cannot_leak_through_another_cell(client, t
 
 
 @pytest.mark.asyncio
+async def test_missing_sector_metric_reference_cannot_expose_shared_cell_evidence(client, test_db, stored):
+    from vnibb.core.auth import User, require_active_user
+
+    async def owner():
+        return User(id=OWNER, email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    snapshot_id = stored["snapshot"]["snapshot_id"]
+    record = await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot_id}")
+    value = copy.deepcopy(record.value)
+    snapshot = value["snapshot"]
+    snapshot["playbook_id"] = "insurer"
+    snapshot["dimensions"][0]["dimension_id"] = "insurance"
+    unsafe, shared = snapshot["cells"]
+    unsafe["dimension_id"] = shared["dimension_id"] = "insurance"
+    unsafe["payload"]["metrics"][0].update(key="insurance_premiums", evidence_ids=[])
+    raw = value["evidence"][0]
+    raw["field"] = "raw_data.insurance_premiums"
+    derived = copy.deepcopy(raw)
+    derived.update(evidence_id="derived-sector-value", provenance="derived", formula="retained input", input_evidence_ids=[raw["evidence_id"]])
+    value["evidence"].append(derived)
+    unsafe["evidence_ids"] = [derived["evidence_id"]]
+    shared["evidence_ids"] = [raw["evidence_id"]]
+
+    safe_dimension = copy.deepcopy(snapshot["dimensions"][0])
+    safe_dimension["dimension_id"] = "unrelated"
+    snapshot["dimensions"].append(safe_dimension)
+    safe = copy.deepcopy(shared)
+    safe.update(result_id=str(uuid4()), dimension_id="unrelated", evidence_ids=[value["evidence"][1]["evidence_id"]])
+    snapshot["cells"].append(safe)
+    record.value = value
+    await test_db.commit()
+
+    selection = await client.post("/api/v1/matrix/selection", json={"snapshot_id": snapshot_id, "result_ids": [shared["result_id"]]})
+    evidence = await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}/evidence", params={"result_id": shared["result_id"]})
+    for response in (selection, evidence):
+        assert response.status_code == 409
+        assert response.json()["code"] == "matrix_snapshot_evidence_unverified"
+        assert raw["value"] not in response.text
+
+    safe_selection = await client.post("/api/v1/matrix/selection", json={"snapshot_id": snapshot_id, "result_ids": [safe["result_id"]]})
+    safe_evidence = await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}/evidence", params={"result_id": safe["result_id"]})
+    assert safe_selection.status_code == safe_evidence.status_code == 200
+    assert [item["evidence_id"] for item in safe_selection.json()["evidence"]] == [value["evidence"][1]["evidence_id"]]
+    assert [item["evidence_id"] for item in safe_evidence.json()] == [value["evidence"][1]["evidence_id"]]
+    assert (await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot_id}")).value == value
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("missing", [False, True])
 async def test_legacy_sector_null_stays_readable_and_missing_evidence_is_quarantined(
     client, test_db, stored, missing,
