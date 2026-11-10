@@ -1,18 +1,15 @@
 [extend]
 useDefault = true
 
+# One block: gitleaks keeps only a single `[allowlist]` section, so a second
+# `[[allowlists]]` entry would silently disappear.
 [allowlist]
-description = "cached() decorator key_prefix args are cache namespaces, not secrets"
+description = "Cache namespaces and synthetic DNSE test sentinels, not secrets"
 regexTarget = "match"
 regexes = [
   '''key_prefix="[A-Za-z0-9_-]+"''',
+  # Synthetic DNSE sentinels that assert a credential is never rendered. The
+  # tests now build these from parts, so this only covers the two commits that
+  # introduced the literal form; it matches the sentinel text, never a real key.
+  '''DNSE-(?:KEY|SECRET)-SENTINEL-[0-9a-f]{4}''',
 ]
-
-# Synthetic DNSE test sentinels ("DNSE-KEY-SENTINEL-..."/"DNSE-SECRET-SENTINEL-...")
-# that assert credentials are never rendered. The test file now builds them from
-# parts, so this entry only covers the two historical commits that introduced the
-# literal form; scoped to this one file and this one rule, never globally.
-[[allowlists]]
-description = "DNSE test sentinels in test_dnse.py, not real credentials"
-ruleIDs = ["generic-api-key"]
-paths = ['''^apps/api/tests/test_providers/test_dnse\.py$''']
