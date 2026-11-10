@@ -124,6 +124,7 @@ async def test_unified_fundamental_is_used_without_legacy_wrapper(monkeypatch):
 @pytest.mark.asyncio
 async def test_timed_out_provider_never_queues_duplicate_thread(monkeypatch):
     release = Event()
+    from vnibb.providers.vnstock.lifecycle import financial_busy
     entered = Event()
 
     def blocked():
@@ -135,6 +136,7 @@ async def test_timed_out_provider_never_queues_duplicate_thread(monkeypatch):
         with pytest.raises(TimeoutError):
             await runtime.run_financial_provider(blocked, 0.01)
         assert entered.is_set()
+        assert financial_busy()
         with pytest.raises(RuntimeError, match="still running"):
             await runtime.run_financial_provider(lambda: [1], 0.01)
     finally:
@@ -536,6 +538,24 @@ async def test_unified_finance_does_not_repeat_ratio_call(monkeypatch):
     assert rows
     assert calls == [("VCI", "quarter", "en", "long")]
 
+
+@pytest.mark.asyncio
+async def test_financial_cycle_stops_while_provider_is_busy(test_engine, monkeypatch):
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
+    monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
+    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: True)
+    attempted = []
+
+    async def acquire(symbol, progress):
+        attempted.append(symbol)
+        return 1
+
+    result = await FullMarketSync().run_maintenance_cycle(
+        "test_busy_financial_cycle", ["VNM"], [("financials_year", acquire)], 10, 7,
+    )
+    assert attempted == []
+    assert result.success and not result.complete and result.pending_count == 1
 
 @pytest.mark.asyncio
 async def test_cycle_deadline_expiry_is_partial_and_next_stage_is_not_starved(test_engine, monkeypatch):
