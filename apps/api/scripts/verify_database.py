@@ -66,9 +66,8 @@ def check_vnstock():
     """Check VNStock connection."""
     print("\n🔄 Testing VNStock connection...")
     try:
-        from vnibb.providers.vnstock.runtime import get_listing_class
-        listing = get_listing_class()(source="VCI")
-        df = listing.all_symbols()
+        from vnibb.providers import market_data
+        df = market_data.listing("VCI")
         print(f"✅ VNStock connected: {len(df):,} symbols available")
         return True
     except Exception as e:

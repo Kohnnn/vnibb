@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 import pandas as pd
 
 from vnibb.core.price_units import PriceUnit
-from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+from vnibb.providers import market_data
 from vnibb.services.technical_analysis import get_ta_service, normalize_history_frame
 
 
@@ -741,21 +741,18 @@ async def get_technical_indicators_direct(
     from vnibb.core.config import settings
     from datetime import datetime, timedelta
 
-    source = validate_source(source)
+    source = market_data.validate_source(source)
 
     def _calculate():
-        Quote = get_quote_class()
         import pandas as pd
 
-        q = Quote(symbol=symbol.upper(), source=source)
         end = datetime.now()
         start = end - timedelta(days=90)
-
-        df = q.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
+        df = market_data.history(symbol.upper(), source, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
         if df is None or df.empty:
             return {"error": "No data available"}
         df = normalize_history_frame(
-            df, symbol=symbol.upper(), source=source, provider=q,
+            df, symbol=symbol.upper(), source=source,
         )
         if df.empty:
             return {"error": "Price units unavailable", "price_unit": "unknown"}

@@ -59,7 +59,7 @@ from vnibb.services.market_session import (
 )
 from vnibb.services.sector_service import SectorService
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
-from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+from vnibb.providers import market_data
 from vnibb.api.v1.market_heatmap import (
     HeatmapGroupBuilder,
     HeatmapGroupConfig,
@@ -630,13 +630,11 @@ def _compute_money_flow_metrics(
 
 async def _fetch_benchmark_history_from_provider(start_date: date, end_date: date) -> pd.DataFrame:
     def _load_history() -> pd.DataFrame:
-        source = validate_source(settings.vnstock_source)
-        Market, _ = import_vnstock_symbol("Market")
-        history = Market().index("VNINDEX").ohlcv(
+        source = market_data.validate_source(settings.vnstock_source)
+        history = market_data.index_history(
+            "VNINDEX", source,
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            source=source,
-            floating=None,
         )
         if history is None or history.empty:
             return pd.DataFrame(columns=["time", "close_index"])
@@ -4138,8 +4136,7 @@ async def get_world_indices(limit: int = Query(default=8, ge=1, le=16)) -> World
 @router.get("/forex-rates", response_model=ForexRatesResponse)
 async def get_forex_rates(limit: int = Query(default=12, ge=1, le=30)) -> ForexRatesResponse:
     def _sync_fetch() -> list[dict[str, Any]]:
-        Retail, _ = import_vnstock_symbol("Retail")
-        frame = Retail().exchange_rate()
+        frame = market_data.forex_rates()
         if frame is None or len(frame.index) == 0:
             return []
 

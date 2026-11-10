@@ -22,7 +22,7 @@ from vnibb.models.financials import IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock
 from vnibb.models.trading import FinancialRatio
-from vnibb.providers.vnstock.runtime import get_listing_class, validate_source
+from vnibb.providers import market_data
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def _non_empty_text(value: str | None) -> bool:
 
 
 def _get_listing_sources() -> list[str]:
-    return [validate_source(getattr(settings, "vnstock_source", None))]
+    return [market_data.validate_source(getattr(settings, "vnstock_source", None))]
 
 
 async def _fetch_provider_industry_map() -> dict[str, str]:
@@ -96,17 +96,11 @@ async def _fetch_provider_industry_map() -> dict[str, str]:
     sources = _get_listing_sources()
 
     def _fetch_sync() -> dict[str, str]:
-        try:
-            Listing = get_listing_class()
-        except Exception as exc:
-            logger.warning("Listing import failed: %s", exc)
-            return {}
 
         mapping: dict[str, str] = {}
         for source in sources:
             try:
-                listing = Listing(source=source)
-                df = listing.symbols_by_industries()
+                df = market_data.listing(source, view="symbols_by_industries")
             except Exception as exc:
                 logger.debug("symbols_by_industries failed for %s: %s", source, exc)
                 continue

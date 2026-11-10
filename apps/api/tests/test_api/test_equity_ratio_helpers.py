@@ -105,6 +105,10 @@ async def test_ratio_endpoint_preserves_declared_dividend_yield_without_scale_gu
         (None, None, None, None, "VND", None, None),
         (None, None, 1000.0, 120.0, None, None, None),
         (None, None, 0.0, 0.0, "VND", None, None),
+        (float("nan"), 9.0, 1000.0, 120.0, "VND", 20.0, 9.0),
+        (float("inf"), 9.0, 1000.0, 120.0, "VND", 20.0, 9.0),
+        (9.0, float("-inf"), 1000.0, 120.0, "VND", 9.0, 25.0),
+        (float("nan"), float("inf"), None, None, "VND", None, None),
     ],
 )
 async def test_ratio_endpoint_prefers_reported_growth_and_only_derives_admitted_missing_values(
