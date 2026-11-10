@@ -3,7 +3,6 @@ Data Pipeline Module
 
 This module organizes the data pipeline into focused sub-modules:
 - base: Base classes and common utilities
-- financials_pipeline: Financial statement sync
 - screener_pipeline: Screener metrics sync
 - news_pipeline: News aggregation
 - scheduler: Job scheduling
