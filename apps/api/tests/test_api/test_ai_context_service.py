@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.ai_context_service import (
     AIContextService,
@@ -530,7 +529,8 @@ async def test_financial_runtime_selects_fiscal_recency_and_preserves_signs(
     monkeypatch, test_db, new_source, old_source, statement_type
 ):
     from datetime import datetime
-    from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 
     model, section_name, metric, second = {
         "income": (IncomeStatement, "income_statement", "revenue", "net_income"),
@@ -552,7 +552,9 @@ async def test_financial_runtime_selects_fiscal_recency_and_preserves_signs(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
 async def test_financial_runtime_does_not_promote_older_report_when_newer_rejected(monkeypatch, test_db, statement_type):
-    from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+    from datetime import datetime
+
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 
     model, section_name, metric, second = {
         "income": (IncomeStatement, "income_statement", "revenue", "net_income"),

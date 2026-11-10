@@ -1,6 +1,5 @@
 import pandas as pd
 import pytest
-
 from vnibb.core.price_units import history_price_records
 from vnibb.providers import market_data
 from vnibb.providers.vnstock import runtime

@@ -4,7 +4,6 @@ import ast
 import os
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[4]
 PROVIDER = ROOT / "apps/api/vnibb/providers/vnstock"
 TESTS = ROOT / "apps/api/tests"
