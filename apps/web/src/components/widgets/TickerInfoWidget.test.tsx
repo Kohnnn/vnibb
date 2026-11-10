@@ -1,4 +1,5 @@
 import { act, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useSyncExternalStore } from 'react';
 import { useHistoricalPrices, useProfile, useScreenerData, useStockQuote } from '@/lib/queries';
 import { useUnit } from '@/contexts/UnitContext';
@@ -305,6 +306,25 @@ describe('TickerInfoWidget freshness contract', () => {
     expect(within(quote).getByText('Stale data')).toBeInTheDocument();
     expect(within(region).getAllByText('57,300.00')).toHaveLength(1);
     expect(region).toHaveAttribute('tabindex', '0');
+  });
+
+  test('tabs from the information region to its quote and freshness scroller', async () => {
+    mockStockQuote.mockReturnValue({
+      data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: true },
+      isLoading: false, isFetching: true, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
+    });
+    const user = userEvent.setup();
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+
+    const region = screen.getByRole('region', { name: 'FPT ticker information' });
+    const scroller = within(region).getByRole('group', { name: 'FPT quote and freshness' });
+    await user.tab();
+    expect(region).toHaveFocus();
+    await user.tab();
+    expect(scroller).toHaveFocus();
+    expect(within(scroller).getByText('Stale data')).toBeInTheDocument();
+    await user.tab({ shift: true });
+    expect(region).toHaveFocus();
   });
 
   test('keeps the freshness group on one scrollable line instead of wrapping it', () => {

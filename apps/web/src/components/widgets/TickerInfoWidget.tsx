@@ -213,7 +213,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             alone took 44px and pushed the 36px price below the clipped edge.
             `shrink-0` on WidgetMeta is load-bearing: without it the chips shrink
             to ~43px and wrap inside themselves, back to 60px. */}
-        <div role="group" aria-label={`${symbol} quote and freshness`} className="flex flex-nowrap items-center gap-x-2 overflow-x-auto scrollbar-hide">
+        <div role="group" aria-label={`${symbol} quote and freshness`} tabIndex={0} className="flex flex-nowrap items-center gap-x-2 overflow-x-auto scrollbar-hide focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
           <span className="inline-flex shrink-0 items-baseline gap-x-1">
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
               {formatPriceValueForUnit(price, priceDisplayConfig)}
