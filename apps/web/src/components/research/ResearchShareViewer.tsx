@@ -31,7 +31,7 @@ export function ResearchShareViewer({ shareId }: { shareId: string }) {
     const share = signedIn && snapshot && snapshot.shareId === shareId && snapshot.userId === user?.id && Date.parse(snapshot.share.expires_at) > Date.now() ? snapshot.share : null;
     return <main className="mx-auto max-w-3xl px-4 py-8 text-[var(--text-primary)] sm:px-5 sm:py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
-            <VniBBLogo width={112} label={null} />
+            <VniBBLogo width={112} />
             <Link href="/dashboard" className="text-sm text-[var(--accent-blue)] underline underline-offset-2">Return to your workspace</Link>
         </div>
         <h1 className="mt-6 text-xl font-semibold sm:text-2xl">Frozen Investment Thesis</h1>

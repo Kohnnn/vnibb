@@ -36,8 +36,10 @@ export function MobileNav({
                     });
                     setIsOpen(true);
                 }}
-                className="fixed left-4 top-4 z-40 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] lg:hidden"
+                className="fixed left-2 top-2 z-40 flex h-11 w-11 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] lg:hidden"
                 aria-label="Open menu"
+                aria-expanded={isOpen}
+                aria-controls={isOpen ? 'mobile-navigation' : undefined}
             >
                 <Menu size={24} />
             </button>
@@ -52,6 +54,7 @@ export function MobileNav({
                     />
                     <div
                         ref={panelRef}
+                        id="mobile-navigation"
                         role="dialog"
                         aria-modal="true"
                         aria-label="Navigation menu"

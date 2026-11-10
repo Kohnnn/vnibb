@@ -72,7 +72,7 @@ def require_supported_dataset(dataset: str) -> dict[str, Any]:
 
 
 def validate_metadata(metadata: dict[str, Any], source: str | None, route: str) -> None:
-    from vnibb.providers.vnstock.runtime import validate_source
+    from vnibb.providers.market_data import validate_source
 
     source = validate_source(source)
     if str(metadata.get("source") or "").upper() != source:
@@ -224,41 +224,26 @@ def fetch_dataset(
     history_end: str,
     intraday_page_size: int,
 ) -> DatasetRows:
-    from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+    from vnibb.providers import market_data
 
-    source = validate_source(source)
+    source = market_data.validate_source(source)
     spec = require_supported_dataset(dataset)
     symbol = symbol.upper()
     if dataset == "trading.price_board":
         return fetch_price_board_batch([symbol], source, limit)[symbol]
-    if dataset == "company.overview":
-        Company, _ = import_vnstock_symbol("Company")
-        frame = Company(symbol=symbol, source=source).overview()
-    elif "method" in spec:
-        Reference, _ = import_vnstock_symbol("Reference")
-        company = Reference().company(symbol)
-        frame = getattr(company, spec["method"])(source=source)
-    else:
-        Market, _ = import_vnstock_symbol("Market")
-        market = Market().equity(symbol)
-        if dataset == "quote.history":
-            frame = market.ohlcv(start=history_start, end=history_end, interval="1D", source=source, floating=None)
-        elif dataset == "quote.intraday":
-            frame = market.trades(limit=max(intraday_page_size, limit, 1000), source=source)
-        elif dataset == "quote.price_depth":
-            frame = market.volume_profile(source=source)
-        else:
-            frame = market.session_stats(source=source)
+    frame = market_data.raw_dataset(
+        symbol, source, dataset, start=history_start, end=history_end,
+        limit=max(intraday_page_size, limit, 1000),
+    )
     return read_sdk_frame(frame, source=source, route=spec["route"], limit=limit)
 
 
 def fetch_price_board_batch(symbols: list[str], source: str, limit: int) -> dict[str, DatasetRows]:
-    from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+    from vnibb.providers import market_data
 
-    source = validate_source(source)
-    Market, _ = import_vnstock_symbol("Market")
+    source = market_data.validate_source(source)
     symbols = [symbol.upper() for symbol in symbols]
-    frame = Market().equity(symbols).quote(source=source)
+    frame = market_data.price_board(symbols, source)
     result = read_sdk_frame(frame, source=source, route=DATASET_SPECS["trading.price_board"]["route"])
     grouped: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in symbols}
     for row in result.rows:
@@ -345,13 +330,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_symbols(raw_symbols: str, source: str) -> list[str]:
-    from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+    from vnibb.providers import market_data
 
-    source = validate_source(source)
+    source = market_data.validate_source(source)
     if raw_symbols.upper() != "ALL":
         return [item.strip().upper() for item in raw_symbols.split(",") if item.strip()]
-    Listing, _ = import_vnstock_symbol("Listing")
-    frame = Listing(source=source).all_symbols()
+    frame = market_data.listing(source)
     result = read_sdk_frame(frame, source=source, route="reference.equity.list")
     symbols = [str(row.get("symbol") or "").upper() for row in result.rows]
     if any(not symbol for symbol in symbols):
@@ -366,13 +350,14 @@ def main() -> int:
     args = parse_args()
 
     datasets = list(DATASET_SPECS) if args.datasets.upper() == "ALL" else [item.strip() for item in args.datasets.split(",") if item.strip()]
-    from vnibb.providers.vnstock.runtime import validate_runtime, validate_source
+    from vnibb.providers.market_data import validate_source
+    from vnibb.providers.vnstock.lifecycle import validate_acquisition_runtime
 
     try:
         args.source = validate_source(args.source)
         for dataset in datasets:
             require_supported_dataset(dataset)
-        validate_runtime()
+        validate_acquisition_runtime()
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
 

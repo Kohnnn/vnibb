@@ -113,4 +113,36 @@ describe('TabBar', () => {
         ]);
         expect(reordered[1]).toHaveAttribute('aria-current', 'page');
     });
+
+    it('reveals an offscreen active tab and leaves a manual offset alone', () => {
+        render(<TabBarWorkspace />);
+        const [first] = tabButtons();
+        const strip = first.parentElement as HTMLElement;
+        let scrollLeft = 0;
+        Object.defineProperty(strip, 'scrollLeft', {
+            configurable: true,
+            get: () => scrollLeft,
+            set: (value: number) => { scrollLeft = value; },
+        });
+        Object.defineProperty(strip, 'clientWidth', { configurable: true, get: () => 100 });
+        Object.defineProperty(strip, 'scrollWidth', { configurable: true, get: () => 180 });
+        strip.getBoundingClientRect = () => ({ left: 0, right: 100 }) as DOMRect;
+        const geometry = [[0, 40], [40, 80], [120, 180]];
+        tabButtons().forEach((tab, index) => {
+            const [left, right] = geometry[index];
+            Object.defineProperty(tab, 'offsetWidth', { configurable: true, get: () => right - left });
+            tab.getBoundingClientRect = () => ({
+                left: left - scrollLeft, right: right - scrollLeft,
+            }) as DOMRect;
+        });
+
+        fireEvent.click(tabButtons()[2]);
+        expect(tabButtons()[2]).toHaveAttribute('aria-current', 'page');
+        expect(scrollLeft).toBe(80);
+
+        scrollLeft = 20;
+        fireEvent.click(tabButtons()[1]);
+        expect(tabButtons()[1]).toHaveAttribute('aria-current', 'page');
+        expect(scrollLeft).toBe(20);
+    });
 });

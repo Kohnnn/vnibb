@@ -133,13 +133,13 @@ export function WidgetToolbar({
     };
     const closeOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest('[data-dropdown-menu-content]')) return;
+      if (target.closest('[data-dropdown-menu-content], [data-ticker-combobox]')) return;
       if (!compactPanelRef.current?.contains(target) && !compactTriggerRef.current?.contains(target)) {
         setIsPanelOpen(false);
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !document.querySelector('[data-dropdown-menu-content]')) {
+      if (event.key === 'Escape' && !document.querySelector('[data-dropdown-menu-content], [data-ticker-combobox]')) {
         event.stopPropagation();
         setIsPanelOpen(false);
         compactTriggerRef.current?.focus();

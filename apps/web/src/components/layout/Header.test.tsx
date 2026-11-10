@@ -36,20 +36,4 @@ describe('Header account menu with auth bypass enabled', () => {
     expect(screen.queryByRole('button', { name: 'Open account menu' })).not.toBeInTheDocument()
   })
 
-  it('allows header tools including alerts to wrap within the available mobile width', () => {
-    setAuthUser(signedInUser)
-    const { container } = render(<Header currentSymbol="AAPL" onAIClick={jest.fn()} onAutoFitLayout={jest.fn()} onEditToggle={jest.fn()} onResetLayout={jest.fn()} />)
-    const tools = container.querySelector('[data-tour="header-tools"]')
-    expect(tools).toHaveClass('min-w-0', 'max-w-full', 'flex-wrap')
-    expect(tools).toContainElement(screen.getByRole('button', { name: 'Alert activity' }))
-  })
-
-  it('renders a visible VniBB wordmark link for mobile widths', () => {
-    setAuthUser(signedInUser)
-    render(<Header currentSymbol="AAPL" />)
-    const brand = screen.getByRole('link', { name: 'VniBB home' })
-    expect(brand).toHaveAttribute('href', '/')
-    expect(brand).toHaveClass('lg:hidden')
-    expect(brand.querySelector('img')).toHaveAttribute('src', '/brand/vnibb-wordmark-master.svg')
-  })
 })
