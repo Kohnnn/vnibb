@@ -1,4 +1,4 @@
-import { fetchAPI } from '@/lib/api';
+import { APIError, fetchAPI } from '@/lib/api';
 import type { MatrixCell, MatrixCreate, MatrixEvidence, MatrixPlaybook, MatrixPreparation, MatrixResearchRequest, MatrixSelectedPeriods, MatrixSelection, MatrixSnapshot, MatrixView } from '@/types/matrix';
 
 const root = '/matrix';
@@ -15,6 +15,21 @@ export const matrixApi = {
   review: (selection: MatrixSelection, state: 'reviewed' | 'unreviewed') => fetchAPI<MatrixSnapshot>(`${root}/snapshots/${encodeURIComponent(selection.snapshot_id)}/review`, { ...protectedOptions, method: 'POST', body: JSON.stringify({ result_ids: selection.result_ids, state }) }),
   revoke: (id: string) => fetchAPI<{ revoked: boolean }>(`${root}/snapshots/${encodeURIComponent(id)}/revoke`, { ...protectedOptions, method: 'POST' }),
 };
+
+export interface MatrixQuarantine {
+  snapshotIds: string[];
+  matrixId: string | null;
+  message: string;
+}
+
+export function matrixQuarantine(reason: unknown): MatrixQuarantine | null {
+  if (!(reason instanceof APIError) || reason.status !== 409 || !reason.responseBody || typeof reason.responseBody !== 'object') return null;
+  const body = reason.responseBody;
+  if (!('code' in body) || body.code !== 'matrix_snapshot_evidence_unverified') return null;
+  const snapshotIds = 'snapshot_ids' in body && Array.isArray(body.snapshot_ids) ? body.snapshot_ids.filter((id): id is string => typeof id === 'string' && id.length > 0) : [];
+  const matrixId = 'matrix_id' in body && typeof body.matrix_id === 'string' && body.matrix_id ? body.matrix_id : null;
+  return { snapshotIds, matrixId, message: reason.message };
+}
 
 export function boundedMatrixWidth(width: number): number {
   return Math.max(140, Math.min(640, Number.isFinite(width) ? width : 240));
