@@ -181,7 +181,7 @@ describe('TickerInfoWidget 52W range unit certification', () => {
     expect(within(screen.getByText('52W Low').parentElement!).getByText('40,000.00')).toBeInTheDocument();
     expect(within(screen.getByText('52W High').parentElement!).getByText('60,000.00')).toBeInTheDocument();
     // The range bar is the second consumer of the same certified bounds.
-    const rangeBar = within(screen.getByRole('region', { name: '52W Range' }));
+    const rangeBar = within(screen.getByText('52W Range').closest('div.rounded-xl') as HTMLElement);
     expect(rangeBar.getByText('40,000.00')).toBeInTheDocument();
     expect(rangeBar.getByText('60,000.00')).toBeInTheDocument();
   });
