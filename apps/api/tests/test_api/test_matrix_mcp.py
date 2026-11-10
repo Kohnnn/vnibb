@@ -221,6 +221,26 @@ async def test_http_missing_frozen_evidence_is_distinct_from_store_outage(
 
 
 @pytest.mark.asyncio
+async def test_matrix_mcp_refuses_unverified_frozen_sector_value(matrix_http, matrix_store):
+    fixture, factory = matrix_store
+    args = selection_args(fixture)
+    async with factory() as db:
+        stored = await db.get(AppKeyValue, f"matrix:snapshot:{args['snapshot_id']}")
+        value = copy.deepcopy(stored.value)
+        snapshot = value["snapshot"]
+        snapshot["playbook_id"] = "insurer"
+        selected = next(cell for cell in snapshot["cells"] if cell["result_id"] == args["result_ids"][0])
+        selected["dimension_id"] = "insurance"
+        selected["payload"]["metrics"][0]["key"] = "insurance_premiums"
+        stored.value = value
+        await db.commit()
+    async with connected_client(matrix_http, signed_token()) as (session, _):
+        result = await session.call_tool("get_matrix_selection", args)
+        assert result.structuredContent is None
+        assert "matrix_snapshot_evidence_unverified" in error_text(result)
+
+
+@pytest.mark.asyncio
 async def test_matrix_export_rights_default_deny_exact_source_and_synthetic(
     matrix_http, matrix_store, monkeypatch
 ):

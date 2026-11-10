@@ -41,7 +41,11 @@ from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.ai_context_service import AIContextService
 from vnibb.services.financial_service import admit_statement_rows
-from vnibb.services.matrix_service import require_matrix_export_rights, resolve_matrix_selection
+from vnibb.services.matrix_service import (
+    MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED,
+    require_matrix_export_rights,
+    resolve_matrix_selection,
+)
 from vnibb.services.mongo_market_data_service import MongoReadError, get_mongo_market_data_service
 from vnibb.services.vietcap_financials import decode_vietcap_financial_record
 
@@ -1742,6 +1746,8 @@ async def get_matrix_selection(
         }.get(exc.status_code, "Matrix selection unavailable")
         if exc.status_code == 409 and str(exc.detail).startswith("evidence_not_found:"):
             message = "evidence_not_found: Matrix frozen evidence not found"
+        if exc.status_code == 409 and isinstance(exc.detail, dict) and exc.detail.get("code") == MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED:
+            message = f"{MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED}: {exc.detail['message']}"
         raise ToolError(message) from None
     except Exception:
         raise ToolError("Matrix selection unavailable") from None

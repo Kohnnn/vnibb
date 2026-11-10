@@ -2,6 +2,24 @@
 
 Owning backlog: [project-work-backlog.md](../project-work-backlog.md); tracker [#241](https://github.com/Kohnnn/vnibb/issues/241). This is evidence, not a second task list. Local integration branch codex/project-integration-20261110 was based on 401caae779b39943ec97f361ccb87c5cb78e1fa9. A source commit is not a serving identity. No provider acquisition, production mutation, scheduler activation, credential rotation, deployment, external-client transfer or human Send occurred in this implementation run. Publication remains held on the source-data incident/history disposition and a proven no-preview-deployment route.
 
+## Local repair evidence
+
+Independent review applies only to the listed slice, not the full integration. Worker checks precede integration unless explicitly labeled parent-run; final integrated verification is recorded separately. Local merges do not close the corresponding GitHub release or operational gates.
+
+| Repair | Reviewed leaf / correction | Exercised evidence | Remaining boundary |
+|---|---|---|---|
+| Provider consumer/lifecycle boundary | `ad9f70dc`, correction `47061a1f` | Worker: 389 focused parity passes, 1 skipped; 52 reference checks; 22 final affected-path checks; repaired `scripts/recover_screener_selfcheck.py` exit 0. Independent review accepted the correction. | Final integration gate; no new DNSE adapter or source permission. |
+| DNSE command-only refusal | `090ffbb9` | Worker: 24 cold-process cases across four environments; standalone help exits 0, acquisition/malformed invocations refuse with 2. Independent review approved. | Private incident/history disposition, credential delivery/rotation, source semantics/rights and no-preview publication route. |
+| Mongo/Redis health and Redis startup | `db36daec` | Worker: four focused passes plus disposable authenticated Mongo/Redis/Compose checks, special passwords, failure/recovery and Redis persistence. Independent review approved. | Authorized operator rollout; upstream Mongo empty-volume `jq --arg` credential exposure is not fixed. |
+| Responsive and compact ticker integration | `3c30a5c7` | Worker: 29 ticker and 47 dialog Jest cases; 15 Chromium/Firefox/WebKit interactions; eight Chromium wordmark viewport/theme cases. Independent review approved. | Actual TradingView interaction and full integrated state/reload matrix; 13 imported CRLF warnings preserved. |
+| Reported-growth precedence | `12a9f30` | Parent: approved existing virtualenv ran the public endpoint regression on the exact candidate, exit 0, 13 passed. Corrective delta independently reviewed. | Final integration; no claim of recovered numerical truth. |
+| Yearly FX precedence/settings | `c784292d` | Worker: 15 focused context/settings cases. Independent review approved local > admin > built-in annual > global precedence and preservation of saved overrides. | Broader FX adoption and legacy auto-saved defaults remain explicitly limited. |
+| Valuation request cancellation | `faf34860` | Worker: four ratio-history cases through actual query hooks and the shared fetch transport; ticker switch and unmount abort obsolete requests. Independent review approved. | Retained-only reader/warnings and dashboard browser acceptance are separate. |
+| Brand icon description | `6d0f3d04` | Parent reviewed the one-line factual correction; worker Chromium `/brand` at 390 px had no document overflow. | Approval linkage, owner content and editable report/deck disposition remain open. |
+
+The parent growth command was run in `implement-growth-20261110/apps/api`: `env -i HOME=/tmp PATH=/usr/bin:/bin PYTHONPATH=. /mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb/apps/api/.venv/bin/python -m pytest tests/test_api/test_equity_ratio_helpers.py::test_ratio_endpoint_prefers_reported_growth_and_only_derives_admitted_missing_values -q`. Its default conftest used SQLite and a mocked SDK; no provider or canonical store was contacted.
+
+
 ## Preserved work and operational access
 
 Original codex/195-e2e-production-fix checkout at64ee0e70 and its backup/ListingBrowser/Matrix/readability work, mixed306-file tickets-20261108 WIP at72737ea6, historical incomplete merge and stashes were preserved. No bulk import/reset/cleanup. The Mongo/Redis hardening used a separate worktree and did not import the optional backup experiment.
@@ -27,6 +45,8 @@ The local DNSE addition is a stdlib-only operator-facing refusal CLI, not a prov
 Existing capability context, evidence-grounded follow-ups, Sheets bounded responses and recipient-only sharing have source/test seams; external Sheets use, real issuer identities, service-worker deployment and source export permission remain distinct. Positioning stays registered but explicitly unavailable, with saved layouts retained and no flow requests; activation needs rights and bounded cost/coverage evidence. Existing Big Flow distinguishes failure from truly empty and cached refresh failure. FX adoption remains partial outside evidenced callsites, and built-in annual FX rates are assumptions rather than verified market quotes; point/index values remain native. Broader AI/export FX and all-endpoint adjustment/resize acceptance are not certified.
 
 Owner deferred unapproved journal, optimizer, strategy editor, deeper relative-risk, persistent document-library expansion, new IQ-host probes and individual P&L ranking until concrete specs and legitimate source/method/permission. This does not defer concrete existing defects. Trading-host public-data POST does not prove IQ-host POST support; IQ remains unknown. Aggregate flow is not identifiable-person P&L. Current chat Markdown export omits artifacts and panel lacks interactive sorting/chart export; accepted behavior and redistribution rights are still needed.
+
+W05 needs no new workflow implementation: the dashboard widget has no trusted-workflow state; the sidebar's ticker/session-change effect clears selected workflow and active request identity without resetting its separate composer input. On integration `d6178122`, `pnpm exec jest src/components/ui/AICopilot.matrix.test.tsx -t 'same-requestId symbol/session switch clears the disclosure and no stale workflow is sent' --runInBand` exited 0 (1 passed, 18 skipped). The case types fresh text after the switch, so it proves identity clearing, not preservation of authored text. The latter is source-only evidence; no model request, automatic submission or current-release claim.
 
 ## Brand channels and widget dispositions
 

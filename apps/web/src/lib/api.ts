@@ -87,12 +87,14 @@ interface FetchOptions extends RequestInit {
 export class APIError extends Error {
     status?: number;
     statusText?: string;
+    responseBody?: unknown;
 
-    constructor(message: string, status?: number, statusText?: string) {
+    constructor(message: string, status?: number, statusText?: string, responseBody?: unknown) {
         super(message);
         this.name = 'APIError';
         this.status = status;
         this.statusText = statusText;
+        this.responseBody = responseBody;
     }
 }
 
@@ -258,7 +260,7 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
                 errorMessage = 'You don\'t have permission to access this data.';
             }
 
-            throw new APIError(errorMessage, response.status, response.statusText);
+            throw new APIError(errorMessage, response.status, response.statusText, errorData);
         }
 
         return response.json();
