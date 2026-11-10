@@ -638,10 +638,10 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
             exportData={exportData}
             exportFilename={`financials_${symbol}_${activeTab}_${period}`}
         >
-            <div className="h-full flex flex-col bg-secondary text-primary font-sans select-none overflow-hidden">
+            <div className="flex h-full min-h-48 min-w-0 flex-col bg-secondary text-primary font-sans select-none">
                 {/* Controls */}
-                <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/70 px-2 py-1 shrink-0">
-                    <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/70 px-2 py-1 shrink-0">
+                    <div className="flex min-w-0 max-w-full gap-1 overflow-x-auto scrollbar-hide">
                         {tabs.map((tab) => {
                             const Icon = tab.icon;
                             return (
@@ -662,7 +662,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                         })}
                     </div>
 
-                    <div className="flex items-center gap-2 ml-auto">
+                    <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-2">
                         <div className="flex bg-muted/30 rounded p-0.5 gap-0.5">
                             {periodOptions.map((opt) => (
                                 <button
@@ -691,7 +691,7 @@ function FinancialsWidgetComponent({ id, symbol, config, hideHeader, onRemove, o
                 </div>
 
                 {/* Table Area with Horizontal Scroll */}
-                <div className="flex-1 overflow-auto p-0.5 scrollbar-thin scrollbar-thumb-[var(--border-color)]">
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto p-0.5 scrollbar-thin scrollbar-thumb-[var(--border-color)]">
                     {tableData && (tableData.periodIssues.length > 0 || tableData.invalidPeriodCount > 0) && (
                         <div className="px-2 py-1 text-[10px] text-[var(--color-warning)]">
                             Fiscal period resolution: {tableData.periodIssues.filter((issue) => issue.reason === 'ambiguous-basis').length} conflicting periods excluded; {tableData.periodIssues.filter((issue) => issue.reason === 'duplicate-identical').length} identical repeats collapsed; {tableData.invalidPeriodCount} undated rows excluded.

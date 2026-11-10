@@ -127,14 +127,14 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
   );
 
   return (
-    <div className="h-full space-y-3 overflow-auto">
+    <div className="@container h-full min-w-0 space-y-3 overflow-auto">
       <WidgetMeta updatedAt={updatedAt} fetchedAt={dataUpdatedAt || null} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="Fundamental analysis" align="right" />
       {partialWarning}
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-3 @4xl:grid-cols-2">
         {valuation && (
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-            <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Valuation</div>
                 <div className="mt-2 text-2xl font-black text-[var(--text-primary)]">{valuationVerified ? money(valuation.intrinsic_value) ?? 'n/a' : 'n/a'}</div>
@@ -145,7 +145,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
               </div>
             </div>
             {!valuationVerified && <p role="status" className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-xs text-[var(--color-warning)]">{comparisonUnavailableReason}</p>}
-            <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="mt-3 grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
               <Metric label="MoS" value={valuationVerified ? pct(valuation.margin_of_safety) : null} />
               <Metric label="Method" value={textValue(valuation.valuation_method)?.toUpperCase()} />
               <Metric label="P/E" value={ratio(valuation.pe)} />
@@ -156,8 +156,8 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
         )}
 
         {competitiveAdvantage && (
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
-            <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Moat</div>
                 <div className="mt-2 text-2xl font-black capitalize text-[var(--text-primary)]">{competitiveAdvantage.moat ?? 'n/a'}</div>
@@ -166,7 +166,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
                 {ratio(competitiveAdvantage.moat_score, '/100') ?? 'score n/a'}
               </div>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <div className="mt-3 grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
               <Metric label="GM stable" value={ratio(moatFactors.gross_margin_stability, '/100')} />
               <Metric label="Coverage" value={ratio(moatFactors.interest_coverage, 'x')} />
               <Metric label="ROIC spread" value={pct(moatFactors.roic_spread)} />
@@ -190,7 +190,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
         <Metric label="ROE" value={pct(qualityMetrics.roe)} />
         <Metric label="ROA" value={pct(qualityMetrics.roa)} />
         <Metric label="Net margin" value={pct(qualityMetrics.net_margin)} />
@@ -202,14 +202,14 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
       </div>
 
       {(strengths.length > 0 || risks.length > 0) && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-3 @lg:grid-cols-2">
           <PointList title="Strengths" items={strengths} tone="positive" />
           <PointList title="Risks" items={risks} tone="negative" />
         </div>
       )}
 
       {sections.length > 0 && (
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+        <div className="grid min-w-0 grid-cols-1 gap-2 @lg:grid-cols-2">
           {sections.map((item, index) => (
             <div key={`${itemTitle(item)}-${index}`} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/50 px-3 py-2">
               <div className="flex items-center justify-between gap-3">
@@ -227,9 +227,9 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
 
 function Metric({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/50 px-3 py-2">
-      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">{label}</div>
-      <div className="mt-1 text-sm font-black text-[var(--text-primary)]">{value ?? 'n/a'}</div>
+    <div className="min-w-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/50 px-3 py-2">
+      <div className="break-words text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">{label}</div>
+      <div className="mt-1 break-words text-sm font-black text-[var(--text-primary)]">{value ?? 'n/a'}</div>
     </div>
   );
 }

@@ -46,6 +46,7 @@ export function TabBar(_props: TabBarProps) {
     const deleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const createTabLockRef = useRef(false);
     const createTabTimeoutRef = useRef<number | null>(null);
+    const tabStripRef = useRef<HTMLDivElement>(null);
 
     const {
         activeDashboard,
@@ -59,6 +60,38 @@ export function TabBar(_props: TabBarProps) {
         recentlyClosedTabs,
     } = useDashboard();
     const shortcutModifier = getShortcutModifierLabel();
+    const activeTabId = activeTab?.id;
+
+    // Keep the active tab visible inside the horizontal strip. Only the
+    // container's own scrollLeft moves (never the page), and only when the
+    // active tab is out of view, so manual scrolling is preserved.
+    const revealActiveTab = useCallback(() => {
+        const strip = tabStripRef.current;
+        const tabElement = strip?.querySelector<HTMLElement>('[aria-current="page"]');
+        if (!strip || !tabElement) return;
+        const slack = 4;
+        const offset = tabElement.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+        const tabWidth = tabElement.offsetWidth;
+        const fits = tabWidth <= strip.clientWidth - slack * 2;
+        if (fits && offset >= slack && offset + tabWidth <= strip.clientWidth - slack) return;
+        const overshoot = fits && offset >= slack
+            ? offset + tabWidth - strip.clientWidth + slack
+            : offset - slack;
+        strip.scrollLeft = Math.max(0, Math.min(strip.scrollWidth - strip.clientWidth, strip.scrollLeft + overshoot));
+    }, []);
+
+    useEffect(() => {
+        revealActiveTab();
+    }, [activeTabId, revealActiveTab]);
+
+    // Phone/desktop resizes change the strip width; re-reveal once layout lands.
+    useEffect(() => {
+        const strip = tabStripRef.current;
+        if (!strip || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(() => revealActiveTab());
+        observer.observe(strip);
+        return () => observer.disconnect();
+    }, [revealActiveTab]);
 
     // Focus input when editing starts
     useEffect(() => {
@@ -338,7 +371,7 @@ export function TabBar(_props: TabBarProps) {
             <div data-tour="tab-bar" className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]" {...swipeHandlers}>
                 <div className="flex items-center gap-0.5 px-2 sm:px-3">
                     {/* Tabs */}
-                    <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
+                    <div ref={tabStripRef} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scrollbar-none">
                         {sortedTabs.map((tab, index) => {
                             const isActive = activeTab?.id === tab.id;
                             const isEditing = editingTabId === tab.id;
@@ -461,16 +494,14 @@ export function TabBar(_props: TabBarProps) {
                                     });
                                     setIsManageModalOpen(true);
                                 }}
-                                className="hidden shrink-0 rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] sm:block"
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] sm:h-auto sm:w-auto sm:p-1.5"
                                 title="Manage tabs"
+                                aria-label="Manage tabs"
                             >
                                 <Settings2 size={14} />
                             </button>
                         </>
                     ) : null}
-
-                    {/* Spacer */}
-                    <div className="flex-1" />
 
                     {/* Keyboard shortcuts hint */}
                     <div className="mr-2 hidden shrink-0 items-center gap-2 text-[10px] text-[var(--text-muted)] xl:flex">

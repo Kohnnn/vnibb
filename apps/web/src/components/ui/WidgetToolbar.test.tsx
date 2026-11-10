@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { WidgetToolbar } from './WidgetToolbar';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
+import { TickerCombobox } from '@/components/widgets/TickerCombobox';
 
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
 
@@ -60,6 +61,61 @@ test('compact controls retain parameter edits and settings access, returning foc
   act(() => { width = 900; observers.forEach(callback => callback()); });
   expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('5Y');
   expect(screen.queryByRole('button', { name: 'More controls for Long company price history' })).not.toBeInTheDocument();
+});
+
+test('ticker popup escapes a compact panel, stays viewport-bound, and closes before its parent', () => {
+  jest.useFakeTimers();
+  jest.replaceProperty(window, 'innerWidth', 390);
+  jest.replaceProperty(window, 'innerHeight', 600);
+  jest.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(288);
+  jest.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(300);
+  jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.getAttribute('aria-label') === 'Select ticker') {
+      return { width: 44, height: 40, top: 520, left: 340, bottom: 560, right: 384, x: 340, y: 520, toJSON() {} };
+    }
+    return { width, height: 36, top: 0, left: 0, bottom: 36, right: width, x: 0, y: 0, toJSON() {} };
+  });
+
+  const onSelect = jest.fn();
+  function Harness() {
+    const [open, setOpen] = useState(false);
+    const anchorRef = useRef<HTMLButtonElement>(null);
+    return <WidgetToolbar title="Company" showSymbolSelector tickerSelector={<>
+      <button ref={anchorRef} type="button" aria-label="Select ticker" onClick={() => setOpen(value => !value)}>VNM</button>
+      <TickerCombobox anchorRef={anchorRef} isOpen={open} onClose={() => setOpen(false)} onSelect={onSelect} />
+    </>} />;
+  }
+
+  render(<Harness />);
+  const more = screen.getByRole('button', { name: 'More controls for Company' });
+  fireEvent.click(more);
+  const panel = screen.getByRole('dialog', { name: 'Company controls' });
+  const ticker = within(panel).getByRole('button', { name: 'Select ticker' });
+  fireEvent.click(ticker);
+  act(() => jest.runOnlyPendingTimers());
+  const popup = screen.getByRole('dialog', { name: 'Select ticker' });
+  expect(popup.parentElement).toBe(document.body);
+  expect(popup).toHaveStyle({ left: '94px', top: '220px', maxHeight: '512px' });
+  const search = within(popup).getByRole('textbox', { name: 'Search ticker' });
+  expect(search).toHaveFocus();
+  fireEvent.mouseDown(search);
+  fireEvent.click(search);
+  expect(panel).toBeInTheDocument();
+  fireEvent.change(search, { target: { value: 'FPT' } });
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(onSelect).toHaveBeenCalledWith('FPT');
+  expect(panel).toBeInTheDocument();
+
+  fireEvent.click(ticker);
+  expect(within(screen.getByRole('dialog', { name: 'Select ticker' })).getByRole('textbox')).toHaveFocus();
+  ticker.focus();
+  fireEvent.keyDown(ticker, { key: 'Escape' });
+  expect(screen.queryByRole('dialog', { name: 'Select ticker' })).not.toBeInTheDocument();
+  expect(ticker).toHaveFocus();
+  fireEvent.keyDown(ticker, { key: 'Escape' });
+  expect(screen.queryByRole('dialog', { name: 'Company controls' })).not.toBeInTheDocument();
+  expect(more).toHaveFocus();
+  jest.useRealTimers();
 });
 
 test('toolbar uses its grid cell width when expanded content overflows the header', () => {

@@ -207,34 +207,39 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
       widgetId={id}
       hideHeader={hideHeader}
     >
-      <div className="flex flex-col h-full space-y-2">
-        <WidgetMeta
-          updatedAt={sourceUpdatedAt}
-          fetchedAt={quoteUpdatedAt}
-          isFetching={isFetching && hasQuote}
-          isCached={Boolean(quote?.cached) || isFallback}
-          note={
-            quote?.price_unit !== 'VND'
-              ? priceUnitLabel
-              : quote?.cached
-                ? 'Cached response'
-                : unitConfig.display === 'USD'
-                  ? 'Price and value fields shown in USD using current FX defaults'
-                  : undefined
-          }
-          sourceLabel="Quote + profile"
-          className="justify-between"
-        />
-
-        <div className="flex items-start justify-between rounded-2xl border border-[var(--color-state-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5 animate-in fade-in duration-500">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-[var(--color-accent-primary)]">
-              {symbol}
-            </span>
+      <div role="region" aria-label={`${symbol} ticker information`} tabIndex={0} className="h-full min-h-0 min-w-0 space-y-2 overflow-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
+        <div role="group" aria-label={`${symbol} quote and freshness`} tabIndex={0} className="flex flex-nowrap items-center gap-x-2 overflow-x-auto scrollbar-hide focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
+          <span className="inline-flex shrink-0 items-baseline gap-x-1">
             <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
               {formatPriceValueForUnit(price, priceDisplayConfig)}
             </span>
             <span className="text-[9px] text-[var(--text-muted)]">{priceUnitLabel}</span>
+          </span>
+          <WidgetMeta
+            updatedAt={sourceUpdatedAt}
+            fetchedAt={quoteUpdatedAt}
+            isFetching={isFetching && hasQuote}
+            isCached={Boolean(quote?.cached) || isFallback}
+            isStale={Boolean(quote?.stale || (hasQuote && (quote?.error || quoteError)))}
+            note={
+              quote?.price_unit !== 'VND'
+                ? priceUnitLabel
+                : quote?.cached
+                  ? 'Cached response'
+                  : unitConfig.display === 'USD'
+                    ? 'Price and value fields shown in USD using current FX defaults'
+                    : undefined
+            }
+            sourceLabel="Quote + profile"
+            className="shrink-0 flex-nowrap"
+          />
+        </div>
+
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 rounded-2xl border border-[var(--color-state-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5 animate-in fade-in duration-500">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-[var(--color-accent-primary)]">
+              {symbol}
+            </span>
             <div
               className={cn(
                 'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit border',
@@ -255,7 +260,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
             {[
             { label: 'Day High', value: formatPriceValueForUnit(dayHigh, priceDisplayConfig) },
             { label: 'Day Low', value: formatPriceValueForUnit(dayLow, priceDisplayConfig) },
@@ -272,13 +277,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
           ].slice(0, 8).map((item, i) => (
             <div
               key={i}
-              className="group flex min-h-[56px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"
+              className="group flex min-h-[56px] min-w-0 flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"
             >
               <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest group-hover:text-[var(--color-accent-primary)] transition-colors">
                 {item.label}
               </div>
               <div className={cn(
-                'mt-1 text-sm font-mono font-semibold tabular-nums',
+                'mt-1 break-words text-sm font-mono font-semibold tabular-nums',
                 item.value === '--' ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
               )}>
                 {item.value || '--'}
@@ -290,7 +295,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               )}
             </div>
           ))}
-          <details className="col-span-2 text-[10px] text-[var(--text-muted)]">
+          <details className="col-span-full text-[10px] text-[var(--text-muted)]">
             <summary className="cursor-pointer">Market cap provenance</summary>
             <p>{marketCapExplanation(marketCap)}</p>
           </details>
@@ -320,7 +325,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">Company Profile</span>
           </div>
           <div
-            className="text-xs font-bold text-[var(--text-secondary)] line-clamp-1 hover:text-[var(--text-primary)] transition-colors cursor-default"
+            className="break-words text-xs font-bold text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-default"
             title={companyName}
           >
             {companyName || 'Company information unavailable'}
