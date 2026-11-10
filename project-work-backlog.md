@@ -8,6 +8,8 @@ This is a **cross-project index**, not a replacement for the dated plans, issue 
 
 Archive consultations cover all 37 indexed sessions below, but substantial middles were dropped in several transcripts. This is a best-supported reconstruction of recovered material, **not a claim that every historical turn or request was recovered**. Superseded historical open/draft states are not current status. No source acquisition, credential handling, production change, merge, deployment or issue mutation is authorized by this index. Source rights, human actions and production operations remain separate point-of-use gates.
 
+Local execution evidence: [Continuing work evidence](docs/CONTINUING_WORK_EVIDENCE_2026-11-10.md) records reviewed repairs, exact verification failures/corrections and remaining operational gates. This historical index does not mark release acceptance from local merges or fixtures; preserve the per-row owners and prerequisites below.
+
 ## 2. Immediate queue
 
 Read these as navigation to the single owning rows below, **not duplicate tasks**:
