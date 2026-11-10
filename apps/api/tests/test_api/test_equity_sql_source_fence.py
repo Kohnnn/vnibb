@@ -94,7 +94,7 @@ async def test_ratio_sql_fences_issuer_before_limit(legacy_db, monkeypatch, endp
         response = await equity.get_financial_ratios.__wrapped__("FPT", "year", db=legacy_db)
         actual = [(row.period, row.pe) for row in response.data]
     else:
-        response = await equity.get_ratio_history.__wrapped__(
+        response = await equity.get_ratio_history(
             "FPT", ratios="pe", period="year", limit=len(expected) or 1, db=legacy_db,
         )
         actual = [(row["period"], row["pe"]) for row in response.data]
