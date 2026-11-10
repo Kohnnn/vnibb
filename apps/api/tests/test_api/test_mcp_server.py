@@ -456,6 +456,17 @@ def test_stock_price_serialization_respects_index_and_explicit_unknown_units(
     assert result["source"] == row["source"]
 
 
+def test_non_price_serialization_withholds_unverified_interest_without_price_unit():
+    row = {"symbol": "FPT", "source": "VCI", "interest_coverage": 12}
+
+    result = server._serialize_row(row, model=server.FinancialRatio)
+
+    assert "price_unit" not in result
+    assert result["interest_coverage"] is None
+    assert result["unavailable_metrics"]["interest_coverage"] == "interest_inputs_unverified"
+    assert result["raw_observation"]["interest_coverage"] == 12
+
+
 @pytest.mark.asyncio
 async def test_financial_corpus_filters_iq_source_and_fiscal_variant(monkeypatch):
     fake = _FakeMongoService()

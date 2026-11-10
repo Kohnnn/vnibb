@@ -6807,6 +6807,11 @@ async def get_financial_ratios(
         # untouched until the single final admission pass.
         from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
         for item in mongo_ratio_rows:
+            for metric in ("revenue_growth", "earnings_growth"):
+                value = getattr(item, metric)
+                if value is not None and not math.isfinite(value):
+                    setattr(item, metric, None)
+                    item.ratio_units.pop(metric, None)
             for metric in PERCENT_RATIO_FIELDS:
                 if item.ratio_units.get(metric) != "percent":
                     if getattr(item, metric) is not None:
@@ -6901,6 +6906,14 @@ async def get_financial_ratios(
         )
     elif primary_error is not None:
         acquisition_error = f"IQ financial source unavailable: {primary_error}"
+
+    for rows in (provider_ratio_rows, db_ratio_rows):
+        for item in rows:
+            for metric in ("revenue_growth", "earnings_growth"):
+                value = getattr(item, metric)
+                if value is not None and not math.isfinite(value):
+                    setattr(item, metric, None)
+                    item.ratio_units.pop(metric, None)
 
     data = _merge_ratio_row_collections(
         provider_ratio_rows,

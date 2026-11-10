@@ -277,7 +277,7 @@ def _compose_auth_services(name: str, tmp_path: Path, password: str) -> dict:
     [("docker-compose.oracle.yml", "mongo"), ("docker-compose.oracle.yml", "redis"),
      ("docker-compose.data.local.yml", "mongo")],
 )
-def test_compose_auth_probes_keep_passwords_out_of_process_arguments(
+def test_compose_auth_probes_keep_passwords_private_and_report_client_failure(
     name: str, service: str, tmp_path: Path,
 ) -> None:
     password = os.urandom(12).hex() + "'\"\\$!"
@@ -299,6 +299,11 @@ def test_compose_auth_probes_keep_passwords_out_of_process_arguments(
     assert result.returncode == 0
     exposed = password.encode() in captured.read_bytes()
     assert not exposed, f"{service} probe exposed its password in argv"
+
+    client = fake_bin / ("mongosh" if service == "mongo" else "redis-cli")
+    client.write_text("#!/bin/sh\nexit 42\n")
+    failed = subprocess.run(["sh", "-c", probe[1].replace("$$", "$")], env=env, capture_output=True)
+    assert failed.returncode != 0, f"{service} probe reported a failed client as healthy"
 
 
 def test_redis_compose_startup_and_health_authenticate_special_password(tmp_path: Path) -> None:
