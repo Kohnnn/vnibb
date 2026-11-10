@@ -11,6 +11,7 @@ from sqlalchemy import desc, or_, select
 
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
+from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
 from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.price_units import persisted_price_record
@@ -23,7 +24,11 @@ from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_quality import is_market_business_day
-from vnibb.services.financial_service import admit_statement_rows
+from vnibb.services.financial_service import (
+    _build_ytd_snapshot,
+    admit_statement_rows,
+    build_ttm_statement_rows,
+)
 from vnibb.services.vnibb_mcp_client_service import vnibb_mcp_client_service
 
 logger = logging.getLogger(__name__)
@@ -751,6 +756,179 @@ def _annotate_source_catalog(
     return source_catalog
 
 
+_STATEMENT_FIELDS = {
+    "income": ("revenue", "gross_profit", "operating_income", "net_income", "eps"),
+    "balance": ("total_assets", "total_liabilities", "total_equity", "cash_and_equivalents", "long_term_debt"),
+    "cashflow": ("operating_cash_flow", "investing_cash_flow", "financing_cash_flow", "free_cash_flow", "dividends_paid", "debt_repayment"),
+}
+
+
+def _statement_period_identity(row: Any) -> tuple[str, int] | None:
+    period = str(row.period or "").strip().upper()
+    period_type = str(row.period_type or "").strip().lower()
+    year, quarter = row.fiscal_year, row.fiscal_quarter
+    annual = re.fullmatch(r"(?:FY)?(20\d{2})", period)
+    quarterly = re.fullmatch(r"(?:Q([1-4])[-_/ ]?(20\d{2})|(20\d{2})[-_/ ]?Q([1-4]))", period)
+    aggregate = re.fullmatch(r"(?:(20\d{2})\s*\(?YTD\)?|TTM(?:[-_ ]?(20\d{2}))?)", period)
+    if annual and period_type == "year" and int(annual[1]) == year and quarter is None:
+        return "year", year
+    if quarterly and period_type == "quarter":
+        period_quarter = int(quarterly[1] or quarterly[4])
+        period_year = int(quarterly[2] or quarterly[3])
+        if (year, quarter) == (period_year, period_quarter):
+            return "quarter", year * 4 + quarter
+    if aggregate and isinstance(year, int) and 2000 <= year <= 2099 and quarter in (1, 2, 3, 4):
+        family = "ytd" if aggregate[1] else "ttm"
+        stated_year = aggregate[1] or aggregate[2]
+        if period_type in ({"year", "quarter", family}) and (not stated_year or int(stated_year) == year):
+            return family, year * 4 + quarter
+    return None
+
+
+def _statement_aggregate_reason(statement: FinancialStatementData, family: str, fields: Sequence[str]) -> str | None:
+    if family not in {"ytd", "ttm"}:
+        return None
+    sources = (statement.raw_data or {}).get("source_rows")
+    if not isinstance(sources, list) or not sources:
+        return "unverified_aggregate_source_periods"
+    try:
+        quarters = [FinancialStatementData.model_validate(item) for item in sources]
+    except ValueError:
+        return "unverified_aggregate_source_periods"
+    identities = [re.fullmatch(r"Q([1-4])-(20\d{2})", str(row.period).upper()) for row in quarters]
+    if any(match is None for match in identities):
+        return "unverified_aggregate_source_periods"
+    quarters = admit_statement_rows(quarters, "quarter")
+    basis = (statement.symbol, statement.statement_type, statement.source, statement.currency,
+             statement.value_unit, statement.consolidation_basis)
+    if any((row.symbol, row.statement_type, row.source, row.currency, row.value_unit,
+            row.consolidation_basis) != basis or row.unavailable_reason for row in quarters):
+        return "incompatible_aggregate_source_basis"
+    if statement.source_periods != [row.period for row in quarters]:
+        return "unverified_aggregate_source_periods"
+    latest = quarters[0]
+    if (latest.fiscal_year, latest.fiscal_quarter) != (statement.fiscal_year, statement.fiscal_quarter):
+        return "unverified_aggregate_source_periods"
+    if family == "ttm":
+        computed = build_ttm_statement_rows(quarters, statement.statement_type)
+        aggregate = computed[0] if computed else None
+    else:
+        ordered = [(row.fiscal_year, row.fiscal_quarter) for row in quarters]
+        expected = [(statement.fiscal_year, number) for number in range(statement.fiscal_quarter, 0, -1)]
+        if statement.statement_type != "balance" and not (len(quarters) == 1 and latest.flow_basis == "cumulative_ytd") and ordered != expected:
+            return "unverified_aggregate_source_periods"
+        aggregate = _build_ytd_snapshot(statement.symbol, statement.statement_type, statement.fiscal_year, quarters)
+    if aggregate is None or aggregate.unavailable_reason:
+        return (aggregate.unavailable_reason if aggregate else None) or "unverified_aggregate_source_periods"
+    if any(getattr(statement, field) is not None and getattr(statement, field) != getattr(aggregate, field) for field in fields):
+        return "aggregate_disagrees_with_source_periods"
+    return None
+
+
+def _admit_financial_context_row(row: Any, symbol: str, statement_type: str, family: str) -> dict[str, Any]:
+    fields = _STATEMENT_FIELDS[statement_type]
+    section = {name: getattr(row, name, None) for name in ("period", "period_type", "fiscal_year", "fiscal_quarter", *fields)}
+    section["source"] = row.source
+    raw = row.raw_data if isinstance(row.raw_data, dict) else {}
+    lineage = raw.get("_financial_lineage") or {}
+    canonical = lineage.get("canonical_data") or {}
+    metadata = {
+        name: canonical.get(name, lineage.get(name))
+        for name in ("currency", "value_unit", "unit_metadata", "consolidation_basis", "flow_basis",
+                     "aggregation_basis", "source_periods", "unavailable_reason")
+        if name in canonical or name in lineage
+    }
+    metadata["unavailable_reason"] = canonical.get("unavailable_reason") or lineage.get("unavailable_reason")
+    if any(evidence.get(name) not in (None, expected)
+           for evidence in (canonical, lineage)
+           for name, expected in (("source", row.source), ("symbol", symbol), ("statement_type", statement_type))):
+        metadata["unavailable_reason"] = "conflicting_statement_source"
+    if canonical.get("period_type") not in (None, row.period_type):
+        metadata["unavailable_reason"] = "conflicting_fiscal_identity"
+    statement = FinancialStatementData(**metadata, **section, symbol=symbol,
+                                       statement_type=statement_type, raw_data=raw)
+    aggregate_reason = _statement_aggregate_reason(statement, family, fields)
+    if aggregate_reason and not statement.unavailable_reason:
+        statement.unavailable_reason = aggregate_reason
+    admitted = admit_statement_rows([statement], "quarter" if family == "quarter" else "year")[0]
+    rejected = {}
+    for field in fields:
+        value = section[field]
+        evidence = admitted.unit_metadata.get(field) or {}
+        reason = admitted.unavailable_reason or evidence.get("unavailable_reason")
+        if not reason and value is not None and field in canonical and canonical[field] != value:
+            reason = "stored_statement_disagrees_with_lineage"
+        if value is not None and (reason or getattr(admitted, field) is None):
+            rejected[field] = reason or "unverified_statement_metric"
+            section[field] = None
+        elif value is None and reason:
+            rejected[field] = reason
+    if rejected:
+        section["raw_observation"] = {name: getattr(row, name, None) for name in fields}
+        section["raw_data"] = raw
+        section["unavailable_metrics"] = rejected
+    if admitted.unavailable_reason:
+        section["unavailable_reason"] = admitted.unavailable_reason
+    elif rejected and all(section[field] is None for field in fields):
+        section["unavailable_reason"] = next(iter(rejected.values()))
+    section["data_status"] = "unavailable" if section.get("unavailable_reason") else "available"
+    for name in ("currency", "value_unit", "consolidation_basis", "flow_basis", "aggregation_basis", "source_periods"):
+        if getattr(admitted, name, None) is not None:
+            section[name] = getattr(admitted, name)
+    return section
+
+
+def _select_financial_context(rows: Sequence[Any], symbol: str, statement_type: str) -> dict[str, Any] | None:
+    families: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for row in rows:
+        if row.source not in ADMITTED_FINANCIAL_SOURCES:
+            continue
+        identity = _statement_period_identity(row)
+        if identity is None:
+            continue
+        family, ordinal = identity
+        families.setdefault(family, []).append((ordinal, _admit_financial_context_row(row, symbol, statement_type, family)))
+    selected = {}
+    fields = _STATEMENT_FIELDS[statement_type]
+    for family, candidates in families.items():
+        newest = max(ordinal for ordinal, _ in candidates)
+        latest = [section for ordinal, section in candidates if ordinal == newest]
+        section = latest[0]
+        basis_names = ("currency", "value_unit", "consolidation_basis", "flow_basis", "aggregation_basis")
+        bases = {tuple(item.get(name) for name in basis_names) for _, item in candidates}
+        if len(bases) > 1 and len(latest) == 1:
+            section = dict(section)
+            if section["data_status"] == "available":
+                section.update({**dict.fromkeys(fields), "data_status": "unavailable", "unavailable_reason": "incompatible_financial_basis"})
+            section["comparison_status"] = "incompatible_financial_basis"
+        if len(latest) > 1:
+            bases = {tuple(item.get(name) for name in basis_names) for item in latest}
+            conflicting = any(len({item[field] for item in latest if item[field] is not None}) > 1 for field in fields)
+            if len(bases) != 1:
+                reason = "incompatible_financial_basis"
+            elif conflicting:
+                reason = "conflicting_source_observations"
+            elif len({item["source"] for item in latest}) > 1:
+                reason = "unverified_financial_revision"
+            else:
+                reason = "conflicting_duplicate_period"
+            section = {**section, **dict.fromkeys(fields), "data_status": "unavailable", "unavailable_reason": reason}
+        historical = [item for ordinal, item in sorted(candidates, key=lambda pair: pair[0], reverse=True) if ordinal < newest]
+        if historical:
+            section = {**section, "historical_observations": historical}
+        selected[family] = section
+    if len(selected) == 1:
+        return next(iter(selected.values()))
+    if selected:
+        # ponytail: keep incomparable report families separate until the caller requests one.
+        return {"data_status": "unavailable", "unavailable_reason": "multiple_financial_period_families", "periods_by_type": selected}
+    if rows:
+        row = rows[0]
+        return {"period": row.period, "period_type": row.period_type, "source": row.source,
+                "data_status": "unavailable", "unavailable_reason": "unverified_statement_period_identity"}
+    return None
+
+
 class AIContextService:
     async def build_runtime_context(
         self,
@@ -827,9 +1005,9 @@ class AIContextService:
 
         fallback_snapshot = await self._build_postgres_snapshot(symbol)
 
-        if primary_snapshot and fallback_snapshot:
-            return self._merge_snapshots(primary_snapshot, fallback_snapshot)
-        return primary_snapshot or fallback_snapshot
+        if primary_snapshot:
+            return self._merge_snapshots(primary_snapshot, fallback_snapshot or {})
+        return fallback_snapshot
 
     def _merge_snapshots(
         self,
@@ -841,9 +1019,6 @@ class AIContextService:
             "company",
             "price_context",
             "ratios",
-            "income_statement",
-            "balance_sheet",
-            "cash_flow",
             "recent_news",
             "foreign_trading",
             "order_flow",
@@ -853,6 +1028,8 @@ class AIContextService:
         ):
             if not merged.get(key):
                 merged[key] = fallback_snapshot.get(key)
+        for key in ("income_statement", "balance_sheet", "cash_flow"):
+            merged[key] = fallback_snapshot.get(key)
         merged["source"] = primary_snapshot.get("source") or fallback_snapshot.get("source")
         return merged
 
@@ -952,51 +1129,12 @@ class AIContextService:
                     .limit(1)
                 )
             ).scalar_one_or_none()
-            income_row = (
-                await session.execute(
-                    select(IncomeStatement)
-                    .where(
-                        IncomeStatement.symbol == symbol,
-                        or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
-                    )
-                    .order_by(
-                        desc(IncomeStatement.fiscal_year),
-                        desc(IncomeStatement.fiscal_quarter),
-                        desc(IncomeStatement.updated_at),
-                    )
-                    .limit(1)
+            financial_rows = {}
+            for statement_type, model in (("income", IncomeStatement), ("balance", BalanceSheet), ("cashflow", CashFlow)):
+                result = await session.execute(
+                    select(model).where(model.symbol == symbol, model.source.in_(ADMITTED_FINANCIAL_SOURCES))
                 )
-            ).scalar_one_or_none()
-            balance_row = (
-                await session.execute(
-                    select(BalanceSheet)
-                    .where(
-                        BalanceSheet.symbol == symbol,
-                        or_(BalanceSheet.source.is_(None), BalanceSheet.source != "issuer_report"),
-                    )
-                    .order_by(
-                        desc(BalanceSheet.fiscal_year),
-                        desc(BalanceSheet.fiscal_quarter),
-                        desc(BalanceSheet.updated_at),
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            cash_row = (
-                await session.execute(
-                    select(CashFlow)
-                    .where(
-                        CashFlow.symbol == symbol,
-                        or_(CashFlow.source.is_(None), CashFlow.source != "issuer_report"),
-                    )
-                    .order_by(
-                        desc(CashFlow.fiscal_year),
-                        desc(CashFlow.fiscal_quarter),
-                        desc(CashFlow.updated_at),
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+                financial_rows[statement_type] = result.scalars().all()
             news_rows = (
                 (
                     await session.execute(
@@ -1075,9 +1213,7 @@ class AIContextService:
                 stock_row,
                 price_rows,
                 ratio_row,
-                income_row,
-                balance_row,
-                cash_row,
+                *financial_rows.values(),
                 news_rows,
                 foreign_trading_rows,
                 order_flow_rows,
@@ -1135,46 +1271,9 @@ class AIContextService:
             }
             if ratio_row
             else None,
-            "income_statement": {
-                "period": getattr(income_row, "period", None),
-                "period_type": getattr(income_row, "period_type", None),
-                "fiscal_year": getattr(income_row, "fiscal_year", None),
-                "fiscal_quarter": getattr(income_row, "fiscal_quarter", None),
-                "revenue": getattr(income_row, "revenue", None),
-                "gross_profit": getattr(income_row, "gross_profit", None),
-                "operating_income": getattr(income_row, "operating_income", None),
-                "net_income": getattr(income_row, "net_income", None),
-                "eps": getattr(income_row, "eps", None),
-            }
-            if income_row
-            else None,
-            "balance_sheet": {
-                "period": getattr(balance_row, "period", None),
-                "period_type": getattr(balance_row, "period_type", None),
-                "fiscal_year": getattr(balance_row, "fiscal_year", None),
-                "fiscal_quarter": getattr(balance_row, "fiscal_quarter", None),
-                "total_assets": getattr(balance_row, "total_assets", None),
-                "total_liabilities": getattr(balance_row, "total_liabilities", None),
-                "total_equity": getattr(balance_row, "total_equity", None),
-                "cash_and_equivalents": getattr(balance_row, "cash_and_equivalents", None),
-                "long_term_debt": getattr(balance_row, "long_term_debt", None),
-            }
-            if balance_row
-            else None,
-            "cash_flow": {
-                "period": getattr(cash_row, "period", None),
-                "period_type": getattr(cash_row, "period_type", None),
-                "fiscal_year": getattr(cash_row, "fiscal_year", None),
-                "fiscal_quarter": getattr(cash_row, "fiscal_quarter", None),
-                "operating_cash_flow": getattr(cash_row, "operating_cash_flow", None),
-                "investing_cash_flow": getattr(cash_row, "investing_cash_flow", None),
-                "financing_cash_flow": getattr(cash_row, "financing_cash_flow", None),
-                "free_cash_flow": getattr(cash_row, "free_cash_flow", None),
-                "dividends_paid": getattr(cash_row, "dividends_paid", None),
-                "debt_repayment": getattr(cash_row, "debt_repayment", None),
-            }
-            if cash_row
-            else None,
+            "income_statement": _select_financial_context(financial_rows["income"], symbol, "income"),
+            "balance_sheet": _select_financial_context(financial_rows["balance"], symbol, "balance"),
+            "cash_flow": _select_financial_context(financial_rows["cashflow"], symbol, "cashflow"),
             "recent_news": _build_news_context(
                 [
                     {
@@ -1275,53 +1374,6 @@ class AIContextService:
                 ]
             ),
         }
-        for key, row, statement_type in (
-            ("income_statement", income_row, "income"),
-            ("balance_sheet", balance_row, "balance"),
-            ("cash_flow", cash_row, "cashflow"),
-        ):
-            section = snapshot[key]
-            if section is None:
-                continue
-            raw_data = getattr(row, "raw_data", None) or {}
-            lineage = raw_data.get("_financial_lineage") or {}
-            canonical = lineage.get("canonical_data") or {}
-            metadata = {
-                name: canonical.get(name, lineage.get(name))
-                for name in (
-                    "currency", "value_unit", "unit_metadata", "consolidation_basis",
-                    "flow_basis", "aggregation_basis", "source_periods", "unavailable_reason",
-                )
-                if name in canonical or name in lineage
-            }
-            metadata["unavailable_reason"] = (
-                canonical.get("unavailable_reason") or lineage.get("unavailable_reason")
-            )
-            source = getattr(row, "source", None)
-            if any(
-                evidence.get(name) not in (None, expected)
-                for evidence in (canonical, lineage)
-                for name, expected in (("source", source), ("symbol", symbol), ("statement_type", statement_type))
-            ):
-                metadata["unavailable_reason"] = "conflicting_statement_source"
-            admitted = admit_statement_rows([
-                FinancialStatementData(**metadata, **section, source=source,
-                    symbol=symbol, statement_type=statement_type, raw_data=raw_data)
-            ], section["period_type"] or "year")[0]
-            rejected = {
-                name: admitted.unavailable_reason or admitted.unit_metadata.get(name, {}).get("unavailable_reason")
-                for name, value in section.items()
-                if name in FinancialStatementData.model_fields
-                and name not in {"fiscal_year", "fiscal_quarter"}
-                and isinstance(value, (int, float)) and getattr(admitted, name) is None
-            }
-            if rejected:
-                section["raw_observation"] = dict(section)
-                section.update(dict.fromkeys(rejected))
-                section["raw_data"] = raw_data
-                section["unavailable_metrics"] = rejected
-                if admitted.unavailable_reason:
-                    section["unavailable_reason"] = admitted.unavailable_reason
         return snapshot
 
     async def _build_postgres_market_snapshot(self) -> dict[str, Any] | None:

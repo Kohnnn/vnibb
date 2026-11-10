@@ -388,7 +388,7 @@ async def test_build_database_snapshot_falls_back_when_vnibb_mcp_fails(monkeypat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
 @pytest.mark.parametrize("rejection", [
-    None, "ambiguous_quarter", "conflicting_identity", "field_rejected",
+    None, "conflicting_identity", "field_rejected", "lineage_disagreement",
     "unknown_currency", "unknown_source_unit", "conflicting_source", "statement_rejected",
 ])
 async def test_postgres_financial_context_withholds_rejected_scalars(
@@ -406,7 +406,7 @@ async def test_postgres_financial_context_withholds_rejected_scalars(
     metric, independent = fields[statement_type]
     canonical = {
         "period": "Q1-2024", "fiscal_year": 2024, "fiscal_quarter": 1,
-        "source": "KBS", "currency": "VND", "value_unit": "VND",
+        "source": "VCI", "currency": "VND", "value_unit": "VND",
         "consolidation_basis": "consolidated", "flow_basis": "single_quarter",
         "aggregation_basis": "reported_quarter", "source_periods": ["Q1-2024"],
         metric: 100.0, independent: 40.0,
@@ -425,16 +425,16 @@ async def test_postgres_financial_context_withholds_rejected_scalars(
         for evidence in canonical["unit_metadata"].values():
             evidence.pop("source_unit")
     if rejection == "conflicting_source":
-        canonical["source"] = "VCI"
+        canonical["source"] = "vietcap"
     if rejection == "statement_rejected":
         canonical["unavailable_reason"] = "unknown_source_unit"
+    if rejection == "lineage_disagreement":
+        canonical[metric] = 999.0
     raw_data = {"_financial_lineage": {"canonical_data": canonical}}
     row = models[statement_type](
         id=995200,
-        symbol="VNM", source="KBS",
-        period="2024" if rejection == "ambiguous_quarter" else "Q1-2024",
-        period_type="quarter", fiscal_year=2024,
-        fiscal_quarter=None if rejection == "ambiguous_quarter" else 1,
+        symbol="VNM", source="VCI", period="Q1-2024",
+        period_type="quarter", fiscal_year=2024, fiscal_quarter=1,
         raw_data=raw_data, **{metric: 100.0, independent: 40.0},
     )
     test_db.add(row)
@@ -459,7 +459,9 @@ async def test_postgres_financial_context_withholds_rejected_scalars(
     assert section[metric] is None
     assert section["raw_observation"][metric] == 100.0
     assert section["raw_data"] == raw_data
-    if rejection == "field_rejected":
+    if rejection in {"field_rejected", "lineage_disagreement"}:
+        if rejection == "lineage_disagreement":
+            assert section["unavailable_metrics"][metric] == "stored_statement_disagrees_with_lineage"
         assert section[independent] == 40.0
     else:
         assert section[independent] is None
@@ -472,3 +474,229 @@ async def test_postgres_financial_context_withholds_rejected_scalars(
             assert section["unavailable_metrics"][independent] == reason
         else:
             assert section["unavailable_reason"]
+
+
+def _financial_row(model, *, row_id, period, source="VCI", value=100.0,
+                   field="revenue", second_field="net_income", second_value=-1.0,
+                   reason=None, period_type=None, canonical_changes=None, **changes):
+    import re
+
+    year = int(re.search(r"20\d{2}", period).group())
+    quarter_match = re.search(r"Q([1-4])", period)
+    quarter = int(quarter_match.group(1)) if quarter_match else None
+    period_type = period_type or ("quarter" if quarter else "year")
+    flow_basis = "single_quarter" if quarter else "annual"
+    canonical = {
+        "symbol": "VNM", "source": source, "period": period, "fiscal_year": year,
+        "fiscal_quarter": quarter, "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": flow_basis,
+        "aggregation_basis": "reported_quarter" if quarter else "reported_annual",
+        "source_periods": [period], "unavailable_reason": reason,
+        field: value, second_field: second_value,
+        "unit_metadata": {
+            name: {"source_unit": "VND", "value_unit": "VND"}
+            for name in (field, second_field)
+        },
+    }
+    canonical.update(canonical_changes or {})
+    return model(id=row_id, symbol="VNM", source=source, period=period, period_type=period_type,
+                 fiscal_year=year, fiscal_quarter=quarter,
+                 raw_data={"_financial_lineage": {"canonical_data": canonical}},
+                 **{field: value, second_field: second_value}, **changes)
+
+
+async def _financial_runtime(monkeypatch, test_db):
+    from vnibb.services import ai_context_service
+
+    class SessionContext:
+        async def __aenter__(self):
+            return test_db
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(ai_context_service, "async_session_maker", SessionContext)
+    monkeypatch.setattr(ai_context_service.settings, "vnibb_mcp_url", "")
+    context = await AIContextService().build_runtime_context(
+        message="Review VNM", history=[], client_context={"symbol": "VNM"}
+    )
+    return context["market_context"][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_source,old_source", [("VCI", "vietcap"), ("vietcap", "VCI")])
+@pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
+async def test_financial_runtime_selects_fiscal_recency_and_preserves_signs(
+    monkeypatch, test_db, new_source, old_source, statement_type
+):
+    from datetime import datetime
+    from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+
+    model, section_name, metric, second = {
+        "income": (IncomeStatement, "income_statement", "revenue", "net_income"),
+        "balance": (BalanceSheet, "balance_sheet", "total_assets", "total_equity"),
+        "cashflow": (CashFlow, "cash_flow", "operating_cash_flow", "free_cash_flow"),
+    }[statement_type]
+    test_db.add_all([
+        _financial_row(model, row_id=1001, period="2023", source=old_source, field=metric,
+                       second_field=second, updated_at=datetime(2035, 1, 1)),
+        _financial_row(model, row_id=1002, period="2024", source=new_source, value=0,
+                       field=metric, second_field=second, second_value=-50, updated_at=datetime(2024, 1, 1)),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))[section_name]
+    assert (section["period"], section["source"], section[metric], section[second]) == ("2024", new_source, 0, -50)
+    assert section["historical_observations"][0]["period"] == "2023"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
+async def test_financial_runtime_does_not_promote_older_report_when_newer_rejected(monkeypatch, test_db, statement_type):
+    from vnibb.models.financials import IncomeStatement, BalanceSheet, CashFlow
+
+    model, section_name, metric, second = {
+        "income": (IncomeStatement, "income_statement", "revenue", "net_income"),
+        "balance": (BalanceSheet, "balance_sheet", "total_assets", "total_equity"),
+        "cashflow": (CashFlow, "cash_flow", "operating_cash_flow", "free_cash_flow"),
+    }[statement_type]
+    test_db.add_all([
+        _financial_row(model, row_id=1001, period="2023", field=metric, second_field=second),
+        _financial_row(model, row_id=1002, period="2024", source="vietcap", field=metric,
+                       second_field=second, reason="rejected_newer_report"),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))[section_name]
+    assert section["period"] == "2024"
+    assert section["unavailable_reason"] == "rejected_newer_report"
+    assert section[metric] is None
+    assert section["historical_observations"][0][metric] == 100
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_source", [None, "unknown", "KBS", "issuer_report"])
+async def test_financial_runtime_excludes_unknown_source(monkeypatch, test_db, bad_source):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add_all([
+        _financial_row(IncomeStatement, row_id=1001, period="2023"),
+        _financial_row(IncomeStatement, row_id=1002, period="2024", source=bad_source or "unknown"),
+    ])
+    await test_db.flush()
+    if bad_source is None:
+        # SQLite cannot insert NULL in this ORM schema; the query's IN filter is also
+        # checked explicitly below against a standalone NULL expression.
+        from sqlalchemy import literal, select
+        from vnibb.core.financial_sources import ADMITTED_FINANCIAL_SOURCES
+        assert (await test_db.execute(select(literal(None).in_(ADMITTED_FINANCIAL_SOURCES)))).scalar() is None
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert (section["period"], section["source"]) == ("2023", "VCI")
+
+
+@pytest.mark.asyncio
+async def test_financial_runtime_keeps_incomparable_period_families_separate(monkeypatch, test_db):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add_all([
+        _financial_row(IncomeStatement, row_id=1001, period="2024", value=100),
+        _financial_row(IncomeStatement, row_id=1002, period="Q1-2025", source="vietcap", value=25),
+        _financial_row(IncomeStatement, row_id=1003, period="Q2-2025", value=90, period_type="year"),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert section["unavailable_reason"] == "multiple_financial_period_families"
+    assert section["periods_by_type"]["year"]["period"] == "2024"
+    assert section["periods_by_type"]["quarter"]["period"] == "Q1-2025"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_basis", ["separate", None])
+async def test_financial_runtime_does_not_compare_incompatible_bases(monkeypatch, test_db, new_basis):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add_all([
+        _financial_row(IncomeStatement, row_id=1001, period="2023"),
+        _financial_row(IncomeStatement, row_id=1002, period="2024", source="vietcap",
+                       canonical_changes={"consolidation_basis": new_basis}),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert section["period"] == "2024"
+    assert section["comparison_status"] == "incompatible_financial_basis"
+    assert section["revenue"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_value", [True, False])
+async def test_financial_runtime_withholds_same_period_unproven_revision(monkeypatch, test_db, same_value):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add_all([
+        _financial_row(IncomeStatement, row_id=1001, period="2024", source="VCI", value=100),
+        _financial_row(IncomeStatement, row_id=1002, period="FY2024", source="vietcap",
+                       value=100 if same_value else 101),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert section["revenue"] is None
+    assert section["unavailable_reason"] == (
+        "unverified_financial_revision" if same_value else "conflicting_source_observations"
+    )
+
+
+@pytest.mark.asyncio
+async def test_financial_runtime_withholds_lone_legacy_without_unit_evidence(monkeypatch, test_db):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add(IncomeStatement(id=1001, symbol="VNM", source="VCI", period="2024", period_type="year",
+                                fiscal_year=2024, revenue=100, raw_data={}))
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert section["period"] == "2024"
+    assert section["revenue"] is None
+    assert section["unavailable_reason"] == "unverified_statement_currency_or_unit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("family", ["ttm", "ytd"])
+@pytest.mark.parametrize("case", ["complete", "mixed_source", "missing_quarter"])
+async def test_financial_runtime_validates_aggregate_source_periods(monkeypatch, test_db, family, case):
+    from vnibb.models.financials import IncomeStatement
+
+    periods = [(2024, 2), (2024, 1), (2023, 4), (2023, 3)] if family == "ttm" else [(2024, 2), (2024, 1)]
+    if case == "missing_quarter":
+        periods.pop()
+    quarters = []
+    for index, (year, quarter) in enumerate(periods):
+        period = f"Q{quarter}-{year}"
+        quarters.append({
+            "symbol": "VNM", "statement_type": "income", "period": period,
+            "fiscal_year": year, "fiscal_quarter": quarter,
+            "source": "vietcap" if case == "mixed_source" and index == 1 else "VCI",
+            "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+            "flow_basis": "single_quarter", "aggregation_basis": "reported_quarter",
+            "revenue": 10, "unit_metadata": {"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+        })
+    period = "TTM-2024" if family == "ttm" else "2024 YTD"
+    basis = "trailing_twelve_months" if family == "ttm" else "cumulative_ytd"
+    aggregation = "four_quarter_flow_sum" if family == "ttm" else "year_to_date_flow_sum"
+    canonical = {
+        "symbol": "VNM", "statement_type": "income", "source": "VCI", "period": period,
+        "fiscal_year": 2024, "fiscal_quarter": 2, "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": basis, "aggregation_basis": aggregation,
+        "source_periods": [row["period"] for row in quarters], "revenue": len(quarters) * 10,
+        "unit_metadata": {"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+    }
+    test_db.add(IncomeStatement(
+        id=1001, symbol="VNM", source="VCI", period=period, period_type=family,
+        fiscal_year=2024, fiscal_quarter=2, revenue=len(quarters) * 10,
+        raw_data={"_financial_lineage": {"canonical_data": canonical}, "source_rows": quarters},
+    ))
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    if case == "complete":
+        assert section["data_status"] == "available"
+        assert section["revenue"] == len(quarters) * 10
+    else:
+        assert section["data_status"] == "unavailable"
+        assert section["revenue"] is None
+        assert section["unavailable_reason"]
