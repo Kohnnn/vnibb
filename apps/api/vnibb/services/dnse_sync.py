@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, date, datetime
+from math import isfinite
 from typing import Any
 
 from sqlalchemy import select
@@ -38,11 +39,22 @@ def _dialect_insert():
 
 
 def _price_rows(symbol: str, stock_id: int, bars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Persistable rows; raises ``ProviderError`` on a bar that cannot be proven.
+
+    The finiteness check is repeated here on purpose: ``parse_ohlc`` already
+    rejects NaN/Infinity, and this is the last gate before ``StockPrice.close``,
+    so a non-finite price can never be written even if a caller hand-builds bars.
+    """
     rows = []
     for bar in bars:
         normalized = normalize_price_record({**bar, "symbol": symbol}, source="dnse")
         if normalized["price_unit"] != "VND":
             continue  # Never persist a bar whose scale could not be proven.
+        prices = [normalized[field] for field in ("open", "high", "low", "close")]
+        if not all(isfinite(float(value)) for value in prices):
+            raise dnse.ProviderError(
+                f"DNSE bar for {symbol} on {normalized['time']} has a non-finite price", "dnse"
+            )
         rows.append({
             "stock_id": stock_id,
             "symbol": symbol,
@@ -60,11 +72,45 @@ def _price_rows(symbol: str, stock_id: int, bars: list[dict[str, Any]]) -> list[
     return rows
 
 
+async def _record_refusal(exc: dnse.DNSEConfigError, started: datetime, symbols: list[str],
+                          start: date, end: date) -> None:
+    """Persist a failed receipt for a refused run; never mask the original error.
+
+    The stderr of an operator's shell is gone by morning, so the durable row is
+    what makes a missing/revoked key a truthful unavailable state (#231). The
+    reason is ``exc.reason``, a stable token, never ``str(exc)``. If the database
+    is also unreachable — plausibly why config failed — log and let the caller
+    still see the ``DNSEConfigError``.
+    """
+    receipt = {
+        "sync_type": "dnse_daily_prices",
+        "status": "failed",
+        "refused": exc.reason,
+        "symbols": symbols,
+        "window": {"start": start.isoformat(), "end": end.isoformat()},
+    }
+    try:
+        async with async_session_maker.begin() as session:
+            session.add(SyncStatus(
+                sync_type="dnse_daily_prices",
+                status="failed",
+                started_at=started,
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
+                success_count=0,
+                error_count=1,
+                additional_data=receipt,
+            ))
+    except Exception as write_exc:  # Ambient read-only copy; any failure to record
+        # the refusal must never replace the DNSEConfigError the caller is owed.
+        logger.warning("DNSE refusal receipt could not be written: %s", type(write_exc).__name__)
+
+
 async def sync_daily_prices(symbols: list[str], start: date, end: date) -> dict[str, Any]:
     """Insert missing DNSE daily bars and publish a SyncStatus receipt.
 
     A misconfigured or disabled client fails the whole run before any write,
-    rather than recording one bogus per-symbol error for every ticker. A single
+    rather than recording one bogus per-symbol error for every ticker; the
+    refusal still leaves one ``status='failed'`` receipt behind. A single
     symbol's fetch or persist failure is reported and the run continues.
     """
     insert = _dialect_insert()
@@ -72,6 +118,13 @@ async def sync_daily_prices(symbols: list[str], start: date, end: date) -> dict[
     imported = skipped = 0
     errors: dict[str, str] = {}
     normalized = sorted({symbol.strip().upper() for symbol in symbols if symbol.strip()})
+    try:
+        # Refuse before any per-symbol work or database access, so one run leaves
+        # exactly one receipt whether or not the tickers exist locally.
+        dnse.ensure_configured()
+    except dnse.DNSEConfigError as exc:
+        await _record_refusal(exc, started, normalized, start, end)
+        raise
     async with async_session_maker() as session:
         known = dict((await session.execute(
             select(Stock.symbol, Stock.id).where(Stock.symbol.in_(normalized))
@@ -82,12 +135,14 @@ async def sync_daily_prices(symbols: list[str], start: date, end: date) -> dict[
             continue
         try:
             bars = await dnse.fetch_daily_bars(symbol, start.isoformat(), end.isoformat())
+            rows = _price_rows(symbol, known[symbol], bars)
         except dnse.DNSEConfigError:
-            raise  # Fail the run: every symbol would report the same misconfiguration.
+            raise  # Already receipted above; never write a second row for one run.
         except dnse.ProviderError as exc:
+            # One bad symbol or unusable bar is reported, and the run continues:
+            # it must never abort after earlier symbols already committed.
             errors[symbol] = str(exc)
             continue
-        rows = _price_rows(symbol, known[symbol], bars)
         if not rows:
             continue
         try:

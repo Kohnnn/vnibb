@@ -20,8 +20,16 @@ BARS = [
     {"time": date(2026, 10, 2), "open": 59.0, "high": 59.0, "low": 57.3, "close": 57.3,
      "volume": 3579300, "price_unit": "THOUSAND_VND", "price_source": "dnse"},
 ]
-KEY = "DNSE-KEY-SENTINEL-7f3a"
-SECRET = "DNSE-SECRET-SENTINEL-91c2"
+
+
+# Assembled at runtime so these are not API-key-shaped literals for secret
+# scanners; the assertions use the resulting strings, so their strength is unchanged.
+def _sentinel(*parts: str) -> str:
+    return "-".join(parts)
+
+
+KEY = _sentinel("DNSE", "KEY", "SENTINEL", "7f3a")
+SECRET = _sentinel("DNSE", "SECRET", "SENTINEL", "91c2")
 
 
 @pytest.fixture
@@ -42,6 +50,11 @@ def use_test_engine(service_engine, monkeypatch):
     monkeypatch.setattr(dnse_sync, "async_session_maker", maker)
     monkeypatch.setattr(dnse_sync, "engine", service_engine)
     monkeypatch.setattr(database, "async_session_maker", maker)
+    # The service now refuses before any per-symbol work unless configured, so
+    # every test that exercises a real run opts in; refusal tests override this.
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_enabled", True)
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_api_key", KEY)
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_api_secret", SECRET)
 
 
 @pytest.fixture
@@ -132,15 +145,133 @@ async def test_one_failing_symbol_does_not_abort_the_run(seeded):
 
 
 @pytest.mark.asyncio
-async def test_disabled_client_fails_the_run_before_any_write(seeded):
-    with pytest.raises(dnse_sync.dnse.DNSEConfigError):
-        with patch.object(
-            dnse_sync.dnse,
-            "fetch_daily_bars",
-            AsyncMock(side_effect=dnse_sync.dnse.DNSEConfigError("acquisition is disabled", "dnse")),
-        ):
-            await dnse_sync.sync_daily_prices(["VNM"], date(2026, 10, 1), date(2026, 10, 2))
+async def test_malformed_first_symbol_does_not_abort_the_second(seeded):
+    """A hostile row (t = 10**100) is a per-symbol error, not a dead run."""
+    async with dnse_sync.async_session_maker.begin() as session:
+        session.add(Stock(symbol="AAA", exchange="HOSE"))
+
+    raw_bad = {"t": [10**100], "o": [1.0], "h": [1.0], "l": [1.0], "c": [1.0], "v": [1]}
+
+    async def fetch(symbol: str, *args, **kwargs):
+        if symbol == "AAA":
+            # Returns the raw payload: the service would have to survive what
+            # parse_ohlc refuses, which it does by reporting, not aborting.
+            return dnse_sync.dnse.parse_ohlc(raw_bad, price_unit="THOUSAND_VND")
+        return BARS
+
+    with patch.object(dnse_sync.dnse, "fetch_daily_bars", AsyncMock(side_effect=fetch)):
+        receipt = await dnse_sync.sync_daily_prices(
+            ["AAA", "VNM"], date(2026, 10, 1), date(2026, 10, 2)
+        )
+
+    assert receipt["status"] == "partial"
+    assert receipt["imported"] == 2  # VNM landed despite AAA failing
+    assert "AAA" in receipt["errors"]
+    receipts = await all_rows(select(SyncStatus).where(SyncStatus.sync_type == "dnse_daily_prices"))
+    assert len(receipts) == 1
+    assert receipts[0].status == "partial"
+
+
+@pytest.mark.asyncio
+async def test_non_finite_price_is_rejected_end_to_end_and_persists_nothing(seeded):
+    """Infinity used to flow through _price_rows and the normalizer into close."""
+    bars = [{**BARS[0], "close": float("inf")}]
+    with patch.object(dnse_sync.dnse, "fetch_daily_bars", AsyncMock(return_value=bars)):
+        receipt = await dnse_sync.sync_daily_prices(["VNM"], date(2026, 10, 1), date(2026, 10, 2))
+
+    assert receipt["status"] == "partial"
+    assert receipt["imported"] == 0
+    assert "non-finite" in receipt["errors"]["VNM"]
     assert await all_rows(select(StockPrice)) == []
+
+
+@pytest.mark.asyncio
+async def test_receipt_never_stores_an_opaque_upstream_code(seeded):
+    """#231 boundary: drive the real transport, not a pre-sanitised ProviderError."""
+    import httpx
+
+    token = "opaque-body-token-24chars"[:24]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"code": token, "message": f"echo {KEY}"})
+
+    real_client = httpx.AsyncClient
+
+    def factory(**kwargs):
+        return real_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with patch.object(dnse_sync.dnse.httpx, "AsyncClient", factory):
+        receipt = await dnse_sync.sync_daily_prices(["VNM"], date(2026, 10, 1), date(2026, 10, 2))
+
+    stored = await one(select(SyncStatus).where(SyncStatus.sync_type == "dnse_daily_prices"))
+    rendered = repr(stored.additional_data)
+    assert token not in rendered
+    assert KEY not in rendered
+    assert "401" in receipt["errors"]["VNM"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_client_raises_and_leaves_one_failed_receipt(seeded, monkeypatch):
+    """#231: a refused run is a truthful unavailable state in durable storage.
+
+    The operator's stderr is gone by morning, so the receipt is what survives:
+    exactly one ``status='failed'`` row carrying a stable reason token, and
+    nothing credential- or URL-shaped in ``additional_data``.
+    """
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_enabled", False)
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_api_key", KEY)
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_api_secret", SECRET)
+    with pytest.raises(dnse_sync.dnse.DNSEConfigError) as caught:
+        await dnse_sync.sync_daily_prices(["VNM"], date(2026, 10, 1), date(2026, 10, 2))
+
+    assert caught.value.reason == dnse_sync.dnse.DNSE_DISABLED
+    assert await all_rows(select(StockPrice)) == []
+    receipts = await all_rows(select(SyncStatus).where(SyncStatus.sync_type == "dnse_daily_prices"))
+    assert len(receipts) == 1
+    stored = receipts[0]
+    assert (stored.status, stored.error_count, stored.success_count) == ("failed", 1, 0)
+    assert stored.additional_data["refused"] == "dnse_disabled"
+    rendered = repr(stored.additional_data)
+    for sentinel in (KEY, SECRET, "signature", "https://", "openapi.dnse"):
+        assert sentinel not in rendered
+
+
+@pytest.mark.asyncio
+async def test_missing_credentials_report_their_own_reason(seeded, monkeypatch):
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_enabled", True)
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_api_key", "")
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_api_secret", "")
+    with pytest.raises(dnse_sync.dnse.DNSEConfigError) as caught:
+        await dnse_sync.sync_daily_prices(["VNM"], date(2026, 10, 1), date(2026, 10, 2))
+
+    assert caught.value.reason == dnse_sync.dnse.DNSE_CREDENTIALS_MISSING
+    stored = await one(select(SyncStatus).where(SyncStatus.sync_type == "dnse_daily_prices"))
+    assert stored.additional_data["refused"] == "dnse_credentials_missing"
+
+
+@pytest.mark.asyncio
+async def test_unreachable_database_does_not_mask_the_config_error(seeded, monkeypatch):
+    """The refusal receipt is best-effort: the original error must still surface."""
+    monkeypatch.setattr(dnse_sync.dnse.settings, "dnse_enabled", False)
+
+    class _BrokenBegin:
+        async def __aenter__(self):
+            raise RuntimeError("database is down")
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+    class _BrokenSession:
+        def begin(self):
+            return _BrokenBegin()
+
+    class _BrokenMaker:
+        def __call__(self):
+            return _BrokenSession()
+
+    monkeypatch.setattr(dnse_sync, "async_session_maker", _BrokenMaker())
+    with pytest.raises(dnse_sync.dnse.DNSEConfigError):
+        await dnse_sync.sync_daily_prices(["VNM"], date(2026, 10, 1), date(2026, 10, 2))
 
 
 @pytest.mark.asyncio
