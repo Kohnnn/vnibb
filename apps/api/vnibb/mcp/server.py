@@ -1084,7 +1084,7 @@ def _withhold_statement(row: dict[str, Any], model: Any, reason: str) -> dict[st
     for name in metrics - {"fiscal_year", "fiscal_quarter"}:
         if isinstance(withheld.get(name), (int, float, Decimal)) and not isinstance(withheld[name], bool):
             withheld[name] = None
-            unavailable[name] = reason
+            unavailable.setdefault(name, reason)
     withheld.update(unavailable_reason=reason, unavailable_metrics=unavailable,
                     data_status="partial_unavailable")
     return withheld
@@ -1105,7 +1105,10 @@ def _reconcile_statement_rows(rows: list[dict[str, Any]], model: Any) -> list[di
         if None in bases or len(set(bases)) != 1:
             reason = "incomparable_statement_basis"
         else:
-            metrics = set(FinancialStatementData.model_fields) - {"fiscal_year", "fiscal_quarter"}
+            metrics = (set(FinancialStatementData.model_fields) | {
+                column.name for column in model.__table__.columns
+                if column.type.python_type in (float, Decimal)
+            }) - {"fiscal_year", "fiscal_quarter"}
             reason = "unverified_financial_revision"
             for offset, index in enumerate(admitted):
                 for other in admitted[offset + 1:]:
@@ -1458,6 +1461,7 @@ async def _get_latest_symbol_document(
         return rows[0] if rows else None
 
     model = COLLECTION_MODELS[collection_id]
+    original = rows
     rows = _reconcile_statement_rows(rows, model)
     identified = [row for row in rows if _statement_period_key(row) is not None]
     if not identified:
@@ -1468,7 +1472,16 @@ async def _get_latest_symbol_document(
                 "unavailable_reason": "ambiguous_period_family"}
     newest_key = max(_statement_period_key(row) for row in identified)
     same_period = [row for row in identified if _statement_period_key(row) == newest_key]
-    latest = next((row for row in same_period if _statement_rejected(row)), same_period[0])
+    observations = [row for row in original if _statement_period_key(row) == newest_key]
+    rejected = [row for row in observations if _statement_rejected(row)]
+    contested = {"unverified_financial_revision", "conflicting_source_observations", "incomparable_statement_basis"}
+    latest = next((row for row in same_period if row.get("unavailable_reason") in contested), None)
+    if latest is None and rejected:
+        latest = rejected[0]
+        reason = latest.get("unavailable_reason") or next(iter(latest.get("unavailable_metrics", {}).values()), "unavailable_statement")
+        latest = _withhold_statement(latest, model, reason)
+    if latest is None:
+        latest = same_period[0]
     if _statement_rejected(latest):
         return latest
     # ponytail: absent revision/basis evidence forbids competing observations;

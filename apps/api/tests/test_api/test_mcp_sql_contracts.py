@@ -750,3 +750,40 @@ async def test_mcp_statement_quarter_recency_preserves_metric_rejections(sql_too
     assert (item["period"], item["source"], item["revenue"]) == ("Q3-2025", new_source, 0)
     assert item["ebitda"] is None and item["unavailable_metrics"]["ebitda"] == "rejected_input"
     assert item["raw_observation"]["ebitda"] == -7
+
+
+@pytest.mark.asyncio
+async def test_mcp_statement_same_period_conflict_in_sql_only_published_metric(sql_tool):
+    first = _income_observation(1, "2025", "vietcap", income_before_tax=10)
+    second = deepcopy(first)
+    second.update(id=2, period="FY2025", source="VCI", income_before_tax=11)
+    canonical = second["raw_data"]["_financial_lineage"]["canonical_data"]
+    canonical.update(period="FY2025", source="VCI")
+    await sql_tool("income_statements", [first, second])
+    result = await server.get_latest_financial_statement("FPT", period_type="year")
+    assert result["item"]["income_before_tax"] is None
+    assert result["item"]["unavailable_reason"] == "conflicting_source_observations"
+
+
+@pytest.mark.asyncio
+async def test_mcp_statement_same_period_rejected_observation_remains_withheld(sql_tool, monkeypatch):
+    valid = _income_observation(1, "2025", "vietcap", revenue=10)
+    rejected = deepcopy(valid)
+    rejected.update(id=2, period="FY2025", source="VCI", revenue=20)
+    canonical = rejected["raw_data"]["_financial_lineage"]["canonical_data"]
+    canonical.update(period="FY2025", source="VCI", unavailable_reason="retained_rejection")
+    await sql_tool("income_statements", [valid, rejected])
+
+    class Context:
+        async def _build_database_snapshot_direct(self, symbol):
+            return {"income_statement": None}
+
+    monkeypatch.setattr(server, "AIContextService", Context)
+    latest = await server.get_latest_financial_statement("FPT", period_type="year")
+    snapshot = await server.get_symbol_snapshot("FPT")
+    for item in (latest["item"], snapshot["snapshot"]["income_statement"]):
+        assert item["source"] == "VCI"
+        assert item["unavailable_reason"] == "retained_rejection"
+        assert item["revenue"] is None
+        assert item["unavailable_metrics"]["revenue"] == "retained_rejection"
+        assert "rejection_details" not in item
