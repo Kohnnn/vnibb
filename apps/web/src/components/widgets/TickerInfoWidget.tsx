@@ -207,37 +207,46 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
       widgetId={id}
       hideHeader={hideHeader}
     >
-      <div className="flex flex-col h-full space-y-2">
-        <WidgetMeta
-          updatedAt={sourceUpdatedAt}
-          fetchedAt={quoteUpdatedAt}
-          isFetching={isFetching && hasQuote}
-          isCached={Boolean(quote?.cached) || isFallback}
-          note={
-            quote?.price_unit !== 'VND'
-              ? priceUnitLabel
-              : quote?.cached
-                ? 'Cached response'
-                : unitConfig.display === 'USD'
-                  ? 'Price and value fields shown in USD using current FX defaults'
-                  : undefined
-          }
-          sourceLabel="Quote + profile"
-          className="justify-between"
-        />
-
-        <div className="flex items-start justify-between rounded-2xl border border-[var(--color-state-border)] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.16),transparent_48%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent)] px-3 py-2.5 animate-in fade-in duration-500">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-[var(--color-accent-primary)]">
-              {symbol}
-            </span>
-            <span className="text-3xl font-black font-mono tracking-tighter text-[var(--text-primary)] tabular-nums drop-shadow-lg">
+      <div role="region" aria-label={`${symbol} ticker information`} tabIndex={0} className="h-full space-y-2 overflow-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
+        {/* A 72px panel leaves this region 70px tall. The quote and freshness
+            row is one line (21px) and scrolls horizontally; wrapping it costs
+            44px, which pushes the price below the region's clipped edge.
+            `shrink-0` on WidgetMeta is load-bearing: without it the chips
+            shrink to ~43px and wrap inside themselves, back to 60px. */}
+        <div role="group" aria-label={`${symbol} quote and freshness`} className="flex flex-nowrap items-center gap-x-2 overflow-x-auto scrollbar-hide">
+          <span className="inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1">
+            <span className="break-words text-2xl font-semibold font-mono tracking-tight text-[var(--text-primary)] tabular-nums">
               {formatPriceValueForUnit(price, priceDisplayConfig)}
             </span>
             <span className="text-[9px] text-[var(--text-muted)]">{priceUnitLabel}</span>
+          </span>
+          <WidgetMeta
+            updatedAt={sourceUpdatedAt}
+            fetchedAt={quoteUpdatedAt}
+            isFetching={isFetching && hasQuote}
+            isCached={Boolean(quote?.cached) || isFallback}
+            isStale={Boolean(quote?.stale || (hasQuote && (quote?.error || quoteError)))}
+            note={
+              quote?.price_unit !== 'VND'
+                ? priceUnitLabel
+                : quote?.cached
+                  ? 'Cached response'
+                  : unitConfig.display === 'USD'
+                    ? 'Price and value fields shown in USD using current FX defaults'
+                    : undefined
+            }
+            sourceLabel="Quote + profile"
+            className="shrink-0 flex-nowrap"
+          />
+        </div>
+        <div className="flex flex-wrap items-start justify-between gap-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-[10px] font-black uppercase tracking-[0.24em] text-[var(--color-accent-primary)]">
+              {symbol}
+            </span>
             <div
               className={cn(
-                'flex items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded-full w-fit border',
+                'flex max-w-full flex-wrap items-center gap-1.5 text-xs font-bold px-2 py-0.5 rounded w-fit border',
                 changeDirection === 'up'
                   ? 'price-up bg-price-up border-[color-mix(in_srgb,var(--color-positive)_28%,transparent)]'
                   : changeDirection === 'down'
@@ -250,12 +259,12 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               <span>{changeLabel}</span>
             </div>
           </div>
-            <div className="bg-[var(--color-state-bg)] rounded-xl p-2 border border-[var(--color-state-border)] shadow-[0_0_15px_rgba(59,130,246,0.15)]">
-              <Activity size={18} className="text-[var(--color-accent-primary)]" />
-            </div>
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2">
+            <Activity size={18} className="text-[var(--color-accent-primary)]" />
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7.5rem),1fr))] gap-2">
             {[
             { label: 'Day High', value: formatPriceValueForUnit(dayHigh, priceDisplayConfig) },
             { label: 'Day Low', value: formatPriceValueForUnit(dayLow, priceDisplayConfig) },
@@ -272,13 +281,13 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
           ].slice(0, 8).map((item, i) => (
             <div
               key={i}
-              className="group flex min-h-[56px] flex-col justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"
+              className="group flex min-h-[56px] min-w-0 flex-col justify-between rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] p-2 transition-colors hover:border-[var(--border-color)]"
             >
               <div className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-widest group-hover:text-[var(--color-accent-primary)] transition-colors">
                 {item.label}
               </div>
               <div className={cn(
-                'mt-1 text-sm font-mono font-semibold tabular-nums',
+                'mt-1 break-words text-sm font-mono font-semibold tabular-nums',
                 item.value === '--' ? 'text-[var(--text-muted)]' : 'text-[var(--text-secondary)]'
               )}>
                 {item.value || '--'}
@@ -290,28 +299,28 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               )}
             </div>
           ))}
-          <details className="col-span-2 text-[10px] text-[var(--text-muted)]">
+          <details className="col-span-full text-[10px] text-[var(--text-muted)]">
             <summary className="cursor-pointer">Market cap provenance</summary>
             <p>{marketCapExplanation(marketCap)}</p>
           </details>
         </div>
 
         {hasRange && (
-          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-2.5">
+          <section aria-label="52W Range" className="rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-2.5">
             <div className="mb-1.5 flex items-center justify-between text-[9px] font-black uppercase tracking-[0.22em] text-[var(--text-muted)]">
               <span>52W Range</span>
               <span className="text-[var(--text-secondary)]">{rangePosition.toFixed(0)}%</span>
             </div>
             <div className="relative h-2 rounded-full bg-[var(--bg-secondary)]">
-              <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[var(--color-negative)] via-[var(--color-warning)] to-[var(--color-positive)]" style={{ width: `${rangePosition}%` }} />
+              <div className="absolute inset-y-0 left-0 rounded-full bg-[var(--color-accent-primary)]" style={{ width: `${rangePosition}%` }} />
               <div className="absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border border-white/50 bg-[var(--bg-primary)] shadow" style={{ left: `calc(${rangePosition}% - 6px)` }} />
             </div>
-            <div className="mt-1.5 flex items-center justify-between text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
+            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 break-all text-[10px] font-mono text-[var(--text-secondary)] tabular-nums">
               <span>{formatPriceValueForUnit(rangeLow, priceDisplayConfig)}</span>
               <span className="text-[var(--text-primary)]">{formatPriceValueForUnit(rangePrice, priceDisplayConfig)}</span>
               <span>{formatPriceValueForUnit(rangeHigh, priceDisplayConfig)}</span>
             </div>
-          </div>
+          </section>
         )}
 
         <div className="pt-1.5 border-t border-[var(--border-subtle)]">
@@ -320,7 +329,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
             <span className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest">Company Profile</span>
           </div>
           <div
-            className="text-xs font-bold text-[var(--text-secondary)] line-clamp-1 hover:text-[var(--text-primary)] transition-colors cursor-default"
+            className="break-words text-xs font-bold text-[var(--text-secondary)]"
             title={companyName}
           >
             {companyName || 'Company information unavailable'}
@@ -332,7 +341,7 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
               </span>
             )}
             {industry && (
-              <span className="inline-flex items-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-positive)]">
+              <span className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--text-secondary)]">
                 {industry}
               </span>
             )}

@@ -4,6 +4,7 @@ import { useHistoricalPrices, useProfile, useScreenerData, useStockQuote } from 
 import { useUnit } from '@/contexts/UnitContext';
 import { TickerInfoWidget } from './TickerInfoWidget';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 
 jest.mock('@/lib/queries', () => ({
   useHistoricalPrices: jest.fn(), useProfile: jest.fn(), useScreenerData: jest.fn(),
@@ -21,7 +22,6 @@ jest.mock('@/hooks/useLoadingTimeout', () => ({
 jest.mock('@/components/ui/WidgetContainer', () => ({
   WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
-jest.mock('@/components/ui/WidgetMeta', () => ({ WidgetMeta: () => null }));
 
 const mockStockQuote = useStockQuote as jest.Mock;
 const mockProfile = useProfile as jest.Mock;
@@ -48,6 +48,14 @@ describe('TickerInfoWidget confirmed-unit market cap', () => {
     });
     mockScreener.mockReturnValue({ data: { data:[] }, refetch: jest.fn() });
     mockHistory.mockReturnValue({ data: { data:[] } });
+  });
+
+  test('keeps the full company name in a keyboard-focusable information region', () => {
+    mockProfile.mockReturnValue({ data: { data: { company_name: 'A long company name for a narrow widget' } }, isLoading: false });
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+    const region = screen.getByRole('region', { name: 'FPT ticker information' });
+    expect(region).toHaveAttribute('tabindex', '0');
+    expect(within(region).getByText('A long company name for a narrow widget')).not.toHaveClass('line-clamp-1');
   });
 
   test('does not derive market cap from a dated quote and undated shares', () => {
@@ -146,7 +154,7 @@ describe('TickerInfoWidget daily delta units', () => {
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
     expect(screen.getByText('57.30')).toBeInTheDocument();
     expect(screen.getByText('Up +0.40 (+0.70%)')).toBeInTheDocument();
-    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0);
   });
 });
 
@@ -173,7 +181,7 @@ describe('TickerInfoWidget 52W range unit certification', () => {
     expect(within(screen.getByText('52W Low').parentElement!).getByText('40,000.00')).toBeInTheDocument();
     expect(within(screen.getByText('52W High').parentElement!).getByText('60,000.00')).toBeInTheDocument();
     // The range bar is the second consumer of the same certified bounds.
-    const rangeBar = within(screen.getByText('52W Range').closest('div.rounded-xl') as HTMLElement);
+    const rangeBar = within(screen.getByRole('region', { name: '52W Range' }));
     expect(rangeBar.getByText('40,000.00')).toBeInTheDocument();
     expect(rangeBar.getByText('60,000.00')).toBeInTheDocument();
   });
@@ -279,6 +287,45 @@ describe('TickerInfoWidget freshness contract', () => {
     expect(provenance.fetchedAt).toBe(QUOTE_RECEIPT);
   });
 
+  test('groups the quote, source date, and stale status ahead of profile notices', () => {
+    mockStockQuote.mockReturnValue({
+      data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: true },
+      isLoading: false, isFetching: true, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
+    });
+    mockProfile.mockReturnValue({ data: { data: { company_name: 'FPT' } }, isLoading: false });
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+
+    const region = screen.getByRole('region', { name: 'FPT ticker information' });
+    const quote = within(region).getByRole('group', { name: 'FPT quote and freshness' });
+    expect(within(quote).getByText('57,300.00')).toBeInTheDocument();
+    expect(within(quote).getByText('VND')).toBeInTheDocument();
+    expect(within(quote).getByText(`As of ${formatAbsoluteTimestamp(QUOTE_OBSERVED_AT)}`)).toBeInTheDocument();
+    expect(within(quote).getByText(`Fetched ${formatAbsoluteTimestamp(QUOTE_RECEIPT)}`)).toBeInTheDocument();
+    expect(within(quote).getByText('Refreshing')).toBeInTheDocument();
+    expect(within(quote).getByText('Stale data')).toBeInTheDocument();
+    expect(within(region).getAllByText('57,300.00')).toHaveLength(1);
+    expect(region).toHaveAttribute('tabindex', '0');
+  });
+
+  test('keeps the freshness group on one scrollable line instead of wrapping it', () => {
+    mockStockQuote.mockReturnValue({
+      data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: true },
+      isLoading: false, isFetching: true, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
+    });
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+
+    const quote = screen.getByRole('group', { name: 'FPT quote and freshness' });
+    // The row scrolls horizontally rather than growing: a 70px region cannot
+    // absorb a second line.
+    expect(quote).toHaveClass('flex-nowrap', 'overflow-x-auto', 'scrollbar-hide');
+    expect(quote).not.toHaveClass('flex-wrap');
+    // WidgetMeta must neither wrap between chips nor shrink so far that each
+    // chip wraps inside itself.
+    const freshness = quote.querySelector(':scope > div')!;
+    expect(freshness).toHaveClass('flex-nowrap', 'shrink-0');
+    expect(freshness).not.toHaveClass('flex-wrap');
+  });
+
   test('leaves the source date unknown instead of promoting the receipt time', () => {
     const onDataChange = jest.fn();
     mockStockQuote.mockReturnValue({
@@ -288,10 +335,39 @@ describe('TickerInfoWidget freshness contract', () => {
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" onDataChange={onDataChange} />);
 
     const { provenance } = onDataChange.mock.calls[0][0].__widgetRuntime;
+    expect(screen.getByText('As-of unknown')).toBeInTheDocument();
     // Whatever empty representation the runtime contract uses, the receipt time must not
     // become the source date.
     expect(provenance.updatedAt).toBeFalsy();
     expect(provenance.fetchedAt).toBe(QUOTE_RECEIPT);
+  });
+
+  test.each([
+    ['quote query', new Error('Quote refetch unavailable'), null],
+    ['quote response', undefined, 'Live quote unavailable; showing stored price.'],
+  ])('marks retained data stale after a %s error', (_kind, error, responseError) => {
+    mockStockQuote.mockReturnValue({
+      data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: false, error: responseError },
+      isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT, error,
+    });
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+
+    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(QUOTE_OBSERVED_AT)}`)).toBeInTheDocument();
+    expect(screen.getByText('Stale data')).toBeInTheDocument();
+    expect(screen.getByText('57,300.00')).toBeInTheDocument();
+  });
+
+  test('does not mark a fresh quote stale when only the profile fails', () => {
+    mockStockQuote.mockReturnValue({
+      data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: false },
+      isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
+    });
+    mockProfile.mockReturnValue({ error: new Error('Profile unavailable'), isLoading: false });
+    render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
+
+    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(QUOTE_OBSERVED_AT)}`)).toBeInTheDocument();
+    expect(screen.queryByText('Stale data')).not.toBeInTheDocument();
+    expect(screen.getByText('57,300.00')).toBeInTheDocument();
   });
 
   test('keeps cached and stale health when refetch advances receipt time or fails with retained data', () => {
@@ -313,6 +389,7 @@ describe('TickerInfoWidget freshness contract', () => {
     const initial = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
     expect(deriveWidgetHealth(initial)).toMatchObject({ status: 'stale', label: 'Stale' });
     expect(deriveWidgetHealth(initial).detail).toContain('cached snapshot');
+    expect(screen.getByText('Stale data')).toBeInTheDocument();
 
     act(() => {
       snapshot = { ...snapshot, dataUpdatedAt: QUOTE_RECEIPT + 60_000 };
@@ -330,6 +407,7 @@ describe('TickerInfoWidget freshness contract', () => {
     const fallback = onDataChange.mock.calls.at(-1)[0].__widgetRuntime.provenance;
     expect(fallback).toMatchObject({ cached: true, stale: true, updatedAt: QUOTE_OBSERVED_AT });
     expect(deriveWidgetHealth(fallback).detail).toContain('cached snapshot');
+    expect(screen.getByText('Stale data')).toBeInTheDocument();
     expect(screen.getByText('57,300.00')).toBeInTheDocument();
   });
 });
