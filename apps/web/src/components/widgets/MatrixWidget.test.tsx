@@ -408,7 +408,7 @@ function NarrowInspectorHarness() {
     <button onClick={() => setOuter(true)}>Open matrix</button>
     <MaximizedWidgetPortal isOpen={outer} title="Matrix workspace" onClose={() => setOuter(false)}>
       <button onClick={() => setInspector(true)}>Inspect FPT Profit quality</button>
-      {inspector && <MatrixInspector snapshot={snapshot} cell={null} dimension={snapshot.dimensions[0]} canReview={false} busy={false} onClose={() => setInspector(false)} onReview={() => {}} />}
+      {inspector && <MatrixInspector snapshot={snapshot} cell={null} dimension={snapshot.dimensions[0]} canReview={false} busy={false} onClose={() => setInspector(false)} onReview={() => {}} onQuarantine={() => false} />}
     </MaximizedWidgetPortal>
   </>;
 }
