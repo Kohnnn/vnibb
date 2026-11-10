@@ -879,6 +879,54 @@ Pass/fail rule:
 - PASS: all five checks are within thresholds
 - FAIL: any single threshold is exceeded or paid shape usage appears
 
+## DNSE acquisition hold and key custody
+
+DNSE source-use rights are unknown (#232), and #168 has not accepted them.
+The local import command refuses unconditionally in every environment before
+reading provider credentials, importing application or provider modules,
+connecting to a provider, opening a database session, or writing a receipt.
+With or without command arguments it exits with status 2 and is not an import
+implementation. No DNSE provider, sync service, or scheduler is registered by
+this candidate. `DNSE_ENABLED` or any other environment flag cannot bypass it.
+Never run the held published #239 candidate: its flag-enabled path is unsafe.
+
+**Operator-only custody, not an acquisition authorization.** If credentials are
+issued, create the private store without truncating an existing file. The root
+process must perform the existence-sensitive creation because an unprivileged
+operator cannot traverse a root-owned `0700` directory:
+
+```bash
+sudo install -d -m 0700 /etc/vnibb
+sudo sh -c 'umask 077; touch /etc/vnibb/provider-keys.env'
+sudo chown root:root /etc/vnibb/provider-keys.env
+sudo chmod 0600 /etc/vnibb/provider-keys.env
+```
+
+The operator may privately edit only `DNSE_API_KEY` and `DNSE_API_SECRET` in
+place using `sudo -e /etc/vnibb/provider-keys.env`; never paste values into a
+terminal command, ticket, chat, log, image, or test. Editing or rotating one key
+must preserve all other entries, including `FINHAY_API_KEY`. Test the creation
+procedure using a disposable protected directory and invented sentinel, without
+reading or printing existing credentials. The `touch` command creates only if
+absent; unlike installing `/dev/null`, rerunning it does not truncate a file.
+
+This is custody only: the current Compose configuration does **not** load
+`/etc/vnibb/provider-keys.env`. `deployment/env.oracle` is a service-level
+env-file shared with API, MCP, scheduler, migration and Caddy; putting provider
+keys there would disclose them to unrelated services. Do not add keys to that
+file or claim a restart delivers this custody file. Any future delivery and
+rotation/recreation procedure needs a separately reviewed least-privilege mount,
+private rollback material, and authorized deployment; it must not bypass the
+source-use gate. A credential or successful registration alone grants no data
+storage, redistribution, or acquisition rights.
+
+This command-only candidate contains no source observations. A future DNSE
+adapter must preserve a cold-import guard before application package initializers
+enumerate credentials; the existing shared provider and core initializers do not
+yet provide it. Prior #239 history may contain disclosed source data: it remains
+held and must not be republished until private rights/incident review and an
+approved history-remediation decision.
+
 ## Read-only database readiness census (#167)
 
 Use the existing preflight command's explicit census mode, with private runtime
