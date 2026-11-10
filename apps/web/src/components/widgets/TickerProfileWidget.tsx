@@ -233,16 +233,16 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2 text-sm">
                 {infoCards.map((item) => {
                     const Icon = item.icon
                     return (
-                        <div key={item.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
+                        <div key={item.label} className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
                             <div className="mb-1 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
                                 <Icon size={12} className="text-[var(--color-accent-primary)]" />
                                 <span>{item.label}</span>
                             </div>
-                            <div className="truncate text-sm font-medium text-[var(--text-primary)]">
+                            <div className="break-words text-sm font-medium text-[var(--text-primary)]">
                                 {item.value}
                             </div>
                             {item.label === 'Market Cap' && (

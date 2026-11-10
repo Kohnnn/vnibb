@@ -34,8 +34,8 @@ export default function BrandChannelsPage() {
         <main className="mx-auto max-w-4xl px-4 py-10 text-[var(--text-primary)] sm:px-6">
             <h1 className="text-2xl font-semibold">Brand and channels</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-                Channel artwork derived from the supplied brand pack. The wordmark is used unchanged; no monogram,
-                recolor or invented contact detail appears in any of these assets.
+                Channel artwork uses the supplied wordmark unchanged, without a monogram or invented contact detail.
+                In the app, the same SVG is a transparent mask colored by the active theme.
             </p>
 
             <section className="mt-10">
@@ -73,7 +73,7 @@ export default function BrandChannelsPage() {
             <section className="mt-10 text-sm leading-6 text-[var(--text-secondary)]">
                 <h2 className="text-lg font-semibold text-[var(--text-primary)]">Open items</h2>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
-                    <li>Favicon and app-icon artwork is not in brand pack v1.1; manifest icon entries stay unresolved until that artwork is approved.</li>
+                    <li>The app uses the wordmark on a white plate for browser and install icons; brand pack v1.1 contains no standalone symbol.</li>
                     <li>The LinkedIn banner in the pack is a 1584 × 528 source composition; adapt it to the destination crop before publishing.</li>
                     <li>No team mailbox, phone number or partnership is claimed; contact details come from the signature owner.</li>
                 </ul>

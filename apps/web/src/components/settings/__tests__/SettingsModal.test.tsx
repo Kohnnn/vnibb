@@ -11,7 +11,7 @@ jest.mock('@/contexts/ThemeContext', () => {
   return { useTheme: () => value }
 })
 jest.mock('@/contexts/UnitContext', () => {
-  const value = { config: { display: 'auto', decimalPlaces: 2 }, globalUsdVndDefaultRate: 25000, adminUsdVndRatesByYear: {}, localUsdVndRatesByYear: {}, setUnit: jest.fn(), setDecimalPlaces: jest.fn(), setUsdVndRate: jest.fn(), clearUsdVndRates: jest.fn(), applyAdminUsdRuntimeConfig: jest.fn() }
+  const value = { config: { display: 'auto', decimalPlaces: 2, usdVndRatesByYear: { '2024': 25_000, '2025': 30_000, '2026': 32_000 } }, globalUsdVndDefaultRate: 28_000, adminUsdVndRatesByYear: { '2025': 30_000 }, localUsdVndRatesByYear: { '2026': 32_000 }, setUnit: jest.fn(), setDecimalPlaces: jest.fn(), setUsdVndRate: jest.fn(), clearUsdVndRates: jest.fn(), applyAdminUsdRuntimeConfig: jest.fn() }
   return { useUnit: () => value }
 })
 jest.mock('@/contexts/SymbolLinkContext', () => {
@@ -55,6 +55,21 @@ describe('SettingsModal section navigation', () => {
     expect(sectionSelect).toHaveValue('appearance')
     expect(screen.getByRole('heading', { name: 'Appearance' })).toBeInTheDocument()
     expect(screen.getByText(/Choose the shell theme for this browser/i)).toBeInTheDocument()
+  })
+
+  test('shows the actual source and resolved FX rate for each year', () => {
+    render(<SettingsModal isOpen onClose={() => {}} />)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Settings section' }), { target: { value: 'appearance' } })
+
+    const builtIn = screen.getByRole('spinbutton', { name: /2024/ })
+    const admin = screen.getByRole('spinbutton', { name: /2025/ })
+    const local = screen.getByRole('spinbutton', { name: /2026/ })
+    expect(builtIn).toHaveAttribute('placeholder', '25000')
+    expect(builtIn.closest('label')).toHaveTextContent('Using built-in yearly default')
+    expect(admin).toHaveAttribute('placeholder', '30000')
+    expect(admin.closest('label')).toHaveTextContent('Using admin yearly default')
+    expect(local).toHaveValue(32_000)
+    expect(local.closest('label')).toHaveTextContent('Local override')
   })
 })
 

@@ -7,7 +7,7 @@ from datetime import datetime
 # Add parent directory to sys.path to allow importing vnibb
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from vnibb.providers.vnstock.runtime import get_listing_class
+from vnibb.providers import market_data
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from vnibb.core.database import async_session_maker
 from vnibb.models import Stock
@@ -24,8 +24,7 @@ async def seed_all_stocks():
     
     try:
         # Use VCI as source
-        listing = get_listing_class()(source='VCI')
-        df = listing.symbols_by_exchange()
+        df = market_data.listing("VCI", view="symbols_by_exchange")
         
         if df is None or df.empty:
             logger.error("No stock data returned from VNStock")

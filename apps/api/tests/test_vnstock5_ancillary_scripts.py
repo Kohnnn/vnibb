@@ -76,7 +76,7 @@ async def test_stock_seeder_uses_exchange_metadata_without_inventing_exchange(mo
         async def commit(self):
             pass
 
-    monkeypatch.setattr(seed_stocks, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr(runtime, "get_listing_class", lambda: Listing)
     monkeypatch.setattr(seed_stocks, "async_session_maker", Session)
     await seed_stocks.seed_all_stocks()
     assert calls == ["VCI"]

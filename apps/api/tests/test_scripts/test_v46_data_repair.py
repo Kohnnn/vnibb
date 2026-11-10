@@ -236,7 +236,7 @@ async def test_industry_listing_uses_explicit_vci(monkeypatch):
         def symbols_by_industries(self):
             return pd.DataFrame([{"symbol": "FPT", "industry_name": "Technology"}])
 
-    monkeypatch.setattr(repair, "get_listing_class", lambda: Listing)
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_listing_class", lambda: Listing)
     monkeypatch.setattr(repair, "_get_listing_sources", lambda: ["VCI"])
     assert await repair._fetch_provider_industry_map() == {"FPT": "Technology"}
     assert calls == ["VCI"]

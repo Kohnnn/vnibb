@@ -700,7 +700,8 @@ export async function getFinancialRatios(
 
 export async function getRatioHistory(
     symbol: string,
-    options?: { ratios?: string[]; period?: 'year' | 'quarter'; limit?: number }
+    options?: { ratios?: string[]; period?: 'year' | 'quarter'; limit?: number },
+    signal?: AbortSignal
 ): Promise<RatioHistoryResponse> {
     return fetchAPI<RatioHistoryResponse>(`/equity/${symbol}/ratios/history`, {
         params: {
@@ -708,6 +709,7 @@ export async function getRatioHistory(
             period: options?.period,
             limit: options?.limit,
         },
+        signal,
     });
 }
 

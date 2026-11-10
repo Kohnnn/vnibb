@@ -139,7 +139,7 @@ function LoginForm() {
         <div className="max-w-md w-full space-y-8 p-8 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border-default)]">
             <div>
                 <div className="flex justify-center">
-                    <VniBBLogo width={144} />
+                    <VniBBLogo width={144} label={null} />
                 </div>
                 <h2 className="mt-4 text-3xl font-bold text-center text-[var(--color-text-primary)]">
                     Sign in to {VNIBB_BRAND_NAME}

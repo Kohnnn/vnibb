@@ -89,9 +89,9 @@ class ScreenerPipeline(BasePipeline):
             FinancialRatiosQueryParams,
             VnstockFinancialRatiosFetcher,
         )
-        from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
+        from vnibb.providers import market_data
 
-        source = validate_source(settings.vnstock_source)
+        source = market_data.validate_source(settings.vnstock_source)
 
         logger.info("Syncing screener data...")
         loop = asyncio.get_running_loop()
@@ -159,10 +159,7 @@ class ScreenerPipeline(BasePipeline):
                 await self._wait_for_rate_limit("screener")
 
                 def _fetch_sync():
-                    fundamental = import_vnstock_symbol("Fundamental")[0]()
-                    return fundamental.equity(symbol).ratio(
-                        source=source, period="year", lang="en", format="long",
-                    )
+                    return market_data.financial_ratios(symbol, source)
 
                 ratio_df = await loop.run_in_executor(None, _fetch_sync)
 

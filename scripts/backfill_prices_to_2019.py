@@ -18,7 +18,7 @@ from vnibb.services.mongo_eod_sync import (
     run_mongo_eod_catchup,
 )
 from vnibb.services.sync_all_data import FullMarketSync
-from vnibb.services.vnstock_registration import ensure_vnstock_registration
+from vnibb.providers.vnstock.registration import ensure_vnstock_registration
 
 DATASETS = ("financials", "ratios", "reference", "market", "eod")
 REFERENCE = ("profiles", "shareholders", "officers", "subsidiaries", "company_news", "company_events", "dividends", "insider_deals")

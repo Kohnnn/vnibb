@@ -168,7 +168,7 @@ export function MarketOverviewWidget({ onRemove, onDataChange }: MarketOverviewW
                       {formatValue(changeValue)} ({formatPct(changePct)})
                     </div>
 
-                    <div className="flex items-center gap-2 mt-2 text-[9px] text-[var(--text-muted)]">
+                    <div className="index-card__meta">
                       <span>Vol: {idx.volume?.toLocaleString() || EMPTY_VALUE}</span>
                       <span>H: {formatValue(idx.high)}</span>
                       <span>L: {formatValue(idx.low)}</span>

@@ -98,7 +98,7 @@ export default function SignupPage() {
             <div className="w-full max-w-md space-y-8 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6 sm:p-8">
                 <div>
                     <div className="flex justify-center">
-                        <VniBBLogo width={144} />
+                        <VniBBLogo width={144} label={null} />
                     </div>
                     <h2 className="mt-4 text-center text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">
                         Create your {VNIBB_BRAND_NAME} account

@@ -30,6 +30,7 @@ def load_pipeline():
              "vnibb.core.database", "vnibb.core.market_cap", "vnibb.core.insider_units",
              "vnibb.core.retry", "vnibb.core.price_units", "vnibb.core.ratio_units",
              "vnibb.core.vn_sectors", "vnibb.core.screener_shares", "vnibb.providers.vnstock.runtime",
+             "vnibb.providers.market_data",
              "vnibb.providers.vnstock.reference_fields", "vnibb.services.screener_metadata",
              "vnibb.services.cache_manager", "vnibb.services.market_session", "vnibb.models.alerts",
              "vnibb.models.company", "vnibb.models.derivatives", "vnibb.models.financials",

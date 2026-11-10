@@ -42,7 +42,7 @@ def test_api_role_skips_scheduler_by_default(monkeypatch):
 @pytest.mark.asyncio
 async def test_scheduler_worker_registers_golden_before_starting_jobs(monkeypatch):
     """The scheduler process has no API lifespan; it must register Golden itself."""
-    from vnibb.services import vnstock_registration
+    from vnibb.providers.vnstock import registration as vnstock_registration
 
     monkeypatch.setattr(settings, "scheduler_role", "scheduler")
     monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
@@ -64,7 +64,7 @@ async def test_scheduler_worker_registers_golden_before_starting_jobs(monkeypatc
 
 @pytest.mark.asyncio
 async def test_scheduler_worker_fails_closed_when_golden_registration_fails(monkeypatch):
-    from vnibb.services import vnstock_registration
+    from vnibb.providers.vnstock import registration as vnstock_registration
 
     monkeypatch.setattr(settings, "scheduler_role", "scheduler")
     monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
@@ -82,7 +82,7 @@ async def test_scheduler_worker_fails_closed_when_golden_registration_fails(monk
 
 @pytest.mark.asyncio
 async def test_scheduler_worker_free_tier_does_not_require_registration(monkeypatch):
-    from vnibb.services import vnstock_registration
+    from vnibb.providers.vnstock import registration as vnstock_registration
 
     monkeypatch.setattr(settings, "scheduler_role", "scheduler")
     monkeypatch.setattr(settings, "vnstock_runtime_tier", "free")
