@@ -127,6 +127,17 @@ one key per snapshot, with append-only revision-bound review events and separate
 revocation. Snapshot IDs are references, not grants: every open or handoff rechecks
 ownership and revocation, and cross-owner or revoked references disclose nothing.
 Revocation blocks future reads; it cannot retract data already exported.
+Historical non-synthetic snapshots containing these unverified non-null sector
+metrics are quarantined, not rewritten. An owned full snapshot, review or history
+page containing one returns `409 matrix_snapshot_evidence_unverified`; history
+identifies affected and unaffected snapshot IDs. Selection and evidence for safe
+cells remain usable unless their frozen evidence closure exposes an affected
+value. The owner may explicitly create a new revision under the same Matrix ID or
+revoke the old snapshot. Previously exported data cannot be retracted. Matrix-v1
+has no typed original sector-observation and basis proof, so it cannot currently
+admit such historical values; future admission requires an explicit typed contract.
+The retained sector findings are in `docs/research/matrix-insurer-evidence.md` and
+`docs/research/matrix-securities-evidence.md`.
 
 ### Handoff
 

@@ -26,6 +26,11 @@ from vnibb.services.matrix_rights import allowlisted_matrix_sources
 
 MAX_MATRIX_BYTES = 524288
 MAX_REVIEW_EVENTS = 1000
+UNVERIFIED_SECTOR_METRICS = {
+    ("insurer", "insurance"): {"insurance_premiums", "insurance_claims", "investment_income"},
+    ("securities", "securities"): {"brokerage_revenue", "margin_loans", "investment_income"},
+}
+MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED = "matrix_snapshot_evidence_unverified"
 
 
 def _not_found():
@@ -101,6 +106,54 @@ def _selected_cells(snapshot, result_ids):
     if any(result_id not in cells for result_id in result_ids):
         raise _not_found()
     return [cells[result_id] for result_id in result_ids]
+
+
+def _unverified_sector_cells(snapshot):
+    if snapshot["synthetic"]:
+        return []
+    return [
+        cell for cell in snapshot["cells"]
+        if any(
+            metric.get("value") is not None
+            and metric["key"] in UNVERIFIED_SECTOR_METRICS.get((snapshot["playbook_id"], cell["dimension_id"]), set())
+            for metric in cell["payload"].get("metrics", [])
+        )
+    ]
+
+
+def _require_verified_sector_evidence(snapshot, cells, evidence=(), all_evidence=()):
+    unsafe = _unverified_sector_cells(snapshot)
+    if not unsafe:
+        return
+    selected_ids = {cell["result_id"] for cell in cells}
+    unverified = any(cell["result_id"] in selected_ids for cell in unsafe)
+    if not unverified and evidence:
+        evidence_ids = {item["evidence_id"] for item in evidence}
+        by_id = {item["evidence_id"]: item for item in all_evidence}
+        pending = [
+            evidence_id
+            for cell in unsafe
+            for metric in cell["payload"].get("metrics", [])
+            if metric.get("value") is not None
+            and metric["key"] in UNVERIFIED_SECTOR_METRICS[(snapshot["playbook_id"], cell["dimension_id"])]
+            for evidence_id in metric["evidence_ids"]
+        ]
+        seen = set()
+        while pending and not unverified:
+            evidence_id = pending.pop()
+            if evidence_id in seen:
+                continue
+            seen.add(evidence_id)
+            unverified = evidence_id in evidence_ids
+            if evidence_id in by_id:
+                pending.extend(by_id[evidence_id]["input_evidence_ids"])
+    if unverified:
+        raise HTTPException(status_code=409, detail={
+            "code": MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED,
+            "message": "This saved Matrix snapshot contains sector values without verified original evidence. Recreate a new revision or revoke the affected snapshot before continuing.",
+            "snapshot_ids": [snapshot["snapshot_id"]],
+            "matrix_id": snapshot["matrix_id"],
+        })
 
 
 def _evidence_for_cells(evidence, cells):
@@ -187,7 +240,10 @@ async def create_matrix_snapshot(db, user_id: str, request: dict) -> dict:
 
 
 async def get_matrix_snapshot(db, user_id: str, snapshot_id: str) -> dict:
-    return await _presentation(db, await _owned_record(db, user_id, snapshot_id))
+    record = await _owned_record(db, user_id, snapshot_id)
+    snapshot = record.value["snapshot"]
+    _require_verified_sector_evidence(snapshot, snapshot["cells"])
+    return await _presentation(db, record)
 
 
 async def list_matrix_snapshots(db, user_id: str, limit: int = 20) -> list[dict]:
@@ -207,6 +263,14 @@ async def list_matrix_snapshots(db, user_id: str, limit: int = 20) -> list[dict]
         .limit(limit)
     )
     records = (await db.execute(query)).scalars().all()
+    unsafe_ids = [record.value["snapshot"]["snapshot_id"] for record in records if _unverified_sector_cells(record.value["snapshot"])]
+    if unsafe_ids:
+        raise HTTPException(status_code=409, detail={
+            "code": MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED,
+            "message": "Matrix history contains snapshots with unverified sector evidence. Recreate a new revision or revoke the affected snapshots to view this history page.",
+            "snapshot_ids": unsafe_ids,
+            "available_snapshot_ids": [record.value["snapshot"]["snapshot_id"] for record in records if not _unverified_sector_cells(record.value["snapshot"])],
+        })
     snapshots = [await _presentation(db, record) for record in records]
     _check_size(snapshots)
     return snapshots
@@ -214,14 +278,19 @@ async def list_matrix_snapshots(db, user_id: str, limit: int = 20) -> list[dict]
 
 async def get_matrix_evidence(db, user_id: str, snapshot_id: str, result_id: str) -> list[dict]:
     record = await _owned_record(db, user_id, snapshot_id)
-    cells = _selected_cells(record.value["snapshot"], [result_id])
-    return _evidence_for_cells(record.value["evidence"], cells)
+    snapshot = record.value["snapshot"]
+    cells = _selected_cells(snapshot, [result_id])
+    _require_verified_sector_evidence(snapshot, cells)
+    evidence = _evidence_for_cells(record.value["evidence"], cells)
+    _require_verified_sector_evidence(snapshot, cells, evidence, record.value["evidence"])
+    return evidence
 
 
 async def review_matrix_snapshot(db, user_id: str, snapshot_id: str, request: dict) -> dict:
     request = _validate(MatrixReview, request)
     record = await _owned_record(db, user_id, snapshot_id, lock=True)
     _selected_cells(record.value["snapshot"], request["result_ids"])
+    _require_verified_sector_evidence(record.value["snapshot"], record.value["snapshot"]["cells"])
     events = (await db.execute(_review_query(snapshot_id))).scalars().all()
     if len(events) >= MAX_REVIEW_EVENTS:
         raise HTTPException(status_code=409, detail="Matrix review history limit reached")
@@ -265,6 +334,9 @@ async def resolve_matrix_selection(db, user_id: str, selection: dict) -> dict:
     record = await _owned_record(db, user_id, selection["snapshot_id"])
     snapshot = await _presentation(db, record)
     cells = _selected_cells(snapshot, selection["result_ids"])
+    _require_verified_sector_evidence(snapshot, cells)
+    evidence = _evidence_for_cells(record.value["evidence"], cells)
+    _require_verified_sector_evidence(snapshot, cells, evidence, record.value["evidence"])
     entity_ids = list(dict.fromkeys(cell["entity_id"] for cell in cells))
     dimension_ids = list(dict.fromkeys(cell["dimension_id"] for cell in cells))
     snapshot["cells"] = cells
@@ -276,7 +348,7 @@ async def resolve_matrix_selection(db, user_id: str, selection: dict) -> dict:
         "result_ids": selection["result_ids"], "period": snapshot["period"],
         "source_scope": list(dict.fromkeys(d["source_scope"] for d in snapshot["dimensions"])),
         "request_text": _request_text(snapshot, cells), "snapshot": snapshot,
-        "evidence": _evidence_for_cells(record.value["evidence"], cells),
+        "evidence": evidence,
     }).model_dump(mode="json")
     _check_size(packet)
     return packet

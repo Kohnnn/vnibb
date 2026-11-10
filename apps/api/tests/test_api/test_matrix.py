@@ -62,6 +62,175 @@ async def stored(test_db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("playbook,dimension,key,amount", [
+    ("insurer", "insurance", "insurance_premiums", "0"),
+    ("securities", "securities", "margin_loans", "123"),
+])
+async def test_legacy_sector_values_cannot_escape_in_public_matrix_responses(
+    client, test_db, stored, playbook, dimension, key, amount,
+):
+    from vnibb.core.auth import User, require_active_user
+
+    async def owner():
+        return User(id=OWNER, email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    record = copy.deepcopy(stored)
+    snapshot = record["snapshot"]
+    snapshot["snapshot_id"] = str(uuid4())
+    snapshot["playbook_id"] = playbook
+    snapshot["dimensions"][0]["dimension_id"] = dimension
+    for cell in snapshot["cells"]:
+        cell["dimension_id"] = dimension
+    unsafe, safe = snapshot["cells"]
+    unsafe["state"] = "non_comparable"
+    unsafe["payload"]["metrics"][0].update(key=key, value=amount, display=f"{amount} VND")
+    record["evidence"][0].update(field=f"raw_data.{key}", value=amount)
+    snapshot_id = snapshot["snapshot_id"]
+    unsafe_id, safe_id = unsafe["result_id"], safe["result_id"]
+    test_db.add(AppKeyValue(key=f"matrix:snapshot:{snapshot_id}", value=record))
+    await test_db.commit()
+
+    def quarantined(response):
+        assert response.status_code == 409
+        assert response.json()["code"] == "matrix_snapshot_evidence_unverified"
+        assert response.json()["snapshot_ids"] == [snapshot_id]
+        assert "cells" not in response.json() and "evidence" not in response.json()
+
+    assert (await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}")).json()["matrix_id"] == snapshot["matrix_id"]
+    quarantined(await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}"))
+    quarantined(await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}/evidence", params={"result_id": unsafe_id}))
+    quarantined(await client.post("/api/v1/matrix/selection", json={"snapshot_id": snapshot_id, "result_ids": [unsafe_id]}))
+    quarantined(await client.post(f"/api/v1/matrix/snapshots/{snapshot_id}/review", json={"result_ids": [safe_id], "state": "reviewed"}))
+    history = await client.get("/api/v1/matrix/snapshots")
+    quarantined(history)
+    assert history.json()["available_snapshot_ids"] == [stored["snapshot"]["snapshot_id"]]
+    safe_selection = await client.post("/api/v1/matrix/selection", json={"snapshot_id": snapshot_id, "result_ids": [safe_id]})
+    assert safe_selection.status_code == 200
+    assert safe_selection.json()["result_ids"] == [safe_id]
+    assert (await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}/evidence", params={"result_id": safe_id})).status_code == 200
+    events = (await test_db.execute(select(AppKeyValue).where(AppKeyValue.key.startswith(f"matrix:review:{snapshot_id}:")))).scalars().all()
+    assert events == []
+    assert (await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot_id}")).value == record
+    async def other_owner():
+        return User(id="00000000-0000-4000-8000-000000000011", email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = other_owner
+    denied = await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}")
+    assert denied.status_code == 404
+    assert snapshot["matrix_id"] not in denied.text
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    assert (await client.post(f"/api/v1/matrix/snapshots/{snapshot_id}/revoke")).status_code == 200
+    revoked = await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}")
+    assert revoked.status_code == 404
+    assert snapshot["matrix_id"] not in revoked.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shared_input", [False, True])
+async def test_legacy_sector_evidence_cannot_leak_through_another_cell(client, test_db, stored, shared_input):
+    from vnibb.core.auth import User, require_active_user
+
+    async def owner():
+        return User(id=OWNER, email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    record = await test_db.get(AppKeyValue, f"matrix:snapshot:{stored['snapshot']['snapshot_id']}")
+    value = copy.deepcopy(record.value)
+    value["snapshot"]["playbook_id"] = "insurer"
+    value["snapshot"]["dimensions"][0]["dimension_id"] = "insurance"
+    unsafe, other = value["snapshot"]["cells"]
+    unsafe["dimension_id"] = "insurance"
+    unsafe["payload"]["metrics"][0]["key"] = "insurance_premiums"
+    other["dimension_id"] = "insurance"
+    other["evidence_ids"] = [value["evidence"][0]["evidence_id"]]
+    if shared_input:
+        raw_id = value["evidence"][0]["evidence_id"]
+        derived = copy.deepcopy(value["evidence"][0])
+        derived.update(evidence_id="derived-sector-value", provenance="derived", formula="retained input", input_evidence_ids=[raw_id])
+        value["evidence"].append(derived)
+        unsafe["payload"]["metrics"][0]["evidence_ids"] = [derived["evidence_id"]]
+    record.value = value
+    await test_db.commit()
+    response = await client.post("/api/v1/matrix/selection", json={"snapshot_id": value["snapshot"]["snapshot_id"], "result_ids": [other["result_id"]]})
+    assert response.status_code == 409
+    assert response.json()["code"] == "matrix_snapshot_evidence_unverified"
+    evidence = await client.get(f"/api/v1/matrix/snapshots/{value['snapshot']['snapshot_id']}/evidence", params={"result_id": other["result_id"]})
+    assert evidence.status_code == 409
+    assert evidence.json()["code"] == "matrix_snapshot_evidence_unverified"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [False, True])
+async def test_legacy_sector_null_stays_readable_and_missing_evidence_is_quarantined(
+    client, test_db, stored, missing,
+):
+    from vnibb.core.auth import User, require_active_user
+
+    async def owner():
+        return User(id=OWNER, email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    snapshot_id = stored["snapshot"]["snapshot_id"]
+    record = await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot_id}")
+    value = copy.deepcopy(record.value)
+    value["snapshot"]["playbook_id"] = "insurer"
+    value["snapshot"]["dimensions"][0]["dimension_id"] = "insurance"
+    for cell in value["snapshot"]["cells"]:
+        cell["dimension_id"] = "insurance"
+    target = value["snapshot"]["cells"][0]
+    metric = target["payload"]["metrics"][0]
+    metric["key"] = "insurance_premiums"
+    if missing:
+        metric["evidence_ids"] = ["missing-frozen-evidence"]
+    else:
+        metric.update(value=None, display="Unavailable", evidence_ids=[])
+        target.update(state="unavailable", evidence_ids=[])
+    record.value = value
+    await test_db.commit()
+    response = await client.get(f"/api/v1/matrix/snapshots/{snapshot_id}")
+    assert response.status_code == (409 if missing else 200)
+    if missing:
+        assert response.json()["code"] == "matrix_snapshot_evidence_unverified"
+    else:
+        assert response.json()["cells"][0]["payload"]["metrics"][0]["value"] is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_quarantine_allows_owned_recreation_without_rewriting(client, test_db, stored, monkeypatch):
+    from vnibb.core.auth import User, require_active_user
+    from vnibb.models.stock import Stock
+
+    async def owner():
+        return User(id=OWNER, email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    monkeypatch.setattr("vnibb.services.matrix_observations.get_mongo_market_data_service", lambda: SimpleNamespace(enabled=False))
+    snapshot = stored["snapshot"]
+    record = await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot['snapshot_id']}")
+    original = copy.deepcopy(record.value)
+    original["snapshot"]["playbook_id"] = "insurer"
+    original["snapshot"]["dimensions"][0]["dimension_id"] = "insurance"
+    for cell in original["snapshot"]["cells"]:
+        cell["dimension_id"] = "insurance"
+    original["snapshot"]["cells"][0]["payload"]["metrics"][0]["key"] = "insurance_premiums"
+    record.value = copy.deepcopy(original)
+    test_db.add(AppKeyValue(key=f"matrix:owner:{snapshot['matrix_id']}", value={"owner_id": OWNER, "origin_snapshot_id": snapshot["snapshot_id"]}))
+    for index, symbol in enumerate(("FPT", "CMG")):
+        test_db.add(Stock(id=990001 + index, symbol=symbol, industry="Non-life insurance", is_active=1))
+    await test_db.commit()
+    response = await client.post("/api/v1/matrix/snapshots", json={
+        "anchor_symbol": "FPT", "symbols": ["FPT", "CMG"], "playbook_id": "insurer",
+        "period": "2025", "period_type": "year", "matrix_id": snapshot["matrix_id"],
+    })
+    assert response.status_code == 201
+    assert response.json()["matrix_id"] == snapshot["matrix_id"]
+    assert response.json()["snapshot_id"] != snapshot["snapshot_id"]
+    assert all(cell["review_state"] == "unreviewed" for cell in response.json()["cells"])
+    assert (await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot['snapshot_id']}")).value == original
+
+
+@pytest.mark.asyncio
 async def test_selection_preserves_exact_values_and_scopes_evidence(test_db, stored):
     original = stored["snapshot"]
     cell = original["cells"][1]
