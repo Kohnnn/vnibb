@@ -2,11 +2,33 @@
 
 Owning backlog: [project-work-backlog.md](../project-work-backlog.md); tracker [#241](https://github.com/Kohnnn/vnibb/issues/241). This is evidence, not a second task list. Local integration branch codex/project-integration-20261110 was based on 401caae779b39943ec97f361ccb87c5cb78e1fa9. A source commit is not a serving identity. Publication remains held on the source-data incident/history disposition and a proven no-preview-deployment route. No production recovery or source-use approval is claimed; preliminary browser network uncertainty is disclosed below.
 
+## Delayed advisory corrections (2026-11-11)
+
+Latest locally checked code: `2ad54cb53921cf65fad67de4a5da9aaa3e0b08b4`, based on documentation save `e0b8f5fb604970e67d6ffd0e6e76d1ed3d8a02bd`, in the same integration checkout. The older receipts below stay bound to their named candidates; this correction does not make the full release gate green.
+
+Confirmed defect: NaN/Infinity growth from a preferred source overwrote finite retained growth, and skipped statement enrichment could leave a nonfinite JSON response. Growth is now rejected before source merging and before the Vietcap early return; invalid unit claims are removed with the value. Finite preferred values, including zero, retain precedence, and finite retained fallback survives. No general sanitizer, new provider or source policy was added. An offline mocked pre-fix reproducer observed both failures; it contacted no real provider or store.
+
+Independent review approved the four-file correction, then separately approved replacing temporary list concatenation with nested iteration. Before that allocation-only delta, the focused ratio-helper/MCP/private-auth subprocess run passed **255 tests, exit 0** (30.16 seconds wall). After it, the real HTTP growth regression passed **25 cases, exit 0** (6.49 seconds wall), and configured changed-line Ruff passed, exit 0 (2.01 seconds; 1,076 out-of-scope and 11 baseline diagnostics excluded). Runtime/test writers were stopped and the candidate stayed frozen during checks. The final four-file patch hash before commit was `1f0559ee48b7431e7e20b438e688a959ada5743f6d9bde16017ee7712425eebf`; commit `2ad54cb5` saves that patch. No broad suite was repeated.
+
+Behavioral coverage retained the valid parts of the delayed test feedback: a non-price financial ratio cannot acquire `price_unit` while rejected interest stays withheld with its reason/raw observation, and a failed auth client must report unhealthy. Obsolete raw-row equality and Compose source-text/default assertions were not restored. Real Mongo authentication, container deadline/signal behavior and production rollout remain outside this subprocess proof. The earlier 382-test run already included the complete AI-context and IQ-serving modules, so no redundant collection-only check was run.
+
+Focused command suffixes below use the exact credential-free environment recorded in the earlier final-check section:
+
+```sh
+PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_equity_ratio_helpers.py apps/api/tests/test_api/test_mcp_server.py apps/api/tests/test_core/test_release_build_contract.py::test_compose_auth_probes_keep_passwords_private_and_report_client_failure -q
+PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_equity_ratio_helpers.py::test_ratio_endpoint_preserves_finite_growth_when_preferred_is_nonfinite -q
+CI_GATE_RUFF_ONLY=1 node scripts/ci-gate.mjs
+```
+
+Source attribution, corrected fixture and CI-harness advisories are dispositioned below. Publication, rights, production recovery and worktree-cleanup blockers are unchanged. Changelog synchronization after this code commit changes documentation/generated text only.
+
 ## Final verification boundary (2026-11-11)
 
 Final locally checked code candidate: `4ffd01cfcc88effea960777146f72b016ee67f76`, based on `401caae779b39943ec97f361ccb87c5cb78e1fa9`, in `vnibb-worktrees/project-integration-20261110`. Bounded Standards and Spec reviews approved inspected seams at `4d1c03db86ab3f9250a3f72a55c4a6b851899684`, not every changed file or operational acceptance. Later changes delete two obsolete assertions and mechanically correct lint; the parent also removed an unintended unused import. Documentation and generated-changelog synchronization follow this code candidate.
 
 The credential-free `node scripts/ci-gate.mjs` run exited **1** after 333.30 seconds. Frontend lint (four warnings), TypeScript, changelog generation/check and production build passed. Jest: 206 passing suites, one failing suite; 1,686 passed, 13 failed, one skipped. The parent set `NEXT_PUBLIC_ENABLE_REALTIME=false`, disabling the hook exercised by the mocked WebSocket suite. Changing only that variable to true for the existing focused suite yielded **13 passed, one skipped, exit 0**. This is a failed full run plus narrow corrected proof, not an all-green full-gate claim. The real-backend WebSocket case remains skipped.
+
+Advisory check against `.github/workflows/ci.yml`: the root `ci:gate` job leaves `NEXT_PUBLIC_ENABLE_REALTIME` unset; only the separate smoke jobs set it to false. Therefore the earlier 13 mocked-WebSocket failures are a parent harness-configuration artifact, not evidence of a candidate defect. The corrected focused result is not an exact-CI full-run receipt. No broad rerun was performed for this delayed advisory; U04 and integrated release acceptance remain blocked, not closed on the failed recipe.
 
 The separately invoked changed-line Ruff gate stopped on 12 actionable diagnostics; chained compile/pytest commands were not reached. Independent main-module compile passed. The independent backend suite exited 1: **4,695 passed, two failed, 94 skipped, four warnings and four subtests passed**, in 472.59 seconds. The two failures were obsolete assertions requiring raw financial passthrough and the old Compose password interpolation. Their deletion and focused follow-up are recorded separately; runtime admission and private-auth behavior are not weakened.
 
@@ -34,6 +56,8 @@ Parent real-browser valuation checks used synthetic retained rows: both widgets 
 The static union contains 175 IDs. All 149 eligible passive IDs were captured once in their assigned isolated context, with no missing, extra or duplicate ID. Excluded: 25 external TradingView IDs and shell-only copilot. Observations: 43 error, 17 unavailable, 66 loading, two OPTIONS-stopped loading, nine idle/local-empty, 12 inconclusive. None is blanket signoff. `backtest_lab` and `sweep_matrix` never reached an observed settled failure state. This does not certify failure delivery, populated financial truth, accessibility or every visual state.
 
 Workers were supplied `381212f3` and did not independently fingerprint the preview. The parent freeze records unchanged frontend at `4d1c03db`; that is not independent runtime binding. Shared-origin seed collisions invalidated preliminary captures, replaced by isolated contexts. Some overwritten preliminary screenshot pixels are not retained. Screenshot references are temporary, not durable approved artwork.
+
+Delayed-review attribution check: the committed `apps/web` tree is exactly `62ad9a9eacee490db0a4cad614604ede7d707d58` at `381212f3`, `4d1c03db` and `4ffd01cf`. The only frontend-path change from `4ffd01cf` to documentation save `e0b8f5fb` is `apps/web/src/data/changelog.generated.ts`. This confirms source equality across the backend/lint deltas, not an independently identified running preview or retroactive acceptance of the passive sweep.
 
 **Network uncertainty:** group 2 observed two preliminary WebSocket handshake responses before its effective constructor guard. Destination and absolute event times were not recorded. An additional diagnostic probe lacked the guard; its result is unknown. Final guarded captures recorded no WebSocket escape, but the entire run cannot be certified network-isolated. This was disclosed, not retroactively cleared. Compliance with the original 900-second total wall-clock bound is unverified. All owned contexts/tabs closed before preview shutdown.
 

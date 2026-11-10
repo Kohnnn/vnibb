@@ -20,7 +20,7 @@ live in \`docs/\`.
 - Keep DNSE acquisition unavailable through a standalone refusal command before credentials, application imports or external I/O. No DNSE provider is installed; schemas, units, session coverage, source rights and publication remain separate gates (#231–#233, #241).
 - Authenticate Mongo healthchecks without credential arguments and move Redis startup authentication into a private configuration file; Redis health uses environment authentication. Upstream Mongo empty-volume initialization remains a documented separate exposure; no production rollout occurred (#242).
 - Contain compact ticker/widget overflow and preserve maximized/nested-dialog focus, keyboard scrolling and freshness warnings. Local opaque-origin iframe traversal is verified separately from the still-unverified live TradingView interaction (#236, #200).
-- Preserve finite reported growth, including zero, and derive only missing or nonfinite values from admitted statements (#238, #241).
+- Reject nonfinite reported growth before source merging, preserving finite retained fallback and reported zero even when statement enrichment is unavailable; derive only still-missing values from admitted statements (#238, #241).
 - Correct yearly USD/VND precedence for fresh preferences and disclose effective local, admin and built-in rates without discarding existing saved overrides. Broader FX adoption remains partial (#241).
 - Cancel obsolete valuation-history requests on ticker changes and widget unmount while retaining cached-data and retry behavior (#241).
 - Correct the brand-channel description to match the existing wordmark-on-plate browser and install icons; preserve all 175 registered widget identities without claiming individual visual signoff (#194, #200).
