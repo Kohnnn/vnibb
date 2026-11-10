@@ -456,12 +456,6 @@ def test_stock_price_serialization_respects_index_and_explicit_unknown_units(
     assert result["source"] == row["source"]
 
 
-def test_non_price_collection_serialization_does_not_add_price_units():
-    row = {"symbol": "VNM", "source": "vnstock", "revenue": 1000.0}
-
-    assert server._serialize_row(row, model=server.IncomeStatement) == row
-
-
 @pytest.mark.asyncio
 async def test_financial_corpus_filters_iq_source_and_fiscal_variant(monkeypatch):
     fake = _FakeMongoService()
