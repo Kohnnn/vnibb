@@ -37,6 +37,7 @@ jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEven
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }));
 jest.mock('./TickerCombobox', () => ({ TickerCombobox: ({ isOpen, onSelect }: { isOpen: boolean; onSelect: (symbol: string) => void }) => isOpen ? <button type="button" onClick={() => onSelect(mockWidgetType === 'tradingview_chart' ? 'NASDAQ:MSFT' : 'VNM')}>Pick {mockWidgetType === 'tradingview_chart' ? 'NASDAQ:MSFT' : 'VNM'}</button> : null }));
 beforeEach(() => { mockTickerOverride = null; mockWidgetConfig = {}; mockWidgetType = 'screener'; mockUpdateWidget.mockClear(); mockSetGroupSymbol.mockClear(); });
+afterEach(() => jest.restoreAllMocks());
 
 const FilterContext = createContext({ filter: '', saveFilter: (_value: string) => {} });
 
@@ -56,8 +57,10 @@ function WorkspaceHarness() {
 }
 
 test('maximized edits have a single live editor and survive restoring the original cell', async () => {
+  jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
   const user = userEvent.setup();
-  render(<WorkspaceHarness />);
+  render(<><button type="button">Background settings</button><WorkspaceHarness /></>);
+  const maximizeButton = screen.getByRole('button', { name: 'Maximize widget' });
   await user.type(screen.getByRole('textbox', { name: 'Screener search' }), 'V');
   await user.click(screen.getByRole('button', { name: 'Maximize widget' }));
   const dialog = screen.getByRole('dialog', { name: 'VCI - Screener' });
@@ -65,12 +68,19 @@ test('maximized edits have a single live editor and survive restoring the origin
   expect(liveEditors).toHaveLength(1);
   expect(liveEditors[0]).toHaveValue('V');
   await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Minimize widget' })).toHaveFocus());
+  screen.getByRole('button', { name: 'Background settings' }).focus();
+  expect(within(dialog).getByRole('button', { name: 'Minimize widget' })).toHaveFocus();
+  await user.tab({ shift: true });
+  expect(within(dialog).getByRole('textbox', { name: 'Screener search' })).toHaveFocus();
+  await user.tab();
+  expect(within(dialog).getByRole('button', { name: 'Minimize widget' })).toHaveFocus();
   await user.click(within(dialog).getByRole('textbox', { name: 'Screener search' }));
   await user.type(screen.getByLabelText('Screener search'), 'CB');
   expect(screen.getByLabelText('Saved screener filter')).toHaveTextContent('VCB');
   await user.click(within(dialog).getByRole('button', { name: 'Minimize widget' }));
   expect(screen.getAllByRole('textbox', { name: 'Screener search', hidden: true })).toHaveLength(1);
   expect(screen.getByRole('textbox', { name: 'Screener search' })).toHaveValue('VCB');
+  expect(maximizeButton).toHaveFocus();
 });
 
 test('a detached ticker reaches the lazy widget through Suspense when its group changes', async () => {

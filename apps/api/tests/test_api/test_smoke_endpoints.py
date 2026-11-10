@@ -4535,7 +4535,7 @@ async def test_market_forex_rates_smoke_returns_data(client, monkeypatch):
             )
 
     monkeypatch.setattr(
-        "vnibb.api.v1.market.import_vnstock_symbol", lambda name: (Retail, "vnstock")
+        "vnibb.providers.vnstock.runtime.import_vnstock_symbol", lambda name: (Retail, "vnstock")
     )
 
     response = await client.get("/api/v1/market/forex-rates?limit=1")

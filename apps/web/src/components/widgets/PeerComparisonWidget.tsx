@@ -453,7 +453,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                         <table className="data-table w-full text-[10px] border-collapse">
                     <thead className="text-[var(--text-muted)] sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                         <tr>
-                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] z-10 min-w-[148px] border-r border-[var(--border-subtle)]">
+                            <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] sticky left-0 z-10 min-w-[148px] border-r border-[var(--border-subtle)]">
                                 <button type="button" onClick={() => handleSort('metric')} className="inline-flex items-center gap-1 hover:text-[var(--text-primary)]">
                                     <span>Metric</span>
                                     {sortIndicator('metric')}
@@ -662,9 +662,9 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
     return (
         <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)] rounded-lg">
             {/* Header Area */}
-            <div className="px-3 py-2 border-b border-[var(--border-color)] flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1 bg-[var(--bg-secondary)] p-1 rounded border border-[var(--border-subtle)]">
+            <div className="px-3 py-2 border-b border-[var(--border-color)] flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+                    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1 bg-[var(--bg-secondary)] p-1 rounded border border-[var(--border-subtle)]">
                         {peers.map((sym, index) => (
                             <div
                                 key={`${sym}-${index}`}
@@ -692,6 +692,8 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             <button
                                 onClick={() => setShowSelector(!showSelector)}
                                 className="p-1 hover:bg-[var(--bg-hover)] rounded transition-colors text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                                aria-label="Add comparison symbol"
+                                aria-expanded={showSelector}
                             >
                                 <Plus size={12} />
                             </button>
@@ -699,7 +701,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
                     <WidgetMeta
                         updatedAt={null}
                         fetchedAt={dataUpdatedAt || null}
@@ -714,6 +716,8 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             onClick={() => setShowSetsMenu(!showSetsMenu)}
                             className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)] rounded border border-[var(--border-subtle)]"
                             title="Saved Comparisons"
+                            aria-label="Saved comparisons"
+                            aria-expanded={showSetsMenu}
                         >
                             <FolderOpen size={14} />
                         </button>
@@ -731,6 +735,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                         <button
                                             onClick={handleSaveSet}
                                             disabled={!saveSetName.trim()}
+                                            aria-label="Save comparison set"
                                             className="p-1 bg-[var(--color-state-bg)] hover:bg-[var(--color-state-bg)] disabled:opacity-50 rounded"
                                         >
                                             <Save size={12} />
@@ -755,6 +760,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                                 </button>
                                                 <button
                                                     onClick={() => setSets((current) => current.filter((entry) => entry.id !== set.id))}
+                                                    aria-label={`Delete saved comparison ${set.name}`}
                                                     className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-[var(--color-negative)] transition-opacity"
                                                 >
                                                     <Trash2 size={10} />
@@ -766,15 +772,19 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                             </div>
                         )}
                     </div>
-                    <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-subtle)]">
+                    <div className="flex bg-[var(--bg-secondary)] rounded p-0.5 border border-[var(--border-subtle)]" role="group" aria-label="Comparison view">
                         <button
                             onClick={() => setActiveTab('table')}
+                            aria-label="Table view"
+                            aria-pressed={activeTab === 'table'}
                             className={`p-1.5 rounded transition-all ${activeTab === 'table' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                         >
                             <TableIcon size={14} />
                         </button>
                         <button
                             onClick={() => setActiveTab('radar')}
+                            aria-label="Chart view"
+                            aria-pressed={activeTab === 'radar'}
                             className={`p-1.5 rounded transition-all ${activeTab === 'radar' ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                         >
                             <LayoutGrid size={14} />
@@ -783,13 +793,14 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                     <button
                         onClick={() => setHeatmapEnabled(!heatmapEnabled)}
+                        aria-label="Toggle heatmap"
+                        aria-pressed={heatmapEnabled}
                         className={`p-1.5 rounded transition-all border border-[var(--border-subtle)] ${heatmapEnabled ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] border-[var(--color-state-border)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)]'}`}
-                        title="Toggle Heatmap"
                     >
                         <Grid3X3 size={14} />
                     </button>
 
-                    <button onClick={() => refetch()} className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)] rounded border border-[var(--border-subtle)]">
+                    <button onClick={() => refetch()} aria-label="Refresh comparison data" className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--bg-secondary)] rounded border border-[var(--border-subtle)]">
 
                         <RefreshCw size={14} />
                     </button>

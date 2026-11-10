@@ -5,7 +5,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
-  Command,
   LogOut,
   Search,
   User,
@@ -141,9 +140,7 @@ export function Header({
   unitDisplay = 'auto',
   onUnitDisplayChange,
 }: HeaderProps) {
-  const hasActionMenu = Boolean(
-    onResetLayout || onCollapseAll || onExpandAll
-  )
+  const hasActionMenu = Boolean(onResetLayout || onCollapseAll || onExpandAll)
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user, loading: authLoading, provider, isAdmin, isGuest, signOut } = useAuth()
   const shortcutModifier = getShortcutModifierLabel()
@@ -313,17 +310,17 @@ export function Header({
           AlertNotificationPanel) inside the header's paint order; the blur was
           retired in #199 (glass). */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[var(--dashboard-shell-bg)]" />
-      <div className="px-4 py-2 pl-14 lg:pl-4">
-        <div data-tour="header-bar" className="flex min-h-[2.75rem] flex-wrap items-center gap-2">
+      <div className="px-2 py-2 pl-[3.25rem] pr-0 sm:pl-14 sm:pr-2 lg:px-4 lg:pl-4">
+        <div data-tour="header-bar" className="flex min-h-11 min-w-0 flex-wrap items-center sm:flex-nowrap sm:gap-1">
           {/* Below lg the sidebar is off-canvas, so the wordmark lives here. */}
           <Link
             href="/"
             aria-label={`${VNIBB_BRAND_NAME} home`}
-            className="flex shrink-0 items-center rounded-sm lg:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
+            className="flex min-h-11 shrink-0 items-center rounded-sm lg:hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
           >
-            <VniBBLogo width={88} label={null} />
+            <VniBBLogo width={80} label={null} />
           </Link>
-          <div className="hidden min-w-0 shrink-0 items-center gap-2 xl:flex">
+          <div className="hidden min-w-0 shrink-0 items-center gap-2 2xl:flex">
             <div className="inline-flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
               <div className="min-w-0">
                 <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--text-muted)]">
@@ -365,52 +362,41 @@ export function Header({
             ))}
           </div>
 
-          <div data-tour="header-search" className="relative min-w-[220px] flex-1 xl:min-w-0">
+          <div data-tour="header-search" className="relative w-11 shrink-0 sm:min-w-0 sm:flex-1">
             <button
               type="button"
               aria-label="Open symbol search and command palette"
               onClick={openHeaderSearch}
-              className="flex w-full items-center justify-between gap-3 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] py-1.5 pl-8 pr-3 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
+              className="flex h-11 w-full items-center justify-center gap-3 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] sm:justify-between sm:pl-8 sm:pr-3"
             >
               <Search
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]"
-                size={14}
+                className="text-[var(--text-muted)] sm:absolute sm:left-2.5 sm:top-1/2 sm:-translate-y-1/2"
+                size={16}
               />
-              <span className="min-w-0 truncate text-[var(--text-secondary)]">
+              <span className="hidden min-w-0 truncate text-[var(--text-secondary)] sm:block">
                 Search tickers, commands, and workspaces
               </span>
-              <span className="hidden shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] sm:inline-flex">
+              <span className="hidden shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)] xl:inline-flex">
                 {shortcutModifier}+K
               </span>
             </button>
           </div>
 
-          <div data-tour="header-tools" className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 sm:shrink-0 sm:gap-2">
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
-                detail: { source: 'header_button' },
-              }))}
-              className="flex items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
-              title={`Open command palette (${shortcutModifier}+K)`}
-              aria-label="Open command palette"
-            >
-              <Command size={13} />
-              <span className="hidden md:inline">{shortcutModifier}+K</span>
-            </button>
+          <div data-tour="header-tools" className="ml-auto flex min-w-0 max-w-full flex-nowrap shrink-0 items-center justify-end sm:gap-1">
 
           {onAIClick && (
             <button
               type="button"
               onClick={onAIClick}
               className={cn(
-                'flex items-center gap-1 rounded-md border px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors',
+                'hidden h-11 items-center gap-1 rounded-md border px-2 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] sm:flex',
                 isAIOpen
                   ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--color-info)]'
                   : 'border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               )}
               title="Open VniAgent"
               aria-label={isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}
+              aria-pressed={isAIOpen}
             >
               <Sparkles size={13} />
               <span className="hidden md:inline">VniAgent</span>
@@ -420,8 +406,10 @@ export function Header({
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                type="button"
+                className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                 title="Display settings"
+                aria-label="Display settings"
               >
                 <Settings2 size={14} />
               </button>
@@ -471,7 +459,7 @@ export function Header({
           </DropdownMenu>
 
           {(onAutoFitLayout || onEditToggle) && (
-            <div className="inline-flex items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-1">
+            <div className="hidden items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-1 xl:inline-flex">
               {onAutoFitLayout && (
                 <button
                   type="button"
@@ -496,6 +484,7 @@ export function Header({
                       : 'border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   )}
                   title="Lock or unlock dashboard layout for editing"
+                  aria-pressed={isEditing}
                   aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
                 >
                   {isEditing ? <Unlock size={13} className="animate-pulse" /> : <Lock size={13} />}
@@ -505,17 +494,42 @@ export function Header({
             </div>
           )}
 
-          {hasActionMenu && (
-           <DropdownMenu>
+          <DropdownMenu>
             <DropdownMenuTrigger asChild>
                 <button
-                  className="flex items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  type="button"
+                  className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                   title="Dashboard actions"
+                  aria-label="Dashboard actions"
                 >
                   <MoreHorizontal size={14} />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-[180px]">
+                <DropdownMenuItem
+                  onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
+                    detail: { source: 'header_button' },
+                  }))}
+                  className="text-xs"
+                >
+                  Open command palette
+                </DropdownMenuItem>
+                {onAIClick && (
+                  <DropdownMenuItem onClick={onAIClick} className="text-xs">
+                    {isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}
+                  </DropdownMenuItem>
+                )}
+                {onAutoFitLayout && (
+                  <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs">
+                    Auto-fit layout
+                  </DropdownMenuItem>
+                )}
+                {onEditToggle && (
+                  <DropdownMenuItem onClick={onEditToggle} className="text-xs">
+                    {isEditing ? 'Lock layout' : 'Edit layout'}
+                  </DropdownMenuItem>
+                )}
+                {hasActionMenu && <DropdownMenuSeparator />}
                 {onResetLayout && (
                   <DropdownMenuItem onClick={onResetLayout} className="text-xs">
                     Reset layout
@@ -534,7 +548,6 @@ export function Header({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
 
           <AlertNotificationPanel />
 
@@ -561,14 +574,14 @@ export function Header({
              <DropdownMenuTrigger asChild>
                <button
                  type="button"
-                 className="flex items-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
+                 className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] px-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
                  title="Account menu"
                  aria-label="Open account menu"
                >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[10px] font-bold uppercase text-[var(--text-primary)]">
                   {authLoading ? <User size={13} /> : userInitials}
                 </span>
-                <span className="hidden max-w-[8rem] truncate text-[10px] font-semibold uppercase tracking-[0.12em] lg:inline">
+                <span className="hidden max-w-[8rem] truncate text-[10px] font-semibold uppercase tracking-[0.12em] 2xl:inline">
                   {authLoading ? 'Session' : userDisplayName}
                 </span>
               </button>

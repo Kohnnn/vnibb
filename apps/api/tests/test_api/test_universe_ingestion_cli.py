@@ -334,7 +334,7 @@ async def test_sql_inventory_reconciles_current_universe_without_mutating_cycle(
 async def test_apply_registers_golden_before_listing_bootstrap(cli, monkeypatch):
     """The CLI has no API lifespan; --apply must register Golden before acquisition."""
     from vnibb.core.config import settings
-    from vnibb.services import vnstock_registration
+    from vnibb.providers.vnstock import registration as vnstock_registration
 
     monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
     order = []
@@ -366,7 +366,7 @@ async def test_apply_registers_golden_before_listing_bootstrap(cli, monkeypatch)
 @pytest.mark.asyncio
 async def test_apply_fails_closed_when_golden_registration_fails(cli, monkeypatch):
     from vnibb.core.config import settings
-    from vnibb.services import vnstock_registration
+    from vnibb.providers.vnstock import registration as vnstock_registration
 
     monkeypatch.setattr(settings, "vnstock_runtime_tier", "golden")
     monkeypatch.setattr(cli, "ensure_vnstock_registration",

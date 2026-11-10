@@ -52,7 +52,7 @@ from vnibb.core.retry import with_retry
 from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import resolve_sector_name
-from vnibb.providers.vnstock.runtime import validate_source
+from vnibb.providers.market_data import validate_source
 from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 from vnibb.core.screener_shares import resolve_screener_shares
@@ -380,30 +380,18 @@ class DataPipeline:
         interval: str = "1D",
         bypass_internal_retry: bool = False,
     ) -> pd.DataFrame:
-        from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+        from vnibb.providers import market_data
 
         source = validate_source(settings.vnstock_source)
         timeout_seconds = max(float(getattr(settings, "vnstock_timeout", 0) or 0), 1.0)
 
         def _fetch_sync() -> pd.DataFrame:
-            quote = get_quote_class()(symbol=symbol, source=source)
-            history_callable = quote.history
-            unwrapped_history = getattr(history_callable, "__wrapped__", None)
-            if bypass_internal_retry and callable(unwrapped_history):
-                frame = unwrapped_history(quote, start=start, end=end, interval=interval)
-            else:
-                frame = history_callable(start=start, end=end, interval=interval)
+            frame = market_data.history(
+                symbol, source, start=start, end=end, interval=interval,
+                bypass_internal_retry=bypass_internal_retry, mark_index_units=True,
+            )
             if isinstance(frame, pd.DataFrame):
-                asset_type = getattr(quote, "asset_type", None)
-                if (
-                    str(asset_type or "").lower() in {"index", "derivative"}
-                    and frame.attrs.get("price_unit") is None
-                    and frame.attrs.get("priceUnit") is None
-                ):
-                    # A derivative contract is quoted in index points; declare
-                    # that unit explicitly instead of leaving it unverified.
-                    frame.attrs["price_unit"] = "index_points"
-                frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=source, provider=quote, asset_type=asset_type))
+                frame = pd.DataFrame(history_price_records(frame, symbol=symbol, source=source))
             return frame
 
         frame = await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
@@ -436,11 +424,10 @@ class DataPipeline:
                     return rows
             except Exception as exc:
                 logger.warning("Cached IQ listing unavailable: %s", exc)
-        from vnibb.providers.vnstock.runtime import get_listing_class
+        from vnibb.providers import market_data
 
         try:
-            listing = get_listing_class()(source=validate_source(settings.vnstock_source))
-            frame = await asyncio.to_thread(listing.symbols_by_exchange)
+            frame = await asyncio.to_thread(market_data.listing, settings.vnstock_source, view="symbols_by_exchange")
             return [{**row, "_listing_source": "VCI"} for row in frame.to_dict(orient="records")] if frame is not None else []
         except Exception as exc:
             logger.warning("Free VCI instrument metadata unavailable: %s", exc)
@@ -972,7 +959,7 @@ class DataPipeline:
         sync_id: Optional[int] = None,
     ) -> int:
         """Refresh source-backed IQ stock listings; free VCI supplements outages."""
-        from vnibb.providers.vnstock.runtime import get_listing_class
+        from vnibb.providers import market_data
         from vnibb.services.vietcap_client import VietcapClient
         from vnibb.services.vietcap_financials import persist_vietcap_listings
 
@@ -1012,8 +999,7 @@ class DataPipeline:
             return count
 
         listing_source = "VCI"
-        listing = get_listing_class()(source=validate_source(settings.vnstock_source))
-        df = await asyncio.to_thread(listing.all_symbols)
+        df = await asyncio.to_thread(market_data.listing, settings.vnstock_source)
         if df is None or df.empty:
             raise ValueError("IQ and free VCI listings unavailable")
         confirmed_symbols = {str(row.get("symbol") or "").upper() for row in stock_rows}
@@ -1242,11 +1228,7 @@ class DataPipeline:
             not acquire_sessions or symbols is not None or exchanges is not None or limit is not None
         ):
             raise ValueError("recovery assertions require session acquisition without selection filters")
-        from vnibb.providers.vnstock.runtime import (
-            import_vnstock_symbol,
-            get_listing_class,
-            run_financial_provider,
-        )
+        from vnibb.providers import market_data
 
 
         logger.info("Syncing screener data...")
@@ -1310,10 +1292,7 @@ class DataPipeline:
         def _extract_listing_metadata(src: str) -> Dict[str, Dict[str, Any]]:
             metadata: Dict[str, Dict[str, Any]] = {}
             try:
-                listing = Listing(source=validate_source(src))
-                df = listing.all_symbols()
-                exchange_df = listing.symbols_by_exchange()
-                industry_df = listing.symbols_by_industries()
+                df, exchange_df, industry_df = market_data.listing_metadata(src)
             except Exception as listing_error:
                 logger.debug("Listing metadata fetch failed: %s", listing_error)
                 return metadata
@@ -1486,7 +1465,6 @@ class DataPipeline:
             _validate_screener_recovery_target(active_symbols, pinned_symbols, pinned_session, session_date)
             if set(active_symbols) != set(deduped_symbols):
                 raise ValueError("the full active symbol universe changed during recovery preflight")
-        Listing = get_listing_class() if enrich_ratios else None
         primary_source = (settings.vnstock_source or "VCI").upper()
         listing_metadata = {}
         if enrich_ratios:
@@ -1808,10 +1786,7 @@ class DataPipeline:
                         try:
 
                             def _fetch_ratio_snapshot(sym: str, src: str):
-                                fundamental = import_vnstock_symbol("Fundamental")[0]()
-                                df = fundamental.equity(sym).ratio(
-                                    source=validate_source(src), period="year", lang="en", format="long",
-                                )
+                                df = market_data.financial_ratios(sym, src)
                                 if df is None or df.empty:
                                     return None
                                 ratios = VnstockFinancialRatiosFetcher.transform_data(
@@ -1829,9 +1804,8 @@ class DataPipeline:
                                 try:
                                     end_date = datetime.now()
                                     start_date = end_date - timedelta(days=10)
-                                    from vnibb.providers.vnstock.runtime import get_quote_class
-                                    quote = get_quote_class()(symbol=sym, source=validate_source(src))
-                                    history = quote.history(
+                                    history = market_data.history(
+                                        sym, src,
                                         start=start_date.strftime("%Y-%m-%d"),
                                         end=end_date.strftime("%Y-%m-%d"),
                                     )
@@ -1840,8 +1814,6 @@ class DataPipeline:
                                             history,
                                             symbol=sym,
                                             source=src,
-                                            provider=quote,
-                                            asset_type=getattr(quote, "asset_type", None),
                                         )[-1]
                                         ratio_row["price"] = latest.get("close")
                                         ratio_row["price_unit"] = latest["price_unit"]
@@ -1858,7 +1830,7 @@ class DataPipeline:
 
                                 return ratio_row
 
-                            ratio_df = await run_financial_provider(
+                            ratio_df = await market_data.run_financial(
                                 lambda sym=symbol, src=ratio_source: _fetch_ratio_snapshot(sym, src), settings.vnstock_timeout
                             )
                             if ratio_df:
@@ -3259,31 +3231,12 @@ class DataPipeline:
             symbol = symbols[idx]
             await self._wait_for_rate_limit("profiles")
             try:
-                from vnibb.providers.vnstock.runtime import (
-                    get_company_class,
-                    run_financial_provider,
-                )
+                from vnibb.providers import market_data
 
                 def acquire_profile(symbol=symbol) -> Dict[str, Any]:
-                    company = get_company_class()(symbol=symbol, source=validate_source(settings.vnstock_source))
-                    overview_row: Dict[str, Any] = {}
-                    profile_row: Dict[str, Any] = {}
-                    errors: list[Exception] = []
-                    for method_name, target in (("overview", overview_row), ("profile", profile_row)):
-                        try:
-                            method = getattr(company, method_name, None)
-                            if method is None:
-                                continue
-                            frame = method()
-                            if frame is not None and not frame.empty:
-                                target.update(frame.iloc[0].to_dict())
-                        except Exception as exc:
-                            errors.append(exc)
-                    if not overview_row and not profile_row and errors:
-                        raise errors[-1]
-                    return {**profile_row, **overview_row}
+                    return market_data.company_profile(symbol, settings.vnstock_source)
 
-                merged_row = await run_financial_provider(acquire_profile, settings.vnstock_timeout)
+                merged_row = await market_data.run_financial(acquire_profile, settings.vnstock_timeout)
                 if not merged_row:
                     if progress is not None:
                         progress["error_count"] = progress.get("error_count", 0) + 1
@@ -6360,9 +6313,8 @@ class DataPipeline:
                         receipt.update(provider="vietcap:Trading", price_multiplier=1, source_price_unit="VND")
                         return acquired, receipt
                     except Exception as primary_error:
-                        from vnibb.providers.vnstock.runtime import get_quote_class
-                        quote = get_quote_class()(symbol=symbol, source=validate_source(source))
-                        frame = quote.intraday(page_size=min(max(1, limit), 1000))
+                        from vnibb.providers import market_data
+                        frame = market_data.intraday(symbol, source, page_size=min(max(1, limit), 1000))
                         unit = str(getattr(frame, "attrs", {}).get("price_unit") or "").strip().lower()
                         units = {"vnd": (1, "VND"), "thousand_vnd": (1000, "thousand_VND")}
                         if unit not in units:

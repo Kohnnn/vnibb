@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useDialogFocusTrap } from './useDialogFocusTrap';
 
@@ -23,6 +23,7 @@ function NavigationDialog({ onClose }: { onClose: () => void }) {
         <section ref={dialogRef} role="dialog" aria-label="Navigation" tabIndex={-1}>
             <button type="button" onClick={onClose}>Close navigation</button>
             <button type="button" onClick={() => setChildOpen(true)}>Transfer research</button>
+            <iframe title="Embedded research" />
         </section>
         {childOpen && <ChildDialog onClose={closeChild} />}
     </>;
@@ -63,6 +64,49 @@ it('gives a portaled child dialog focus ownership and restores each opener after
         await user.keyboard('{Escape}');
         expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument();
         await waitFor(() => expect(navigationOpener).toHaveFocus());
+    } finally {
+        visibleElements.mockRestore();
+    }
+});
+
+it('includes an embedded frame when wrapping dialog keyboard focus', async () => {
+    const visibleElements = jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+    const user = userEvent.setup();
+    try {
+        render(<NavigationLauncher />);
+        await user.click(screen.getByRole('button', { name: 'Open navigation' }));
+        const close = screen.getByRole('button', { name: 'Close navigation' });
+        const research = screen.getByRole('button', { name: 'Transfer research' });
+        const frame = screen.getByTitle('Embedded research') as HTMLIFrameElement;
+        await waitFor(() => expect(close).toHaveFocus());
+
+        // Firefox drops a synchronous iframe.focus() inside the trusted keydown.
+        const nativeFocus = frame.focus.bind(frame);
+        const focusDescriptor = Object.getOwnPropertyDescriptor(frame, 'focus');
+        let attempts = 0;
+        Object.defineProperty(frame, 'focus', { configurable: true, value: (options?: FocusOptions) => {
+            attempts += 1;
+            if (attempts === 1) return;
+            nativeFocus(options);
+        } });
+
+        // Stepping focus elsewhere before the retry (no keydown) keeps the dialog's focusin
+        // re-entry out of this timing check, so only the deferred retry can reclaim the frame.
+        const nextTask = () => new Promise<void>((resolve) => { window.setTimeout(resolve, 0); });
+        try {
+            fireEvent.keyDown(close, { key: 'Tab', shiftKey: true });
+            research.focus();
+            await nextTask();
+            expect(research).toHaveFocus();
+
+            close.focus();
+            attempts = 0;
+            await user.tab({ shift: true });
+            await waitFor(() => expect(frame).toHaveFocus());
+        } finally {
+            if (focusDescriptor) Object.defineProperty(frame, 'focus', focusDescriptor);
+            else Reflect.deleteProperty(frame, 'focus');
+        }
     } finally {
         visibleElements.mockRestore();
     }
