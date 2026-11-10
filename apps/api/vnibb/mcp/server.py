@@ -984,8 +984,14 @@ def _serialize_row(row: Any, *, model: Any = None) -> dict[str, Any]:
     payload = dict(row)
     if model is StockPrice:
         payload = persisted_price_record(payload)
-    elif model in (IncomeStatement, BalanceSheet, CashFlow) and payload.get("period"):
-        payload = _admit_statement_row(payload, model)
+    elif model in (IncomeStatement, BalanceSheet, CashFlow):
+        payload = (_admit_statement_row(payload, model) if payload.get("period")
+                   else _withhold_statement(payload, model, "unverified_statement_period"))
+        reason = payload.get("unavailable_reason")
+        if _statement_period_key(payload) is None and reason not in {
+            "ambiguous_quarterly_fiscal_identity", "conflicting_fiscal_identity"
+        }:
+            payload = _withhold_statement(payload, model, reason or "unverified_statement_period")
     elif model is FinancialRatio:
         raw_data = payload.get("raw_data")
         ratio_units = raw_data.get("ratio_units") if isinstance(raw_data, dict) else None
@@ -1022,6 +1028,93 @@ def _serialize_row(row: Any, *, model: Any = None) -> dict[str, Any]:
             payload["unavailable_metrics"] = unavailable_metrics
             payload["data_status"] = "partial_unavailable"
     return {key: _normalize_row_value(value) for key, value in payload.items()}
+
+
+def _statement_period_key(row: dict[str, Any]) -> tuple[int, int] | None:
+    """Order only fiscal identities independently supported by the stored label."""
+    label = str(row.get("period") or "").strip().upper()
+    family = row.get("period_type")
+    annual = re.fullmatch(r"(?:FY)?(20\d{2})", label)
+    quarterly = re.fullmatch(r"Q([1-4])-(20\d{2})|(20\d{2})-Q([1-4])", label)
+    if family == "year" and annual and int(annual.group(1)) == row.get("fiscal_year"):
+        return int(annual.group(1)), 0
+    if family == "quarter" and quarterly:
+        quarter = int(quarterly.group(1) or quarterly.group(4))
+        year = int(quarterly.group(2) or quarterly.group(3))
+        if (year, quarter) == (row.get("fiscal_year"), row.get("fiscal_quarter")):
+            return year, quarter
+    return None
+
+
+def _statement_basis(row: dict[str, Any], model: Any) -> tuple[Any, ...] | None:
+    currency, unit = row.get("currency"), row.get("value_unit")
+    scope, flow, aggregation = (row.get(name) for name in (
+        "consolidation_basis", "flow_basis", "aggregation_basis"
+    ))
+    if currency != "VND" or unit != "VND" or scope not in {"consolidated", "separate"}:
+        return None
+    if model is not BalanceSheet and flow not in {"annual", "single_quarter", "cumulative_ytd"}:
+        return None
+    if not aggregation:
+        return None
+    return currency, unit, scope, flow, aggregation
+
+
+def _statement_rejected(row: dict[str, Any]) -> bool:
+    if row.get("unavailable_reason"):
+        return True
+    rejected_bases = {"unverified_statement_currency_or_unit", "unverified_statement_basis",
+                      "unverified_statement_period", "unknown_annual_flow_basis",
+                      "unknown_quarterly_flow_basis", "unknown_ttm_flow_basis", "unknown_ytd_flow_basis"}
+    return any(reason in rejected_bases for reason in (row.get("unavailable_metrics") or {}).values())
+
+
+def _withhold_statement(row: dict[str, Any], model: Any, reason: str) -> dict[str, Any]:
+    withheld = dict(row)
+    withheld.setdefault("raw_observation", dict(row))
+    unavailable = dict(row.get("unavailable_metrics") or {})
+    metrics = set(FinancialStatementData.model_fields) | {
+        column.name for column in model.__table__.columns
+        if column.type.python_type in (float, Decimal)
+    }
+    for name in metrics - {"fiscal_year", "fiscal_quarter"}:
+        if isinstance(withheld.get(name), (int, float, Decimal)) and not isinstance(withheld[name], bool):
+            withheld[name] = None
+            unavailable[name] = reason
+    withheld.update(unavailable_reason=reason, unavailable_metrics=unavailable,
+                    data_status="partial_unavailable")
+    return withheld
+
+
+def _reconcile_statement_rows(rows: list[dict[str, Any]], model: Any) -> list[dict[str, Any]]:
+    groups: dict[tuple[Any, ...], list[int]] = {}
+    for index, row in enumerate(rows):
+        period = _statement_period_key(row)
+        if period is not None:
+            groups.setdefault((row.get("symbol"), row.get("period_type"), *period), []).append(index)
+    reconciled = list(rows)
+    for indices in groups.values():
+        admitted = [index for index in indices if not _statement_rejected(rows[index])]
+        if len({rows[index].get("source") for index in admitted}) < 2:
+            continue
+        bases = [_statement_basis(rows[index], model) for index in admitted]
+        if None in bases or len(set(bases)) != 1:
+            reason = "incomparable_statement_basis"
+        else:
+            metrics = set(FinancialStatementData.model_fields) - {"fiscal_year", "fiscal_quarter"}
+            reason = "unverified_financial_revision"
+            for offset, index in enumerate(admitted):
+                for other in admitted[offset + 1:]:
+                    if any(isinstance(rows[index].get(name), (int, float, Decimal))
+                           and isinstance(rows[other].get(name), (int, float, Decimal))
+                           and rows[index][name] != rows[other][name] for name in metrics):
+                        reason = "conflicting_source_observations"
+                        break
+                if reason == "conflicting_source_observations":
+                    break
+        for index in admitted:
+            reconciled[index] = _withhold_statement(rows[index], model, reason)
+    return reconciled
 
 
 def _model_columns(model: Any) -> list[Any]:
@@ -1307,12 +1400,17 @@ async def query_database_collection_data(
         queries.insert(0, _query_equal("source", list(ADMITTED_FINANCIAL_SOURCES)))
         applied_filters["admitted_sources"] = list(ADMITTED_FINANCIAL_SOURCES)
 
-    rows = await list_collection_documents_paginated(
-        spec.collection,
-        queries=queries,
-        page_size=min(bounded_limit, 100),
-        max_documents=bounded_limit,
-    )
+    if spec.collection in STATEMENT_COLLECTIONS.values() and bounded_limit:
+        rows = await list_collection_documents_paginated(
+            spec.collection, queries=[query for query in queries if query["method"] != "limit"],
+            page_size=100,
+        )
+        rows = _reconcile_statement_rows(rows, COLLECTION_MODELS[spec.collection])[:bounded_limit]
+    else:
+        rows = await list_collection_documents_paginated(
+            spec.collection, queries=queries, page_size=min(bounded_limit, 100),
+            max_documents=bounded_limit,
+        )
 
     return {
         "collection": spec.collection,
@@ -1324,6 +1422,8 @@ async def query_database_collection_data(
         "retrieved_at": datetime.now(UTC).isoformat(),
         "row_count": len(rows),
         "items": serialize_data_value(rows),
+        **({"financial_coverage": "SQL only; Mongo observations and overwritten same-period sources are not compared"}
+           if spec.collection in STATEMENT_COLLECTIONS.values() else {}),
         **(_price_series_metadata(rows) if spec.collection == "stock_prices" else {}),
     }
 
@@ -1339,21 +1439,41 @@ async def _get_latest_symbol_document(
         queries.append(
             _query_equal("period_type", [_normalize_filter_value("period_type", period_type)])
         )
-    queries.extend(
-        [
-            _query_order("fiscal_year", descending=True),
-            _query_order("fiscal_quarter", descending=True),
-            _query_limit(1),
-        ]
-    )
-    # Recency, not source rank, decides the snapshot: the ordering below is only
-    # meaningful when every admitted source competes in one query. Ranking by
-    # source first returned a stale primary row ahead of a newer admitted one.
+    queries.extend([
+        _query_order("fiscal_year", descending=True),
+        _query_order("fiscal_quarter", descending=True),
+    ])
+    is_statement = collection_id in STATEMENT_COLLECTIONS.values()
+    if not is_statement:
+        queries.append(_query_limit(1))
     rows = await list_collection_documents(
         collection_id,
         queries=[_query_equal("source", list(ADMITTED_FINANCIAL_SOURCES)), *queries],
     )
-    return rows[0] if rows else None
+    if not rows or not is_statement:
+        return rows[0] if rows else None
+
+    model = COLLECTION_MODELS[collection_id]
+    rows = _reconcile_statement_rows(rows, model)
+    identified = [row for row in rows if _statement_period_key(row) is not None]
+    if not identified:
+        return _withhold_statement(rows[0], model, rows[0].get("unavailable_reason") or "unverified_statement_period")
+    families = {row["period_type"] for row in identified}
+    if len(families) > 1:
+        return {"symbol": normalize_symbol_input(symbol), "data_status": "partial_unavailable",
+                "unavailable_reason": "ambiguous_period_family"}
+    newest_key = max(_statement_period_key(row) for row in identified)
+    same_period = [row for row in identified if _statement_period_key(row) == newest_key]
+    latest = next((row for row in same_period if _statement_rejected(row)), same_period[0])
+    if _statement_rejected(latest):
+        return latest
+    # ponytail: absent revision/basis evidence forbids competing observations;
+    # a future revision contract can replace this conservative withholding.
+    admitted = [row for row in identified if not _statement_rejected(row)]
+    bases = {_statement_basis(row, model) for row in admitted}
+    if len(admitted) > 1 and (None in bases or len(bases) > 1):
+        return _withhold_statement(latest, model, "incomparable_statement_basis")
+    return latest
 
 
 async def _get_symbol_rows(
@@ -1693,6 +1813,7 @@ async def get_symbol_snapshot(symbol: str) -> dict[str, Any]:
         "retrieved_at": datetime.now(UTC).isoformat(),
         "found": True,
         "snapshot": serialize_data_value(snapshot),
+        "financial_coverage": "SQL only; Mongo observations and overwritten same-period sources are not compared",
         "serialization_policy": "compact_ai_snapshot; bounded summaries, full financial evidence; use dedicated/generic tools for full rows",
     }
 
@@ -1783,6 +1904,7 @@ async def get_latest_financial_statement(
         "item": serialize_data_value(row or {}),
         "found": row is not None,
         "source": f"postgres:{collection_id}",
+        "financial_coverage": "SQL only; Mongo observations and overwritten same-period sources are not compared",
         "retrieved_at": datetime.now(UTC).isoformat(),
         "provider_source": row.get("source") if row else None,
         "data_status": row.get("data_status", "available") if row else "empty_no_admitted_source",

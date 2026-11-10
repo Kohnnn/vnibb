@@ -490,6 +490,10 @@ async def test_public_sql_rejects_unadvertised_date_bounds(sql_tool, collection,
 async def test_fiscal_aliases_select_exact_lowercase_persisted_periods(sql_tool, collection, alias, canonical):
     periods = ("year", "quarter", "yearly", "quarterly", "YEAR", "QUARTER", "ttm")
     rows = [_row(collection, ordinal, symbol="FPT", period_type=period) for ordinal, period in enumerate(periods, 1)]
+    if collection != "financial_ratios":
+        rows[0] = _row(collection, 1, symbol="FPT", fiscal_quarter=None)
+        rows[1] = _row(collection, 2, symbol="FPT", period="Q2-2022", period_type="quarter",
+                       fiscal_year=2022, fiscal_quarter=2)
     await sql_tool(collection, rows)
 
     result = await server.query_database_collection(collection=collection, symbol=" fpt ", period_type=alias)
@@ -594,3 +598,155 @@ async def test_dedicated_corporate_timeline_preserves_all_payload_columns_and_me
         assert item["date"] == day.isoformat()
         columns = server.COLLECTION_MODELS[collection].__table__.columns.keys()
         assert {key: item["payload"][key] for key in columns} == _json_value(row)
+
+
+def _income_observation(ordinal, period, source, **values):
+    year = int(period[-4:])
+    row = _row("income_statements", ordinal, symbol="FPT", period=period,
+               fiscal_year=year, fiscal_quarter=None, source=source, **values)
+    row["raw_data"]["_financial_lineage"]["canonical_data"]["aggregation_basis"] = "reported_annual"
+    return row
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("older_source,newer_source", [("vietcap", "VCI"), ("VCI", "vietcap")])
+async def test_mcp_statement_tools_select_newest_admitted_sql_period(sql_tool, monkeypatch, older_source, newer_source):
+    older = _income_observation(1, "2024", older_source, revenue=50)
+    newer = _income_observation(2, "2025", newer_source, revenue=0, net_income=-5)
+    banned = _income_observation(3, "2026", "KBS", revenue=500)
+    await sql_tool("income_statements", [older, newer, banned])
+
+    class Context:
+        async def _build_database_snapshot_direct(self, symbol):
+            return {"income_statement": None}
+
+    monkeypatch.setattr(server, "AIContextService", Context)
+    collection = await server.query_database_collection("income_statements", symbol="FPT", period_type="year", limit=1)
+    latest = await server.get_latest_financial_statement("FPT", period_type="year")
+    snapshot = await server.get_symbol_snapshot("FPT")
+    for item in (collection["items"][0], latest["item"], snapshot["snapshot"]["income_statement"]):
+        assert (item["period"], item["source"], item["revenue"], item["net_income"]) == ("2025", newer_source, 0, -5)
+        assert item["raw_data"] == newer["raw_data"]
+    assert collection["filters_applied"]["admitted_sources"] == ["vietcap", "VCI"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_statement_tools_keep_rejected_newest_period(sql_tool, monkeypatch):
+    older = _income_observation(1, "2024", "vietcap", revenue=30)
+    newer = _income_observation(2, "2025", "VCI", revenue=10)
+    newer["raw_data"]["_financial_lineage"]["canonical_data"]["unavailable_reason"] = "retained_rejection"
+    await sql_tool("income_statements", [older, newer])
+
+    class Context:
+        async def _build_database_snapshot_direct(self, symbol):
+            return {"income_statement": None}
+
+    monkeypatch.setattr(server, "AIContextService", Context)
+    collection = await server.query_database_collection("income_statements", symbol="FPT", period_type="year", limit=1)
+    latest = await server.get_latest_financial_statement("FPT", period_type="year")
+    snapshot = await server.get_symbol_snapshot("FPT")
+    for item in (collection["items"][0], latest["item"], snapshot["snapshot"]["income_statement"]):
+        assert (item["period"], item["revenue"], item["unavailable_reason"]) == ("2025", None, "retained_rejection")
+        assert item["raw_observation"]["revenue"] == 10
+    assert latest["data_status"] == "partial_unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("other_revenue,reason", [(10, "unverified_financial_revision"), (11, "conflicting_source_observations")])
+async def test_mcp_statement_tools_withhold_visible_same_period_source_conflicts(sql_tool, monkeypatch, other_revenue, reason):
+    first = _income_observation(1, "2025", "vietcap", revenue=10)
+    second = deepcopy(first)
+    second.update(id=2, period="FY2025", source="VCI", revenue=other_revenue)
+    canonical = second["raw_data"]["_financial_lineage"]["canonical_data"]
+    canonical.update(period="FY2025", source="VCI")
+    await sql_tool("income_statements", [first, second])
+
+    class Context:
+        async def _build_database_snapshot_direct(self, symbol):
+            return {"income_statement": None}
+
+    monkeypatch.setattr(server, "AIContextService", Context)
+    collection = await server.query_database_collection("income_statements", symbol="FPT", period_type="year", limit=1)
+    latest = await server.get_latest_financial_statement("FPT", period_type="year")
+    snapshot = await server.get_symbol_snapshot("FPT")
+    for item in (collection["items"][0], latest["item"], snapshot["snapshot"]["income_statement"]):
+        assert item["revenue"] is None
+        assert item["unavailable_reason"] == reason
+        assert item["unavailable_metrics"]["revenue"] == reason
+
+
+@pytest.mark.asyncio
+async def test_mcp_statement_requires_comparable_family_and_ignores_invalid_identity(sql_tool, monkeypatch):
+    annual = _income_observation(1, "2024", "vietcap", revenue=10)
+    malformed = _income_observation(2, "2025", "VCI", revenue=999)
+    malformed.update(period="not-a-period", fiscal_year=9999)
+    quarter = _row("income_statements", 3, symbol="FPT", period="Q1-2025", period_type="quarter",
+                   fiscal_year=2025, fiscal_quarter=1, source="VCI", revenue=20)
+    await sql_tool("income_statements", [annual, malformed, quarter])
+
+    class Context:
+        async def _build_database_snapshot_direct(self, symbol):
+            return {"income_statement": None}
+
+    monkeypatch.setattr(server, "AIContextService", Context)
+    latest = await server.get_latest_financial_statement("FPT", period_type="year")
+    assert (latest["item"]["period"], latest["item"]["revenue"]) == ("2024", 10)
+    filtered = await server.query_database_collection("income_statements", symbol="FPT", period_type="quarter")
+    assert [(item["period"], item["revenue"]) for item in filtered["items"]] == [("Q1-2025", 20)]
+    ambiguous = await server.get_latest_financial_statement("FPT")
+    snapshot = await server.get_symbol_snapshot("FPT")
+    assert ambiguous["item"]["unavailable_reason"] == "ambiguous_period_family"
+    assert snapshot["snapshot"]["income_statement"]["unavailable_reason"] == "ambiguous_period_family"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("older_basis,newer_basis,expected", [
+    (None, "consolidated", 20),
+    ("consolidated", "separate", None),
+])
+async def test_mcp_statement_ignores_rejected_older_basis_but_withholds_incompatible_admitted(sql_tool, older_basis, newer_basis, expected):
+    older = _income_observation(1, "2024", "vietcap", revenue=10)
+    newer = _income_observation(2, "2025", "VCI", revenue=20)
+    older["raw_data"]["_financial_lineage"]["canonical_data"]["consolidation_basis"] = older_basis
+    newer["raw_data"]["_financial_lineage"]["canonical_data"]["consolidation_basis"] = newer_basis
+    await sql_tool("income_statements", [older, newer])
+    latest = await server.get_latest_financial_statement("FPT", period_type="year")
+    assert latest["item"]["period"] == "2025"
+    assert latest["item"]["revenue"] == expected
+    if expected is None:
+        assert latest["item"]["unavailable_reason"] == "incomparable_statement_basis"
+
+
+@pytest.mark.asyncio
+async def test_mcp_statement_collection_withholds_competition_in_historical_period(sql_tool):
+    older = _income_observation(1, "2024", "vietcap", revenue=10)
+    competing = deepcopy(older)
+    competing.update(id=2, period="FY2024", source="VCI")
+    competing["raw_data"]["_financial_lineage"]["canonical_data"].update(period="FY2024", source="VCI")
+    newer = _income_observation(3, "2025", "vietcap", revenue=20)
+    await sql_tool("income_statements", [older, competing, newer])
+    result = await server.query_database_collection("income_statements", symbol="FPT", period_type="year", limit=3)
+    assert result["items"][0]["revenue"] == 20
+    assert all(item["revenue"] is None and item["unavailable_reason"] == "unverified_financial_revision"
+               for item in result["items"][1:])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("old_source,new_source", [("vietcap", "VCI"), ("VCI", "vietcap")])
+async def test_mcp_statement_quarter_recency_preserves_metric_rejections(sql_tool, old_source, new_source):
+    rows = []
+    for ordinal, quarter, source in ((1, 1, old_source), (2, 3, new_source)):
+        row = _row("income_statements", ordinal, symbol="FPT", period=f"Q{quarter}-2025",
+                   period_type="quarter", fiscal_year=2025, fiscal_quarter=quarter,
+                   source=source, revenue=0 if ordinal == 2 else 90, ebitda=-7)
+        canonical = row["raw_data"]["_financial_lineage"]["canonical_data"]
+        canonical["aggregation_basis"] = "reported_quarter"
+        if ordinal == 2:
+            canonical["unit_metadata"]["ebitda"]["unavailable_reason"] = "rejected_input"
+        rows.append(row)
+    await sql_tool("income_statements", rows)
+    latest = await server.get_latest_financial_statement("FPT", period_type="quarter")
+    item = latest["item"]
+    assert (item["period"], item["source"], item["revenue"]) == ("Q3-2025", new_source, 0)
+    assert item["ebitda"] is None and item["unavailable_metrics"]["ebitda"] == "rejected_input"
+    assert item["raw_observation"]["ebitda"] == -7

@@ -529,7 +529,7 @@ async def test_latest_financial_ranks_admitted_sources_by_recency(monkeypatch):
 
     async def read(collection, queries):
         calls.append(queries[0]["values"])
-        return [{"symbol": "FPT", "source": "VCI", "fiscal_year": 2026}]
+        return [{"symbol": "FPT", "source": "VCI", "period": "2026", "period_type": "year", "fiscal_year": 2026}]
 
     monkeypatch.setattr(server, "list_collection_documents", read)
     row = await server._get_latest_symbol_document("income_statements", "FPT")
@@ -562,8 +562,8 @@ async def test_latest_financial_ranks_admitted_sources_by_recency(monkeypatch):
         # Same fiscal year: the later quarter decides.
         (
             [
-                {"id": 1, "symbol": "FPT", "source": "vietcap", "fiscal_year": 2026, "fiscal_quarter": 1, "period": "Q1-2026"},
-                {"id": 2, "symbol": "FPT", "source": "VCI", "fiscal_year": 2026, "fiscal_quarter": 3, "period": "Q3-2026"},
+                {"id": 1, "symbol": "FPT", "source": "vietcap", "fiscal_year": 2026, "fiscal_quarter": 1, "period": "Q1-2026", "period_type": "quarter"},
+                {"id": 2, "symbol": "FPT", "source": "VCI", "fiscal_year": 2026, "fiscal_quarter": 3, "period": "Q3-2026", "period_type": "quarter"},
             ],
             "VCI",
         ),
@@ -588,11 +588,8 @@ async def test_latest_financial_selects_newest_period_across_sources(
 
         async def read(collection, queries):
             captured["queries"] = queries
-            stmt = _apply_sql_queries(select(IncomeStatement), IncomeStatement, list(queries))
-            return [
-                {"source": r.source, "fiscal_year": r.fiscal_year}
-                for r in session.execute(stmt).scalars().all()
-            ]
+            stmt = _apply_sql_queries(select(*server._model_columns(IncomeStatement)), IncomeStatement, list(queries))
+            return [server._serialize_row(row, model=IncomeStatement) for row in session.execute(stmt).mappings().all()]
 
         monkeypatch.setattr(server, "list_collection_documents", read)
         row = await server._get_latest_symbol_document("income_statements", "FPT")
