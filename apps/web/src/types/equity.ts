@@ -339,6 +339,7 @@ export interface RatioHistoryResponse {
   data: RatioHistoryPoint[];
   meta?: {
     count: number;
+    warnings?: string[];
   };
   error?: string | null;
 }
