@@ -6,7 +6,6 @@ from datetime import date
 
 import httpx
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers import dnse
