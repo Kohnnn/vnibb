@@ -35,6 +35,22 @@ Layout note:
 - Widget-library size badges are derived from that contract so the displayed size matches actual widget insertion behavior.
 - `widgetDefinitions.ts` and `WidgetRegistry.ts` keep mirrored defaults for discoverability, but the layout contract remains the operative source of truth.
 
+### Responsive workspace
+
+- Widget contents shrink to their panel, with keyboard-focusable local scroll regions for long content. Financial tables scroll inside their widget rather than widening the workspace; metric columns respond to widget width.
+- Breakpoint changes apply without animated position/size interpolation, which could make otherwise separate widgets cross over each other. Responsive layouts remain view-only; saved desktop placement is unchanged, and Auto-fit remains an explicit action.
+- The compact header keeps search, display settings, dashboard actions and alerts available. VniAgent and layout actions remain in **Dashboard actions** on narrow screens. The control group wraps to a second short row only when needed, including a 320 px signed-in layout.
+- Ticker search opens outside the compact widget-controls panel and stays within the viewport. Escape closes ticker search first, then the parent controls panel.
+- The in-app wordmark uses the unchanged master SVG as a transparent, theme-ink mask. Fixed-channel artwork (README, app icons, email and social cards) retains its white field.
+- Market Overview index cards use panel-width auto-fit columns. Volume, high/low and each index's own observation date wrap without forcing a wider card; narrow panels retain all fields.
+- Peer Comparison wraps symbol and action groups independently. Table/chart and heatmap toggles expose their active state, all icon actions have names, and the metric column stays pinned while numeric columns scroll locally. No comparison columns are hidden.
+- Active tabs reveal within their own horizontal strip after tab changes and viewport resizes, without scrolling the page. Manage tabs remains available on phones.
+- Maximized widgets use the shared dialog focus trap: background focus returns inside, Tab wraps (including embedded frames), and closing restores the maximize button. The original card is inert while maximized; its single live content host moves into the modal.
+- The mobile Research Matrix inspector joins the same dialog stack when it portals outside a maximized widget. Escape closes the inspector first and restores its opener; the desktop inline inspector remains non-modal.
+
+Reference decisions: [OpenBB parameter positioning](https://docs.openbb.co/workspace/developers/widget-parameters/parameter-positioning) allows parameter controls to occupy multiple rows; [Chartrow holdings](https://chartrow.com/quote/arkk/holdings) keeps identity visible in a locally scrolling table, and its [top-performers views](https://chartrow.com/top-performers#view=drawdown&p=ytd) disclose secondary controls. This repair adopts contained control groups and pinned identity within existing views, not a new density setting, hidden financial columns or additional chart types.
+
+
 ## News Association Labels
 
 Company and related-news ranking is rule-based, not a calibrated probability. The UI shows the association reason and `rank N/100`; peer and sector matches are indirect, and a provider-related symbol is provider metadata rather than independent verification.

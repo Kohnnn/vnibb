@@ -23,6 +23,7 @@ function NavigationDialog({ onClose }: { onClose: () => void }) {
         <section ref={dialogRef} role="dialog" aria-label="Navigation" tabIndex={-1}>
             <button type="button" onClick={onClose}>Close navigation</button>
             <button type="button" onClick={() => setChildOpen(true)}>Transfer research</button>
+            <iframe title="Embedded research" />
         </section>
         {childOpen && <ChildDialog onClose={closeChild} />}
     </>;
@@ -63,6 +64,21 @@ it('gives a portaled child dialog focus ownership and restores each opener after
         await user.keyboard('{Escape}');
         expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument();
         await waitFor(() => expect(navigationOpener).toHaveFocus());
+    } finally {
+        visibleElements.mockRestore();
+    }
+});
+
+it('includes an embedded frame when wrapping dialog keyboard focus', async () => {
+    const visibleElements = jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+    const user = userEvent.setup();
+    try {
+        render(<NavigationLauncher />);
+        await user.click(screen.getByRole('button', { name: 'Open navigation' }));
+        const close = screen.getByRole('button', { name: 'Close navigation' });
+        await waitFor(() => expect(close).toHaveFocus());
+        await user.tab({ shift: true });
+        expect(screen.getByTitle('Embedded research')).toHaveFocus();
     } finally {
         visibleElements.mockRestore();
     }

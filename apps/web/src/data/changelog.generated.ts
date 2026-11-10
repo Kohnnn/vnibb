@@ -16,6 +16,13 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- The in-app VniBB wordmark is transparent and follows light/dark theme ink without changing SVG geometry or shifting on theme changes. README, app-icon, email and social artwork retain their fixed white field.
+- Dashboard controls fit a compact toolbar instead of multiple oversized mobile rows. Search, display settings, alerts and account controls stay reachable; layout actions and VniAgent remain available through Dashboard actions on narrow screens, with wrapping only when the controls need it.
+- Widgets contain long content and financial tables locally; metric columns adapt to panel width. Grid resizing no longer animates separate widgets through each other, and ticker search escapes compact-panel clipping with viewport-bounded positioning and nested Escape handling. Saved desktop positions and financial values are unchanged.
+- Market Overview index cards fit narrow desktop panels and phones without clipped index values or colliding metadata. Peer Comparison keeps symbol, saved-set, view, heatmap, refresh and export controls within the panel; view states are announced and the metric column remains visible during horizontal table scrolling. Financial values, provenance and available columns are unchanged.
+- Active dashboard tabs stay visible after phone/desktop resizing, Manage tabs is reachable on phones, and maximized widgets keep keyboard focus inside (including embedded frames), restoring their original opener. The hidden original card is inert until restored.
+- The mobile Research Matrix inspector retains keyboard focus when opened from a maximized widget; Escape closes that inspector before the parent widget. Desktop inline inspection remains non-modal.
+
 - Listing Browser filters wrap to their widget width rather than the viewport breakpoint. Native selects stay compact and long industry labels cannot force them outside a narrow widget; exchange, sort, search and clear behavior is retained (#222).
 - Comparison-derived OCF/Sales requires retained statement evidence matching the actual stored revenue and operating cash flow, with explicit VND units, field evidence, compatible source/consolidation and annual or single-quarter flow. Unknown or contradictory bases remain unavailable; measured zero OCF remains zero and TTM requires four consecutive compatible paired quarters. Other metrics and production financial acceptance are unchanged (#224, #106).
 - Watchlist ceiling/floor status uses neutral ink, not gain/loss colors. Status labels and icons remain visible; missing price-limit evidence stays muted (#200).

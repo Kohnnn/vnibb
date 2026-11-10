@@ -40,9 +40,6 @@ const lgTranslate = (x: number, y: number) => `translate(${Math.round(((LOCKED_G
 async function resizeGridTo(width: number, height = 900) {
   await act(async () => {
     resizeObservers.forEach(callback => callback([{ contentRect: { width, height } }]));
-    const debounceElapsed = Promise.withResolvers<void>();
-    setTimeout(debounceElapsed.resolve, 150); // the grid debounces container measurements by 100ms
-    await debounceElapsed.promise;
   });
 }
 
