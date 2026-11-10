@@ -73,7 +73,7 @@ export default function BrandChannelsPage() {
             <section className="mt-10 text-sm leading-6 text-[var(--text-secondary)]">
                 <h2 className="text-lg font-semibold text-[var(--text-primary)]">Open items</h2>
                 <ul className="mt-2 list-disc space-y-1 pl-5">
-                    <li>Favicon and app-icon artwork is not in brand pack v1.1; manifest icon entries stay unresolved until that artwork is approved.</li>
+                    <li>The app uses the wordmark on a white plate for browser and install icons; brand pack v1.1 contains no standalone symbol.</li>
                     <li>The LinkedIn banner in the pack is a 1584 × 528 source composition; adapt it to the destination crop before publishing.</li>
                     <li>No team mailbox, phone number or partnership is claimed; contact details come from the signature owner.</li>
                 </ul>
