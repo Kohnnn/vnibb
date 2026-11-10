@@ -3,6 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
 
+beforeEach(() => jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList));
+afterEach(() => jest.restoreAllMocks());
+
 function PersistedFilterHarness() {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');

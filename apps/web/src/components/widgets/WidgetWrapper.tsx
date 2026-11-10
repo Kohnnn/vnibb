@@ -170,10 +170,11 @@ export function WidgetWrapper({
     const [internalData, setInternalData] = useState<any>(widgetData);
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
+    const tickerTriggerRef = useRef<HTMLButtonElement | null>(null);
     const [widgetHost] = useState<HTMLDivElement | null>(() => {
         if (typeof document === 'undefined') return null;
         const host = document.createElement('div');
-        host.className = 'h-full';
+        host.className = 'h-full min-h-0 min-w-0';
         return host;
     });
     const maximizedContentRef = useRef<HTMLDivElement | null>(null);
@@ -717,7 +718,7 @@ export function WidgetWrapper({
             {/* Normal widget - dim when maximized */}
             <div
                 className={cn(
-                    "widget-card-premium h-full min-h-0 flex flex-col overflow-visible",
+                    "widget-card-premium flex h-full min-h-0 min-w-0 flex-col",
                     isEditing ? 'ring-2 ring-[var(--color-state-border)]' : '',
                     isMaximized ? 'opacity-0 pointer-events-none' : ''
                 )}
@@ -726,6 +727,7 @@ export function WidgetWrapper({
                         ? getColorForGroup(widgetGroup)
                         : undefined
                 }}
+                inert={isMaximized}
                 data-widget-id={id}
             >
                 <WidgetToolbar
@@ -753,8 +755,11 @@ export function WidgetWrapper({
                     tickerSelector={
                         <div className="relative flex items-center min-w-[68px]">
                             <button
+                                ref={tickerTriggerRef}
                                 type="button"
-                                onClick={() => setIsTickerDropdownOpen(true)}
+                                onClick={() => setIsTickerDropdownOpen(open => !open)}
+                                aria-haspopup="dialog"
+                                aria-expanded={isTickerDropdownOpen}
                                 className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]"
                                 title="Select widget ticker"
                             >
@@ -766,9 +771,9 @@ export function WidgetWrapper({
                                 )}
                             </button>
                             <TickerCombobox
+                                anchorRef={tickerTriggerRef}
                                 isOpen={isTickerDropdownOpen}
                                 onClose={() => setIsTickerDropdownOpen(false)}
-                                currentSymbol={displaySymbol}
                                 onSelect={handleTickerSelect}
                             />
                         </div>
@@ -904,7 +909,9 @@ export function WidgetWrapper({
                     }
                 />
                 {showCapabilities ? (
-                    <WidgetCapabilityPanel widgetType={widgetType} symbol={displaySymbol} config={currentWidget?.config} onClose={handleCloseCapabilities} />
+                    <div className="min-h-0 max-h-[50%] shrink overflow-auto">
+                        <WidgetCapabilityPanel widgetType={widgetType} symbol={displaySymbol} config={currentWidget?.config} onClose={handleCloseCapabilities} />
+                    </div>
                 ) : null}
 
                 {isEditing && layoutInsight ? (
@@ -923,7 +930,7 @@ export function WidgetWrapper({
 
 
                 {/* Content */}
-                <div id={id} ref={contentHostRef} className="relative min-h-0 flex-1 overflow-auto rounded-b-lg bg-[var(--bg-secondary)] p-2 sm:p-2.5">
+                <div id={id} ref={contentHostRef} role="region" aria-label={`${title} content`} tabIndex={0} className="relative min-h-0 min-w-0 flex-1 overflow-auto rounded-b-lg bg-[var(--bg-secondary)] p-2 sm:p-2.5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--focus-ring-color)]">
                     {isMaximized ? null : isCollapsed ? (
                         <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
                             Collapsed

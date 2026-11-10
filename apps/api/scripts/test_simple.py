@@ -32,10 +32,9 @@ async def test_redis_conn():
 
 async def test_vnstock_api():
     """Test vnstock"""
-    from vnibb.providers.vnstock.runtime import get_listing_class
+    from vnibb.providers import market_data
     source = "VCI"
-    listing = get_listing_class()(source=source)
-    symbols = listing.all_symbols()
+    symbols = market_data.listing(source)
     return {"source": source, "count": len(symbols)}
 
 async def main():

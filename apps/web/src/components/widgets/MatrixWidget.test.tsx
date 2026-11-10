@@ -1,5 +1,9 @@
+import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import MatrixWidget from './MatrixWidget';
+import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
+import { MatrixInspector } from './matrix/MatrixInspector';
 import { matrixApi } from '@/lib/matrix';
 import type { MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
 
@@ -109,6 +113,9 @@ it('retains a selected common period on shortlist edits and never offers absent 
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG' } });
   await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2023'));
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, XYZ' } });
+  // Settle the rejected availability request inside act: its catch calls
+  // setAvailability/setPeriodError, which would otherwise flush as a warning.
+  await waitFor(() => expect(matrixApi.periods).toHaveBeenLastCalledWith('FPT', ['FPT', 'XYZ']));
   expect(screen.getByLabelText('Year')).toHaveValue('');
   expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
   expect(matrixApi.prepare).toHaveBeenCalledTimes(1);
@@ -304,17 +311,57 @@ it('removes owned content and ignores in-flight evidence after revocation', asyn
 
 it('traps narrow inspector keyboard focus and restores the initiating result', async () => {
   jest.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() } as unknown as MediaQueryList);
+  jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
   render(<MatrixWidget id="matrix" symbol="FPT" />);
   fireEvent.click(screen.getByRole('button', { name: 'Explore synthetic fixture' }));
   const result = await screen.findByRole('button', { name: 'Inspect FPT Profit quality' });
   result.focus(); fireEvent.click(result);
   const dialog = screen.getByRole('dialog');
   expect(dialog).toHaveAttribute('aria-modal', 'true');
-  expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus());
   fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
   expect(screen.getByRole('tab', { name: 'Review' })).toHaveFocus();
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(result).toHaveFocus();
+});
+
+function NarrowInspectorHarness() {
+  const [outer, setOuter] = useState(false);
+  const [inspector, setInspector] = useState(false);
+  return <>
+    <button onClick={() => setOuter(true)}>Open matrix</button>
+    <MaximizedWidgetPortal isOpen={outer} title="Matrix workspace" onClose={() => setOuter(false)}>
+      <button onClick={() => setInspector(true)}>Inspect FPT Profit quality</button>
+      {inspector && <MatrixInspector snapshot={snapshot} cell={null} dimension={snapshot.dimensions[0]} canReview={false} busy={false} onClose={() => setInspector(false)} onReview={() => {}} />}
+    </MaximizedWidgetPortal>
+  </>;
+}
+
+it('owns focus in the narrow inspector portal and closes it before the maximized widget', async () => {
+  jest.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() } as unknown as MediaQueryList);
+  jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+  const user = userEvent.setup();
+  render(<NarrowInspectorHarness />);
+  const outerOpener = screen.getByRole('button', { name: 'Open matrix' });
+  await user.click(outerOpener);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Minimize widget' })).toHaveFocus());
+  const inspect = screen.getByRole('button', { name: 'Inspect FPT Profit quality' });
+  await user.click(inspect);
+  const inspector = screen.getByRole('dialog', { name: 'Profit quality inspector' });
+  expect(inspector).toHaveAttribute('aria-modal', 'true');
+  const closeInspector = screen.getByRole('button', { name: 'Close inspector' });
+  await waitFor(() => expect(closeInspector).toHaveFocus());
+  await user.tab({ shift: true });
+  expect(closeInspector).toHaveFocus();
+  await user.tab();
+  expect(closeInspector).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Profit quality inspector' })).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: 'Matrix workspace' })).toBeInTheDocument();
+  await waitFor(() => expect(inspect).toHaveFocus());
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Matrix workspace' })).not.toBeInTheDocument();
+  await waitFor(() => expect(outerOpener).toHaveFocus());
 });
 
 it('shows every frozen observation reference field without numeric conversion', async () => {

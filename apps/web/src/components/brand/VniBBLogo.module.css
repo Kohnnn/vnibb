@@ -1,0 +1,19 @@
+.logo {
+  display: inline-flex;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.wordmark {
+  display: block;
+  background-color: var(--text-primary);
+  -webkit-mask: url('/brand/vnibb-wordmark-master.svg') center / contain no-repeat;
+  mask: url('/brand/vnibb-wordmark-master.svg') center / contain no-repeat;
+}
+
+@media (forced-colors: active) {
+  .wordmark {
+    background-color: CanvasText;
+    forced-color-adjust: none;
+  }
+}

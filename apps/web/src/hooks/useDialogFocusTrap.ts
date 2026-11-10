@@ -10,6 +10,8 @@ const FOCUSABLE_SELECTOR = [
   'textarea:not([disabled])',
   'input:not([disabled])',
   'select:not([disabled])',
+  // Native tab stop; inner-frame keys stay in that context. ponytail: traversal is browser-owned until a provider offers a keyboard bridge.
+  'iframe',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
@@ -60,6 +62,21 @@ export function useDialogFocusTrap<T extends HTMLElement>({
 
     const focusTimeout = window.setTimeout(focusDialog, 0)
 
+    let frameRetry = 0
+    // Firefox drops iframe.focus() inside a trusted keydown; retry once on the next task while the
+    // dialog is still topmost and nothing else has claimed focus.
+    const focusTarget = (target: HTMLElement) => {
+      window.clearTimeout(frameRetry)
+      const focusOrigin = document.activeElement
+      target.focus({ preventScroll: true })
+      if (!(target instanceof HTMLIFrameElement) || document.activeElement === target) return
+      frameRetry = window.setTimeout(() => {
+        if (!isTopDialog() || !target.isConnected || !dialog.contains(target)) return
+        if (document.activeElement !== focusOrigin) return
+        target.focus({ preventScroll: true })
+      }, 0)
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isTopDialog()) return
       if (event.key === 'Escape' && onCloseRef.current) {
@@ -87,14 +104,14 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       if (event.shiftKey) {
         if (activeElement === firstFocusable || !dialog.contains(activeElement)) {
           event.preventDefault()
-          lastFocusable.focus({ preventScroll: true })
+          focusTarget(lastFocusable)
         }
         return
       }
 
       if (activeElement === lastFocusable || !dialog.contains(activeElement)) {
         event.preventDefault()
-        firstFocusable.focus({ preventScroll: true })
+        focusTarget(firstFocusable)
       }
     }
 
@@ -109,6 +126,7 @@ export function useDialogFocusTrap<T extends HTMLElement>({
 
     return () => {
       window.clearTimeout(focusTimeout)
+      window.clearTimeout(frameRetry)
       dialog.removeEventListener('keydown', handleKeyDown)
       document.removeEventListener('focusin', handleFocusIn)
       const wasTopDialog = isTopDialog()
