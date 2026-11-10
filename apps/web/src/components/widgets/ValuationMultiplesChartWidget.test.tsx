@@ -53,6 +53,24 @@ describe('ValuationMultiplesChartWidget', () => {
       __widgetRuntime: expect.objectContaining({ layoutHint: expect.objectContaining({ empty: true }) }),
     }));
   });
+
+  it('keeps a zero-valued observation as history', () => {
+    const onDataChange = jest.fn();
+    jest.mocked(useRatioHistory).mockReturnValue({
+      data: { data: [{ period: '2025', pe: 0 }] },
+      dataUpdatedAt: 1,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: jest.fn(),
+    } as unknown as UseQueryResult<RatioHistoryResponse, Error>);
+
+    render(<ValuationMultiplesChartWidget id="valuation" symbol="VCB" onDataChange={onDataChange} />);
+
+    expect(screen.getByTestId('ratio-chart')).toBeInTheDocument();
+    expect(screen.queryByText('No valuation history for VCB')).not.toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ periods: 1 }));
+  });
 });
 
 describe.each([
@@ -62,6 +80,7 @@ describe.each([
   it('shows the provider reason and retry, distinguishes empty success, and recovers', () => {
     const reason = 'Financial ratio history provider deadline exceeded';
     const refetch = jest.fn();
+    const warnings = ['Freshness and completeness are unverified.', 'One retained store could not be read.'];
     const onDataChange = jest.fn();
     const query = {
       data: undefined,
@@ -80,30 +99,42 @@ describe.each([
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetch).toHaveBeenCalledTimes(1);
 
-    jest.mocked(useRatioHistory).mockReturnValue({ ...query, data: { data: [] }, error: null } as typeof query);
+    jest.mocked(useRatioHistory).mockReturnValue({
+      ...query, data: { data: [], meta: { count: 0, warnings } }, error: null,
+    } as typeof query);
     view.rerender(<Widget id="valuation" symbol="VCB" onDataChange={onDataChange} />);
     expect(screen.getByText(emptyMessage)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ periods: 0 }));
+    expect(screen.getByText(warnings.join(' '))).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      periods: 0,
+      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ warnings }) }),
+    }));
 
     const history: RatioHistoryResponse = {
       data: [{ period: '2023', pe: 10 }, { period: '2024', pe: 12 }, { period: '2025', pe: 14 }],
+      meta: { count: 3, warnings },
     };
     jest.mocked(useRatioHistory).mockReturnValue({ ...query, data: history, error: null, dataUpdatedAt: 1 } as typeof query);
     view.rerender(<Widget id="valuation" symbol="VCB" onDataChange={onDataChange} />);
     expect(screen.getByTestId('ratio-chart')).toBeInTheDocument();
     expect(screen.queryByText(emptyMessage)).not.toBeInTheDocument();
-    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ periods: 3 }));
+    expect(screen.getByText(warnings.join(' '))).toBeInTheDocument();
+    expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      periods: 3,
+      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ stale: false, warnings }) }),
+    }));
 
     onDataChange.mockClear();
     jest.mocked(useRatioHistory).mockReturnValue({ ...query, data: history, dataUpdatedAt: 1 } as typeof query);
     view.rerender(<Widget id="valuation" symbol="VCB" onDataChange={onDataChange} />);
     expect(screen.getByTestId('ratio-chart')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(reason);
+    expect(screen.getByText(warnings.join(' '))).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Showing previously received ratio history');
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
       periods: 3,
-      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ stale: true }) }),
+      __widgetRuntime: expect.objectContaining({ provenance: expect.objectContaining({ stale: true, warnings }) }),
     }));
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(refetch).toHaveBeenCalledTimes(2);
@@ -112,6 +143,14 @@ describe.each([
     view.rerender(<Widget id="valuation" symbol="VCB" onDataChange={onDataChange} />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByTestId('ratio-chart')).toBeInTheDocument();
+    expect(screen.getByText(warnings.join(' '))).toBeInTheDocument();
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({ periods: 3 }));
+
+    jest.mocked(useRatioHistory).mockReturnValue({
+      ...query, data: { ...history, meta: { count: 3 } }, error: null, dataUpdatedAt: 3,
+    } as typeof query);
+    view.rerender(<Widget id="valuation" symbol="VCB" onDataChange={onDataChange} />);
+    expect(screen.queryByText(warnings.join(' '))).not.toBeInTheDocument();
+    expect(screen.getByTestId('ratio-chart')).toBeInTheDocument();
   });
 });

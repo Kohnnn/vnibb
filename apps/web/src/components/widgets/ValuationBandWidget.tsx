@@ -7,6 +7,7 @@ import { Sigma } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -114,6 +115,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
       lastDataDate: null,
       fetchedAt: dataUpdatedAt,
       stale: isFallback,
+      warnings: historyResponse?.meta?.warnings,
       extra: {
         periods: rows.length,
         metric,
@@ -121,7 +123,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
         percentile,
       },
     }));
-  }, [current, dataUpdatedAt, error, hasData, isFallback, metric, onDataChange, percentile, rows, upperSymbol]);
+  }, [current, dataUpdatedAt, error, hasData, historyResponse?.meta?.warnings, isFallback, metric, onDataChange, percentile, rows, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view valuation bands" icon={<Sigma size={18} />} />;
@@ -169,6 +171,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             align="right"
           />
         </div>
+        <QuantWarningBanner warning={historyResponse?.meta?.warnings?.join(' ')} className="mb-2" />
         {isFallback && (
           <div role="alert" className="mb-2 text-[10px] text-[var(--color-warning)]">
             {error?.message} Showing previously received ratio history.{' '}
