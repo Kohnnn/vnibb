@@ -7,3 +7,12 @@ regexTarget = "match"
 regexes = [
   '''key_prefix="[A-Za-z0-9_-]+"''',
 ]
+
+# Synthetic DNSE test sentinels ("DNSE-KEY-SENTINEL-..."/"DNSE-SECRET-SENTINEL-...")
+# that assert credentials are never rendered. The test file now builds them from
+# parts, so this entry only covers the two historical commits that introduced the
+# literal form; scoped to this one file and this one rule, never globally.
+[[allowlists]]
+description = "DNSE test sentinels in test_dnse.py, not real credentials"
+ruleIDs = ["generic-api-key"]
+paths = ['''^apps/api/tests/test_providers/test_dnse\.py$''']
