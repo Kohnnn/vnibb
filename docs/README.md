@@ -4,6 +4,8 @@
 
 ## Core References
 
+- `../project-work-backlog.md`: cross-session work index; use its dependencies and current GitHub tickets before reviving historical plans.
+
 - `API_REFERENCE.md`: API-level reference material for the backend surface
 - `APPS_SCRIPT_SHEETS.md`: Google Apps Script / Sheets read-only API integration
 - `BQ_CONNECTED_SHEETS_QUERIES.md`: externally managed BigQuery and Connected Sheets access, metadata, IAM, and query guidance
