@@ -46,6 +46,8 @@ Existing capability context, evidence-grounded follow-ups, Sheets bounded respon
 
 Owner deferred unapproved journal, optimizer, strategy editor, deeper relative-risk, persistent document-library expansion, new IQ-host probes and individual P&L ranking until concrete specs and legitimate source/method/permission. This does not defer concrete existing defects. Trading-host public-data POST does not prove IQ-host POST support; IQ remains unknown. Aggregate flow is not identifiable-person P&L. Current chat Markdown export omits artifacts and panel lacks interactive sorting/chart export; accepted behavior and redistribution rights are still needed.
 
+W05 needs no new workflow implementation: the dashboard widget has no trusted-workflow state; the sidebar's ticker/session-change effect clears selected workflow and active request identity without resetting its separate composer input. On integration `d6178122`, `pnpm exec jest src/components/ui/AICopilot.matrix.test.tsx -t 'same-requestId symbol/session switch clears the disclosure and no stale workflow is sent' --runInBand` exited 0 (1 passed, 18 skipped). The case types fresh text after the switch, so it proves identity clearing, not preservation of authored text. The latter is source-only evidence; no model request, automatic submission or current-release claim.
+
 ## Brand channels and widget dispositions
 
 Existing unchanged wordmark-on-white-plate favicon/install assets and OG source/raster exist; their precise approval linkage is unverified, not proven absent. Live HTML signature needs actual owner contact content; native editable report/deck content or explicit deferral is outstanding. Existing assets are preserved rather than replaced with an invented monogram.
