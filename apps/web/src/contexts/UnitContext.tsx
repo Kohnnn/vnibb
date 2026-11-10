@@ -47,13 +47,13 @@ function normalizeRuntimeRates(value: unknown): Record<string, number> {
 
 export function UnitProvider({ children }: { children: ReactNode }) {
   const [localConfig, setLocalConfig] = useState<UnitConfig>(() => {
-    if (typeof window === 'undefined') return DEFAULT_UNIT_CONFIG
+    if (typeof window === 'undefined') return { ...DEFAULT_UNIT_CONFIG, usdVndRatesByYear: {} }
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
-      if (!saved) return DEFAULT_UNIT_CONFIG
-      return normalizeUnitConfig(JSON.parse(saved) as Partial<UnitConfig>)
+      if (!saved) return { ...DEFAULT_UNIT_CONFIG, usdVndRatesByYear: {} }
+      return normalizeUnitConfig((JSON.parse(saved) as Partial<UnitConfig> | null) || {})
     } catch {
-      return DEFAULT_UNIT_CONFIG
+      return { ...DEFAULT_UNIT_CONFIG, usdVndRatesByYear: {} }
     }
   })
   const [globalUsdVndDefaultRate, setGlobalUsdVndDefaultRate] = useState(
@@ -123,7 +123,7 @@ export function UnitProvider({ children }: { children: ReactNode }) {
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== STORAGE_KEY || !event.newValue) return
       try {
-        const next = normalizeUnitConfig(JSON.parse(event.newValue) as Partial<UnitConfig>)
+        const next = normalizeUnitConfig((JSON.parse(event.newValue) as Partial<UnitConfig> | null) || {})
         setLocalConfig(next)
       } catch {
         // Ignore malformed storage updates

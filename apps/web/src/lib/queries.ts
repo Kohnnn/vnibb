@@ -184,8 +184,8 @@ export function useRatioHistory(
     const period = options?.period || 'year';
     return useQuery({
         queryKey: queryKeys.ratioHistory(symbol, period, ratios, options?.limit),
-        queryFn: async () => {
-            const response = await api.getRatioHistory(symbol, { ratios, period, limit: options?.limit });
+        queryFn: async ({ signal }) => {
+            const response = await api.getRatioHistory(symbol, { ratios, period, limit: options?.limit }, signal);
             if (response.error) throw new Error(response.error);
             return response;
         },
