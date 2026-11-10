@@ -621,8 +621,54 @@ async def test_financial_runtime_does_not_compare_incompatible_bases(monkeypatch
     await test_db.flush()
     section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
     assert section["period"] == "2024"
-    assert section["comparison_status"] == "incompatible_financial_basis"
+    if new_basis is not None:
+        assert section["comparison_status"] == "incompatible_financial_basis"
+    else:
+        assert section["unavailable_reason"] == "unverified_statement_basis"
     assert section["revenue"] is None
+
+
+@pytest.mark.asyncio
+async def test_financial_runtime_ignores_rejected_older_basis(monkeypatch, test_db):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add_all([
+        IncomeStatement(id=1001, symbol="VNM", source="VCI", period="2023", period_type="year",
+                        fiscal_year=2023, revenue=30, raw_data={}),
+        _financial_row(IncomeStatement, row_id=1002, period="2024", source="vietcap", value=100),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert (section["period"], section["data_status"], section["revenue"]) == ("2024", "available", 100)
+    assert "comparison_status" not in section
+    historical = section["historical_observations"][0]
+    assert historical["period"] == "2023"
+    assert historical["revenue"] is None
+    assert historical["unavailable_reason"] == "unverified_statement_currency_or_unit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("same_value", [True, False])
+async def test_financial_runtime_withholds_contested_historical_period(monkeypatch, test_db, same_value):
+    from vnibb.models.financials import IncomeStatement
+
+    test_db.add_all([
+        _financial_row(IncomeStatement, row_id=1001, period="2025", source="VCI", value=200),
+        _financial_row(IncomeStatement, row_id=1002, period="2024", source="VCI", value=100),
+        _financial_row(IncomeStatement, row_id=1003, period="FY2024", source="vietcap",
+                       value=100 if same_value else 101),
+    ])
+    await test_db.flush()
+    section = (await _financial_runtime(monkeypatch, test_db))["income_statement"]
+    assert (section["period"], section["revenue"]) == ("2025", 200)
+    assert len(section["historical_observations"]) == 1
+    historical = section["historical_observations"][0]
+    assert historical["period"] in {"2024", "FY2024"}
+    assert historical["data_status"] == "unavailable"
+    assert historical["revenue"] is None and historical["net_income"] is None
+    assert historical["unavailable_reason"] == (
+        "unverified_financial_revision" if same_value else "conflicting_source_observations"
+    )
 
 
 @pytest.mark.asyncio

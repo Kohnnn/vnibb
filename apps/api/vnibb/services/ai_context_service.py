@@ -891,31 +891,38 @@ def _select_financial_context(rows: Sequence[Any], symbol: str, statement_type: 
     selected = {}
     fields = _STATEMENT_FIELDS[statement_type]
     for family, candidates in families.items():
-        newest = max(ordinal for ordinal, _ in candidates)
-        latest = [section for ordinal, section in candidates if ordinal == newest]
-        section = latest[0]
         basis_names = ("currency", "value_unit", "consolidation_basis", "flow_basis", "aggregation_basis")
-        bases = {tuple(item.get(name) for name in basis_names) for _, item in candidates}
-        if len(bases) > 1 and len(latest) == 1:
-            section = dict(section)
-            if section["data_status"] == "available":
-                section.update({**dict.fromkeys(fields), "data_status": "unavailable", "unavailable_reason": "incompatible_financial_basis"})
-            section["comparison_status"] = "incompatible_financial_basis"
-        if len(latest) > 1:
-            bases = {tuple(item.get(name) for name in basis_names) for item in latest}
-            conflicting = any(len({item[field] for item in latest if item[field] is not None}) > 1 for field in fields)
-            if len(bases) != 1:
-                reason = "incompatible_financial_basis"
-            elif conflicting:
-                reason = "conflicting_source_observations"
-            elif len({item["source"] for item in latest}) > 1:
-                reason = "unverified_financial_revision"
-            else:
-                reason = "conflicting_duplicate_period"
-            section = {**section, **dict.fromkeys(fields), "data_status": "unavailable", "unavailable_reason": reason}
-        historical = [item for ordinal, item in sorted(candidates, key=lambda pair: pair[0], reverse=True) if ordinal < newest]
-        if historical:
-            section = {**section, "historical_observations": historical}
+        admitted_bases = {
+            tuple(item.get(name) for name in basis_names)
+            for _, item in candidates
+            if item["data_status"] == "available" and any(item[field] is not None for field in fields)
+        }
+        periods: dict[int, list[dict[str, Any]]] = {}
+        for ordinal, item in candidates:
+            periods.setdefault(ordinal, []).append(item)
+        resolved = []
+        for ordinal in sorted(periods, reverse=True):
+            observations = periods[ordinal]
+            section = next((item for item in observations if item["data_status"] == "unavailable"), observations[0])
+            if len(observations) > 1 and all(item["data_status"] == "available" for item in observations):
+                bases = {tuple(item.get(name) for name in basis_names) for item in observations}
+                conflicting = any(len({item[field] for item in observations if item[field] is not None}) > 1 for field in fields)
+                if len(bases) != 1:
+                    reason = "incompatible_financial_basis"
+                elif conflicting:
+                    reason = "conflicting_source_observations"
+                elif len({item["source"] for item in observations}) > 1:
+                    reason = "unverified_financial_revision"
+                else:
+                    reason = "conflicting_duplicate_period"
+                section = {**section, **dict.fromkeys(fields), "data_status": "unavailable", "unavailable_reason": reason}
+            resolved.append(section)
+        section = resolved[0]
+        if len(admitted_bases) > 1 and len(periods[max(periods)]) == 1 and section["data_status"] == "available":
+            section = {**section, **dict.fromkeys(fields), "data_status": "unavailable",
+                       "unavailable_reason": "incompatible_financial_basis", "comparison_status": "incompatible_financial_basis"}
+        if len(resolved) > 1:
+            section = {**section, "historical_observations": resolved[1:]}
         selected[family] = section
     if len(selected) == 1:
         return next(iter(selected.values()))
