@@ -6893,7 +6893,6 @@ async def get_financial_ratios(
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v7_provider_deadline")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
@@ -6909,7 +6908,7 @@ async def get_ratio_history(
     try:
         data = await _load_mongo_financial_ratio_rows(symbol.upper(), period, limit=limit)
     except Exception as exc:
-        stored_errors.append(f"Mongo: {exc}")
+        stored_errors.append("Mongo")
         logger.warning("Stored Mongo ratio history unavailable for %s: %s", symbol.upper(), exc)
         data = []
     if not data:
@@ -6933,25 +6932,20 @@ async def get_ratio_history(
         except Exception as exc:
             if not release_read:
                 raise
-            stored_errors.append(f"SQL: {exc}")
+            stored_errors.append("SQL")
             logger.warning("Stored SQL ratio history unavailable for %s: %s", symbol.upper(), exc)
         finally:
             if release_read and db.in_transaction():
                 await db.rollback()
+    if not data and stored_errors:
+        return StandardResponse(
+            data=[], meta=MetaData(count=0),
+            error="Financial ratio history stored source unavailable: " + "; ".join(stored_errors),
+        )
+    warnings = ["Retained ratio history freshness and completeness are unverified."]
+    if stored_errors:
+        warnings.append("Retained ratio history stored source unavailable: " + "; ".join(stored_errors))
     try:
-        if not data:
-            data = await asyncio.wait_for(
-                VnstockFinancialRatiosFetcher.fetch(
-                    FinancialRatiosQueryParams(symbol=symbol.upper(), period=period)
-                ),
-                timeout=min(10, _provider_timeout_budget()),
-            )
-        if not data:
-            return StandardResponse(
-                data=[], meta=MetaData(count=0),
-                error=("Financial ratio history stored source unavailable: " + "; ".join(stored_errors))
-                if stored_errors else None,
-            )
         rows: List[dict[str, Any]] = []
         for item in data:
             # Admit through the shared site so `fcf_yield`/`ocf_sales` cannot
@@ -6966,14 +6960,12 @@ async def get_ratio_history(
             rows.append(row)
 
         rows = sorted(rows, key=lambda r: _ratio_period_sort_key(str(r.get("period", ""))))
-        return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
-    except Exception as exc:
-        error = (
-            "Financial ratio history provider deadline exceeded"
-            if isinstance(exc, (TimeoutError, ProviderTimeoutError))
-            else f"Financial ratio history provider unavailable: {exc}"
+        return StandardResponse(
+            data=rows[:limit], meta=MetaData(count=min(len(rows), limit), warnings=warnings),
         )
-        return StandardResponse(data=[], error=error)
+    except Exception as exc:
+        logger.warning("Stored ratio history could not be processed for %s: %s", symbol.upper(), exc)
+        return StandardResponse(data=[], error="Financial ratio history retained data unavailable")
 
 
 @router.get("/{symbol}/metrics/history", response_model=MetricsHistoryResponse)
