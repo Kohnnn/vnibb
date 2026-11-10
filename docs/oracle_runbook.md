@@ -879,6 +879,63 @@ Pass/fail rule:
 - PASS: all five checks are within thresholds
 - FAIL: any single threshold is exceeded or paid shape usage appears
 
+## DNSE daily-bar import (bounded, operator-run, off by default)
+
+DNSE LightSpeed API access is signed REST (`X-Signature` = HMAC-SHA256 over
+`(request-target)`, `Date` and a per-request `nonce`; a clock more than ±1 minute
+off is rejected). The provider lives in `apps/api/vnibb/providers/dnse.py` and is
+**disabled by default**: `dnse_get` refuses to run unless `DNSE_ENABLED=true`.
+
+Data-use rights are **unknown, not granted**: #232 records DNSE's terms as "Not
+found / Unknown" and #168 still requires a recorded storage and public-serving
+permission. This runbook documents the mechanism only; running it is an operator
+decision that needs that permission recorded first.
+
+What the import does, and does not, do:
+
+- Writes only `stock_prices` rows with `source='dnse_vnd'`, interval `1D`.
+- Prices arrive in thousand VND and are scaled once to VND through
+  `vnibb.core.price_units`; `value`/`adj_close` stay NULL (DNSE publishes no
+  turnover). A bar whose price is NaN/Infinity, whose session timestamp is out of
+  range, or whose `volume` is missing, negative or non-integer is rejected as a
+  provider error rather than repaired: nothing is synthesised, so an absent volume
+  never becomes an observed zero.
+- Inserts are `ON CONFLICT DO NOTHING` on `(symbol, time, interval)`: an existing
+  Vietcap or prior bar is never overwritten, restamped, or deleted.
+- Publishes `sync_status` rows (`sync_type='dnse_daily_prices'`): exactly one per
+  run with the symbol list, window, imported/skipped counts and per-symbol error
+  codes, and one `status='failed'` row when the run is refused before it starts
+  (disabled or unconfigured client), whose `additional_data.refused` is a stable
+  token (`dnse_disabled` / `dnse_credentials_missing`). Error text is a status and
+  a short documented code, never an upstream response body or credential.
+- Does not register a scheduler job, does not touch Mongo envelopes, and reports
+  unknown tickers as `symbol_not_in_stocks` instead of inventing `stocks` rows.
+
+Run it bounded, from the release checkout on the host whose database you mean:
+
+```bash
+umask 077
+DNSE_ENABLED=true PYTHONPATH=apps/api python apps/api/scripts/import_dnse_daily.py \
+  --symbols VNM,FPT --start 2026-10-01 --end 2026-11-10 \
+  > "$PRIVATE_EVIDENCE/dnse-import.$(date -u +%Y%m%dT%H%M%SZ).json"
+```
+
+Exit code 0 = every requested symbol completed; 1 = partial (per-symbol reasons
+are in the JSON); 2 = refused, meaning the client is disabled or unconfigured, in
+which case the reason is printed to stderr and a `status='failed'` receipt is still
+written. A rerun of the same window is idempotent and returns `imported: 0`, which
+is the cheap proof that the receipt is honest.
+
+**Rate limiting gap (accepted).** DNSE's OHLC allowance is 50,000/hour and
+100,000/day per API key. The client issues one GET per symbol per run and does
+not throttle. The boring choice here is to document the gap rather than add a
+sleep-and-budget layer: the documented invocation is a bounded, operator-run list
+of named symbols, so a full allowance needs ~50,000 symbols in one invocation —
+the universe is ~1,700. If this ever becomes a scheduled sweep, add a sequential
+token-bucket guard in `dnse.py` keyed on `X-RateLimit-*` headers and revisit the
+scheduler decision with the permission record.
+
+
 ## Read-only database readiness census (#167)
 
 Use the existing preflight command's explicit census mode, with private runtime

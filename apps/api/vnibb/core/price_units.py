@@ -39,7 +39,7 @@ def normalize_price_record(
     provenance = str(source or record.get("price_source") or record.get("source") or "")
     unit = str(marker or "").strip().upper()
     if marker is None:
-        if provenance.lower() in {"vnstock_vnd", "vietcap_vnd"} or re.fullmatch(r"vnstock_vnd:(?:KBS|VCI|TCBS)", provenance, re.IGNORECASE):
+        if provenance.lower() in {"vnstock_vnd", "vietcap_vnd", "dnse_vnd"} or re.fullmatch(r"vnstock_vnd:(?:KBS|VCI|TCBS)", provenance, re.IGNORECASE):
             unit = "VND"
         elif provenance.lower() == "vnstock_points" or re.fullmatch(r"vnstock_points:(?:KBS|VCI|TCBS)", provenance, re.IGNORECASE):
             unit = "INDEX_POINTS"
@@ -68,6 +68,8 @@ def persisted_price_source(record: Mapping[str, Any]) -> str:
     prefix = "vnstock_vnd" if unit == "VND" else "vnstock_points" if unit == "index_points" else "vnstock_unknown"
     source = str(record.get("price_source") or "")
     provider = source.rsplit(":", 1)[-1].upper()
+    if provider == "DNSE":
+        return "dnse_vnd" if unit == "VND" else "dnse_points" if unit == "index_points" else "dnse_unknown"
     return f"{prefix}:{provider}" if provider in _HISTORY_SOURCES and unit != "unknown" else prefix
 
 

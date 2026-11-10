@@ -780,3 +780,19 @@ def test_stored_snapshot_never_promotes_same_session_ingestion_clock():
     quote = equity._build_quote_from_screener_snapshot(snapshot, observation_clock=True)
 
     assert quote.updated_at.isoformat() == "2026-10-22T00:00:00+07:00"
+
+
+def test_dnse_thousand_vnd_bars_scale_once_and_keep_their_own_source():
+    row = normalize_price_record(
+        {"time": date(2026, 10, 1), "open": 59.4, "high": 59.6, "low": 58.5,
+         "close": 58.6, "volume": 3690200, "price_unit": "THOUSAND_VND"},
+        symbol="VNM", source="dnse",
+    )
+    assert (row["close"], row["price_unit"]) == (58600.0, "VND")
+    assert persisted_price_source(row) == "dnse_vnd"
+
+
+def test_dnse_provenance_without_a_unit_marker_stays_unknown():
+    row = normalize_price_record({"close": 58.6}, symbol="VNM", source="dnse")
+    assert row["price_unit"] == "unknown"
+    assert persisted_price_source(row) == "dnse_unknown"
