@@ -72,10 +72,18 @@ FAILED_MARKER="${BACKUP_DIR}/${STAMP}.FAILED"
 # that because it used to write a file too). The staging cost is covered by
 # the preflight and the file is removed as soon as the copy out returns.
 MONGO_ARCHIVE_IN_CONTAINER="/tmp/${STAMP}.archive"
+# mongodump reads its password from this file instead of argv: `docker exec`
+# arguments are world-readable through ps/pgrep on the host. mongodump
+# strict-parses only the secret-bearing options from --config, so the
+# non-secret --username/--authenticationDatabase stay on the command line.
+# It lives in the mongo container's temp directory and is removed as soon as
+# the dump returns.
+MONGO_CONFIG_IN_CONTAINER="/tmp/${STAMP}.mongodump.json"
 DEST_CREATED=false
 DEST_REMOVED=false
 MONGO_COPY_ATTEMPTED=false
 MONGO_STAGED_CLEAN=false
+MONGO_CONFIG_WRITTEN=false
 
 # --- failure handling -------------------------------------------------------
 # Removes only what this run created. A previous good set is a different
@@ -91,6 +99,20 @@ remove_incomplete_set() {
     else
         log "removed incomplete set $DEST"
     fi
+}
+
+# The mongodump config holds the root password, so it is removed on success and
+# on every failure path; an unremovable copy is reported with the exact path
+# (never with its contents).
+remove_mongo_config() {
+    [[ "$MONGO_CONFIG_WRITTEN" == true ]] || return 0
+    # Cleared first: a trap that runs next must not issue the same exec again.
+    MONGO_CONFIG_WRITTEN=false
+    if docker exec "$MONGO_CONTAINER" rm -f "$MONGO_CONFIG_IN_CONTAINER" >/dev/null 2>&1; then
+        return 0
+    fi
+    warn "CLEANUP FAILURE: mongodump config $MONGO_CONFIG_IN_CONTAINER (holds the root password) may remain in $MONGO_CONTAINER"
+    return 1
 }
 
 # Fail-closed: staged files outside the set directory are removed, and a
@@ -109,6 +131,7 @@ remove_container_staging() {
 # apart. The marker is written last: it is the durable evidence of the failure.
 fail() {
     warn "FAILED: $*"
+    remove_mongo_config || true
     remove_container_staging || true
     remove_incomplete_set || true
     printf '{"stamp":"%s","status":"failed","reason":"%s"}\n' "$STAMP" "$*" > "$FAILED_MARKER"
@@ -121,6 +144,7 @@ trap_cleanup() {
     local status=$?
     trap - EXIT
     if [[ "$status" -ne 0 ]]; then
+        remove_mongo_config || true
         remove_container_staging
         remove_incomplete_set
     fi
@@ -404,13 +428,26 @@ MONGO_PASS="$(docker exec "$MONGO_CONTAINER" printenv MONGO_INITDB_ROOT_PASSWORD
 # `--authenticationDatabase admin` is required: the app connects with
 # authSource=admin, and without it mongodump exits 0 having dumped nothing.
 log "dumping mongo (db=$MONGO_DB user=$MONGO_USER)"
+# The root password must never be an argument of any process: `docker exec`
+# argv is visible to every local user through ps/pgrep. python3 builds the JSON
+# on the host from a pipe and the container writes it mode 0600. mongodump's
+# config parser accepts only secret-bearing keys there, so the non-secret
+# --username/--authenticationDatabase stay as flags.
+MONGO_CONFIG_WRITTEN=true
+if ! printf '%s' "$MONGO_PASS" \
+    | python3 -c 'import json,sys; sys.stdout.write(json.dumps({"password": sys.stdin.read()}))' \
+    | docker exec -i "$MONGO_CONTAINER" sh -c 'umask 077; cat > "$1"' sh "$MONGO_CONFIG_IN_CONTAINER"; then
+    fail "could not write the mongodump credentials file in $MONGO_CONTAINER"
+fi
 # Staged output exists from here on, so a later failure must clear it.
 MONGO_COPY_ATTEMPTED=true
 if ! docker exec "$MONGO_CONTAINER" mongodump \
-    --username "$MONGO_USER" --password "$MONGO_PASS" --authenticationDatabase admin \
+    --config="$MONGO_CONFIG_IN_CONTAINER" \
+    --username "$MONGO_USER" --authenticationDatabase admin \
     --archive="$MONGO_ARCHIVE_IN_CONTAINER" --gzip; then
     fail "mongodump exited non-zero"
 fi
+remove_mongo_config || fail "the mongodump credentials file could not be removed from $MONGO_CONTAINER"
 
 MONGO_ARCHIVE="${DEST}/mongo-${MONGO_DB}-${STAMP}.archive.gz"
 if ! docker cp "${MONGO_CONTAINER}:${MONGO_ARCHIVE_IN_CONTAINER}" "$MONGO_ARCHIVE"; then

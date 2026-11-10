@@ -90,7 +90,10 @@ if command[0] == "sh" and command[1] == "-c":
         sys.exit(0)
     if "POSTGRES_DATA_DIR" in script:
         sys.exit(0)  # unset: the producer defaults to /var/lib/postgresql/data
-    raise AssertionError(script)
+    # The mongodump credentials file arrives on stdin, never in argv.
+    assert "umask 077" in script and "cat >" in script, script
+    Path(state["config_payload_path"]).write_text(sys.stdin.read())
+    sys.exit(0)
 
 if command[0] == "df":
     assert command[:2] == ["df", "-Pk"], command
@@ -122,6 +125,10 @@ if command[0] == "stat":
     sys.exit(0)
 
 if command[0] == "rm":
+    # The credentials file must always clear; only the staged archive removal is
+    # the injectable failure.
+    if command[-1].endswith(".mongodump.json"):
+        sys.exit(0)
     sys.exit(1 if state["staging_removal_fails"] else 0)
 
 if command[0] == "pg_restore":
@@ -137,6 +144,11 @@ if command[0] == "pg_dump":
     sys.exit(1 if state["pg_dump_fails"] else 0)
 
 if command[0] == "mongodump":
+    # The password must never be an argument of this process.
+    assert any(part.startswith("--config=") for part in command), command
+    assert not any(part.startswith("--password") for part in command), command
+    assert "--username" in command and "root" in command, command
+    assert "--authenticationDatabase" in command and "admin" in command, command
     sys.exit(1 if state["mongodump_fails"] else 0)
 
 raise AssertionError(command)
@@ -209,6 +221,7 @@ def run_backup(tmp_path):
             "copy_fails": copy_fails,
             "staging_removal_fails": staging_removal_fails,
             "staged_archive_short": staged_archive_short,
+            "config_payload_path": str(tmp_path / "mongodump-config.json"),
             "mongo_archive_bytes": list(b"\x1f\x8b" + b"\x00" * 4096),
             "mongo_password": SECRET,
             "available": {
@@ -260,6 +273,8 @@ def run_backup(tmp_path):
     # Tests that need to prepare sets before the run reach the directory here,
     # without running the script just to create it.
     run.backup_dir = backup_dir
+    # Where the fake container wrote the credential config it received on stdin.
+    run.config_path = tmp_path / "mongodump-config.json"
     return run
 
 
@@ -707,3 +722,45 @@ def test_no_credentials_are_printed(run_backup):
     assert SECRET not in combined
     assert "MONGO_INITDB_ROOT_PASSWORD" not in combined
     assert "DATABASE_URL" not in combined
+
+
+def test_mongo_password_is_in_no_docker_argv(run_backup):
+    """The incident: pgrep showed the root password in mongodump's argv."""
+    result, commands, _ = run_backup()
+    assert result.returncode == 0, result.stderr
+
+    for cmd in commands:
+        assert SECRET not in " ".join(cmd), cmd
+    assert not any("--password" in " ".join(cmd) for cmd in commands), commands
+
+
+def test_mongodump_reads_a_password_only_config_file(run_backup):
+    result, commands, _ = run_backup()
+    assert result.returncode == 0, result.stderr
+
+    (dump_cmd,) = [cmd for cmd in commands if "mongodump" in cmd]
+    joined = " ".join(dump_cmd)
+    assert any(part.startswith("--config=") for part in dump_cmd), dump_cmd
+    assert "--username" in dump_cmd and "root" in dump_cmd, dump_cmd
+    assert "--authenticationDatabase" in dump_cmd and "admin" in dump_cmd, dump_cmd
+    assert "--archive" in joined and "--gzip" in dump_cmd, dump_cmd
+
+    # mongodump's config parser rejects non-secret keys, so only `password` is
+    # written there; the payload arrives on stdin, never on a command line.
+    payload = json.loads(run_backup.config_path.read_text())
+    assert payload == {"password": SECRET}
+
+
+def test_mongodump_config_is_removed_after_success_and_failure(run_backup):
+    def config_removals(commands):
+        return [
+            cmd
+            for cmd in commands
+            if cmd[:1] == ["exec"] and "rm" in cmd and any(".mongodump.json" in p for p in cmd)
+        ]
+
+    _, commands, _ = run_backup()
+    assert config_removals(commands), commands
+
+    _, failed_commands, _ = run_backup(mongodump_fails=True)
+    assert config_removals(failed_commands), failed_commands
