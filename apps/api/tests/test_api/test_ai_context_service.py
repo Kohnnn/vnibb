@@ -552,8 +552,6 @@ async def test_financial_runtime_selects_fiscal_recency_and_preserves_signs(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("statement_type", ["income", "balance", "cashflow"])
 async def test_financial_runtime_does_not_promote_older_report_when_newer_rejected(monkeypatch, test_db, statement_type):
-    from datetime import datetime
-
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 
     model, section_name, metric, second = {
