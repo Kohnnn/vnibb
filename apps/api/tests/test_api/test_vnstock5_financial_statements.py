@@ -268,6 +268,69 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
             cache.assert_not_awaited()
 
 
+@pytest.mark.parametrize("symbols", [None, ["HPG"]])
+async def test_legacy_statement_sync_fails_before_acquisition_or_database_access(
+    monkeypatch, test_engine, symbols
+):
+    from datetime import datetime
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import event, select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
+    from vnibb.services.pipeline.financials_pipeline import FinancialsPipeline
+
+    models_and_metrics = [
+        (IncomeStatement, "revenue"),
+        (BalanceSheet, "total_assets"),
+        (CashFlow, "operating_cash_flow"),
+    ]
+    original_time = datetime(2020, 1, 2)
+    lineage = {"_financial_lineage": {
+        "source": "VCI", "value_unit": "VND", "consolidation_basis": "consolidated",
+        "flow_basis": "annual", "canonical_data": {"source": "VCI", "value_unit": "VND"},
+    }}
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with sessions() as session:
+        for model, metric in models_and_metrics:
+            session.add(model(
+                id=1, symbol="HPG", period="2025", period_type="year", fiscal_year=2025,
+                source="VCI", raw_data=lineage, created_at=original_time,
+                updated_at=original_time, **{metric: 0.0},
+            ))
+        await session.commit()
+
+    provider_fetch = AsyncMock(side_effect=AssertionError("unexpected provider acquisition"))
+    monkeypatch.setattr(VnstockFinancialsFetcher, "fetch", provider_fetch)
+    pipeline = FinancialsPipeline()
+    monkeypatch.setattr(pipeline, "_session_factory", sessions, raising=False)
+    statements = []
+
+    def record_sql(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    progress = {"success_count": 0}
+    event.listen(test_engine.sync_engine, "before_cursor_execute", record_sql)
+    try:
+        with pytest.raises(RuntimeError, match="legacy financial statement sync.*unavailable"):
+            await pipeline.sync_financials(symbols=symbols, period="year", progress=progress)
+    finally:
+        event.remove(test_engine.sync_engine, "before_cursor_execute", record_sql)
+
+    provider_fetch.assert_not_awaited()
+    assert statements == []
+    assert progress["success_count"] == 0
+    async with sessions() as session:
+        for model, metric in models_and_metrics:
+            rows = (await session.scalars(select(model))).all()
+            assert len(rows) == 1
+            stored = rows[0]
+            assert stored.symbol == "HPG" and stored.period == "2025"
+            assert getattr(stored, metric) == 0.0
+            assert stored.source == "VCI" and stored.raw_data == lineage
+            assert stored.created_at == original_time and stored.updated_at == original_time
+
+
 async def test_generation_five_provider_failure_does_not_fallback_to_another_source(monkeypatch):
     import sys
     from types import ModuleType
