@@ -16,6 +16,8 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- Add a signed DNSE LightSpeed API client and a bounded \`import_dnse_daily.py\` operator command that writes additive \`source='dnse_vnd'\` daily bars (thousand-VND scaled once, NULL turnover, no overwrite of existing bars, \`sync_status\` receipt). Acquisition stays off: \`DNSE_ENABLED\` defaults false, no scheduler job is registered, and DNSE's data-use rights remain unknown (#232) with the #168 permission record still outstanding.
+
 - Listing Browser filters wrap to their widget width rather than the viewport breakpoint. Native selects stay compact and long industry labels cannot force them outside a narrow widget; exchange, sort, search and clear behavior is retained (#222).
 - Comparison-derived OCF/Sales requires retained statement evidence matching the actual stored revenue and operating cash flow, with explicit VND units, field evidence, compatible source/consolidation and annual or single-quarter flow. Unknown or contradictory bases remain unavailable; measured zero OCF remains zero and TTM requires four consecutive compatible paired quarters. Other metrics and production financial acceptance are unchanged (#224, #106).
 - Watchlist ceiling/floor status uses neutral ink, not gain/loss colors. Status labels and icons remain visible; missing price-limit evidence stays muted (#200).

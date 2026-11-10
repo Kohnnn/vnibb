@@ -896,12 +896,18 @@ What the import does, and does not, do:
 - Writes only `stock_prices` rows with `source='dnse_vnd'`, interval `1D`.
 - Prices arrive in thousand VND and are scaled once to VND through
   `vnibb.core.price_units`; `value`/`adj_close` stay NULL (DNSE publishes no
-  turnover), and OHLCV is never synthesised.
+  turnover). A bar whose price is NaN/Infinity, whose session timestamp is out of
+  range, or whose `volume` is missing, negative or non-integer is rejected as a
+  provider error rather than repaired: nothing is synthesised, so an absent volume
+  never becomes an observed zero.
 - Inserts are `ON CONFLICT DO NOTHING` on `(symbol, time, interval)`: an existing
   Vietcap or prior bar is never overwritten, restamped, or deleted.
-- Publishes one `sync_status` row (`sync_type='dnse_daily_prices'`) per run with
-  the symbol list, window, imported/skipped counts and per-symbol error codes.
-  Error text is a code, never an upstream response body or credential.
+- Publishes `sync_status` rows (`sync_type='dnse_daily_prices'`): exactly one per
+  run with the symbol list, window, imported/skipped counts and per-symbol error
+  codes, and one `status='failed'` row when the run is refused before it starts
+  (disabled or unconfigured client), whose `additional_data.refused` is a stable
+  token (`dnse_disabled` / `dnse_credentials_missing`). Error text is a status and
+  a short documented code, never an upstream response body or credential.
 - Does not register a scheduler job, does not touch Mongo envelopes, and reports
   unknown tickers as `symbol_not_in_stocks` instead of inventing `stocks` rows.
 
@@ -915,8 +921,10 @@ DNSE_ENABLED=true PYTHONPATH=apps/api python apps/api/scripts/import_dnse_daily.
 ```
 
 Exit code 0 = every requested symbol completed; 1 = partial (per-symbol reasons
-are in the JSON). A rerun of the same window is idempotent and returns
-`imported: 0`, which is the cheap proof that the receipt is honest.
+are in the JSON); 2 = refused, meaning the client is disabled or unconfigured, in
+which case the reason is printed to stderr and a `status='failed'` receipt is still
+written. A rerun of the same window is idempotent and returns `imported: 0`, which
+is the cheap proof that the receipt is honest.
 
 **Rate limiting gap (accepted).** DNSE's OHLC allowance is 50,000/hour and
 100,000/day per API key. The client issues one GET per symbol per run and does
