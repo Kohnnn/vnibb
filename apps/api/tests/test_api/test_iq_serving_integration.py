@@ -198,11 +198,18 @@ async def test_financial_http_same_period_never_erases_rejected_source(
     client, test_db, monkeypatch, reject_primary,
 ):
     unit = {"unit": "VND", "source_unit": "VND"}
-    common = dict(
-        symbol="FPT", period="2025", fiscal_year=2025, statement_type="income",
-        currency="VND", value_unit="VND", consolidation_basis="consolidated",
-        flow_basis="annual", revenue=100, unit_metadata={"revenue": unit},
-    )
+    common = {
+        "symbol": "FPT",
+        "period": "2025",
+        "fiscal_year": 2025,
+        "statement_type": "income",
+        "currency": "VND",
+        "value_unit": "VND",
+        "consolidation_basis": "consolidated",
+        "flow_basis": "annual",
+        "revenue": 100,
+        "unit_metadata": {"revenue": unit},
+    }
     iq = FinancialStatementData(**common, source="vietcap",
         unavailable_reason="conflicting_metric_rows" if reject_primary else None)
     sql = FinancialStatementData(**common, source="VCI",
