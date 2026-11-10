@@ -178,7 +178,7 @@ services:
     pids_limit: ${MONGO_PIDS_LIMIT:-256}
     logging: *docker-logging
     healthcheck:
-      test: ["CMD-SHELL", "exec mongosh 'mongodb://127.0.0.1:27017/?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000' --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval 'quit(db.adminCommand({ ping: 1 }).ok ? 0 : 2)'"]
+      test: ["CMD-SHELL", "exec mongosh 'mongodb://127.0.0.1:27017/admin?serverSelectionTimeoutMS=2000&connectTimeoutMS=2000' --quiet --eval 'const r = db.auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD); quit(r && r.ok === 1 && db.adminCommand({ping:1}).ok === 1 ? 0 : 3)'"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -191,7 +191,16 @@ services:
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in deployment/env.oracle}
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --save 60 1000"]
+    command:
+      - sh
+      - -ec
+      - |
+        # ponytail: env and the private config remain secret-bearing; use managed secret files when available.
+        set -o pipefail
+        : "$${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+        umask 077
+        { printf 'requirepass "'; printf '%s' "$$REDIS_PASSWORD" | od -An -v -tx1 | tr -s ' ' '\n' | sed '/^$$/d; s/^/\\x/' | tr -d '\n'; printf '"\nappendonly yes\nsave 60 1000\n'; } > /tmp/redis-auth.conf
+        exec redis-server /tmp/redis-auth.conf
     volumes:
       - vnibb_redis:/data
     cpus: ${REDIS_CPUS:-0.50}
@@ -199,7 +208,7 @@ services:
     pids_limit: ${REDIS_PIDS_LIMIT:-128}
     logging: *docker-logging
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -qx PONG"]
       interval: 10s
       timeout: 5s
       retries: 12

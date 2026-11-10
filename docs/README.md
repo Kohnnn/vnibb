@@ -5,6 +5,7 @@
 ## Core References
 
 - `../project-work-backlog.md`: cross-session work index; use its dependencies and current GitHub tickets before reviving historical plans.
+- `CONTINUING_WORK_EVIDENCE_2026-11-10.md`: integration decisions, operational limits and the individual widget-ID disposition inventory; verification is separate from source presence.
 
 - `API_REFERENCE.md`: API-level reference material for the backend surface
 - `APPS_SCRIPT_SHEETS.md`: Google Apps Script / Sheets read-only API integration
