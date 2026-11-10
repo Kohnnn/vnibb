@@ -721,6 +721,11 @@ async def test_enrich_missing_ratio_metrics_computes_certified_statement_metrics
     assert item.payout_ratio == pytest.approx((40.0 / 150.0) * 100)
     assert item.peg_ratio == pytest.approx(0.4)
 
+    reported = await _enrich_missing_ratio_metrics(
+        "VNM", "year", [FinancialRatioData(symbol="VNM", period="2024", revenue_growth=7.0, earnings_growth=9.0)], test_db,
+    )
+    assert (reported[0].revenue_growth, reported[0].earnings_growth) == (7.0, 9.0)
+
 
 @pytest.mark.asyncio
 async def test_enrich_missing_ratio_metrics_nulls_bank_only_metrics(test_db):

@@ -4189,10 +4189,11 @@ async def _enrich_missing_ratio_metrics(
             item.provision_coverage = (abs(loan_loss_reserve) / gross_loans) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
-        if revenue is not None and prev_revenue is not None:
+        # Reported values win: statements only fill a growth the ratio source did not report.
+        if item.revenue_growth is None and revenue is not None and prev_revenue is not None:
             item.revenue_growth = _growth_rate(revenue, prev_revenue)
             item.ratio_units["revenue_growth"] = "percent"
-        if net_income is not None and prev_net_income is not None:
+        if item.earnings_growth is None and net_income is not None and prev_net_income is not None:
             item.earnings_growth = _growth_rate(net_income, prev_net_income)
             item.ratio_units["earnings_growth"] = "percent"
 
