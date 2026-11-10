@@ -178,6 +178,25 @@ async def test_matrix_send_reauthorizes_revoked_selection(matrix_chat, test_db):
 
 
 @pytest.mark.asyncio
+async def test_matrix_send_refuses_unverified_sector_values_before_provider(matrix_chat, test_db):
+    client, record, completion = matrix_chat
+    snapshot_id = record["snapshot"]["snapshot_id"]
+    stored = await test_db.get(AppKeyValue, f"matrix:snapshot:{snapshot_id}")
+    value = deepcopy(stored.value)
+    value["snapshot"]["playbook_id"] = "insurer"
+    cell = value["snapshot"]["cells"][1]
+    cell["dimension_id"] = "insurance"
+    cell["payload"]["metrics"][0]["key"] = "insurance_premiums"
+    stored.value = value
+    await test_db.commit()
+    response = await client.post("/chat/stream", json=request_body(record), headers=auth_header())
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "matrix_snapshot_evidence_unverified"
+    assert response.headers["cache-control"] == "no-store"
+    completion.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_matrix_send_requires_explicit_export_rights(matrix_chat, monkeypatch):
     client, record, completion = matrix_chat
     monkeypatch.delenv("MATRIX_EXPORT_ALLOWED_SOURCES", raising=False)
