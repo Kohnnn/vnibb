@@ -17,9 +17,10 @@ interface Props {
   busy: boolean;
   onClose: () => void;
   onReview: (cell: MatrixCell) => void;
+  onQuarantine: (reason: unknown) => boolean;
 }
 
-export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, onClose, onReview }: Props) {
+export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, onClose, onReview, onQuarantine }: Props) {
   const [tab, setTab] = useState<'Result' | 'Evidence' | 'Basis' | 'Review'>('Result');
   const [evidence, setEvidence] = useState<MatrixEvidence[] | null>(null);
   const [error, setError] = useState('');
@@ -42,6 +43,7 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
     setEvidence(null);
     setError('');
     matrixApi.evidence(snapshot, cell.result_id).then((items) => { if (active) setEvidence(items); }).catch((reason: unknown) => {
+      if (onQuarantine(reason)) return;
       if (!active) return;
       setError(reason instanceof Error ? reason.message : 'Evidence could not be authorized or loaded.');
       if (!snapshot.synthetic && reason instanceof APIError && [401, 403, 404].includes(reason.status ?? 0)) {
@@ -49,7 +51,7 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
       }
     });
     return () => { active = false; };
-  }, [snapshot, cell, tab]);
+  }, [snapshot, cell, tab, onQuarantine]);
 
   const content = <aside ref={panel} tabIndex={-1} className="matrix-inspector" role="dialog" aria-modal={narrow} aria-label={`${dimension.label} inspector`} onKeyDown={(event) => {
     if (event.key === 'Escape' && !narrow) { event.stopPropagation(); onClose(); }

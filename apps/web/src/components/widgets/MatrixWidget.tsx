@@ -5,7 +5,8 @@ import type { KeyboardEvent } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { APIError } from '@/lib/api';
-import { boundedMatrixWidth, hiddenMatrixSelectionCount, matrixApi, matrixRequestText, matrixViewFromConfig } from '@/lib/matrix';
+import { boundedMatrixWidth, hiddenMatrixSelectionCount, matrixApi, matrixQuarantine, matrixRequestText, matrixViewFromConfig } from '@/lib/matrix';
+import type { MatrixQuarantine } from '@/lib/matrix';
 import type { MatrixCell, MatrixDimension, MatrixPlaybook, MatrixPreparation, MatrixSelectedPeriods, MatrixSnapshot, MatrixView } from '@/types/matrix';
 import type { WidgetProps } from './WidgetRegistry';
 import { MatrixInspector } from './matrix/MatrixInspector';
@@ -56,11 +57,13 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
   const [notice, setNotice] = useState('');
   const [fallback, setFallback] = useState('');
   const [revokeConfirm, setRevokeConfirm] = useState(false);
+  const [quarantine, setQuarantine] = useState<MatrixQuarantine | null>(null);
   const [savedRef, setSavedRef] = useState(view.snapshotRefs[0] ?? '');
   const generation = useRef(0);
   const prepareGeneration = useRef(0);
   const mounted = useRef(true);
   const focusOrigin = useRef<HTMLElement | null>(null);
+  const quarantineAlert = useRef<HTMLParagraphElement>(null);
   const grid = useRef<HTMLDivElement>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
@@ -68,6 +71,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     mounted.current = true;
     return () => { mounted.current = false; generation.current += 1; };
   }, []);
+  useEffect(() => { if (quarantine) quarantineAlert.current?.focus(); }, [quarantine]);
   useEffect(() => {
     let active = true;
     matrixApi.playbooks().then((items) => { if (active) setPlaybooks(items); }).catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Playbooks unavailable.'); });
@@ -83,9 +87,9 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     setView(next);
     if (location) updateWidget(location.dashboardId, location.tabId, id, { config: { ...location.widget.config, matrixView: next } });
   }, [location, updateWidget, id]);
-  const clearSnapshot = () => {
+  const clearSnapshot = useCallback(() => {
     setSnapshot(null); setSelected(new Set()); setInspected(null); setFallback(''); setRevokeConfirm(false);
-  };
+  }, []);
   useEffect(() => {
     const revoked = (event: Event) => {
       const ref = (event as CustomEvent<{ snapshot_id: string }>).detail?.snapshot_id;
@@ -95,15 +99,40 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
         setSnapshot(null); setSelected(new Set()); setInspected(null); setFallback(''); setRevokeConfirm(false);
         setNotice('Snapshot revoked. In-memory results and evidence have been removed.');
       }
-      if (viewRef.current.snapshotRefs.includes(ref)) saveView({ snapshotRefs: viewRef.current.snapshotRefs.filter((item) => item !== ref) });
+      if (viewRef.current.snapshotRefs.includes(ref)) {
+        const remaining = viewRef.current.snapshotRefs.filter((item) => item !== ref);
+        saveView({ snapshotRefs: remaining });
+        setSavedRef((current) => current === ref ? remaining[0] ?? '' : current);
+      }
+      if (quarantine?.snapshotIds.includes(ref)) { setQuarantine(null); setRevokeConfirm(false); }
     };
     window.addEventListener('vnibb:matrix-revoked', revoked);
     return () => window.removeEventListener('vnibb:matrix-revoked', revoked);
-  }, [snapshot?.snapshot_id, saveView]);
+  }, [snapshot?.snapshot_id, quarantine, saveView]);
+  const handleQuarantine = useCallback((reason: unknown): boolean => {
+    const blocked = matrixQuarantine(reason);
+    if (!blocked) return false;
+    generation.current += 1;
+    clearSnapshot();
+    setQuarantine(blocked);
+    setError('');
+    return true;
+  }, [clearSnapshot]);
+  const evidenceTicket = generation.current;
+  const evidenceSnapshotId = snapshot?.snapshot_id;
+  const handleEvidenceQuarantine = useCallback((reason: unknown): boolean => {
+    const blocked = matrixQuarantine(reason);
+    if (!blocked) return false;
+    if (mounted.current && generation.current === evidenceTicket && evidenceSnapshotId && blocked.snapshotIds.includes(evidenceSnapshotId)) handleQuarantine(reason);
+    return true;
+  }, [evidenceTicket, evidenceSnapshotId, handleQuarantine]);
   const run = async (action: () => Promise<void>) => {
+    const ticket = generation.current;
     setBusy(true); setError(''); setNotice('');
     try { await action(); } catch (reason) {
       if (!mounted.current) return;
+      if (matrixQuarantine(reason) && ticket !== generation.current) return;
+      if (handleQuarantine(reason)) return;
       if (reason instanceof APIError && [401, 403, 404].includes(reason.status ?? 0) && snapshot && !snapshot.synthetic) {
         generation.current += 1; clearSnapshot();
       }
@@ -117,6 +146,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     await run(async () => {
       const next = await load();
       if (!mounted.current || ticket !== generation.current) return;
+      setQuarantine(null);
       setSnapshot(next);
       if (!next.synthetic) {
         saveView({ snapshotRefs: [next.snapshot_id, ...viewRef.current.snapshotRefs.filter((ref) => ref !== next.snapshot_id)].slice(0, 20) });
@@ -213,13 +243,21 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     const updated = await matrixApi.review({ snapshot_id: snapshot.snapshot_id, result_ids: [cell.result_id] }, cell.review_state === 'reviewed' ? 'unreviewed' : 'reviewed');
     if (mounted.current && current === generation.current) setSnapshot(updated);
   });
+  const revoke = (ref: string) => run(async () => {
+    await matrixApi.revoke(ref);
+    if (!mounted.current) return;
+    window.dispatchEvent(new CustomEvent('vnibb:matrix-revoked', { detail: { snapshot_id: ref } }));
+    setRevokeConfirm(false);
+    setNotice('Snapshot revoked. In-memory results and evidence have been removed.');
+  });
+  const revokeRef = snapshot && !snapshot.synthetic ? snapshot.snapshot_id : quarantine?.snapshotIds[0];
 
   return <section className={styles.root} aria-label="Matrix research workspace">
     <div className="matrix-topline"><div><span className="matrix-eyebrow">VniBB / RESEARCH</span><h2>Matrix</h2></div><button disabled={busy} type="button" onClick={() => openSnapshot(matrixApi.fixture)}>Explore synthetic fixture</button></div>
     <details className="matrix-scope" open={!snapshot}><summary>Research scope <span className="matrix-muted">· explicit creation only</span></summary>
       <div className="matrix-fields"><label>Anchor company<input value={anchor} maxLength={12} onChange={(event) => { prepareGeneration.current += 1; setAnchor(event.target.value.toUpperCase()); setPreparation(null); setAvailability(null); setPeriodError(''); }} /></label><button disabled={busy || !anchor.trim()} type="button" onClick={prepare}>Prepare peer scope</button><label className="matrix-wide">Companies · maximum 10<input value={symbols} onChange={(event) => { prepareGeneration.current += 1; setSymbols(event.target.value); setPeriodError(''); }} aria-describedby="matrix-peer-basis" /></label></div>
       <p id="matrix-peer-basis" className="matrix-muted">{preparation?.peer_basis || 'Prepare to preselect stored sector peers. You can edit the company list before creating.'}</p>
-      <div className="matrix-fields"><label>Sector playbook<select value={playbook} onChange={(event) => { prepareGeneration.current += 1; setPlaybook(event.target.value); }}><option value="">Choose a playbook</option>{playbooks.map((item) => <option key={item.playbook_id} value={item.playbook_id}>{item.label}</option>)}</select></label><label>Period basis<select value={periodType} onChange={(event) => setPeriodType(event.target.value as 'year' | 'quarter')}><option value="year">Common financial year</option><option value="quarter">Quarter</option></select></label><label>Year<select value={period} onChange={(event) => { setSelectedYear(event.target.value); setSelectedQuarter(''); }}><option value="">No common year selected</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{periodType === 'quarter' && <label>Quarter<select value={quarter} onChange={(event) => setSelectedQuarter(event.target.value)}><option value="">No common quarter selected</option>{quarters.map((item) => <option key={item} value={item}>Q{item.slice(-1)}</option>)}</select></label>}<button className="matrix-primary" type="button" disabled={!canCreate} onClick={() => openSnapshot(() => matrixApi.create({ anchor_symbol: anchor.trim().toUpperCase(), symbols: requestedSymbols, playbook_id: playbook, period: periodType === 'quarter' ? quarter : period, period_type: periodType }))}>Create snapshot</button></div>
+      <div className="matrix-fields"><label>Sector playbook<select value={playbook} onChange={(event) => { prepareGeneration.current += 1; setPlaybook(event.target.value); }}><option value="">Choose a playbook</option>{playbooks.map((item) => <option key={item.playbook_id} value={item.playbook_id}>{item.label}</option>)}</select></label><label>Period basis<select value={periodType} onChange={(event) => setPeriodType(event.target.value as 'year' | 'quarter')}><option value="year">Common financial year</option><option value="quarter">Quarter</option></select></label><label>Year<select value={period} onChange={(event) => { setSelectedYear(event.target.value); setSelectedQuarter(''); }}><option value="">No common year selected</option>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{periodType === 'quarter' && <label>Quarter<select value={quarter} onChange={(event) => setSelectedQuarter(event.target.value)}><option value="">No common quarter selected</option>{quarters.map((item) => <option key={item} value={item}>Q{item.slice(-1)}</option>)}</select></label>}<button className="matrix-primary" type="button" disabled={!canCreate} onClick={() => openSnapshot(() => matrixApi.create({ anchor_symbol: anchor.trim().toUpperCase(), symbols: requestedSymbols, playbook_id: playbook, period: periodType === 'quarter' ? quarter : period, period_type: periodType, ...(quarantine?.matrixId ? { matrix_id: quarantine.matrixId } : {}) }))}>{quarantine?.matrixId ? 'Create new revision' : 'Create snapshot'}</button></div>
       <p className="matrix-muted">{playbooks.find((item) => item.playbook_id === playbook)?.description || 'Sector-specific questions; eligibility is checked against stored company classification.'}</p>
       {preparation?.playbook_id && playbook !== preparation.playbook_id && <p className="matrix-notice">This differs from the anchor’s suggested playbook. Ineligible companies will not be presented as comparable.</p>}
       {preparation?.limitations.map((limit) => <p key={limit} className="matrix-notice">{limit}</p>)}
@@ -230,6 +268,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     </details>
     {view.snapshotRefs.length > 0 && <div className="matrix-toolbar"><label>Saved snapshot reference<select value={savedRef} onChange={(event) => setSavedRef(event.target.value)}>{view.snapshotRefs.map((ref) => <option key={ref} value={ref}>{ref}</option>)}</select></label><button type="button" disabled={!owner || busy || !savedRef} onClick={() => openSnapshot(() => matrixApi.snapshot(savedRef))}>Open saved</button></div>}
     {busy && <p role="status" className="matrix-status">Working on your explicit request…</p>}{error && <p role="alert" className="matrix-error">{error}</p>}{notice && <p role="status" className="matrix-notice">{notice}</p>}
+    {quarantine && <><p ref={quarantineAlert} tabIndex={-1} role="alert" className="matrix-error">{quarantine.message}</p><p className="matrix-notice">Affected snapshot: {quarantine.snapshotIds.join(', ')}. {quarantine.matrixId ? 'Prepare a peer scope and choose a period, then use Create new revision.' : 'Prepare a peer scope and choose a period to create a new snapshot.'} No result is refreshed or sent automatically.</p></>}
     {!snapshot && !busy && view.snapshotRefs.length > 0 && <p className="matrix-muted" role="status">Saved references are listed above. Open one or create a new snapshot — nothing loads automatically.</p>}
     {!snapshot && !busy && <div className="matrix-empty"><h3>Companies × research questions</h3><p>Prepare a peer scope, choose a common period, then create a frozen Matrix. Or explore the clearly labeled synthetic fixture.</p><p>View controls never create or refresh results.</p></div>}
     {snapshot && <>
@@ -242,16 +281,10 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
         const cell = cellIndex.get(`${entity.entity_id}:${dimension.dimension_id}`);
         return <td key={dimension.dimension_id} className={cell && selected.has(cell.result_id) ? 'matrix-selected' : ''}>{cell ? <><label className="matrix-select-cell"><input type="checkbox" checked={selected.has(cell.result_id)} onChange={() => toggleCell(cell.result_id)} aria-label={`Select ${entity.symbol} ${dimension.label}`} /></label><button type="button" className="matrix-cell" data-matrix-cell={`${row}:${col}`} onKeyDown={(event) => keyboard(event, row, col, cell)} onClick={() => inspect(dimension, cell)} aria-label={`Inspect ${entity.symbol} ${dimension.label}`}><MatrixResult cell={cell} density={view.density} /></button></> : <p className="matrix-notice">Unavailable · no result was retained.</p>}</td>;
       })}</tr>)}</tbody></table>{entities.length === 0 && <p className="matrix-empty">No companies match. Your selected result IDs are retained.</p>}{dimensions.length === 0 && <p className="matrix-empty">Show a question using Visible questions.</p>}</div>
-      {inspected && <MatrixInspector key={`${snapshot.snapshot_id}:${inspected.resultId ?? inspected.dimension.dimension_id}`} snapshot={snapshot} cell={snapshot.cells.find((cell) => cell.result_id === inspected.resultId) ?? null} dimension={inspected.dimension} canReview={!!owner && !snapshot.synthetic} busy={busy} onClose={closeInspector} onReview={review} />}</div>
+      {inspected && <MatrixInspector key={`${snapshot.snapshot_id}:${inspected.resultId ?? inspected.dimension.dimension_id}`} snapshot={snapshot} cell={snapshot.cells.find((cell) => cell.result_id === inspected.resultId) ?? null} dimension={inspected.dimension} canReview={!!owner && !snapshot.synthetic} busy={busy} onClose={closeInspector} onReview={review} onQuarantine={handleEvidenceQuarantine} />}</div>
       <details className="matrix-limitations"><summary>Snapshot basis and limitations · {snapshot.limitations.length}</summary><p>Snapshot {snapshot.snapshot_id} · revision {snapshot.revision}</p>{snapshot.limitations.map((limit) => <p key={limit}>{limit}</p>)}</details>
-      {!snapshot.synthetic && <div className="matrix-revoke">{!revokeConfirm ? <button type="button" disabled={busy} onClick={() => setRevokeConfirm(true)}>Revoke snapshot…</button> : <><p>Revocation blocks future reads and follow-ups. Previously copied text cannot be recalled.</p><button type="button" disabled={busy} onClick={() => run(async () => {
-        const ref = snapshot.snapshot_id;
-        await matrixApi.revoke(ref);
-        if (!mounted.current) return;
-        window.dispatchEvent(new CustomEvent('vnibb:matrix-revoked', { detail: { snapshot_id: ref } }));
-        setSavedRef('');
-      })}>Confirm revoke</button><button type="button" onClick={() => setRevokeConfirm(false)}>Cancel</button></>}</div>}
     </>}
+    {revokeRef && owner && <div className="matrix-revoke">{!revokeConfirm ? <button type="button" disabled={busy} onClick={() => setRevokeConfirm(true)}>Revoke snapshot…</button> : <><p>Revoke snapshot {revokeRef}? Revocation blocks future reads and follow-ups. Previously copied text cannot be recalled.</p><button type="button" disabled={busy} onClick={() => revoke(revokeRef)}>Confirm revoke</button><button type="button" onClick={() => setRevokeConfirm(false)}>Cancel</button></>}</div>}
     {fallback && <label className="matrix-fallback">Copy text manually<textarea readOnly value={fallback} onFocus={(event) => event.target.select()} /><button type="button" onClick={() => setFallback('')}>Clear copied text</button></label>}
   </section>;
 }
