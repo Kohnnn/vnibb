@@ -188,9 +188,9 @@ class RSRatingService:
             if returns is not None:
                 return returns
 
-            from vnibb.providers.vnstock.runtime import validate_source
+            from vnibb.providers import market_data
 
-            candidate_sources = [validate_source(settings.vnstock_source)]
+            candidate_sources = [market_data.validate_source(settings.vnstock_source)]
 
             for source in candidate_sources:
                 try:

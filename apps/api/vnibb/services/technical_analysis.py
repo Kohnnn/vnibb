@@ -15,6 +15,7 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_maker
 from vnibb.core.price_units import history_price_records
 from vnibb.models.technical_indicator import TechnicalIndicator
+from vnibb.providers import market_data
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 
 logger = logging.getLogger(__name__)
@@ -112,12 +113,9 @@ class TechnicalAnalysisService:
         import asyncio
 
         def _sync_calculate():
-            from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
-
-            source = validate_source(settings.vnstock_source)
-            quote = get_quote_class()(symbol=symbol, source=source)
-
-            df = quote.history(
+            source = market_data.validate_source(settings.vnstock_source)
+            df = market_data.history(
+                symbol, source,
                 start=start_date.strftime("%Y-%m-%d"),
                 end=end_date.strftime("%Y-%m-%d"),
             )
@@ -126,7 +124,6 @@ class TechnicalAnalysisService:
                 return {}
             df = normalize_history_frame(
                 df, symbol=symbol, source=source,
-                provider=quote,
             )
             if df.empty:
                 return {}
@@ -333,16 +330,12 @@ class TechnicalAnalysisService:
             return window
 
         from vnibb.api.v1.equity import _provider_timeout_budget
-        from vnibb.providers.vnstock.runtime import run_reference_provider
 
         def _fetch():
             try:
-                from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
-
-                source = validate_source(settings.vnstock_source)
-                quote = get_quote_class()(symbol=symbol, source=source)
-
-                df = quote.history(
+                source = market_data.validate_source(settings.vnstock_source)
+                df = market_data.history(
+                    symbol, source,
                     start=start_date.strftime("%Y-%m-%d"),
                     end=end_date.strftime("%Y-%m-%d"),
                     interval=interval,
@@ -351,14 +344,13 @@ class TechnicalAnalysisService:
                     return None
                 return normalize_history_frame(
                     df, symbol=symbol, source=source,
-                    provider=quote,
                 )
             except Exception as e:
                 logger.error(f"Failed to fetch OHLCV for {symbol}: {e}")
                 return None
 
         try:
-            frame = await run_reference_provider(
+            frame = await market_data.run_reference(
                 _fetch, timeout=_provider_timeout_budget(),
                 key=("technical_history", symbol, start_date, end_date, interval, settings.vnstock_source),
             )

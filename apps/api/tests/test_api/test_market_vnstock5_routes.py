@@ -19,7 +19,7 @@ async def test_benchmark_uses_vci_index_ohlcv(monkeypatch):
             assert symbol == "VNINDEX"
             return Index()
 
-    monkeypatch.setattr(market, "import_vnstock_symbol", lambda name: (Market, "vnstock"))
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.import_vnstock_symbol", lambda name: (Market, "vnstock"))
     monkeypatch.setattr(market.settings, "vnstock_source", "VCI")
     result = await market._fetch_benchmark_history_from_provider(date(2026, 1, 1), date(2026, 1, 3))
 
@@ -34,7 +34,7 @@ async def test_benchmark_rejects_non_vci_before_import(monkeypatch):
         imported.append(name)
         raise AssertionError("SDK import must follow source admission")
 
-    monkeypatch.setattr(market, "import_vnstock_symbol", forbidden_import)
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.import_vnstock_symbol", forbidden_import)
     monkeypatch.setattr(market.settings, "vnstock_source", "KBS")
     result = await market._fetch_benchmark_history_from_provider(date(2026, 1, 1), date(2026, 1, 3))
 
@@ -57,7 +57,7 @@ async def test_forex_uses_retail_columns_and_preserves_missing_values(client, mo
         assert name == "Retail"
         return Retail, "vnstock"
 
-    monkeypatch.setattr(market, "import_vnstock_symbol", load)
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.import_vnstock_symbol", load)
     response = await client.get("/api/v1/market/forex-rates?limit=1")
     assert response.status_code == 200
     payload = response.json()
