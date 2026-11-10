@@ -4189,6 +4189,11 @@ async def _enrich_missing_ratio_metrics(
             item.provision_coverage = (abs(loan_loss_reserve) / gross_loans) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
+        # Treat nonfinite reported growth as unavailable so admitted statements can fill it.
+        if item.revenue_growth is not None and not math.isfinite(item.revenue_growth):
+            item.revenue_growth = None
+        if item.earnings_growth is not None and not math.isfinite(item.earnings_growth):
+            item.earnings_growth = None
         # Reported values win: statements only fill a growth the ratio source did not report.
         if item.revenue_growth is None and revenue is not None and prev_revenue is not None:
             item.revenue_growth = _growth_rate(revenue, prev_revenue)
