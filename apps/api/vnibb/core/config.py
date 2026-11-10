@@ -185,6 +185,13 @@ class Settings(BaseSettings):
     vnstock_reinforcement_rps: float = 2 / 60
     vnstock_calls_per_minute: Optional[int] = 20  # Per-operation ceiling; global budgets still apply
     big_order_threshold_vnd: float = 10_000_000_000
+    # DNSE LightSpeed API. Off by default: #232 records DNSE's data-use rights as
+    # unknown, so acquisition stays off until an operator records permission that
+    # covers storage and public redisplay.
+    dnse_enabled: bool = False
+    dnse_api_key: Optional[str] = Field(default=None, repr=False, exclude=True)
+    dnse_api_secret: Optional[str] = Field(default=None, repr=False, exclude=True)
+    dnse_api_version: str = "2026-07-23"
     intraday_limit: int = 500
     intraday_symbols_per_run: int = 200
     derivatives_symbols: Optional[str] = None  # Comma-separated override
