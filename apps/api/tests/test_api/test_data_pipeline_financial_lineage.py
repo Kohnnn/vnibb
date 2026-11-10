@@ -48,6 +48,9 @@ def financial_sync(monkeypatch):
 
 
     class RecordingSession:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
         async def __aenter__(self):
             return self
 

@@ -1311,6 +1311,43 @@ async def test_income_statement_withholds_initially_null_sga_filled_from_raw_lin
     assert row["selling_general_admin"] is None
     assert row["unit_metadata"]["selling_general_admin"]["unavailable_reason"] == "unverified_monetary_unit"
 
+@pytest.mark.asyncio
+async def test_income_statement_does_not_crossfill_rejected_cashflow_depreciation(
+    client, test_db, monkeypatch
+):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    common = {
+        "symbol": "FPT", "period": "2025", "fiscal_year": 2025,
+        "source": "VCI", "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": "annual",
+    }
+    income = FinancialStatementData(
+        **common, statement_type="income", operating_income=100,
+        unit_metadata={"operating_income": unit},
+    )
+    cashflow = FinancialStatementData(
+        **common, statement_type="cashflow", depreciation=10,
+        unit_metadata={"depreciation": {**unit, "unavailable_reason": "conflicting_metric_rows"}},
+    )
+    test_db.add(CashFlow(
+        id=701, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+        source="VCI", depreciation=10,
+        raw_data={"_financial_lineage": {"canonical_data": cashflow.model_dump(mode="json")}},
+    ))
+    await test_db.commit()
+
+    async def statements(**_kwargs):
+        return [income]
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_financials_with_ttm", statements)
+    response = await client.get("/api/v1/equity/FPT/income-statement?period=FY&limit=1")
+
+    assert response.status_code == 200
+    row = response.json()["data"][0]
+    assert row["operating_income"] == 100
+    assert row["depreciation"] is None
+    assert row["ebitda"] is None
+
 
 
 @pytest.mark.asyncio

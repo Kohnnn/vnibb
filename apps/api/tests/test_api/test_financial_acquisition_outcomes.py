@@ -34,6 +34,9 @@ def acquisition(monkeypatch):
             return self
 
     class Session:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name='sqlite'))
+
         async def __aenter__(self):
             self.pending = []
             return self
