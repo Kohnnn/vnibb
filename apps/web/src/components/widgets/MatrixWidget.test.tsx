@@ -5,9 +5,9 @@ import MatrixWidget from './MatrixWidget';
 import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
 import { MatrixInspector } from './matrix/MatrixInspector';
 import { matrixApi } from '@/lib/matrix';
-import { fetchAPI } from '@/lib/api';
+import { APIError, fetchAPI } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
-import type { MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
+import type { MatrixEvidence, MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
 
 let mockUser: { id: string; provider: string } | null = null;
 const mockUpdateWidget = jest.fn();
@@ -84,6 +84,59 @@ it.each(['evidence', 'review', 'selection'] as const)('removes a displayed packe
   fireEvent.click(screen.getByRole('button', { name: 'Create new revision' }));
   await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ matrix_id: 'matrix-1' })));
   expect(network).toHaveBeenCalledTimes(1);
+});
+
+it.each(['close inspector', 'switch tabs'])('clears the current snapshot when evidence reports quarantine after %s', async (action) => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  const pending = Promise.withResolvers<MatrixEvidence[]>();
+  jest.mocked(matrixApi.evidence).mockReturnValue(pending.promise);
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Inspect FPT Profit quality' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  if (action === 'close inspector') fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+  else fireEvent.click(screen.getByRole('tab', { name: 'Result' }));
+  await act(async () => {
+    pending.reject(new APIError('Sector values lack verified original evidence.', 409, 'Conflict', { code: 'matrix_snapshot_evidence_unverified', snapshot_ids: ['snapshot-1'], matrix_id: 'matrix-1' }));
+    await pending.promise.catch(() => undefined);
+  });
+  expect(screen.getByRole('alert')).toHaveTextContent('verified original evidence');
+  expect(screen.queryByRole('table', { name: 'Company research Matrix' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText('9,007,199,254,740,993.125 VND')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create new revision' })).toBeEnabled();
+  expect(matrixApi.create).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a different safe snapshot visible when an earlier evidence request reports quarantine', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  mockState.dashboards[0].tabs[0].widgets[0].config = { matrixView: { snapshotRefs: ['safe-snapshot'] } };
+  const pending = Promise.withResolvers<MatrixEvidence[]>();
+  jest.mocked(matrixApi.evidence).mockReturnValue(pending.promise);
+  jest.spyOn(matrixApi, 'snapshot').mockResolvedValue({ ...snapshot, synthetic: false, snapshot_id: 'safe-snapshot', cells: snapshot.cells.map((cell) => ({ ...cell, payload: { ...cell.payload, metrics: cell.payload.metrics?.map((metric) => ({ ...metric, display: 'Safe retained value' })) } })) });
+  try {
+    render(<MatrixWidget id="matrix" symbol="FPT" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect FPT Profit quality' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    fireEvent.change(screen.getByLabelText('Saved snapshot reference'), { target: { value: 'safe-snapshot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open saved' }));
+    expect(await screen.findAllByText('Safe retained value')).toHaveLength(2);
+    await act(async () => {
+      pending.reject(new APIError('Sector values lack verified original evidence.', 409, 'Conflict', { code: 'matrix_snapshot_evidence_unverified', snapshot_ids: ['snapshot-1'], matrix_id: 'matrix-1' }));
+      await pending.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('table', { name: 'Company research Matrix' })).toBeInTheDocument();
+    expect(screen.getAllByText('Safe retained value')).toHaveLength(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  } finally {
+    mockState.dashboards[0].tabs[0].widgets[0].config = {};
+  }
 });
 
 it('opens a saved reference, explains a 409, and permits an explicit revoke without losing safe references', async () => {

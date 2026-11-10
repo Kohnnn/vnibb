@@ -43,8 +43,8 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
     setEvidence(null);
     setError('');
     matrixApi.evidence(snapshot, cell.result_id).then((items) => { if (active) setEvidence(items); }).catch((reason: unknown) => {
-      if (!active) return;
       if (onQuarantine(reason)) return;
+      if (!active) return;
       setError(reason instanceof Error ? reason.message : 'Evidence could not be authorized or loaded.');
       if (!snapshot.synthetic && reason instanceof APIError && [401, 403, 404].includes(reason.status ?? 0)) {
         window.dispatchEvent(new CustomEvent('vnibb:matrix-revoked', { detail: { snapshot_id: snapshot.snapshot_id } }));
