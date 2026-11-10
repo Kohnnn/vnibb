@@ -106,12 +106,50 @@ async def test_signature_header_is_not_logged(enabled, monkeypatch, caplog):
         dnse.httpx, "AsyncClient",
         lambda **kwargs: real_client(transport=_transport(httpx.Response(200, json={}), seen), **kwargs),
     )
-    with caplog.at_level(logging.DEBUG):
+    with caplog.at_level(logging.DEBUG, logger="vnibb.providers.dnse"):
         await dnse.dnse_get("/price/ohlc")
 
     signature = seen[0].headers["x-signature"].split('signature="', 1)[1].split('"', 1)[0]
     assert signature and signature not in caplog.text
     assert SECRET not in caplog.text
+
+
+@pytest.mark.parametrize("failure", ["http_error", "status_401", "status_500"])
+@pytest.mark.asyncio
+async def test_signature_and_secret_survive_no_failure_path(enabled, monkeypatch, caplog, failure):
+    """#231: every failure path is silent about the secret *and* the signature.
+
+    The signature header is credential-equivalent (it authenticates the request
+    alongside the key), so a raised httpx error or a non-200 response must not
+    surface it in a log record, the exception message, or ``repr(exc)`` — the
+    last two because the service copies ``str(exc)`` into a durable receipt.
+    """
+    seen: list[httpx.Request] = []
+    real_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if failure == "http_error":
+            raise httpx.ConnectError(f"boom while signing with {SECRET}", request=request)
+        return httpx.Response(401 if failure == "status_401" else 500,
+                              json={"code": "OA-401", "message": f"echo {SECRET}"})
+
+    monkeypatch.setattr(
+        dnse.httpx, "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    with caplog.at_level(logging.DEBUG, logger="vnibb.providers.dnse"):
+        with pytest.raises(ProviderError) as caught:
+            await dnse.dnse_get("/price/ohlc", {"symbol": "VNM"})
+
+    signature = seen[0].headers["x-signature"].split('signature="', 1)[1].split('"', 1)[0]
+    assert signature and "%3D" in signature  # a real, encoded signature was produced
+    rendered = "\n".join((str(caught.value), repr(caught.value), caplog.text,
+                          caught.value.args[0] if caught.value.args else ""))
+    for sentinel in (SECRET, KEY, f"signature={signature}", signature):
+        assert sentinel not in rendered
+    # The header itself was well-formed on the wire; only our output is clean.
+    assert seen[0].headers["x-api-key"] == KEY
 
 
 @pytest.mark.asyncio
