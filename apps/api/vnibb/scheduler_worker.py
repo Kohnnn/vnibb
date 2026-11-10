@@ -9,7 +9,7 @@ from vnibb.core.config import settings
 from vnibb.core.logging_config import setup_logging
 from vnibb.core.scheduler import shutdown_scheduler, start_scheduler
 from vnibb.services.realtime_pipeline import get_realtime_pipeline
-from vnibb.services.vnstock_registration import ensure_vnstock_registration
+from vnibb.providers.vnstock.registration import ensure_vnstock_registration
 
 logger = logging.getLogger(__name__)
 

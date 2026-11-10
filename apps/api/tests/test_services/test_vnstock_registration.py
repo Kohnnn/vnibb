@@ -5,7 +5,7 @@ import sys
 import types
 
 import pytest
-from vnibb.services import vnstock_registration as registration
+from vnibb.providers.vnstock import registration
 
 
 @pytest.fixture

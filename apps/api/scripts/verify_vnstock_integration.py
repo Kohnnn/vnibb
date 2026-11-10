@@ -82,11 +82,11 @@ def check_vnstock_library():
         "modules": {},
     }
     
-    from vnibb.providers.vnstock.runtime import import_vnstock_symbol
+    from vnibb.providers.vnstock import lifecycle
 
     # Check installation through the runtime policy before importing vnstock.
     try:
-        results["version"], _ = import_vnstock_symbol("__version__")
+        results["version"] = lifecycle.diagnostic_version()
         results["installed"] = True
         print(f"✓ vnstock installed (version: {results['version']})")
     except Exception as e:
@@ -106,7 +106,7 @@ def check_vnstock_library():
     print("\n  Available modules:")
     for name, module_name, class_name in modules_to_check:
         try:
-            import_vnstock_symbol(class_name)
+            lifecycle.diagnostic_facade(class_name)
             results["modules"][name] = True
             print(f"    ✓ {name}")
         except Exception as e:
@@ -128,9 +128,8 @@ def test_vnstock_apis():
     # Test 1: Listing.all_symbols()
     print("  Testing Listing API...")
     try:
-        from vnibb.providers.vnstock.runtime import get_listing_class
-        listing = get_listing_class()(source=default_source)
-        df = listing.all_symbols()
+        from vnibb.providers import market_data
+        df = market_data.listing(default_source)
         results["listing_all_symbols"] = len(df) if df is not None else 0
         print(f"    ✓ all_symbols(): {len(df)} stocks")
     except Exception as e:
@@ -140,9 +139,8 @@ def test_vnstock_apis():
     # Test 2: Stock quote for a sample symbol
     print("\n  Testing Quote API (VCB)...")
     try:
-        from vnibb.providers.vnstock.runtime import get_quote_class
-        quote = get_quote_class()(symbol='VCB', source=default_source)
-        df = quote.history(start='2024-01-01', end='2024-01-31')
+        from vnibb.providers import market_data
+        df = market_data.history('VCB', default_source, start='2024-01-01', end='2024-01-31')
         results["quote_history"] = len(df) if df is not None else 0
         print(f"    ✓ quote.history(): {len(df)} price records")
     except Exception as e:
@@ -152,9 +150,8 @@ def test_vnstock_apis():
     # Test 3: Company overview
     print("\n  Testing Company API (VCB)...")
     try:
-        from vnibb.providers.vnstock.runtime import get_company_class
-        company = get_company_class()(symbol='VCB', source=default_source)
-        overview = company.overview()
+        from vnibb.providers import market_data
+        overview = market_data.company_overview('VCB', default_source)
         has_data = overview is not None and (not hasattr(overview, 'empty') or not overview.empty)
         results["company_overview"] = 1 if has_data else 0
         print(f"    ✓ company.overview(): data retrieved")
@@ -165,9 +162,8 @@ def test_vnstock_apis():
     # Test 4: Financial statements
     print("\n  Testing Finance API (VCB)...")
     try:
-        from vnibb.providers.vnstock.runtime import get_finance_class
-        finance = get_finance_class()(symbol='VCB', source=default_source)
-        bs = finance.balance_sheet(period='year', lang='en')
+        from vnibb.providers import market_data
+        bs = market_data.balance_sheet('VCB', default_source)
         has_data = bs is not None and (not hasattr(bs, 'empty') or not bs.empty)
         results["finance_balance_sheet"] = 1 if has_data else 0
         print(f"    ✓ finance.balance_sheet(): data retrieved")

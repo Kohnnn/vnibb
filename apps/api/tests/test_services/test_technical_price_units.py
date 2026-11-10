@@ -203,7 +203,7 @@ async def test_direct_indicator_endpoint_discloses_unknown_without_computing(mon
             frame.attrs["price_unit"] = "unknown"
             return frame
 
-    monkeypatch.setattr(technical, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
     monkeypatch.setattr(settings, "vnstock_timeout", 5)
 
     result = await technical.get_technical_indicators_direct("FPT", indicators="sma", period=14, source="VCI")

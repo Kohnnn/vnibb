@@ -55,6 +55,7 @@ from vnibb.models.api_errors import (
     ValidationError,
     ValidationErrorResponse,
 )
+from vnibb.providers.vnstock.lifecycle import warmup as _warmup_vnstock_sync
 
 # Configure structured logging
 setup_logging()
@@ -320,20 +321,8 @@ async def _safe_warmup():
         logger.warning(f"Background warmup failed: {e}")
 
 
-def _warmup_vnstock_sync():
-    """Preload SDK facades without issuing provider requests."""
-    try:
-        from vnibb.providers.vnstock.runtime import import_vnstock_symbol
-
-        for name in ("Company", "Finance", "Listing"):
-            import_vnstock_symbol(name)
-        logger.info("vnstock modules pre-loaded successfully.")
-    except Exception:
-        logger.warning("vnstock pre-initialization failed")
-
-
 async def _register_vnstock_on_startup() -> None:
-    from vnibb.services.vnstock_registration import ensure_vnstock_registration
+    from vnibb.providers.vnstock.registration import ensure_vnstock_registration
 
     try:
         result = await asyncio.wait_for(
@@ -444,14 +433,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await _register_vnstock_on_startup()
 
     if settings.environment != "test":
-        # Policy only (tier + source). The persisted-credential probe talks to
-        # the SDK's auth status, which reaches the network and can raise for a
-        # stale device registration; running it here turned that into a total
-        # startup failure. Acquisition still refuses through
-        # `import_vnstock_symbol`, where a paid credential actually matters.
-        from vnibb.providers.vnstock.runtime import validate_runtime_policy
+        from vnibb.providers.vnstock.lifecycle import validate_startup_policy
 
-        validate_runtime_policy()
+        validate_startup_policy()
         import threading
 
         skip_warmup_default = "true" if settings.environment == "production" else "false"
