@@ -94,6 +94,217 @@ async def test_statement_endpoint_does_not_fetch_vci_when_iq_available(monkeypat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "iq_year,sql_year,sql_basis,sql_revenue,expected_source,expected_revenue,reason",
+    [
+        (2024, 2025, True, 200, "VCI", 200, None),
+        (2025, 2024, True, 200, "vietcap", 100, None),
+        (2024, 2025, False, 200, "VCI", None, "unverified_statement_currency_or_unit"),
+        (2025, 2025, True, 200, "vietcap", None, "conflicting_source_observations"),
+        (2025, 2025, True, 100, "vietcap", None, "unverified_financial_revision"),
+    ],
+)
+async def test_financial_http_competes_retained_sources_before_limit(
+    client, test_db, monkeypatch, iq_year, sql_year, sql_basis, sql_revenue,
+    expected_source, expected_revenue, reason,
+):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    iq = FinancialStatementData(
+        symbol="FPT", period=str(iq_year), fiscal_year=iq_year, statement_type="income",
+        source="vietcap", currency="VND", value_unit="VND", consolidation_basis="consolidated",
+        flow_basis="annual", revenue=100, unit_metadata={"revenue": unit},
+    )
+    stored = FinancialStatementData(
+        symbol="FPT", period=str(sql_year), fiscal_year=sql_year, statement_type="income",
+        source="VCI", currency="VND" if sql_basis else None, value_unit="VND" if sql_basis else None,
+        consolidation_basis="consolidated", flow_basis="annual", revenue=sql_revenue, gross_profit=0,
+        unit_metadata={"revenue": unit, "gross_profit": unit},
+    )
+    test_db.add(IncomeStatement(
+        id=7901, symbol="FPT", period=str(sql_year), period_type="year", fiscal_year=sql_year,
+        source="VCI", revenue=sql_revenue, gross_profit=0,
+        raw_data={"_financial_lineage": {"canonical_data": stored.model_dump(mode="json")}},
+    ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[iq]))
+    provider = AsyncMock(side_effect=AssertionError("retained comparison must not fetch"))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", provider)
+
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=year&limit=1")
+    assert response.status_code == 200
+    [row] = response.json()["data"]
+    assert row["period"] == str(max(iq_year, sql_year))
+    assert (row["source"], row["revenue"]) == (expected_source, expected_revenue)
+    if reason == "unverified_statement_currency_or_unit":
+        assert row["unit_metadata"]["revenue"]["unavailable_reason"] == reason
+    elif reason:
+        assert row["unavailable_reason"] == reason
+    if iq_year == sql_year:
+        assert row["gross_profit"] is None
+    provider.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode,expected_period,expected_source,expected_revenue,reason",
+    [
+        ("valid_zero", "2025", "VCI", 0, None),
+        ("valid_negative", "2025", "VCI", -40, None),
+        ("malformed_fiscal_identity", "2024", "vietcap", 100, None),
+        ("same_period_unknown_basis", "2025", "vietcap", None, "unverified_financial_basis"),
+        ("newer_incompatible_scope", "2025", "VCI", None, "unverified_financial_basis"),
+        ("sql_failure", "2024", "vietcap", None, "financial_source_comparison_unavailable"),
+    ],
+)
+async def test_financial_http_competition_preserves_truthful_source_and_basis(
+    client, test_db, monkeypatch, mode, expected_period, expected_source, expected_revenue, reason,
+):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    iq = FinancialStatementData(
+        symbol="FPT", period="2025" if mode == "same_period_unknown_basis" else "2024",
+        fiscal_year=2025 if mode == "same_period_unknown_basis" else 2024,
+        statement_type="income", source="vietcap", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="annual", revenue=100,
+        unit_metadata={"revenue": unit},
+    )
+    amount = 0 if mode == "valid_zero" else -40
+    sql = FinancialStatementData(
+        symbol="FPT", period="unidentified" if mode == "malformed_fiscal_identity" else "2025",
+        fiscal_year=None if mode == "malformed_fiscal_identity" else 2025,
+        statement_type="income", source="VCI", currency="VND", value_unit="VND",
+        consolidation_basis="separate" if mode == "newer_incompatible_scope" else "consolidated",
+        flow_basis=None if mode == "same_period_unknown_basis" else "annual", revenue=amount,
+        unit_metadata={"revenue": unit},
+    )
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[iq]))
+    provider = AsyncMock(side_effect=AssertionError("retained comparison must not fetch"))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", provider)
+    fallback = AsyncMock(side_effect=RuntimeError("SQL unavailable")) if mode == "sql_failure" else AsyncMock(return_value=[sql])
+    monkeypatch.setattr(equity, "_load_financial_statement_fallback", fallback)
+
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=year&limit=1")
+    assert response.status_code == 200
+    [row] = response.json()["data"]
+    assert (row["period"], row["source"], row["revenue"]) == (expected_period, expected_source, expected_revenue)
+    if reason:
+        assert row["unavailable_reason"] == reason
+    if mode == "sql_failure":
+        assert "SQL unavailable" in response.json()["error"]
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reject_primary", [False, True])
+async def test_financial_http_same_period_never_erases_rejected_source(
+    client, test_db, monkeypatch, reject_primary,
+):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    common = dict(
+        symbol="FPT", period="2025", fiscal_year=2025, statement_type="income",
+        currency="VND", value_unit="VND", consolidation_basis="consolidated",
+        flow_basis="annual", revenue=100, unit_metadata={"revenue": unit},
+    )
+    iq = FinancialStatementData(**common, source="vietcap",
+        unavailable_reason="conflicting_metric_rows" if reject_primary else None)
+    sql = FinancialStatementData(**common, source="VCI",
+        unavailable_reason=None if reject_primary else "conflicting_metric_rows")
+    test_db.add(IncomeStatement(
+        id=7902, symbol="FPT", period="2025", period_type="year", fiscal_year=2025,
+        source="VCI", revenue=100,
+        raw_data={"_financial_lineage": {"canonical_data": sql.model_dump(mode="json")}},
+    ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[iq]))
+    provider = AsyncMock(side_effect=AssertionError("retained comparison must not fetch"))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", provider)
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=year&limit=1")
+    assert response.status_code == 200
+    [row] = response.json()["data"]
+    assert row["revenue"] is None
+    assert row["unavailable_reason"] == "conflicting_metric_rows"
+    provider.assert_not_awaited()
+
+@pytest.mark.asyncio
+async def test_financial_http_competes_vci_even_if_other_sql_source_is_newer(client, test_db, monkeypatch):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    iq = FinancialStatementData(
+        symbol="FPT", period="2023", fiscal_year=2023, statement_type="income", source="vietcap",
+        currency="VND", value_unit="VND", consolidation_basis="consolidated", flow_basis="annual",
+        revenue=50, unit_metadata={"revenue": unit},
+    )
+    for year, source, amount in ((2024, "VCI", 100), (2025, "KBS", 200)):
+        canonical = iq.model_copy(update={"period": str(year), "fiscal_year": year, "source": source, "revenue": amount})
+        test_db.add(IncomeStatement(
+            id=year, symbol="FPT", period=str(year), period_type="year", fiscal_year=year,
+            source=source, revenue=amount,
+            raw_data={"_financial_lineage": {"canonical_data": canonical.model_dump(mode="json")}},
+        ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[iq]))
+    provider = AsyncMock(side_effect=AssertionError("retained comparison must not fetch"))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", provider)
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=year&limit=1")
+    assert response.status_code == 200
+    [row] = response.json()["data"]
+    assert (row["period"], row["source"], row["revenue"]) == ("2024", "VCI", 100)
+    provider.assert_not_awaited()
+@pytest.mark.asyncio
+async def test_financial_http_skips_unidentifiable_sql_before_limit(client, test_db, monkeypatch):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    iq = FinancialStatementData(
+        symbol="FPT", period="2024", fiscal_year=2024, statement_type="income", source="vietcap",
+        currency="VND", value_unit="VND", consolidation_basis="consolidated", flow_basis="annual",
+        revenue=50, unit_metadata={"revenue": unit},
+    )
+    for year, label, revenue in ((2026, "unidentified", 200), (2025, "2025", 100)):
+        canonical = iq.model_copy(update={"period": label, "fiscal_year": year, "source": "VCI", "revenue": revenue})
+        test_db.add(IncomeStatement(
+            id=year, symbol="FPT", period=label, period_type="year", fiscal_year=year,
+            source="VCI", revenue=revenue,
+            raw_data={"_financial_lineage": {"canonical_data": canonical.model_dump(mode="json")}},
+        ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[iq]))
+    provider = AsyncMock(side_effect=AssertionError("retained comparison must not fetch"))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", provider)
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=year&limit=1")
+    assert response.status_code == 200
+    [row] = response.json()["data"]
+    assert (row["period"], row["source"], row["revenue"]) == ("2025", "VCI", 100)
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("iq_newer", [False, True])
+async def test_financial_http_withholds_newer_incompatible_scope_in_either_source_order(
+    client, test_db, monkeypatch, iq_newer,
+):
+    unit = {"unit": "VND", "source_unit": "VND"}
+    iq_year, sql_year = (2025, 2024) if iq_newer else (2024, 2025)
+    iq = FinancialStatementData(
+        symbol="FPT", period=str(iq_year), fiscal_year=iq_year, statement_type="income", source="vietcap",
+        currency="VND", value_unit="VND", consolidation_basis="separate" if iq_newer else "consolidated",
+        flow_basis="annual", revenue=100, unit_metadata={"revenue": unit},
+    )
+    sql = iq.model_copy(update={"period": str(sql_year), "fiscal_year": sql_year, "source": "VCI",
+        "consolidation_basis": "consolidated" if iq_newer else "separate", "revenue": -40})
+    test_db.add(IncomeStatement(
+        id=sql_year, symbol="FPT", period=str(sql_year), period_type="year", fiscal_year=sql_year,
+        source="VCI", revenue=-40, raw_data={"_financial_lineage": {"canonical_data": sql.model_dump(mode="json")}},
+    ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_statement_rows", AsyncMock(return_value=[iq]))
+    provider = AsyncMock(side_effect=AssertionError("retained comparison must not fetch"))
+    monkeypatch.setattr(equity, "get_financials_with_ttm", provider)
+    response = await client.get("/api/v1/equity/FPT/financials?statement_type=income&period=year&limit=1")
+    assert response.status_code == 200
+    [row] = response.json()["data"]
+    assert (row["period"], row["source"], row["revenue"], row["unavailable_reason"]) == (
+        "2025", "vietcap" if iq_newer else "VCI", None, "unverified_financial_basis"
+    )
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("primary_failure", [False, True])
 async def test_statement_endpoint_falls_back_on_empty_or_failed_iq(monkeypatch, primary_failure):
     row = FinancialStatementData(

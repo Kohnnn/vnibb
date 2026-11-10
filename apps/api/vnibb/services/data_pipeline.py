@@ -56,7 +56,7 @@ from vnibb.providers.market_data import validate_source
 from vnibb.providers.vnstock.reference_fields import identity, parse_datetime, supplied
 from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
 from vnibb.core.screener_shares import resolve_screener_shares
-from vnibb.services.cache_manager import StructuredPersistenceConflict, lock_ratio_writes, snapshot_session_coverage, source_update_condition
+from vnibb.services.cache_manager import StructuredPersistenceConflict, lock_ratio_writes, lock_statement_writes, snapshot_session_coverage, source_update_condition
 from vnibb.services.market_session import expected_market_session, qualify_market_session
 from vnibb.models.alerts import BlockTrade
 from vnibb.models.company import Company, Officer, Shareholder
@@ -3652,6 +3652,7 @@ class DataPipeline:
                         _parse_period_fields(entry.period, entry.raw_data)[0] for entry in admitted_items
                     )
                     async with async_session_maker() as session:
+                        await lock_statement_writes(session, model, symbol, normalized_period)
                         for entry in admitted_items:
                             payload = entry.model_dump(mode="json")
                             raw_payload = dict(entry.raw_data or {})

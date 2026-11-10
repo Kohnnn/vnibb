@@ -367,6 +367,8 @@ async def _load_financial_statement_fallback(
     statement_type: str,
     period: str,
     limit: int,
+    *,
+    source: str | None = None,
 ) -> list[FinancialStatementData]:
     """Read financial statements from local DB when provider data is unavailable."""
     symbol_upper = symbol.upper()
@@ -401,9 +403,12 @@ async def _load_financial_statement_fallback(
         )
         .order_by(model.fiscal_year.desc(), model.fiscal_quarter.desc())
     )
+    if source is not None:
+        stmt = stmt.where(model.source == source)
     if quarter_filter is not None:
         stmt = stmt.where(model.fiscal_quarter == quarter_filter)
-    stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
+    if source is None:
+        stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -1062,6 +1067,74 @@ def _sort_financial_statement_rows(
     rows: list[FinancialStatementData],
 ) -> list[FinancialStatementData]:
     return sorted(rows, key=lambda item: _statement_period_sort_key(item.period))
+
+
+def _select_retained_financial_rows(
+    primary: list[FinancialStatementData], secondary: list[FinancialStatementData], limit: int,
+) -> list[FinancialStatementData]:
+    # ponytail: compare revisions only when a verified fiscal-revision contract exists.
+    def valid_identity(row: FinancialStatementData) -> bool:
+        return bool(re.fullmatch(r"20\d{2}", str(row.period))) and (
+            row.fiscal_year is None or row.fiscal_year == int(row.period)
+        ) and row.fiscal_quarter is None
+
+    def same_basis(first: FinancialStatementData, second: FinancialStatementData) -> bool:
+        return (
+            first.symbol.upper() == second.symbol.upper()
+            and first.statement_type == second.statement_type
+            and first.currency == second.currency == "VND"
+            and first.value_unit == second.value_unit == "VND"
+            and first.consolidation_basis in {"consolidated", "separate"}
+            and first.consolidation_basis == second.consolidation_basis
+            and first.flow_basis == second.flow_basis
+            and first.aggregation_basis == second.aggregation_basis
+        )
+
+    def withheld(row: FinancialStatementData, reason: str) -> FinancialStatementData:
+        return admit_statement_rows([row.model_copy(update={"unavailable_reason": reason})], "year")[0]
+
+    selected = {_financial_statement_identity(row): row for row in primary}
+    for row in secondary:
+        identity = _financial_statement_identity(row)
+        existing = selected.get(identity)
+        if existing is not None and existing.source != row.source:
+            if not same_basis(existing, row) or existing.source_periods != row.source_periods:
+                reason = "unverified_financial_basis"
+            elif existing.unavailable_reason or row.unavailable_reason:
+                reason = existing.unavailable_reason or row.unavailable_reason
+            else:
+                conflicting = any(
+                    isinstance(getattr(existing, name, None), (int, float))
+                    and isinstance(getattr(row, name, None), (int, float))
+                    and getattr(existing, name) != getattr(row, name)
+                    for name in FinancialStatementData.model_fields
+                    if name not in {"fiscal_year", "fiscal_quarter"}
+                )
+                reason = "conflicting_source_observations" if conflicting else "unverified_financial_revision"
+            selected[identity] = withheld(existing, reason)
+        elif existing is None:
+            references = [candidate for candidate in primary if valid_identity(candidate)]
+            if references and valid_identity(row):
+                reference = max(references, key=lambda candidate: int(candidate.period))
+                if not same_basis(reference, row):
+                    if int(row.period) > int(reference.period):
+                        row = withheld(row, row.unavailable_reason or "unverified_financial_basis")
+                    elif int(row.period) < int(reference.period):
+                        current = selected[_financial_statement_identity(reference)]
+                        if not current.unavailable_reason and not row.unavailable_reason and all(
+                            any(isinstance(getattr(candidate, name), (int, float))
+                                for name in FinancialStatementData.model_fields
+                                if name not in {"fiscal_year", "fiscal_quarter"})
+                            for candidate in (current, row)
+                        ):
+                            selected[_financial_statement_identity(reference)] = withheld(
+                                current, "unverified_financial_basis"
+                            )
+            selected[identity] = row
+    rows = list(selected.values())
+    if primary and secondary:
+        rows = [row for row in rows if valid_identity(row)]
+    return _sort_financial_statement_rows(rows)[-limit:]
 
 
 async def _is_bank_like_symbol(db: AsyncSession, symbol: str) -> bool:
@@ -5137,6 +5210,17 @@ async def get_financials(
                 )
                 mongo_data = _merge_financial_statement_rows(acquired, mongo_data)
         if mongo_data and all(row.source == "vietcap" for row in mongo_data):
+            if str(period).upper() in {"YEAR", "FY"} and db is not None:
+                try:
+                    retained = await _load_financial_statement_fallback(
+                        db=db, symbol=symbol, statement_type=statement_type, period=period, limit=limit, source="VCI",
+                    )
+                except Exception as exc:
+                    primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                    mongo_data = [row.model_copy(update={"unavailable_reason": "financial_source_comparison_unavailable"})
+                                  for row in mongo_data]
+                else:
+                    mongo_data = _select_retained_financial_rows(mongo_data, retained, limit)
             return StandardResponse(
                 data=admit_statement_rows(mongo_data, period), meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
                 error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
