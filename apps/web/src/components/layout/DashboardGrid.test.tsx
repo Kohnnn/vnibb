@@ -39,7 +39,6 @@ test('view and responsive transitions preserve authored gaps, and only desktop e
   });
   const resizeGrid = (width: number) => act(() => {
     resizeCallback([{ contentRect: new DOMRect(0, 0, width, 900) } as ResizeObserverEntry], {} as ResizeObserver);
-    jest.advanceTimersByTime(100);
   });
 
   const { container } = render(<WorkspaceHarness />);

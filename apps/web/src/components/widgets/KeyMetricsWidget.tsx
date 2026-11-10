@@ -58,7 +58,7 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
         ? sparklineData.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
         : [];
     return (
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2 transition-colors hover:border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]/80">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2 transition-colors hover:border-[var(--border-color)] hover:bg-[var(--bg-tertiary)]/80">
             <div className="min-w-0">
                 <div className="break-words whitespace-normal text-[11px] font-semibold text-[var(--text-secondary)]">{label}</div>
                 {source && source !== 'Unavailable' && (
@@ -67,11 +67,11 @@ function MetricRow({ label, value, sparklineData, source }: MetricRowProps) {
                     </div>
                 )}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {finiteSpark.length > 0 && (
                     <Sparkline data={finiteSpark} width={40} height={16} />
                 )}
-                <span className="text-[var(--text-primary)] font-mono text-xs tabular-nums">{value ?? EMPTY_VALUE}</span>
+                <span className="min-w-0 break-words text-[var(--text-primary)] font-mono text-xs tabular-nums">{value ?? EMPTY_VALUE}</span>
             </div>
         </div>
     );
@@ -340,7 +340,7 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                         action={{ label: 'Refresh', onClick: () => refetch() }}
                     />
                 ) : (
-                    <div className="flex h-full min-h-0 flex-col gap-2">
+                    <div className="flex min-w-0 flex-col gap-2">
                         <div className="flex flex-wrap gap-1 pb-1">
                             {METRIC_TABS.map((tab) => (
                                 <button
@@ -366,20 +366,20 @@ export function KeyMetricsWidget({ id, symbol, hideHeader, onRemove, onDataChang
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+                        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
                             {highlightCards.map((card) => (
-                                <div key={card.label} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
-                                    <div className="text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                                <div key={card.label} className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-tertiary)]/55 px-3 py-2.5">
+                                    <div className="break-words text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
                                         {card.label}
                                     </div>
-                                    <div className="mt-1 text-sm font-semibold font-mono text-[var(--text-primary)] tabular-nums">
+                                    <div className="mt-1 break-words text-sm font-semibold font-mono text-[var(--text-primary)] tabular-nums">
                                         {card.value}
                                     </div>
                                 </div>
                             ))}
                         </div>
 
-                        <div className="min-h-0 flex-1 overflow-auto pr-1 scrollbar-hide">
+                        <div className="min-w-0">
                             {activeCategory === 'valuation' && (
                                 <div className="space-y-2">
                                     <MetricRow label="P/E Ratio" value={formatRatio(mergedStock?.pe)} sparklineData={history?.pe_ratio} source={metricMap.pe.source} />

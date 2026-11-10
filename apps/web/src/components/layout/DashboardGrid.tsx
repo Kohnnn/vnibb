@@ -75,10 +75,8 @@ export function DashboardGrid({
     const containerRef = useRef<HTMLDivElement>(null);
     const [width, setWidth] = useState(0);
 
-    // Measure before mounting widgets; later resize animations remain debounced.
+    // Keep grid geometry in step with the observed container width.
     useLayoutEffect(() => {
-        let timeoutId: number | undefined;
-
         const updateWidth = (nextWidth?: number) => {
             const measuredWidth = nextWidth ?? containerRef.current?.getBoundingClientRect().width ?? 0;
             const roundedWidth = Math.round(measuredWidth);
@@ -87,13 +85,6 @@ export function DashboardGrid({
             }
 
             setWidth((currentWidth) => (currentWidth === roundedWidth ? currentWidth : roundedWidth));
-        };
-
-        const debouncedUpdate = (nextWidth?: number) => {
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
-            }
-            timeoutId = window.setTimeout(() => updateWidth(nextWidth), 100);
         };
 
         updateWidth();
@@ -107,7 +98,7 @@ export function DashboardGrid({
                 return;
             }
 
-            debouncedUpdate(nextWidth);
+            updateWidth(nextWidth);
         });
         if (containerRef.current) {
             resizeObserver.observe(containerRef.current);
@@ -115,9 +106,6 @@ export function DashboardGrid({
 
         return () => {
             resizeObserver.disconnect();
-            if (timeoutId !== undefined) {
-                window.clearTimeout(timeoutId);
-            }
         };
     }, []);
 
