@@ -56,6 +56,11 @@ os.environ["REDIS_HOST"] = ""
 os.environ["REDIS_PORT"] = "0"
 os.environ["SENTRY_DSN"] = ""
 os.environ["VNSTOCK_API_KEY"] = "mock_key"
+# DNSE acquisition stays off in tests, and a contributor's exported DNSE_* must
+# never silently re-enable it or outrank a test's own patched values (#231).
+os.environ.pop("DNSE_ENABLED", None)
+os.environ.pop("DNSE_API_KEY", None)
+os.environ.pop("DNSE_API_SECRET", None)
 os.environ["VNSTOCK_SOURCE"] = "VCI"
 os.environ["VNSTOCK_RUNTIME_TIER"] = "free"
 os.environ["OPENROUTER_API_KEY"] = "mock_openrouter_key"
