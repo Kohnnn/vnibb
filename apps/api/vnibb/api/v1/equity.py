@@ -407,7 +407,8 @@ async def _load_financial_statement_fallback(
         stmt = stmt.where(model.source == source)
     if quarter_filter is not None:
         stmt = stmt.where(model.fiscal_quarter == quarter_filter)
-    stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
+    if source is None:
+        stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -1115,8 +1116,20 @@ def _select_retained_financial_rows(
             references = [candidate for candidate in primary if valid_identity(candidate)]
             if references and valid_identity(row):
                 reference = max(references, key=lambda candidate: int(candidate.period))
-                if int(row.period) > int(reference.period) and not same_basis(reference, row):
-                    row = withheld(row, row.unavailable_reason or "unverified_financial_basis")
+                if not same_basis(reference, row):
+                    if int(row.period) > int(reference.period):
+                        row = withheld(row, row.unavailable_reason or "unverified_financial_basis")
+                    elif int(row.period) < int(reference.period):
+                        current = selected[_financial_statement_identity(reference)]
+                        if not current.unavailable_reason and not row.unavailable_reason and all(
+                            any(isinstance(getattr(candidate, name), (int, float))
+                                for name in FinancialStatementData.model_fields
+                                if name not in {"fiscal_year", "fiscal_quarter"})
+                            for candidate in (current, row)
+                        ):
+                            selected[_financial_statement_identity(reference)] = withheld(
+                                current, "unverified_financial_basis"
+                            )
             selected[identity] = row
     rows = list(selected.values())
     if primary and secondary:
