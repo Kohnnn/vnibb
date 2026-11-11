@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
@@ -46,8 +47,8 @@ def sdk(monkeypatch):
     vnstock = ModuleType("vnstock")
     vnstock.__version__ = "5.2.1"
     monkeypatch.setitem(sys.modules, "vnstock", vnstock)
-    from vnibb.providers.vnstock import runtime
     from vnibb.core import financial_lane
+    from vnibb.providers.vnstock import runtime
 
     calls = []
     active = {"source": "kbs"}
@@ -126,9 +127,10 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
     from datetime import datetime
     from unittest.mock import AsyncMock
 
-    import vnibb.services.data_pipeline as pipeline_module
     from sqlalchemy import BigInteger, Integer, select
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import vnibb.services.data_pipeline as pipeline_module
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
     from vnibb.models.sync_status import SyncStatus
     from vnibb.services.data_pipeline import DataPipeline
@@ -273,9 +275,9 @@ async def test_generation_five_provider_failure_does_not_fallback_to_another_sou
     import sys
     from types import ModuleType
 
+    from vnibb.core import financial_lane
     from vnibb.core.exceptions import ProviderError
     from vnibb.providers.vnstock import runtime
-    from vnibb.core import financial_lane
 
     vnstock = ModuleType("vnstock")
     vnstock.__version__ = "5.2.1"
@@ -306,8 +308,8 @@ async def test_generation_four_statement_adapter_keeps_period_count_and_vci(monk
     import sys
     from types import ModuleType
 
-    from vnibb.providers.vnstock import runtime
     from vnibb.core import financial_lane
+    from vnibb.providers.vnstock import runtime
 
     vnstock = ModuleType("vnstock")
     vnstock.__version__ = "4.0.4"
@@ -339,8 +341,8 @@ async def test_generation_four_missing_sdk_version_stays_on_legacy_route(monkeyp
     import sys
     from types import ModuleType
 
-    from vnibb.providers.vnstock import runtime
     from vnibb.core import financial_lane
+    from vnibb.providers.vnstock import runtime
 
     monkeypatch.setitem(sys.modules, "vnstock", ModuleType("vnstock"))
     calls = []
@@ -561,6 +563,7 @@ async def test_retained_metric_reads_agree_across_rest_and_mcp(statement, stale)
     would make the two surfaces disagree about the same row."""
     from sqlalchemy import BigInteger, Integer, select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from vnibb.api.v1.equity import _load_financial_statement_fallback
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement

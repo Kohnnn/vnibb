@@ -22,6 +22,8 @@ Independent corrective review approved MCP leaf `aa3f664c` after 17 focused fina
 
 The user subsequently explicitly authorized committing, pushing all work and merging eligible work to `main`. `apps/web/vercel.json` now disables automatic Git deployment only for `codex/project-integration-20261110`; `main` remains enabled by default. A JSON assertion and independent source review accepted this native branch-scoped setting. This removes the integration-preview publication obstacle, not the prohibition on republishing disputed DNSE bars/history. All 24 currently open issue bodies and four draft PR bodies were read via explicit `gh --repo Kohnnn/vnibb`; source rights, denied host access, real-identity/human Send and deferred regulatory evidence remain distinct from code merge acceptance.
 
+The first post-repair backend command on `b543b48a` stopped at configured changed-line Ruff, exit 1: 12 import-order/unused-import diagnostics in six provider-cutover test modules. Compile and pytest were not reached. The correction only sorts the affected imports and removes three now-unused vnstock runtime imports; no assertion, fixture, test patch target or runtime code changed. The next backend run binds to the successor candidate rather than claiming checks on `b543b48a`.
+
 
 
 ## Delayed advisory corrections (2026-11-11)

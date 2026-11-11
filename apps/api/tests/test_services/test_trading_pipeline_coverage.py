@@ -5,12 +5,13 @@ from unittest.mock import AsyncMock, Mock
 
 import pandas as pd
 import pytest
+
+from vnibb.core import financial_lane
 from vnibb.core.config import settings
 from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import ForeignTrading, IntradayTrade, OrderFlowDaily
 from vnibb.providers.vnstock import runtime
-from vnibb.core import financial_lane
 from vnibb.services import (
     data_pipeline,
     mongo_market_data_service,

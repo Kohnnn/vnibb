@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from vnibb.core.config import settings
 from vnibb.services import realtime_pipeline, sync_all_data
 
@@ -101,7 +102,6 @@ async def test_full_universe_rotation_resumes_after_restart_and_provider_failure
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_intraday_trades", ticks)
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_orderbook_snapshots", depth)
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=1))
-    from vnibb.providers.vnstock import runtime
     from vnibb.core import financial_lane
     monkeypatch.setattr(financial_lane, "financial_busy", lambda: False)
 
@@ -164,6 +164,7 @@ async def test_contended_rotation_never_acquires_or_mutates_coverage(monkeypatch
 @pytest.mark.asyncio
 async def test_scheduler_uses_durable_intraday_entrypoint(monkeypatch):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
     from vnibb.core import scheduler
 
     rotation = AsyncMock()
@@ -284,7 +285,6 @@ async def test_capability_skip_cannot_certify_rotation_coverage(monkeypatch):
     monkeypatch.setattr(sync_all_data.data_pipeline, "_wait_for_rate_limit", AsyncMock())
     monkeypatch.setattr(sync_all_data.data_pipeline, "_cache_set_json", AsyncMock())
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=0))
-    from vnibb.providers.vnstock import runtime
     from vnibb.core import financial_lane
     monkeypatch.setattr(financial_lane, "financial_busy", lambda: False)
 

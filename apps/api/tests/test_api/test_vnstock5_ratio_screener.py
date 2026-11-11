@@ -2,10 +2,11 @@ from datetime import date
 
 import pandas as pd
 import pytest
+
+from vnibb.core import financial_lane
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers.vnstock import runtime
-from vnibb.core import financial_lane
 from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
