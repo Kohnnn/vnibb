@@ -24,7 +24,11 @@ from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory, get_db
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.exceptions import (
+    ProviderCredentialRefusedError,
+    ProviderError,
+    ProviderTimeoutError,
+)
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
@@ -4441,7 +4445,11 @@ async def get_historical_prices(
             )
         except Exception as exc:
             provider_error = exc
-            warnings.append("provider resolution failed; retained trusted partial rows")
+            warnings.append(
+                "provider credentials unavailable; trust stored rows only"
+                if isinstance(exc, ProviderCredentialRefusedError)
+                else "provider resolution failed; retained trusted partial rows"
+            )
             logger.warning(
                 "Historical endpoint provider failed (symbol=%s interval=%s): %s",
                 symbol_upper,
@@ -4473,11 +4481,17 @@ async def get_historical_prices(
             ),
         )
 
-    await _schedule_critical_reinforcement(
-        symbol=symbol_upper,
-        endpoint="equity.historical",
-        domains=["prices"],
-    )
+    if isinstance(provider_error, ProviderCredentialRefusedError):
+        warnings.append(
+            "provider credentials unavailable; reinforcement not scheduled until the runtime credential policy allows acquisition"
+        )
+    else:
+        await _schedule_critical_reinforcement(
+            symbol=symbol_upper,
+            endpoint="equity.historical",
+            domains=["prices"],
+        )
+
     empty_meta = _historical_resolution_meta(
         [],
         adjustment_mode,

@@ -18,7 +18,7 @@ import time
 from typing import Any, Generic, List, Optional, TypeVar
 
 from pydantic import BaseModel
-from vnibb.core.exceptions import ProviderError
+from vnibb.core.exceptions import ProviderCredentialRefusedError, ProviderError
 
 QueryT = TypeVar("QueryT", bound=BaseModel)
 DataT = TypeVar("DataT", bound=BaseModel)
@@ -169,6 +169,10 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
                 e,
             )
             return []
+        except ProviderCredentialRefusedError:
+            # A credential-policy refusal is not a missing observation; degrading
+            # to [] would report an empty dataset. Let the consumer surface it.
+            raise
         except RuntimeError as e:
             if "Circuit breaker is OPEN" in str(e):
                 _log_throttled(

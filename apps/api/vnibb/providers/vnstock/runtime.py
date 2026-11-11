@@ -10,6 +10,7 @@ from importlib.util import find_spec
 from typing import Any
 
 from vnibb.core.config import settings
+from vnibb.core.exceptions import ProviderCredentialRefusedError
 
 
 def validate_free_runtime() -> None:
@@ -54,12 +55,12 @@ def _refuse_persisted_paid_account() -> None:
         except Exception as exc:
             if isinstance(exc, ModuleNotFoundError) and exc.name == "vnstock":
                 return
-            raise RuntimeError(
+            raise ProviderCredentialRefusedError(
                 "Free runtime could not import vnstock to verify credential state; refusing to acquire."
             ) from exc
     status = getattr(module, "status", None)
     if not callable(status):
-        raise RuntimeError(
+        raise ProviderCredentialRefusedError(
             "Free runtime cannot verify the installed vnstock credential state; "
             "refusing to acquire without a credential status check."
         )
@@ -67,16 +68,16 @@ def _refuse_persisted_paid_account() -> None:
         state = status()
     except Exception as exc:
         if _is_sdk_auth_failure(exc):
-            raise RuntimeError(
+            raise ProviderCredentialRefusedError(
                 "Installed vnstock credential was rejected by the SDK (AuthError); "
                 "refusing to acquire."
             ) from exc
-        raise RuntimeError(
+        raise ProviderCredentialRefusedError(
             "Free runtime could not read the installed vnstock credential state; "
             "refusing to acquire."
         ) from exc
     if not isinstance(state, dict):
-        raise RuntimeError(
+        raise ProviderCredentialRefusedError(
             "Installed vnstock credential status is malformed; refusing to acquire."
         )
     authenticated = state.get("authenticated")
@@ -86,7 +87,7 @@ def _refuse_persisted_paid_account() -> None:
     if authenticated is False and tier in {"guest", "free"}:
         return
     if authenticated is not True:
-        raise RuntimeError(
+        raise ProviderCredentialRefusedError(
             "Installed vnstock credential state is unverifiable; refusing to acquire."
         )
     if tier in {"guest", "free"}:
@@ -94,11 +95,11 @@ def _refuse_persisted_paid_account() -> None:
     if not tier:
         # An authenticated credential that reports no tier is an unverifiable
         # state: fail closed rather than acquire on an unknown plan.
-        raise RuntimeError(
+        raise ProviderCredentialRefusedError(
             "Installed vnstock reports an authenticated credential with no "
             "verifiable paid tier; refusing to acquire."
         )
-    raise RuntimeError(
+    raise ProviderCredentialRefusedError(
         f"Free runtime cannot use an authenticated {tier} credential; "
         "authenticate as a free or guest account."
     )

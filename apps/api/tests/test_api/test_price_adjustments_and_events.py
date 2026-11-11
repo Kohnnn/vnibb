@@ -817,3 +817,39 @@ async def test_ratio_mongo_failure_retains_healthy_sql_source(client, test_db, m
     assert any("unverified" in warning.lower() for warning in payload["meta"]["warnings"])
     assert any("Mongo" in warning for warning in payload["meta"]["warnings"])
     provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_historical_credential_refusal_is_unavailable_not_empty(client, monkeypatch):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    from vnibb.core.config import settings
+    from vnibb.providers.vnstock import runtime
+
+    sdk = ModuleType("vnstock")
+    sdk.status = lambda: {"authenticated": True, "tier": "golden"}
+    monkeypatch.setitem(sys.modules, "vnstock", sdk)
+    monkeypatch.setattr(runtime, "find_spec", lambda name: None)
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "free")
+    monkeypatch.setattr(settings, "vnstock_runtime_tier", "free")
+    monkeypatch.setattr(equity, "_load_historical_from_mongo", AsyncMock(return_value=([], [])))
+    monkeypatch.setattr(
+        equity.CacheManager,
+        "get_historical_prices",
+        AsyncMock(return_value=SimpleNamespace(hit=False, data=None)),
+    )
+    monkeypatch.setattr(equity, "_load_historical_from_recent_cache", AsyncMock(return_value=[]))
+    reinforcement = AsyncMock()
+    monkeypatch.setattr(equity, "_schedule_critical_reinforcement", reinforcement)
+
+    response = await client.get(
+        "/api/v1/equity/historical?symbol=VNM&start_date=2026-06-08&end_date=2026-06-09"
+    )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["data"] == []
+    assert "unavailable" in payload["error"].lower()
+    assert "credential" in payload["error"].lower()
+    reinforcement.assert_not_awaited()
