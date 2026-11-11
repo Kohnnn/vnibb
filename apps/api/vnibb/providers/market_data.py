@@ -9,6 +9,12 @@ active adapter's timeout and concurrency behavior. Structured fetches continue
 to use :class:`BaseFetcher`; this port never returns an SDK client or class.
 """
 
+from vnibb.providers.fhsc import (
+    fhsc_financials,
+    fhsc_history,
+    fhsc_listing,
+    fhsc_quote,
+)
 from vnibb.providers.vnstock.market_data import (
     balance_sheet,
     company_overview,
@@ -28,7 +34,8 @@ from vnibb.providers.vnstock.market_data import (
 )
 
 __all__ = [
-    "balance_sheet", "company_overview", "company_profile", "financial_ratios",
+    "balance_sheet", "company_overview", "company_profile", "fhsc_financials",
+    "fhsc_history", "fhsc_listing", "fhsc_quote", "financial_ratios",
     "forex_rates", "history", "index_history", "intraday", "listing",
     "listing_metadata", "price_board", "raw_dataset", "run_financial",
     "run_reference", "validate_source",
