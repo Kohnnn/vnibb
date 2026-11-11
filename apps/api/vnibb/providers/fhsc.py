@@ -9,7 +9,6 @@ from typing import Any
 
 from vnibb.core.price_units import normalize_price_record
 
-
 _PRICE_FIELDS = ("price", "open", "high", "low", "reference", "ceiling", "floor", "change", "change_percent", "volume")
 _LISTING_NUMBERS = ("listing_reference_price", "listed_shares", "outstanding_shares", "treasury_shares", "free_float", "free_float_pct")
 
@@ -155,10 +154,12 @@ def _financial_row(symbol: str, entry: Any, statement_type: str, period: str) ->
     if isinstance(year, bool) or not isinstance(year, int) or not 1900 <= year <= 2100:
         raise ValueError("Malformed FHSC statement year")
     quarter = entry.get("quarter")
-    if quarter is not None and (isinstance(quarter, bool) or quarter not in (1, 2, 3, 4)):
+    if quarter is not None and (isinstance(quarter, bool) or not isinstance(quarter, int) or quarter not in (1, 2, 3, 4)):
         raise ValueError("Malformed FHSC statement quarter")
     if period == "quarter" and quarter is None:
         raise ValueError("FHSC quarterly row is missing quarter")
+    if period == "year" and quarter is not None:
+        raise ValueError("FHSC annual row contains quarter")
     codes = {}
     for code, value in entry.items():
         if code in {"year", "quarter"}:
@@ -189,7 +190,7 @@ def _financial_row(symbol: str, entry: Any, statement_type: str, period: str) ->
             }
             for code in codes
         },
-        flow_basis=None if is_balance else ("annual" if period == "year" else "single_quarter"),
+        flow_basis="annual" if not is_balance and period == "year" else None,
         unavailable_reason="unknown_source_unit",
     )
 

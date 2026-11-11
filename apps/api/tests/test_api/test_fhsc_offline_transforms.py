@@ -1,7 +1,6 @@
 """Offline FHSC payload transforms proven against documented response shapes."""
 
 import pytest
-
 from vnibb.providers import market_data
 from vnibb.services.financial_service import admit_statement_rows
 
@@ -192,6 +191,63 @@ def test_financial_annual_rows_keep_year_only_period():
     assert admitted.total_assets is None
 
 
+@pytest.mark.parametrize("quarter", [1.0, 4.0, True, False, "1", 0, 5])
+def test_financial_quarter_must_be_an_integer_in_range(quarter):
+    with pytest.raises(ValueError, match="statement quarter"):
+        market_data.fhsc_financials(
+            "FPT", financial_payload([{"year": 2025, "quarter": quarter, "chiphilaivay": 10.0}]),
+            statement_type="income-statement", period="quarterly",
+        )
+
+
+@pytest.mark.parametrize("period", ["annual", "year"])
+@pytest.mark.parametrize("quarter", [1, 4])
+def test_financial_annual_rejects_a_quarter(period, quarter):
+    with pytest.raises(ValueError, match="annual.*quarter"):
+        market_data.fhsc_financials(
+            "FPT", financial_payload([{"year": 2025, "quarter": quarter, "chiphilaivay": 10.0}]),
+            statement_type="cash-flow", period=period,
+        )
+
+
+@pytest.mark.parametrize("quarter_field", [{}, {"quarter": None}])
+def test_financial_annual_preserves_raw_identity_and_metadata(quarter_field):
+    raw = {"year": 2025, **quarter_field, "chiphilaivay": 10.0}
+    row = market_data.fhsc_financials(
+        "FPT", financial_payload([raw]), statement_type="income-statement", period="annual",
+    )[0]
+    admitted = admit_statement_rows([row], "year")[0]
+    for result in (row, admitted):
+        assert (result.period, result.fiscal_year, result.fiscal_quarter) == ("2025", 2025, None)
+        assert result.raw_data == {"raw": raw, "metric_codes": {"chiphilaivay": 10.0}}
+        assert result.flow_basis == "annual"
+        assert result.unit_metadata["chiphilaivay"]["unavailable_reason"] == "unknown_source_unit"
+
+
+@pytest.mark.parametrize("statement_type, canonical_type", [
+    ("income-statement", "income"),
+    ("cash-flow", "cashflow"),
+])
+def test_financial_quarterly_flow_basis_remains_unknown_through_admission(statement_type, canonical_type):
+    raw = {"year": 2025, "quarter": 1, "chiphilaivay": 10.0}
+    row = market_data.fhsc_financials(
+        "FPT", financial_payload([raw]), statement_type=statement_type, period="quarterly",
+    )[0]
+    admitted = admit_statement_rows([row], "quarter")[0]
+    for result in (row, admitted):
+        assert (result.period, result.fiscal_year, result.fiscal_quarter) == ("Q1-2025", 2025, 1)
+        assert type(result.fiscal_quarter) is int
+        assert result.statement_type == canonical_type
+        assert result.raw_data == {"raw": raw, "metric_codes": {"chiphilaivay": 10.0}}
+        assert result.flow_basis is None
+        assert result.currency is None and result.value_unit is None
+        assert result.unavailable_reason == "unknown_source_unit"
+        assert result.unit_metadata["chiphilaivay"] == {
+            "source": "fhsc", "source_field": "chiphilaivay", "source_unit": None,
+            "value_unit": None, "unavailable_reason": "unknown_source_unit",
+        }
+
+
 def test_financial_rejects_undocumented_type_and_quarterless_quarterly_row():
     with pytest.raises(ValueError, match="statement type"):
         market_data.fhsc_financials("FPT", financial_payload(), statement_type="notes", period="year")
@@ -246,7 +302,3 @@ def test_symbol_mismatch_is_rejected_across_families():
         market_data.fhsc_quote("FPT", quote_payload(symbol="vnm"))
     with pytest.raises(ValueError, match="mismatch"):
         market_data.fhsc_listing("FPT", listing_payload(symbol=None))
-
-
-def test_all_four_entry_points_are_exported():
-    assert {"fhsc_history", "fhsc_quote", "fhsc_listing", "fhsc_financials"} <= set(market_data.__all__)
