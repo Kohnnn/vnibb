@@ -21,7 +21,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, tuple_
 
 from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
@@ -1123,6 +1123,71 @@ def _reconcile_statement_rows(rows: list[dict[str, Any]], model: Any) -> list[di
             reconciled[index] = _withhold_statement(rows[index], model, reason)
     return reconciled
 
+async def _statement_competitors(
+    collection_id: str,
+    model: Any,
+    page: list[dict[str, Any]],
+    queries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    annual: set[tuple[str, int]] = set()
+    quarterly: set[tuple[str, int, int]] = set()
+    for row in page:
+        period = _statement_period_key(row)
+        if period is None:
+            continue
+        symbol, (year, quarter) = row.get("symbol"), period
+        if symbol is None:
+            continue
+        if quarter == 0:
+            annual.add((symbol, year))
+        else:
+            quarterly.add((symbol, year, quarter))
+    if not annual and not quarterly:
+        return []
+
+    model = _resolve_collection_model(collection_id)
+    identities = []
+    if annual:
+        identities.append(and_(
+            model.period_type == "year",
+            tuple_(model.symbol, model.fiscal_year).in_(annual),
+        ))
+    if quarterly:
+        identities.append(and_(
+            model.period_type == "quarter",
+            tuple_(model.symbol, model.fiscal_year, model.fiscal_quarter).in_(quarterly),
+        ))
+    filters = [query for query in queries if query["method"] not in {
+        "limit", "offset", "orderAsc", "orderDesc",
+    }]
+    statement = _apply_sql_queries(select(*_model_columns(model)), model, filters)
+    statement = statement.where(or_(*identities))
+    async with async_session_maker() as session:
+        result = await session.execute(statement)
+        return [_serialize_row(row, model=model) for row in result.mappings().all()]
+
+
+async def _statement_page_with_competitors(
+    collection_id: str,
+    queries: list[dict[str, Any]],
+    bounded_limit: int,
+) -> list[dict[str, Any]]:
+    page = await list_collection_documents_paginated(
+        collection_id,
+        queries=[query for query in queries if query["method"] != "limit"],
+        page_size=min(bounded_limit, 100),
+        max_documents=bounded_limit,
+    )
+    if not page:
+        return []
+    model = COLLECTION_MODELS[collection_id]
+    competitors = await _statement_competitors(collection_id, model, page, queries)
+    unique_rows = {row["id"]: row for row in [*page, *competitors]}
+    reconciled = {
+        row["id"]: row for row in _reconcile_statement_rows(list(unique_rows.values()), model)
+    }
+    return [reconciled[row["id"]] for row in page]
+
 
 def _model_columns(model: Any) -> list[Any]:
     """Ordered column list for a mapped model, which is the MCP row shape."""
@@ -1408,11 +1473,7 @@ async def query_database_collection_data(
         applied_filters["admitted_sources"] = list(ADMITTED_FINANCIAL_SOURCES)
 
     if spec.collection in STATEMENT_COLLECTIONS.values() and bounded_limit:
-        rows = await list_collection_documents_paginated(
-            spec.collection, queries=[query for query in queries if query["method"] != "limit"],
-            page_size=100,
-        )
-        rows = _reconcile_statement_rows(rows, COLLECTION_MODELS[spec.collection])[:bounded_limit]
+        rows = await _statement_page_with_competitors(spec.collection, queries, bounded_limit)
     else:
         rows = await list_collection_documents_paginated(
             spec.collection, queries=queries, page_size=min(bounded_limit, 100),
