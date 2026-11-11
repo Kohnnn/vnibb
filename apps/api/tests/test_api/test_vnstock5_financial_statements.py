@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-
 from vnibb.providers.vnstock.financials import (
     FinancialsQueryParams,
     StatementType,
@@ -127,10 +126,9 @@ async def test_sync_preserves_existing_statement_and_receipts(sdk, statement, sc
     from datetime import datetime
     from unittest.mock import AsyncMock
 
+    import vnibb.services.data_pipeline as pipeline_module
     from sqlalchemy import BigInteger, Integer, select
     from sqlalchemy.ext.asyncio import async_sessionmaker
-
-    import vnibb.services.data_pipeline as pipeline_module
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
     from vnibb.models.sync_status import SyncStatus
     from vnibb.services.data_pipeline import DataPipeline
@@ -563,7 +561,6 @@ async def test_retained_metric_reads_agree_across_rest_and_mcp(statement, stale)
     would make the two surfaces disagree about the same row."""
     from sqlalchemy import BigInteger, Integer, select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
     from vnibb.api.v1.equity import _load_financial_statement_fallback
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement

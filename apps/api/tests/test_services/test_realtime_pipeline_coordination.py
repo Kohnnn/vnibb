@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 import pytest
-
 from vnibb import scheduler_worker
 from vnibb.api.v1 import realtime as realtime_api
 from vnibb.core import scheduler

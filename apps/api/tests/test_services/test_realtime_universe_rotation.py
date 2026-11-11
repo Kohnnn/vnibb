@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
 from vnibb.core.config import settings
 from vnibb.services import realtime_pipeline, sync_all_data
 
@@ -164,7 +163,6 @@ async def test_contended_rotation_never_acquires_or_mutates_coverage(monkeypatch
 @pytest.mark.asyncio
 async def test_scheduler_uses_durable_intraday_entrypoint(monkeypatch):
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
     from vnibb.core import scheduler
 
     rotation = AsyncMock()

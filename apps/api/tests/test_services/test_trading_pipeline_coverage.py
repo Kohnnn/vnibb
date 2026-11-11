@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pandas as pd
 import pytest
-
 from vnibb.core import financial_lane
 from vnibb.core.config import settings
 from vnibb.models.stock import Stock

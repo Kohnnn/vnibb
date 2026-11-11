@@ -2,7 +2,6 @@ from datetime import date
 
 import pandas as pd
 import pytest
-
 from vnibb.core import financial_lane
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
