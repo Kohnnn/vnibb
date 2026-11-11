@@ -113,6 +113,39 @@ def test_free_runtime_guard_accepts_clean_community_environment(monkeypatch):
     assert runtime.validate_free_runtime() is None
 
 
+@pytest.mark.parametrize(
+    ("authenticated", "tier", "allowed"),
+    [
+        (False, "guest", True),
+        (False, "free", True),
+        (True, "guest", True),
+        (True, " FREE ", True),
+        (True, "golden", False),
+        (True, "diamond", False),
+        (True, "unknown", False),
+        (True, "", False),
+        (True, None, False),
+        (False, "golden", False),
+        (False, "unknown", False),
+        (None, "free", False),
+    ],
+)
+def test_free_runtime_credential_tier_policy(monkeypatch, authenticated, tier, allowed):
+    from vnibb.core.exceptions import ProviderCredentialRefusedError
+    from vnibb.providers.vnstock import runtime
+
+    sdk = types.ModuleType("vnstock")
+    sdk.status = lambda: {"authenticated": authenticated, "tier": tier}
+    monkeypatch.setitem(sys.modules, "vnstock", sdk)
+    monkeypatch.setattr(runtime, "find_spec", lambda name: None)
+
+    if allowed:
+        assert runtime.validate_free_runtime() is None
+    else:
+        with pytest.raises(ProviderCredentialRefusedError):
+            runtime.validate_free_runtime()
+
+
 @pytest.mark.parametrize("symbol", ["Listing", "Trading", "Quote", "Finance", "Company"])
 def test_runtime_imports_community_in_clean_free_environment(monkeypatch, symbol):
     from vnibb.providers.vnstock import runtime

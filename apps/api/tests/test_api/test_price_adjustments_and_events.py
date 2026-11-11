@@ -831,9 +831,11 @@ def isolated_vnstock_breaker(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tier_kind", ["golden", "diamond", "unknown"])
 async def test_historical_credential_refusal_is_unavailable_not_empty(
-    client, monkeypatch, isolated_vnstock_breaker,
+    client, monkeypatch, isolated_vnstock_breaker, caplog, capsys, tier_kind,
 ):
+    import secrets
     import sys
     from types import ModuleType, SimpleNamespace
     from unittest.mock import Mock
@@ -841,8 +843,10 @@ async def test_historical_credential_refusal_is_unavailable_not_empty(
     from vnibb.core.config import settings
     from vnibb.providers.vnstock import runtime
 
+    synthetic_tier = f"synthetic-api-key-{secrets.token_hex(24)}"
+    sdk_tier = synthetic_tier if tier_kind == "unknown" else tier_kind
     sdk = ModuleType("vnstock")
-    sdk.status = Mock(return_value={"authenticated": True, "tier": "golden"})
+    sdk.status = Mock(return_value={"authenticated": True, "tier": sdk_tier})
     monkeypatch.setitem(sys.modules, "vnstock", sdk)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
     monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "free")
@@ -867,6 +871,15 @@ async def test_historical_credential_refusal_is_unavailable_not_empty(
         )
         for _ in range(isolated_vnstock_breaker.failure_threshold + 2)
     ]
+    captured = capsys.readouterr()
+    observed = "\n".join([*(response.text for response in responses), caplog.text,
+                          captured.out, captured.err]).lower()
+    logged_refusal = any("Historical endpoint provider failed" in record.message
+                         for record in caplog.records)
+    caplog.clear()
+    if synthetic_tier.lower() in observed:
+        pytest.fail("SDK credential tier disclosed in historical response or logs", pytrace=False)
+    assert logged_refusal
 
     for response in responses:
         payload = response.json()
