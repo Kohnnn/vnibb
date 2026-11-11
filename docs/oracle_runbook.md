@@ -935,6 +935,18 @@ private rollback material, and authorized deployment; it must not bypass the
 source-use gate. A credential or successful registration alone grants no data
 storage, redistribution, or acquisition rights.
 
+Before committing provider-related changes, use the repository's staged-only
+Gitleaks hook. Install Gitleaks 8.30.1 and `pre-commit` on the developer's PATH,
+then opt in for this checkout with `pre-commit install`; the configuration does
+not install or enable itself. Run its standalone synthetic regression with
+`python scripts/security/test_gitleaks_precommit.py`. It creates a disposable
+index and checks rejection/redaction without real credentials. The rule covers
+non-empty `DNSE_API_KEY`, `DNSE_API_SECRET`, `FINHAY_API_KEY` and
+`FINHAY_API_SECRET` assignments, including low-entropy values and placeholders;
+keep examples empty instead of allowlisting provider names. Staged safe content
+must pass even when unrelated secrets exist only outside the index. CI retains
+the history scan; neither scan proves image-layer or live-container secrecy.
+
 This command-only candidate contains no source observations. A future DNSE
 adapter must preserve a cold-import guard before application package initializers
 enumerate credentials; the existing shared provider and core initializers do not
