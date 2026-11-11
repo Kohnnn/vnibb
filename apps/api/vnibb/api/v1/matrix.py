@@ -1,6 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from vnibb.api.deps import DatabaseDep
 from vnibb.core.auth import User, require_active_user
@@ -23,11 +27,33 @@ router = APIRouter()
 CurrentUser = Annotated[User, Depends(require_active_user)]
 
 
-async def no_store(response: Response):
-    response.headers["Cache-Control"] = "no-store"
+class PrivateMatrixRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def private_handler(request: Request):
+            try:
+                response = await handler(request)
+            except StarletteHTTPException as exc:
+                exception_handler = next(
+                    (request.app.exception_handlers[cls] for cls in type(exc).__mro__
+                     if cls in request.app.exception_handlers),
+                    http_exception_handler,
+                )
+                response = await exception_handler(request, exc)
+                response.headers.update(exc.headers or {})
+            except RequestValidationError as exc:
+                fallback = request_validation_exception_handler
+                exception_handler = request.app.exception_handlers.get(type(exc), fallback)
+                response = await exception_handler(request, exc)
+            response.headers["Cache-Control"] = "no-store"
+            response.headers.add_vary_header("Authorization")
+            return response
+
+        return private_handler
 
 
-private = APIRouter(dependencies=[Depends(no_store)])
+private = APIRouter(route_class=PrivateMatrixRoute)
 
 
 @router.get("/playbooks", response_model=list[MatrixPlaybook])

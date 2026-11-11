@@ -103,6 +103,9 @@ Mid-publication checkpoints record outcome stats without advancing `last_index` 
 
 Mid-publication outcome checkpoints update Redis only; the SQL sync record is updated after the publication transaction ends. Independently durable traded price writes precede the snapshot transaction, avoiding SQLite reader/writer deadlocks while retaining prices if publication is interrupted. Final admission still revalidates prices and commits snapshots and the receipt atomically. File-backed SQLite regressions in `test_sync_recovery.py` cover both paths with a live sync record.
 
+Recovery progress distinguishes processed rows from a committed cohort: `cohort_published=true` is emitted only after the final snapshot/receipt transaction commits. A checkpoint or acquired-price count is not publication; cancellation, failed admission and uncertain commit acknowledgement must not be reported as a published cohort.
+
+
 Default SQLite regression runs explicitly start a root transaction and leave the successful publication savepoint open until the final session commit; releasing a root savepoint early would make cancellation unable to restore the previous cohort. Run the default cancellation regressions without `POSTGRES_CONTRACT`: `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_sync_recovery.py -q -k 'resumed_base_and_marker_commit_atomically or cancelled_final_commit_keeps_previous_same_day_admitted_cohort'`.
 
 Request-path `CacheManager.store_screener_data` may enrich ratios but must not replace the quote, volume, actual trade date, price-unit/source evidence, raw session record or creation lineage of a typed admitted member. The atomic upsert guard requires a completed, error-free typed receipt matching the stored snapshot/session dates and symbol membership; unrelated, legacy and differently dated receipts do not claim ownership. A quote-less refresh also leaves existing session metadata intact rather than merging `market_session=None`. This does not freeze legacy price updates or certify missing prices. Run `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_sync_recovery.py apps/api/tests/test_services/test_market_session_readers.py apps/api/tests/test_services/test_screener_snapshot_ownership.py -q` without `POSTGRES_CONTRACT`; with the disposable PostgreSQL contract environment, run `PYTHONPATH=apps/api python -m pytest apps/api/tests/test_contract/test_postgres_release_contract.py -q -k 'screener_quote_base or request_refresh_preserves_admitted'`.
@@ -878,6 +881,78 @@ Recommended VNIBB guardrails:
 Pass/fail rule:
 - PASS: all five checks are within thresholds
 - FAIL: any single threshold is exceeded or paid shape usage appears
+
+## DNSE acquisition hold and key custody
+
+DNSE source-use rights are unknown (#232), and #168 has not accepted them.
+The local import command refuses unconditionally in every environment before
+reading provider credentials, importing application or provider modules,
+connecting to a provider, opening a database session, or writing a receipt.
+`--help` and `-h` alone show the acquisition hold and exit 0; all other
+invocations, with or without arguments, refuse and exit 2. This is not an
+import implementation. No DNSE provider, sync service, or scheduler is
+registered by this candidate. `DNSE_ENABLED` or any other environment flag
+cannot bypass the hold.
+Never run the held published #239 candidate: its flag-enabled path is unsafe.
+
+The [official OHLC schema](https://developers.dnse.com.vn/docs/dnse/get-ohlc-history/)
+documents the literal candle arrays `t/o/h/l/c/v`, `nextTime`, and required
+authentication headers. The inspected documentation does not establish price or
+volume units, request time units, session coverage, finality, rate limits, or
+data-use rights. Do not infer a price multiplier, session date, entitlement, or
+safe storage/redistribution from the schema. The pages inspected do not establish
+that fundamentals are available or that they are absent. A future adapter still
+needs the missing semantics, source-use authorization, and an import-safe cold
+authorization seam; the source-neutral port alone does not provide that seam.
+
+**Operator-only custody, not an acquisition authorization.** If credentials are
+issued, create the private store without truncating an existing file. The root
+process must perform the existence-sensitive creation because an unprivileged
+operator cannot traverse a root-owned `0700` directory:
+
+```bash
+sudo install -d -m 0700 /etc/vnibb
+sudo sh -c 'umask 077; touch /etc/vnibb/provider-keys.env'
+sudo chown root:root /etc/vnibb/provider-keys.env
+sudo chmod 0600 /etc/vnibb/provider-keys.env
+```
+
+The operator may privately edit only `DNSE_API_KEY` and `DNSE_API_SECRET` in
+place using `sudo -e /etc/vnibb/provider-keys.env`; never paste values into a
+terminal command, ticket, chat, log, image, or test. Editing or rotating one key
+must preserve all other entries, including `FINHAY_API_KEY`. Test the creation
+procedure using a disposable protected directory and invented sentinel, without
+reading or printing existing credentials. The `touch` command creates only if
+absent; unlike installing `/dev/null`, rerunning it does not truncate a file.
+
+This is custody only: the current Compose configuration does **not** load
+`/etc/vnibb/provider-keys.env`. `deployment/env.oracle` is a service-level
+env-file shared with API, MCP, scheduler, migration and Caddy; putting provider
+keys there would disclose them to unrelated services. Do not add keys to that
+file or claim a restart delivers this custody file. Any future delivery and
+rotation/recreation procedure needs a separately reviewed least-privilege mount,
+private rollback material, and authorized deployment; it must not bypass the
+source-use gate. A credential or successful registration alone grants no data
+storage, redistribution, or acquisition rights.
+
+Before committing provider-related changes, use the repository's staged-only
+Gitleaks hook. Install Gitleaks 8.30.1 and `pre-commit` on the developer's PATH,
+then opt in for this checkout with `pre-commit install`; the configuration does
+not install or enable itself. Run its standalone synthetic regression with
+`python scripts/security/test_gitleaks_precommit.py`. It creates a disposable
+index and checks rejection/redaction without real credentials. The rule covers
+non-empty `DNSE_API_KEY`, `DNSE_API_SECRET`, `FINHAY_API_KEY` and
+`FINHAY_API_SECRET` assignments, including low-entropy values and placeholders;
+keep examples empty instead of allowlisting provider names. Staged safe content
+must pass even when unrelated secrets exist only outside the index. CI retains
+the history scan; neither scan proves image-layer or live-container secrecy.
+
+This command-only candidate contains no source observations. A future DNSE
+adapter must preserve a cold-import guard before application package initializers
+enumerate credentials; the existing shared provider and core initializers do not
+yet provide it. Prior #239 history may contain disclosed source data: it remains
+held and must not be republished until private rights/incident review and an
+approved history-remediation decision.
 
 ## Read-only database readiness census (#167)
 

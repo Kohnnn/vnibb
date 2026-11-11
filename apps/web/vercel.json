@@ -4,6 +4,9 @@
   "outputDirectory": ".next",
   "framework": "nextjs",
   "git": {
+    "deploymentEnabled": {
+      "codex/project-integration-20261110": false
+    },
     "ignoreCommand": "cd ../.. && corepack enable && corepack pnpm@9.15.4 dlx turbo-ignore"
   }
 }

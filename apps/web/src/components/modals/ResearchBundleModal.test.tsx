@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useDashboard, type DashboardContextValue } from '@/contexts/DashboardContext';
 import { ResearchBundleModal } from './ResearchBundleModal';
@@ -127,14 +127,14 @@ it('prunes disappeared thesis keys, frees the 50-item cap, and downloads only su
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL });
     const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     refresh(symbols);
 
     try {
         const { rerender } = render(<ResearchBundleModal onClose={jest.fn()} />);
         const checkbox = (symbol: string) => screen.getByLabelText(`${symbol} · Personal / Research`);
         const download = screen.getByRole('button', { name: 'Download Research Bundle JSON' });
-        for (const symbol of symbols.slice(0, 50)) await user.click(checkbox(symbol));
+        for (const symbol of symbols.slice(0, 50)) fireEvent.click(checkbox(symbol));
         expect(checkbox('A50')).toBeDisabled();
 
         refresh(symbols, 'Refreshed');

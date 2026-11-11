@@ -208,6 +208,7 @@ export function ListingBrowserWidget({
               {(['ALL', 'HOSE', 'HNX', 'UPCOM'] as ExchangeFilter[]).map((item) => (
                 <button
                   key={item}
+                  aria-pressed={exchange === item}
                   onClick={() => setExchange(item)}
                   className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] transition-colors ${exchange === item ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                 >

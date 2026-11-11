@@ -14,7 +14,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.exceptions import (
+    ProviderCredentialRefusedError,
+    ProviderError,
+    ProviderTimeoutError,
+)
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
 from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
@@ -202,6 +206,8 @@ class VnstockEquityHistoricalFetcher(
 
                 return history_price_records(df, symbol=query["symbol"], source=source, provider=quote)
 
+            except ProviderCredentialRefusedError:
+                raise
             except Exception as e:
                 logger.error(f"vnstock fetch error for {query['symbol']}: {e}")
                 raise ProviderError(

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { APIError } from '@/lib/api';
 import styles from './MatrixWidget.module.css';
 import { matrixApi } from '@/lib/matrix';
@@ -16,23 +17,24 @@ interface Props {
   busy: boolean;
   onClose: () => void;
   onReview: (cell: MatrixCell) => void;
+  onQuarantine: (reason: unknown) => boolean;
 }
 
-export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, onClose, onReview }: Props) {
+export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, onClose, onReview, onQuarantine }: Props) {
   const [tab, setTab] = useState<'Result' | 'Evidence' | 'Basis' | 'Review'>('Result');
   const [evidence, setEvidence] = useState<MatrixEvidence[] | null>(null);
   const [error, setError] = useState('');
   const [narrow, setNarrow] = useState(false);
-  const panel = useRef<HTMLElement>(null);
+  const panel = useDialogFocusTrap<HTMLElement>({ enabled: narrow, onClose });
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
     const update = () => setNarrow(media.matches);
     update();
     media.addEventListener('change', update);
-    panel.current?.querySelector<HTMLButtonElement>('button')?.focus();
     return () => media.removeEventListener('change', update);
   }, []);
   useEffect(() => {
+    if (narrow || window.matchMedia('(max-width: 767px)').matches) return;
     panel.current?.querySelector<HTMLButtonElement>('button')?.focus();
   }, [narrow]);
   useEffect(() => {
@@ -41,6 +43,7 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
     setEvidence(null);
     setError('');
     matrixApi.evidence(snapshot, cell.result_id).then((items) => { if (active) setEvidence(items); }).catch((reason: unknown) => {
+      if (onQuarantine(reason)) return;
       if (!active) return;
       setError(reason instanceof Error ? reason.message : 'Evidence could not be authorized or loaded.');
       if (!snapshot.synthetic && reason instanceof APIError && [401, 403, 404].includes(reason.status ?? 0)) {
@@ -48,16 +51,10 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
       }
     });
     return () => { active = false; };
-  }, [snapshot, cell, tab]);
+  }, [snapshot, cell, tab, onQuarantine]);
 
-  const content = <aside ref={panel} className="matrix-inspector" role="dialog" aria-modal={narrow} aria-label={`${dimension.label} inspector`} onKeyDown={(event) => {
-    if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
-    if (event.key !== 'Tab' || !narrow) return;
-    const targets = panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input, textarea, [tabindex="0"]');
-    if (!targets?.length) return;
-    const first = targets[0]; const last = targets[targets.length - 1];
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  const content = <aside ref={panel} tabIndex={-1} className="matrix-inspector" role="dialog" aria-modal={narrow} aria-label={`${dimension.label} inspector`} onKeyDown={(event) => {
+    if (event.key === 'Escape' && !narrow) { event.stopPropagation(); onClose(); }
   }}>
     <header><div><span className="matrix-eyebrow">{cell?.entity_id || 'Research dimension'}</span><h3>{dimension.label}</h3></div><button type="button" onClick={onClose} aria-label="Close inspector">Close</button></header>
     <p>{dimension.question}</p>

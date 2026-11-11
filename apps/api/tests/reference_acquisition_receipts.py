@@ -157,7 +157,7 @@ async def test_profile_receipt_preserves_overview_failure_without_optional_profi
         return operation()
 
     monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_company_class", lambda: OverviewOnlyCompany)
-    monkeypatch.setattr("vnibb.providers.vnstock.runtime.run_financial_provider", run_provider)
+    monkeypatch.setattr("vnibb.core.financial_lane.run_financial", run_provider)
     session_factory = AsyncMock(side_effect=AssertionError("failed fetch must not open a write session"))
     monkeypatch.setattr(pipeline_module, "async_session_maker", session_factory)
     progress = {}

@@ -7,3 +7,9 @@ regexTarget = "match"
 regexes = [
   '''key_prefix="[A-Za-z0-9_-]+"''',
 ]
+
+[[rules]]
+id = "vnibb-provider-credentials"
+description = "DNSE and Finhay API credential assignments"
+regex = '''(?im)(?:^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?(?:DNSE|FINHAY)_API_(?:KEY|SECRET)[ \t]*[:=][ \t]*(?:"(?:\\[^\r\n]|[^"\\\r\n])+"|'[^'\r\n]+'|[^\s"'`#][^\s"'`]*)[ \t]*;?[ \t]*(?:\#.*)?$|["'](?:DNSE|FINHAY)_API_(?:KEY|SECRET)["'][ \t]*:[ \t]*(?:"(?:\\[^\r\n]|[^"\\\r\n])+"|'[^'\r\n]+'))'''
+keywords = ["dnse_api_", "finhay_api_"]

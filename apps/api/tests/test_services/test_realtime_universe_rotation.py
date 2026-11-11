@@ -101,8 +101,8 @@ async def test_full_universe_rotation_resumes_after_restart_and_provider_failure
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_intraday_trades", ticks)
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_orderbook_snapshots", depth)
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=1))
-    from vnibb.providers.vnstock import runtime
-    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
+    from vnibb.core import financial_lane
+    monkeypatch.setattr(financial_lane, "financial_busy", lambda: False)
 
     for start in range(0, universe_size, batch_size):
         monkeypatch.setattr(settings, "scheduler_live_symbols_per_run", min(batch_size, universe_size - start))
@@ -283,8 +283,8 @@ async def test_capability_skip_cannot_certify_rotation_coverage(monkeypatch):
     monkeypatch.setattr(sync_all_data.data_pipeline, "_wait_for_rate_limit", AsyncMock())
     monkeypatch.setattr(sync_all_data.data_pipeline, "_cache_set_json", AsyncMock())
     monkeypatch.setattr(sync_all_data.data_pipeline, "sync_derivatives_prices", AsyncMock(return_value=0))
-    from vnibb.providers.vnstock import runtime
-    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
+    from vnibb.core import financial_lane
+    monkeypatch.setattr(financial_lane, "financial_busy", lambda: False)
 
     await realtime_pipeline.run_intraday_sync()
 

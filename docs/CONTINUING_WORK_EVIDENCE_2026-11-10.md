@@ -1,0 +1,362 @@
+# Continuing project work — implementation evidence
+
+Owning backlog: [project-work-backlog.md](../project-work-backlog.md); tracker [#241](https://github.com/Kohnnn/vnibb/issues/241). This is evidence, not a second task list. Local integration branch codex/project-integration-20261110 was based on 401caae779b39943ec97f361ccb87c5cb78e1fa9. A source commit is not a serving identity. The subsequent explicit request authorizes application updates and OCI/Vercel deployment, not acquisition, source rights, credential rotation or human Send. The candidate excludes the disputed DNSE draft material; that incident/history disposition remains separate. No production recovery or source-use approval is claimed; preliminary browser network uncertainty is disclosed below.
+
+## Requested release verification (2026-11-11)
+
+Frozen candidate `75f668f64c9fb1f11e7f89ee841bf25f92acd74e`, checkout `vnibb-worktrees/project-integration-20261110`, had only untracked root/web `node_modules` dependency paths before and after the full gate. `pnpm run ci:gate` exited **1** after 1402.71 seconds: lint passed with 79 warnings; typecheck, generated-changelog check and production build passed; Jest passed 206 suites and 1,698 tests, skipped one test, and timed out the existing ResearchBundleModal selection-pruning/cap/download case at 5,000 ms. Backend Ruff, compile and pytest were **not reached**. The credential-free command and full output are retained in `local://vnibb-release-20261111-gate.md` and `artifact://1394` for this run. Local Node 24.20.0/Python 3.11.16 differs from GitHub Node 22/Python 3.12. Later focused repairs cannot turn this result into an all-green full-gate receipt.
+
+Independent Standards review identified a collection-wide MCP statement read: requesting one row could materialize the entire retained financial collection before reconciliation. The accepted repair bounds the output page, hydrates complete competitors only for those fiscal identities, then reconciles and preserves page order and withholding. Independent Spec review also retained the #230 scheduler-latch ownership residual. Both repairs and the timeout correction require separate focused verification and corrective review. No release or task closure is inferred from the earlier full run.
+
+Vercel dry upload confirmed the canonical project is `vnibb-web` (`prj_Z5t3c7rTuWaFaFhkQhW2nA6nyJuz`), scope `vphk2001-gmailcoms-projects`; CLI upload must run from the monorepo root because the project adds `apps/web` as its build root. The first manifest included ignored caches/test screenshots, requiring native `.vercelignore` exclusions before upload. `--skip-domain` withholds aliases only, not public access; no deployment protection was observed. A push-free CLI release must record candidate SHA, upload-manifest digest and deployment ID, without claiming GitHub build provenance. The observed rollback target is `dpl_Gzwko6MWPzY8cNwScVC56QB5LWru` at base `401caae`; no deployment has occurred at this evidence point.
+
+OCI remains blocked on the unchanged tailnet SSH policy denial, host-only serving environment/Compose override order, and unverified current/rollback image identities. No retry, alternate identity, stale June environment, image publication, host recreation or scheduler start is authorized by this receipt. A future code-only rollout names `api mcp` explicitly and excludes stores/Auth/scheduler; it does not apply the separate Mongo/Redis credential-hardening rollout.
+
+Accepted upload correction `b27fe3ac` adds root `.vercelignore`; the actual CLI dry command above exited 0 after integration, producing 1,536 manifest entries / 23,501,679 bytes. Local cache/test directories remain only as zero-byte directory entries; none of their child files, generated TypeScript build metadata or real environment files are included. Public brand images/fonts and tracked documentation assets remain. The final upload needs a new manifest digest after remaining source changes.
+
+Accepted test-only correction `bee6dfbe` removes artificial user-event delays and dispatches the 50-checkbox setup without pointer-delay timers. Parent `CI=1 ./node_modules/.bin/jest --passWithNoTests --runInBand src/components/modals/ResearchBundleModal.test.tsx`, cwd `apps/web`, exited 0: **4 passed**, 2.41 seconds, including the formerly timing-out case at 1,582 ms. Existing selection pruning, disabled 51st item, refreshed downloaded membership and object-URL cleanup assertions remain. The command emitted the existing missing-public-URL fallback warning; no component implementation, timeout or assertion was changed. This narrow result does not replace the failed full-gate receipt.
+
+Independent corrective review approved latch leaf `9b2da723` and upload leaf `b27fe3ac`. The financial single-flight executor, lock, in-flight future/key and busy predicate now live in `vnibb/core/financial_lane.py`; vnstock runtime functions and the lifecycle wrapper are removed, and financial callers plus scheduler busy checks use the same neutral state. Review found no additional state owner or changed timeout/sharing/exception-drain behavior. The guarantee remains per process, not distributed. Leaf check receipts were corrected: earlier piped pytest exits and no-live-call assertions are not independently proved; parent integrated verification is required. No GitHub issue is closed by this local cutover.
+
+Independent corrective review approved MCP leaf `aa3f664c` after 17 focused financial-query passes. A bounded result page is reconciled with all admitted-source competitors for only its annual/quarterly symbol/fiscal identities; off-page competitors affect withholding but do not consume output slots or expose unrelated symbol histories. The existing admission/withholding rules remain unchanged. The SQLite regression verifies a conflicting alternate fiscal label outside a one-row page and excludes unrelated-row serialization. Performance and production-store cardinality are not measured by this proof.
+
+The user subsequently explicitly authorized committing, pushing all work and merging eligible work to `main`. `apps/web/vercel.json` now disables automatic Git deployment only for `codex/project-integration-20261110`; `main` remains enabled by default. A JSON assertion and independent source review accepted this native branch-scoped setting. This removes the integration-preview publication obstacle, not the prohibition on republishing disputed DNSE bars/history. All 24 currently open issue bodies and four draft PR bodies were read via explicit `gh --repo Kohnnn/vnibb`; source rights, denied host access, real-identity/human Send and deferred regulatory evidence remain distinct from code merge acceptance.
+
+The first post-repair backend command on `b543b48a` stopped at configured changed-line Ruff, exit 1: 12 import-order/unused-import diagnostics in six provider-cutover test modules. Compile and pytest were not reached. The correction only sorts the affected imports and removes three now-unused vnstock runtime imports; no assertion, fixture, test patch target or runtime code changed. The next backend run binds to the successor candidate rather than claiming checks on `b543b48a`.
+
+On committed candidate `30065c9609c152e3284e34a8338d59b1120dd6b9`, the parent ran configured changed-line Ruff, `python -m py_compile apps/api/vnibb/api/main.py`, and `PYTHONPATH=apps/api python -m pytest apps/api/tests -q` in one success-gated chain: **exit 0; 4,722 passed, 94 skipped, 4 subtests passed, 4 warnings**, pytest 494.55 seconds. Python was the existing `VNIBB/vnibb/apps/api/.venv/bin/python`; a credential-free environment and test HOME disabled Mongo, Redis, scheduler, WebSocket startup and warmup. Backend files stayed frozen; the only concurrent tracked edit was the separate web Listing Browser `aria-pressed` line. The previous `0b3deff7` chain also stopped before compile/pytest because default Ruff classification differed from the gate's explicit config; `30065c96` corrects only import grouping. Raw successful output: `artifact://2093`. This proves fixture/test behavior, not production source truth or network isolation.
+
+Published integration draft [PR #243](https://github.com/Kohnnn/vnibb/pull/243) initially at `0b3deff7`, then `30065c96`; both pushes exited 0. Gitleaks 8.30.1 scanned `401caae..0b3deff7` (51 commits, approximately 397,367 bytes): no leaks, exit 0. Hosted run [42979138803](https://github.com/Kohnnn/vnibb/actions/runs/42979138803), candidate `0b3deff7`, passed lint, types, changelog, build and **207 Jest suites / 1,699 tests, 1 skipped**, then failed the same 13 import-group diagnostics; backend compile/tests were not reached. That failure is not a check on the corrected successor.
+
+Final disposable #242 verification used the candidate's actual rendered Compose commands and unchanged auth-surface blobs through `30065c96`: both Compose files validate; Mongo correct/wrong/empty/unreachable authentication and existing-volume restart pass; Redis special-character/newline passwords, missing-password refusal, authenticated health, persistence settings, restart and SIGKILL/AOF recovery pass. Passwords were absent from Mongo/Redis server argv and logs. Upstream Mongo first initialization still passes its root password through `jq` argv; environment/Docker metadata and the private Redis config remain readable to Docker/root operators. These residuals are documented, not called safe. All owned disposable containers, volumes and networks were removed. Evidence: `local://vnibb-20261111-242-final-auth-evidence.md`. No production rotation or recreation occurred.
+
+Native Tab/Shift+Tab opaque-frame traversal, original-card inertness, parent-document Escape/opener restoration, nested Matrix and ticker portals passed Chromium/Firefox/WebKit on the unchanged reviewed focus runtime (production build `236txHloHZZdo9D_x557b`): three focused runs, three passes each. Firefox's extra scroll-container/body stops remained inside the dialog. No programmatic focus was used to fake frame exit. The omp browser harness saw forward traversal but could not inspect the opaque inner frame; reverse proof belongs to the native three-engine runner. Real TradingView and Escape from inside an opaque cross-origin frame remain unclaimed. Evidence: `local://vnibb-20261111-236-iframe-evidence.md`.
+
+Branch disposition: #237/#240 are integrated supersets, not patches to reapply; #238 is patch-equivalent to the integrated growth fix. Close those drafts as superseded only after the integration lands on `main`. Listing layout #222 is already shipped; only the independently justified exchange-button `aria-pressed` state was missing. Three existing tests plus a transient pressed-state probe passed (four total, exit 0); the probe was removed. Unknown container-query WIP, stale brand regressions, bulk dirty trees, stashes and disputed DNSE histories were preserved and not published. Legacy local commits' consumer behavior is already integrated; redundant test assertions and an unused future parameter guard were not restored.
+
+Hosted run [42981616530](https://github.com/Kohnnn/vnibb/actions/runs/42981616530) completed successfully for `9f068152cabb6006ec7935e467b0800eb2139428`: configured full gate, secret scan, native PostgreSQL contract, browser smoke across Chromium/Firefox/WebKit, constrained wheel resolution and both target image architectures. This is CI evidence for that revision, not its successors or production data.
+
+CLI deployment `dpl_4pWZ99Xk1LhRBjH41dy8aPtHoDqH`, unique host `vnibb-gn5e4x8di-vphk2001-gmailcoms-projects.vercel.app`, is READY for frontend candidate `9f068152`. Its unique URL actually requires Vercel SSO; that observation supersedes the earlier protection inference. After explicit interactive approval, authenticated `vercel curl /dashboard --deployment <unique-host> --header 'x-vercel-set-bypass-cookie: true'` returned HTTP 307 and a private bypass cookie, exit 0. Only that deployment host was allowed in the browser; API, provider, third-party and WebSocket traffic was blocked. Attempted backend fetches were rejected by the domain allowlist, not successful server reads. The cookie was cleared and the verification tab closed; no bypass value was printed or committed. The CLI may reuse a project automation token; no project-protection setting was disabled or token revocation claimed.
+
+Protected shell observations: 390×844 mobile document width remained 390 px; onboarding dismissed; maximized Ticker Info opened with its named dialog and focused Minimize control. Native browser keyboard Escape closed it and restored the Maximize opener. The direct harness `press('Escape')` did not close it, so only the native keyboard result is accepted. At 1440×900 the branded desktop shell and explicit connection-failure/unknown-freshness states rendered with blocked data. Screenshots: `/tmp/omp-sshots-15c9fc214d6c13cb.webp`, `/tmp/omp-sshots-15c9fc6fd52c13ce.webp`. This is shell/focus proof only; no live financial values, API identity, TradingView or production-alias promotion is proved.
+
+FHSC offline leaf `1a6517c0` plus corrective `7926b9e2` was independently reviewed and integrated. Public port transforms accept hand-built history, quote, per-symbol listing and financial payloads without HTTP or an enabled live path. Unknown prices remain raw/unavailable; only documented listing-reference VND is normalized. Quarterly fiscal identity rejects boolean/float quarters; annual rows reject non-null quarters; undocumented quarterly flow basis stays unknown through real admission. Forty-three focused behavioral cases passed on the leaf; its configured Ruff passed after import-only cleanup. Canonical financial aliases remain unverified and withheld: #233 is partial, not a completed usable financial adapter.
+
+Credential refusal leaf `5ba153d3` plus corrective `89fc6119` was independently approved and integrated. `ProviderCredentialRefusedError` survives extraction and the fetch boundary; the historical endpoint reports unavailable and does not reinforce. Circuit-breaker accounting excludes that typed policy refusal without resetting existing failures, so repeated refusals cannot become empty success after the failure threshold. Ordinary failures still open the breaker. The corrective leaf's focused run passed 22 tests, exit 0; integrated verification is recorded separately. This does not certify revoked/tier-insufficient DNSE keys, key delivery, signing redaction, rotation or source authorization.
+
+Integrated backend code candidate `4d315d32a7e9f4df939039552ad34671843c8a03` passed **354 tests, exit 0**, 31.56 seconds wall: `PYTHONPATH=apps/api <existing-venv>/python -m pytest apps/api/tests/test_api/test_fhsc_offline_transforms.py apps/api/tests/test_api/test_price_adjustments_and_events.py apps/api/tests/test_core/test_vnstock_runtime_tier.py apps/api/tests/test_scripts/test_populate_vnstock_market_data.py apps/api/tests/test_api/test_mongo_market_data_service.py apps/api/tests/test_services/test_technical_price_units.py apps/api/tests/test_services/test_analytics_price_units.py apps/api/tests/test_services/test_vnstock_registration.py -q`. Environment was credential-free with the existing test HOME, Mongo/Redis disabled, scheduler/WebSocket startup and warmup skipped; test conftest supplies synthetic credentials and in-memory SQLite. Backend code stayed frozen; concurrent edits were only parent-owned changelog/evidence. An earlier command used nonexistent test filenames and exited 4 before collection; it proved nothing. Configured changed-line Ruff on the same backend candidate exited 0 (4.7 seconds; baseline/out-of-scope diagnostics excluded). The earlier full CI result remains bound to `9f068152`, not this delta.
+
+`vercel promote dpl_4pWZ99Xk1LhRBjH41dy8aPtHoDqH --scope vphk2001-gmailcoms-projects --timeout 90s` exited 0. Fresh inspect of **both** `web.vnibb.xyz` and `vnibb-web.vercel.app` resolves to that READY production deployment. The previous `dpl_Gzwko6MWPzY8cNwScVC56QB5LWru` was confirmed READY immediately before promotion and remains the rollback target. A new clean production-host browser tab, with all outside-host/API/WebSocket traffic blocked, rendered `VniBB Dashboard` at 390×844 with width 390 and settled explicit connection-failure/unknown-freshness states; screenshot `/tmp/omp-sshots-15c9fedac6b2ea9c.webp`. It was then closed. This promotes frontend `9f068152` only; backend corrections are not deployed to OCI, and live backend pairing remains unobserved.
+
+Deployment-list metadata independently binds the promoted CLI artifact to `releaseSha=9f068152cabb6006ec7935e467b0800eb2139428` and uploaded `sourceManifestSha256=cbe307d6ad171e4debcc98963bd22afa0d14b1dec96c4873bcd063f4c87b1fa4`. This is the explicit CLI release binding, not GitHub build provenance. Later backend/config/documentation changes are a successor source candidate and do not rewrite that serving identity.
+
+Reviewed pre-commit leaves `ea1fe262` / `33faa066` are integrated at `9bb62293`. The parent ran `PATH=/tmp/vnibb-gitleaks-8.30.1:<existing-venv>/bin:<local-bin>:/usr/bin:/bin <existing-venv>/python scripts/security/test_gitleaks_precommit.py`: **exit 0; 96 staged synthetic credential cases blocked and redacted**, including Compose environment-list and semicolon-terminated shell assignments; safe staged content passed with tracked/untracked secrets outside the index. The hook remains opt-in and was not installed in developer checkouts or globally. No actual provider key, signer or production container was used. Native policy plus one stdlib regression replaces a custom scanner; image/layer/log secrecy and actual key delivery/rotation stay unmet #231 gates.
+
+Final Python syntax compile of FHSC, retry, fetch boundary and historical route exited 0. Changelog generation and exact source/generated-content assertion passed. An extra standalone ResearchBundleModal Jest invocation was terminated at its 60-second command deadline with no result; it is not a new pass or an observed assertion failure. The successful hosted full frontend gate remains the acceptance receipt for unchanged runtime components at `9f068152`; later web changes are generated changelog text only. No full-suite rerun is attributed to the successor candidate.
+
+
+
+
+## Delayed advisory corrections (2026-11-11)
+
+Latest locally checked code: `2ad54cb53921cf65fad67de4a5da9aaa3e0b08b4`, based on documentation save `e0b8f5fb604970e67d6ffd0e6e76d1ed3d8a02bd`, in the same integration checkout. The older receipts below stay bound to their named candidates; this correction does not make the full release gate green.
+
+Confirmed defect: NaN/Infinity growth from a preferred source overwrote finite retained growth, and skipped statement enrichment could leave a nonfinite JSON response. Growth is now rejected before source merging and before the Vietcap early return; invalid unit claims are removed with the value. Finite preferred values, including zero, retain precedence, and finite retained fallback survives. No general sanitizer, new provider or source policy was added. An offline mocked pre-fix reproducer observed both failures; it contacted no real provider or store.
+
+Independent review approved the four-file correction, then separately approved replacing temporary list concatenation with nested iteration. Before that allocation-only delta, the focused ratio-helper/MCP/private-auth subprocess run passed **255 tests, exit 0** (30.16 seconds wall). After it, the real HTTP growth regression passed **25 cases, exit 0** (6.49 seconds wall), and configured changed-line Ruff passed, exit 0 (2.01 seconds; 1,076 out-of-scope and 11 baseline diagnostics excluded). Runtime/test writers were stopped and the candidate stayed frozen during checks. The final four-file patch hash before commit was `1f0559ee48b7431e7e20b438e688a959ada5743f6d9bde16017ee7712425eebf`; commit `2ad54cb5` saves that patch. No broad suite was repeated.
+
+Behavioral coverage retained the valid parts of the delayed test feedback: a non-price financial ratio cannot acquire `price_unit` while rejected interest stays withheld with its reason/raw observation, and a failed auth client must report unhealthy. Obsolete raw-row equality and Compose source-text/default assertions were not restored. Real Mongo authentication, container deadline/signal behavior and production rollout remain outside this subprocess proof. The earlier 382-test run already included the complete AI-context and IQ-serving modules, so no redundant collection-only check was run.
+
+Focused command suffixes below use the exact credential-free environment recorded in the earlier final-check section:
+
+```sh
+PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_equity_ratio_helpers.py apps/api/tests/test_api/test_mcp_server.py apps/api/tests/test_core/test_release_build_contract.py::test_compose_auth_probes_keep_passwords_private_and_report_client_failure -q
+PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_equity_ratio_helpers.py::test_ratio_endpoint_preserves_finite_growth_when_preferred_is_nonfinite -q
+CI_GATE_RUFF_ONLY=1 node scripts/ci-gate.mjs
+```
+
+Source attribution, corrected fixture and CI-harness advisories are dispositioned below. Publication, rights, production recovery and worktree-cleanup blockers are unchanged. Changelog synchronization after this code commit changes documentation/generated text only.
+
+## Final verification boundary (2026-11-11)
+
+Final locally checked code candidate: `4ffd01cfcc88effea960777146f72b016ee67f76`, based on `401caae779b39943ec97f361ccb87c5cb78e1fa9`, in `vnibb-worktrees/project-integration-20261110`. Bounded Standards and Spec reviews approved inspected seams at `4d1c03db86ab3f9250a3f72a55c4a6b851899684`, not every changed file or operational acceptance. Later changes delete two obsolete assertions and mechanically correct lint; the parent also removed an unintended unused import. Documentation and generated-changelog synchronization follow this code candidate.
+
+The credential-free `node scripts/ci-gate.mjs` run exited **1** after 333.30 seconds. Frontend lint (four warnings), TypeScript, changelog generation/check and production build passed. Jest: 206 passing suites, one failing suite; 1,686 passed, 13 failed, one skipped. The parent set `NEXT_PUBLIC_ENABLE_REALTIME=false`, disabling the hook exercised by the mocked WebSocket suite. Changing only that variable to true for the existing focused suite yielded **13 passed, one skipped, exit 0**. This is a failed full run plus narrow corrected proof, not an all-green full-gate claim. The real-backend WebSocket case remains skipped.
+
+Advisory check against `.github/workflows/ci.yml`: the root `ci:gate` job leaves `NEXT_PUBLIC_ENABLE_REALTIME` unset; only the separate smoke jobs set it to false. Therefore the earlier 13 mocked-WebSocket failures are a parent harness-configuration artifact, not evidence of a candidate defect. The corrected focused result is not an exact-CI full-run receipt. No broad rerun was performed for this delayed advisory; U04 and integrated release acceptance remain blocked, not closed on the failed recipe.
+
+The separately invoked changed-line Ruff gate stopped on 12 actionable diagnostics; chained compile/pytest commands were not reached. Independent main-module compile passed. The independent backend suite exited 1: **4,695 passed, two failed, 94 skipped, four warnings and four subtests passed**, in 472.59 seconds. The two failures were obsolete assertions requiring raw financial passthrough and the old Compose password interpolation. Their deletion and focused follow-up are recorded separately; runtime admission and private-auth behavior are not weakened.
+
+On `4ffd01cf`, the parent configured changed-line Ruff gate exited **0** in 1.65 seconds; the existing gate excluded 1,077 out-of-scope and 10 baseline diagnostics. This is not a clean repo-wide Ruff claim. The first focused-smoke invocation exited **4** before tests because the parent supplied a nonexistent test selector. With the exact source selector, **382 tests and four subtests passed, exit 0**, in 29.18 seconds wall time. Scope: MCP, SQL AI financial context, IQ serving, registration, scheduler, provider/import boundary, cleanup behavior and private-auth process arguments. No source edits occurred during these checks; only three parent-owned documentation files and two dependency symlinks were dirty at start.
+
+The final delta preserves runtime admission and credential safety: `85664d25` deletes the old Compose source-text assertion; `5d7fd7be` deletes the raw financial-passthrough equality test; `95164cd9`, `a9de8da6` and `4ffd01cf` contain mechanical lint cleanup only. Existing consumer-admission and credential-argument behavior coverage passed in the focused run. Full-suite failures remain recorded above; no second full-suite or all-green release claim.
+
+Exact final-check environment and commands (checkout above; the environment contains no production credentials):
+
+```sh
+env -i HOME="/tmp/vnibb-integration-home-20261110" PATH="/mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb/apps/api/.venv/bin:/home/compute_01/.nvm/versions/node/v24.20.0/bin:/home/compute_01/.local/bin:/usr/bin:/bin" PYTHON="/mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb/apps/api/.venv/bin/python" CI_BASE_SHA="401caae779b39943ec97f361ccb87c5cb78e1fa9" NEXT_PUBLIC_API_URL="http://127.0.0.1:8000" NEXT_PUBLIC_WS_URL="ws://127.0.0.1:8000/api/v1/ws/prices" NEXT_PUBLIC_ENABLE_REALTIME="false" ENVIRONMENT="test" DATABASE_URL="sqlite+aiosqlite:////tmp/vnibb-release-smoke.db" DATABASE_URL_SYNC="sqlite+aiosqlite:////tmp/vnibb-release-smoke.db" MONGODB_ENABLED="false" REDIS_URL="" REDIS_HOST="" REDIS_PORT="0" SKIP_SCHEDULER_STARTUP="1" SKIP_WEBSOCKET_STARTUP="1" SKIP_WARMUP="true" NEXT_TELEMETRY_DISABLED="1" CI="1" CI_GATE_RUFF_ONLY=1 node scripts/ci-gate.mjs
+env -i HOME="/tmp/vnibb-integration-home-20261110" PATH="/mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb/apps/api/.venv/bin:/home/compute_01/.nvm/versions/node/v24.20.0/bin:/home/compute_01/.local/bin:/usr/bin:/bin" PYTHON="/mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb/apps/api/.venv/bin/python" CI_BASE_SHA="401caae779b39943ec97f361ccb87c5cb78e1fa9" NEXT_PUBLIC_API_URL="http://127.0.0.1:8000" NEXT_PUBLIC_WS_URL="ws://127.0.0.1:8000/api/v1/ws/prices" NEXT_PUBLIC_ENABLE_REALTIME="false" ENVIRONMENT="test" DATABASE_URL="sqlite+aiosqlite:////tmp/vnibb-release-smoke.db" DATABASE_URL_SYNC="sqlite+aiosqlite:////tmp/vnibb-release-smoke.db" MONGODB_ENABLED="false" REDIS_URL="" REDIS_HOST="" REDIS_PORT="0" SKIP_SCHEDULER_STARTUP="1" SKIP_WEBSOCKET_STARTUP="1" SKIP_WARMUP="true" NEXT_TELEMETRY_DISABLED="1" CI="1" PYTHONPATH=apps/api python -m pytest apps/api/tests/test_api/test_mcp_server.py apps/api/tests/test_api/test_ai_context_service.py apps/api/tests/test_api/test_iq_serving_integration.py apps/api/tests/test_services/test_vnstock_registration.py apps/api/tests/test_core/test_scheduler_worker.py apps/api/tests/test_core/test_market_data_port.py apps/api/tests/test_core/test_provider_import_boundary.py apps/api/tests/test_scripts/test_cleanup_images.py apps/api/tests/test_core/test_release_build_contract.py::test_compose_auth_probes_keep_passwords_out_of_process_arguments -q
+```
+
+After these checks, only documentation and generated changelog content changed. The existing `node apps/web/scripts/generate-changelog.mjs` exited 0; a stdlib Node ESM import/assert confirmed its exported string exactly equals `CHANGELOG.md` (exit 0). The first throwaway comparison used `Function` on an ESM export and failed before comparison; no product source was changed for it.
+
+The guarded existing Chromium/Firefox/WebKit matrix initially returned **100 passed, two skipped, three failed, exit 1** in 300.52 seconds. All brand/state cases passed. Three copies of the ticker-search case failed because the parent synthetic API used the wrong response shape. Correcting only that fixture to the existing `results/name/type` contract produced **three passed, exit 0**, in 9.78 seconds. Thus 103 existing cases passed across two executions, not one green full run. The two skips are forced-colors emulation on non-Chromium engines. The runner imported the existing suites unchanged, denied notifications, blocked WebSockets/external HTTP/non-GET requests, and disabled service workers. Its `/live` and `/ready` responses came from a Node fixture, not the backend; this is not backend readiness proof. Both loopback servers were stopped and the three throwaway runner files removed after their contents and JSON results were preserved in run-specific session artifacts.
+
+Native PostgreSQL 17.11 concurrency contract: **two passed, exit 0**, against one uniquely owned loopback disposable target. This covers two cooperating annual-income writer interleavings, not complete issuer-source ownership, idempotency, original documents or production recovery. The owned container and volume were removed after proof.
+
+Parent real-browser valuation checks used synthetic retained rows: both widgets showed populated, empty, failed and retry-recovery states with unknown source as-of and warnings visible. The offline/online cached-refresh probe did **not** establish a refetch and is not cached-refresh browser proof; existing focused component checks cover that path. Theme/layout persisted across 320/390/1024/1440 px in light/dark and reload. These are selected surfaces, not every-widget approval.
+
+### Passive widget sweep is observation, not signoff
+
+The static union contains 175 IDs. All 149 eligible passive IDs were captured once in their assigned isolated context, with no missing, extra or duplicate ID. Excluded: 25 external TradingView IDs and shell-only copilot. Observations: 43 error, 17 unavailable, 66 loading, two OPTIONS-stopped loading, nine idle/local-empty, 12 inconclusive. None is blanket signoff. `backtest_lab` and `sweep_matrix` never reached an observed settled failure state. This does not certify failure delivery, populated financial truth, accessibility or every visual state.
+
+Workers were supplied `381212f3` and did not independently fingerprint the preview. The parent freeze records unchanged frontend at `4d1c03db`; that is not independent runtime binding. Shared-origin seed collisions invalidated preliminary captures, replaced by isolated contexts. Some overwritten preliminary screenshot pixels are not retained. Screenshot references are temporary, not durable approved artwork.
+
+Delayed-review attribution check: the committed `apps/web` tree is exactly `62ad9a9eacee490db0a4cad614604ede7d707d58` at `381212f3`, `4d1c03db` and `4ffd01cf`. The only frontend-path change from `4ffd01cf` to documentation save `e0b8f5fb` is `apps/web/src/data/changelog.generated.ts`. This confirms source equality across the backend/lint deltas, not an independently identified running preview or retroactive acceptance of the passive sweep.
+
+**Network uncertainty:** group 2 observed two preliminary WebSocket handshake responses before its effective constructor guard. Destination and absolute event times were not recorded. An additional diagnostic probe lacked the guard; its result is unknown. Final guarded captures recorded no WebSocket escape, but the entire run cannot be certified network-isolated. This was disclosed, not retroactively cleared. Compliance with the original 900-second total wall-clock bound is unverified. All owned contexts/tabs closed before preview shutdown.
+
+### Remaining gates
+
+No push, PR readiness/default-branch merge, deployment, acquisition enablement, production write, credential rotation, real-client transfer or deliberate Send was performed for these accepted local repairs. Unknown preliminary WebSocket destinations prevent a categorical no-provider-contact claim for the entire browser run. Rights/source originals, licensed coverage, current store/serving identities, fresh independent restore, operational recovery and the next scheduled-session watch remain required. Source/credential incident and committed-history disposition plus a proven no-preview route still hold publication. Local checks do not close those rows.
+
+Original dirty checkouts, mixed ticket work, historical merge and stashes remain preserved. Final cleanup inventory covered exactly 19 run-owned worker roots against `4ffd01cf`: 17 HEADs were ancestors, two cherry-picked worker HEADs were not ancestors, three roots had only untracked dependency symlinks and one contained a real `.venv` directory. No visible process cwd matched, but 349 process cwd entries were inaccessible, so inactivity could not be established. **All 19 roots and every branch were preserved; no worktree, dependency link or directory was removed.** The previously cancelled lint worker did eventually create its clean baseline checkout at `4d1c03db`; it contained no patch. Cleanup remains blocked on reliable activity/ownership evidence, not silently completed. The run-specific inventory is retained as `local://vnibb-20261111-owned-worker-cleanup-inventory.md`.
+
+
+## Local repair evidence
+
+Independent review applies only to the listed slice, not the full integration. Worker checks precede integration unless explicitly labeled parent-run; final integrated verification is recorded separately. Local merges do not close the corresponding GitHub release or operational gates.
+
+| Repair | Reviewed leaf / correction | Exercised evidence | Remaining boundary |
+|---|---|---|---|
+| Provider consumer/lifecycle boundary | `ad9f70dc`, correction `47061a1f` | Worker: 389 focused parity passes, 1 skipped; 52 reference checks; 22 final affected-path checks; repaired `scripts/recover_screener_selfcheck.py` exit 0. Independent review accepted the correction. | Final integration gate; no new DNSE adapter or source permission. |
+| DNSE command-only refusal | `090ffbb9` | Worker: 24 cold-process cases across four environments; standalone help exits 0, acquisition/malformed invocations refuse with 2. Independent review approved. | Private incident/history disposition, credential delivery/rotation, source semantics/rights and no-preview publication route. |
+| Mongo/Redis health and Redis startup | `db36daec` | Worker: four focused passes plus disposable authenticated Mongo/Redis/Compose checks, special passwords, failure/recovery and Redis persistence. Independent review approved. | Authorized operator rollout; upstream Mongo empty-volume `jq --arg` credential exposure is not fixed. |
+| Responsive and compact ticker integration | `3c30a5c7` | Worker: 29 ticker and 47 dialog Jest cases; 15 Chromium/Firefox/WebKit interactions; eight Chromium wordmark viewport/theme cases. Independent review approved. | Actual TradingView interaction and full integrated state/reload matrix; 13 imported CRLF warnings preserved. |
+| Reported-growth precedence | `12a9f30` | Parent: approved existing virtualenv ran the public endpoint regression on the exact candidate, exit 0, 13 passed. Corrective delta independently reviewed. | Final integration; no claim of recovered numerical truth. |
+| Yearly FX precedence/settings | `c784292d` | Worker: 15 focused context/settings cases. Independent review approved local > admin > built-in annual > global precedence and preservation of saved overrides. | Broader FX adoption and legacy auto-saved defaults remain explicitly limited. |
+| Valuation request cancellation | `faf34860` | Worker: four ratio-history cases through actual query hooks and the shared fetch transport; ticker switch and unmount abort obsolete requests. Independent review approved. | Retained-only reader/warnings and dashboard browser acceptance are separate. |
+| Brand icon description | `6d0f3d04` | Parent reviewed the one-line factual correction; worker Chromium `/brand` at 390 px had no document overflow. | Approval linkage, owner content and editable report/deck disposition remain open. |
+| SQL AI financial context | `5d34de38` | Worker: 52 financial-context passes, 11 deselected. Independent corrective review accepted exclusion of rejected basis and resolution of every published historical period. Merged `57da7f4a`. | SQL-only; Mongo/cross-store and real-release parity unproved. |
+| Retained-only ratio-history GET | `659c9e6e` in `bd738ab1` | Worker: 48 focused passes. Independent review approved retained reads, no provider/cache, SQL source fence, admitted zero and honest partial-read warnings. Merged `68ae3dde`. | Synthetic browser state/retry proof is recorded above; real store/serving identity and source truth remain unproved. |
+| Matrix evidence quarantine | `ae382589`, correction `2653c27c` | Independent initial P1 closed by cell-level evidence-closure correction; worker combined regression passed. Corrective review approved, merged `2c969e46`. | Synthetic local contracts only; genuine identities/clients/source rights and deliberate Send remain gated. |
+| Matrix quarantine consumer | `332c0bc3`, correction `f5034000` | Worker: four initial cases and three late-response cases passed before final merges. Independent review approved current-snapshot generation/ID guards after inspector closure/tab change. Merged `f223ddae`. Parent existing nested-inspector browser case passed in three engines. | Real identities/clients and live quarantine occurrence remain unproved; browser fixtures do not replace late-response component coverage. |
+| Fiscal reader/writer corrections | `32e44d0a`, in `4d1c03db` | Independent corrective review approved fiscal competition before limits and scope-conflict withholding; parent native PostgreSQL contract passed both writer interleavings. | Per-symbol uncapped annual history is a known performance exposure; originals, complete writer ownership and cross-store/real-release parity remain unproved. |
+| SQL MCP statement correction | `9d3ac675`, merged `b936bc1b` | Worker: 13 statement cases passed. Independent corrective review approved preservation of rejection decisions and accepted same-period withholding. | SQL-only; overwritten same-period observations cannot be recovered from the natural key, and the single latest/snapshot row does not disclose all observations. |
+| Legacy financial writer retirement | `ad1746c3`, merged `6113b214` | Independent deletion review approved removal of the obsolete path rather than a second writer implementation. | No issuer acquisition or production recovery accepted. |
+| Valuation warning consumers | `d6756987`, merged `381212f3` | Worker: four focused cases passed; independent review approved. Parent actual browser observed both chart surfaces, empty/error and retry recovery with warnings intact. | Cached-refresh browser attempt did not trigger the intended refetch; that path is component-tested only. |
+
+The parent growth command was run in `implement-growth-20261110/apps/api`: `env -i HOME=/tmp PATH=/usr/bin:/bin PYTHONPATH=. /mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb/apps/api/.venv/bin/python -m pytest tests/test_api/test_equity_ratio_helpers.py::test_ratio_endpoint_prefers_reported_growth_and_only_derives_admitted_missing_values -q`. Its default conftest used SQLite and a mocked SDK; no provider or canonical store was contacted.
+
+
+## Preserved work and operational access
+
+Original codex/195-e2e-production-fix checkout at64ee0e70 and its backup/ListingBrowser/Matrix/readability work, mixed306-file tickets-20261108 WIP at72737ea6, historical incomplete merge and stashes were preserved. No bulk import/reset/cleanup. The Mongo/Redis hardening used a separate worktree and did not import the optional backup experiment.
+
+The single permitted cloud-01 connection used BatchMode, strict host-key checking and a six-second connect bound; tailnet policy denied compute_01, exit255 before remote command execution. No alternate identity/host or privilege bypass was attempted. Current census, serving identity, installed backup drift, host firewall attribution, OS/container update prerequisites, natural Auth refresh and current worker outcomes need a permitted read-only identity or dated sanitized release-bound receipts. Old receipts and closed tickets do not establish present state.
+
+## Accepted financial reader policy
+
+Compare independently admitted comparable fiscal periods for the same symbol, statement and period family using evidenced scope/currency/unit/flow basis; never ingestion time, updated_at or static source-first ranking. Identifiable newer rejected periods retain explicit withholding and actual period, not older values silently presented as latest. Keep older admitted history. Malformed identities cannot control ordering. No cross-source/revision field blending. A lone source retains existing safe admission, including zero/negative. Same-period cross-source agreement without proven revision equivalence is unverified_financial_revision; contradictory admitted overlap is conflicting_source_observations. Preserve field rejection fences, complete compatible same-source TTM/YTD and rejected depreciation/EBITDA safeguards. SQL natural keys omit source; no claim of independent same-period source preservation. This policy does not authorize writes or rights.
+
+## Historical Matrix quarantine policy
+
+Unsupported non-null insurer insurance premiums/claims/investment income and securities brokerage revenue/margin loans/investment income require targeted409, including measured zero; raw key/state/evidence ID alone is not original observation or sector basis. Null and unrelated accounting fields do not trigger quarantine. Records/evidence/reviews remain immutable. Ownership/revocation precede the guard; revoke and explicit create remain available. Full GET/review/mixed history cannot leak affected values; review checks occur before events. Safe selected cells and evidence closures remain usable. Distinct actionable quarantine reaches MCP/browser; browser clears unsafe cached values and only explicit owner creation makes a new revision. No TTL or automatic recreation. Production occurrence was not examined; prior exports cannot be retracted.
+
+## Provider schema evidence and refusal boundary
+
+Official public DNSE documentation hydrated in a restricted managed tab, with only developers.dnse.com.vn allowed. No Try it, Send, credential, provider API or account action. OHLC documents GET /price/ohlc, required symbol/resolution/from/to and X-API-Key/X-Aux-Date/X-Signature; t int64 seconds arrays, o/h/l/c double arrays, v int64 arrays, nextTime int64. Bid/ask and instrument request/schema fragments were also inspected. Price/volume units, request time units, adjustment/session/finality/no-trade semantics, missing/empty behavior, quotas and use rights remain unestablished. Fundamentals elsewhere are unknown, not proven absent.
+
+The local DNSE addition is a stdlib-only operator-facing refusal CLI, not a provider implementation: acquisition invocations exit2 before application/provider/DB imports, credentials, network or receipts; standalone help exits0. Flags do not enable acquisition. No legacy provider/service/fixtures or inferred price scaling imported. Importing a nonexistent library still executes Python parent-package initializers and is NOT cold-safe denial; any future adapter must solve its own import-safe authorization boundary. Private non-destructive custody guidance is not service delivery or actual rotation.
+
+## Reconciled product boundaries
+
+Existing capability context, evidence-grounded follow-ups, Sheets bounded responses and recipient-only sharing have source/test seams; external Sheets use, real issuer identities, service-worker deployment and source export permission remain distinct. Positioning stays registered but explicitly unavailable, with saved layouts retained and no flow requests; activation needs rights and bounded cost/coverage evidence. Existing Big Flow distinguishes failure from truly empty and cached refresh failure. FX adoption remains partial outside evidenced callsites, and built-in annual FX rates are assumptions rather than verified market quotes; point/index values remain native. Broader AI/export FX and all-endpoint adjustment/resize acceptance are not certified.
+
+Owner deferred unapproved journal, optimizer, strategy editor, deeper relative-risk, persistent document-library expansion, new IQ-host probes and individual P&L ranking until concrete specs and legitimate source/method/permission. This does not defer concrete existing defects. Trading-host public-data POST does not prove IQ-host POST support; IQ remains unknown. Aggregate flow is not identifiable-person P&L. Current chat Markdown export omits artifacts and panel lacks interactive sorting/chart export; accepted behavior and redistribution rights are still needed.
+
+W05 needs no new workflow implementation: the dashboard widget has no trusted-workflow state; the sidebar's ticker/session-change effect clears selected workflow and active request identity without resetting its separate composer input. On integration `d6178122`, `pnpm exec jest src/components/ui/AICopilot.matrix.test.tsx -t 'same-requestId symbol/session switch clears the disclosure and no stale workflow is sent' --runInBand` exited 0 (1 passed, 18 skipped). The case types fresh text after the switch, so it proves identity clearing, not preservation of authored text. The latter is source-only evidence; no model request, automatic submission or current-release claim.
+
+## Brand channels and widget dispositions
+
+Existing unchanged wordmark-on-white-plate favicon/install assets and OG source/raster exist; their precise approval linkage is unverified, not proven absent. Live HTML signature needs actual owner contact content; native editable report/deck content or explicit deferral is outstanding. Existing assets are preserved rather than replaced with an invented monogram.
+
+| ID | Source component | Category | Catalog/built-in | Disposition / actual remaining evidence |
+|---|---|---|---|---|
+| `ai_analysis` | `AIAnalysisWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `ai_copilot` | `AICopilotWidget` | analysis | not catalog / not observed | Registry-only; shell copilot, not library tile. StarterTransition owns AICopilotWidget; source wording evidence below; visual/state signoff pending. |
+| `alert_activity_inbox` | `AlertActivityInboxWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `alert_settings` | `AlertSettingsPanel` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `amihud_illiquidity` | `AmihudIlliquidityWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `analyst_estimates` | `AnalystEstimatesWidget` | estimates | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `atr_regime` | `ATRRegimeWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `backtest_lab` | `BacktestLabWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `balance_sheet` | `BalanceSheetWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `bank_metrics` | `BankMetricsWidget` | analysis | catalog / yes | Registered and catalogued; bank-specific component exists, source distinguishes bank-specific metrics and keeps empty/error/stale flags (BankMetricsWidget.tsx:23–37, 90–98, 158–170, 201–207). FPT/VCB, ratio semantics and visual states still require candidate-bound evidence. |
+| `big_flow_monitor` | `BigFlowMonitorWidget` | ownership | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `block_trade` | `BlockTradeWidget` | ownership | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `bollinger_squeeze` | `BollingerSqueezeWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `cash_flow` | `CashFlowWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `cashflow_waterfall` | `CashflowWaterfallWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `commodities` | `CommoditiesWidget` | global_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `company_filings` | `CompanyFilingsWidget` | calendar | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `comparison_analysis` | `ComparisonAnalysisWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `consensus_odds` | `ConsensusOddsWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `correlation_matrix` | `CorrelationMatrixWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `cross_source_calibration` | `CrossSourceCalibrationWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `database_inspector` | `DatabaseInspectorWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `derivatives_analytics` | `DerivativesAnalyticsWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `derivatives_contracts_board` | `DerivativesContractsBoardWidget` | global_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `derivatives_price_history` | `DerivativesPriceHistoryWidget` | global_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `dividend_ladder` | `DividendLadderWidget` | calendar | not catalog / yes | Registry-only; Income Investor template; preserve. Visual/state signoff pending. |
+| `dividend_payment` | `DividendPaymentWidget` | calendar | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `drawdown_deep_dive` | `DrawdownDeepDiveWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `drawdown_recovery` | `DrawdownRecoveryWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `earnings_history` | `EarningsHistoryWidget` | calendar | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `earnings_quality` | `EarningsQualityWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `earnings_release_recap` | `EarningsReleaseRecapWidget` | calendar | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `earnings_season_monitor` | `EarningsSeasonMonitorWidget` | calendar | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `edge_half_life` | `EdgeHalfLifeWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `election_odds` | `ElectionOddsWidget` | prediction_markets | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `ema_respect` | `EMARespectWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `events_calendar` | `EventsCalendarWidget` | calendar | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `fibonacci` | `FibonacciWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `financial_ratios` | `FinancialRatiosWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `financial_snapshot` | `FinancialSnapshotWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `footprint_proxy` | `FootprintProxyWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `foreign_flow_leaderboard` | `ForeignFlowLeaderboardWidget` | ownership | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `foreign_trading` | `ForeignTradingWidget` | ownership | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `forex_rates` | `ForexRatesWidget` | global_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `fundamental_analysis` | `FundamentalAnalysisWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `gamma_exposure` | `GammaExposureWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `gap_analysis` | `GapAnalysisWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `gap_fill_stats` | `GapFillStatsWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `garch_volatility` | `GarchVolatilityWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `growth_bridge` | `GrowthBridgeWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `hurst_market_structure` | `HurstMarketStructureWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `ichimoku` | `IchimokuWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `income_sankey` | `IncomeSankeyWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `income_statement` | `IncomeStatementWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `index_comparison` | `IndexComparisonWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `industry_bubble` | `IndustryBubbleWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `insider_deal_timeline` | `InsiderDealTimelineWidget` | ownership | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `insider_trading` | `InsiderTradingWidget` | ownership | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `intraday_trades` | `IntradayTradesWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `investor_event_calendar` | `InvestorEventCalendarWidget` | calendar | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `kalshi` | `KalshiWidget` | prediction_markets | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `key_metrics` | `KeyMetricsWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `limitless` | `LimitlessWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `listing_browser` | `ListingBrowserWidget` | screener | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `macd_crossovers` | `MACDCrossoverWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `macro_calibration` | `MacroCalibrationWidget` | prediction_markets | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `major_shareholders` | `MajorShareholdersWidget` | ownership | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `manifold` | `ManifoldWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `market_breadth` | `MarketBreadthWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `market_heatmap` | `MarketHeatmapWidget` | core_data | not catalog / yes | Registry-only; built-in market dashboard; preserve. Visual/state signoff pending. |
+| `market_lab` | `MarketLabWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `market_movers_sectors` | `MarketMoversSectorsWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `market_news` | `MarketNewsWidget` | news | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `market_overview` | `MarketOverviewWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `market_sentiment` | `MarketSentimentWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `market_structure` | `MarketStructureWidget` | charting | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `momentum` | `MomentumWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `money_flow_trend` | `MoneyFlowTrendWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `monte_carlo_lab` | `MonteCarloLabWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `news_corporate_actions` | `NewsCorporateActionsWidget` | news | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `news_feed` | `NewsFeedWidget` | news | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `news_flow` | `NewsFlowWidget` | news | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `notes` | `NotesWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `obv_divergence` | `OBVDivergenceWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `officers_management` | `OfficersManagementWidget` | ownership | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `orderbook` | `OrderbookWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `ownership_changes` | `OwnershipChangesWidget` | ownership | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `ownership_rating_summary` | `OwnershipRatingSummaryWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `pair_lab` | `PairLabWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `parkinson_volatility` | `ParkinsonVolatilityWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `peer_comparison` | `PeerComparisonWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `polymarket` | `PolymarketWidget` | prediction_markets | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `portfolio_tracker` | `PortfolioTrackerWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `positioning_dashboard` | `PositioningDashboardWidget` | ownership | not catalog / not observed | Registry-only; intentionally withheld; component shows unavailable admission/coverage explanation and says saved layout unchanged (PositioningDashboardWidget.tsx:7–10); visual/state signoff pending. |
+| `prediction_alerts` | `PredictionAlertsWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `prediction_movers` | `PredictionMoversWidget` | prediction_markets | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `predictit` | `PredictItWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `price_alerts` | `PriceAlertsWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `price_chart` | `PriceChartWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `quant_summary` | `QuantSummaryWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `quick_stats` | `QuickStatsWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `relative_rotation` | `RelativeRotationWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `research_browser` | `ResearchBrowserWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `research_matrix` | `MatrixWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `risk_dashboard` | `RiskDashboardWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `rs_ranking` | `RSRankingWidget` | analysis | not catalog / yes | Registry-only; research templates; preserve. Visual/state signoff pending. |
+| `rsi_seasonal` | `RSISeasonalWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `screener` | `ScreenerWidget` | screener | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `seasonality_heatmap` | `SeasonalityHeatmapWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `seasonality_spiral_heatmap` | `SeasonalitySpiralHeatmapWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `sector_board` | `SectorBoardWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `sector_breakdown` | `SectorBreakdownWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `sector_performance` | `SectorPerformanceWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `sector_rotation_radar` | `SectorRotationRadarWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `sector_top_movers` | `SectorTopMoversWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `share_statistics` | `ShareStatisticsWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `signal_robustness_lab` | `SignalRobustnessLabWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `signal_summary` | `SignalSummaryWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `similar_stocks` | `SimilarStocksWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `smart_money` | `SmartMoneyWidget` | quant | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `sortino_monthly` | `SortinoMonthlyWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `source_drift` | `SourceDriftWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `source_transparent_research_notebook` | `ResearchNotebookWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `stock_splits` | `StockSplitsWidget` | calendar | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `subsidiaries` | `SubsidiariesWidget` | ownership | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `sweep_matrix` | `SweepMatrixWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `technical_snapshot` | `TechnicalSnapshotWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `technical_summary` | `TechnicalSummaryWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `ticker_info` | `TickerInfoWidget` | core_data | catalog / yes | Registered and catalogued; ResponsiveIntegration owns this file. Candidate-bound visual/state signoff pending. |
+| `ticker_profile` | `TickerProfileWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `top_movers` | `TopMoversWidget` | core_data | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `top_movers_pulse` | `TopMoversPulseWidget` | prediction_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `tradingview_chart` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_company_profile` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_crypto_heatmap` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_crypto_market` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_economic_calendar` | `TradingViewWidgets` | calendar | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_economic_map` | `TradingViewWidgets` | global_markets | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_etf_heatmap` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_forex_cross_rates` | `TradingViewWidgets` | global_markets | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_forex_heatmap` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_fundamental_data` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_market_data` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_market_overview` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_market_summary` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_mini_chart` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_screener` | `TradingViewWidgets` | screener | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_single_ticker` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_stock_heatmap` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_stock_market` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_symbol_info` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_symbol_overview` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_technical_analysis` | `TradingViewWidgets` | charting | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_ticker` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_ticker_tag` | `TradingViewWidgets` | charting | catalog / not observed | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_ticker_tape` | `TradingViewWidgets` | global_markets | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `tradingview_top_stories` | `TradingViewWidgets` | news | catalog / yes | Registered and catalogued; external TradingView integration; visual/state signoff pending. |
+| `transaction_flow` | `TransactionFlowWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `ttm_snapshot` | `TTMSnapshotWidget` | analysis | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `unified_financials` | `FinancialsWidget` | analysis | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `valuation_band` | `ValuationBandWidget` | charting | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `valuation_lab` | `ValuationLabWidget` | estimates | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `valuation_multiples_chart` | `ValuationMultiplesChartWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `volume_analysis` | `VolumeAnalysisWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `volume_delta` | `VolumeDeltaWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `volume_flow` | `VolumeFlowWidget` | quant | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `volume_profile` | `VolumeProfileWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `vwap_bands` | `VWAPBandsWidget` | charting | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `watchlist` | `WatchlistWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `watchlist_limits_monitor` | `WatchlistLimitsMonitorWidget` | core_data | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `world_indices` | `WorldIndicesWidget` | global_markets | catalog / not observed | Registered and catalogued; visual/state signoff pending. |
+| `world_news_live_stream` | `WorldNewsLiveStreamWidget` | news | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `world_news_map` | `WorldNewsMapWidget` | news | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `world_news_monitor` | `WorldNewsMonitorWidget` | news | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+| `world_news_sources` | `WorldNewsSourcesWidget` | global_markets | catalog / yes | Registered and catalogued; visual/state signoff pending. |
+
+Source evidence: components/widgets/WidgetRegistry.ts:140–727; data/widgetDefinitions.ts:73–126; lib/tradingViewWidgets.ts:611–1665,1960–1972; components/widgets/WidgetInventory.test.ts:12–58; types/dashboard.ts:24–200; contexts/DashboardContext/templates.ts, systemDashboards.ts and types/dashboard-templates.ts. Source set computation parsed static literals; no runtime test or exhaustive traversal of unknown saved-user data.

@@ -46,6 +46,7 @@ def sdk(monkeypatch):
     vnstock = ModuleType("vnstock")
     vnstock.__version__ = "5.2.1"
     monkeypatch.setitem(sys.modules, "vnstock", vnstock)
+    from vnibb.core import financial_lane
     from vnibb.providers.vnstock import runtime
 
     calls = []
@@ -72,7 +73,7 @@ def sdk(monkeypatch):
         return operation()
 
     monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental if name == "Fundamental" else type("Finance", (), {}), "vnstock"))
-    monkeypatch.setattr(runtime, "run_financial_provider", run)
+    monkeypatch.setattr(financial_lane, "run_financial", run)
     return calls, frames, active
 
 
@@ -272,6 +273,7 @@ async def test_generation_five_provider_failure_does_not_fallback_to_another_sou
     import sys
     from types import ModuleType
 
+    from vnibb.core import financial_lane
     from vnibb.core.exceptions import ProviderError
     from vnibb.providers.vnstock import runtime
 
@@ -292,7 +294,7 @@ async def test_generation_five_provider_failure_does_not_fallback_to_another_sou
         return operation()
 
     monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Fundamental, "vnstock"))
-    monkeypatch.setattr(runtime, "run_financial_provider", run)
+    monkeypatch.setattr(financial_lane, "run_financial", run)
     with pytest.raises(ProviderError, match="synthetic VCI failure"):
         await VnstockFinancialsFetcher.extract_data(
             {"symbol": "HPG", "statement_type": "income", "period": "year", "limit": 2}
@@ -304,6 +306,7 @@ async def test_generation_four_statement_adapter_keeps_period_count_and_vci(monk
     import sys
     from types import ModuleType
 
+    from vnibb.core import financial_lane
     from vnibb.providers.vnstock import runtime
 
     vnstock = ModuleType("vnstock")
@@ -324,7 +327,7 @@ async def test_generation_four_statement_adapter_keeps_period_count_and_vci(monk
         return operation()
 
     monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
-    monkeypatch.setattr(runtime, "run_financial_provider", run)
+    monkeypatch.setattr(financial_lane, "run_financial", run)
     result = await VnstockFinancialsFetcher.fetch(
         FinancialsQueryParams(symbol="HPG", statement_type=StatementType.INCOME, period="year", limit=7)
     )
@@ -336,6 +339,7 @@ async def test_generation_four_missing_sdk_version_stays_on_legacy_route(monkeyp
     import sys
     from types import ModuleType
 
+    from vnibb.core import financial_lane
     from vnibb.providers.vnstock import runtime
 
     monkeypatch.setitem(sys.modules, "vnstock", ModuleType("vnstock"))
@@ -353,7 +357,7 @@ async def test_generation_four_missing_sdk_version_stays_on_legacy_route(monkeyp
         return operation()
 
     monkeypatch.setattr(runtime, "import_vnstock_symbol", lambda name: (Finance, "vnstock"))
-    monkeypatch.setattr(runtime, "run_financial_provider", run)
+    monkeypatch.setattr(financial_lane, "run_financial", run)
     result = await VnstockFinancialsFetcher.fetch(
         FinancialsQueryParams(symbol="HPG", statement_type=StatementType.INCOME, period="year", limit=2)
     )

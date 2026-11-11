@@ -2,7 +2,8 @@
 
 import { createPortal } from 'react-dom';
 import { Minimize2 } from 'lucide-react';
-import { useEffect, useState, useCallback, useRef, type ReactNode, type RefObject } from 'react';
+import { useEffect, useState, useCallback, type ReactNode, type RefObject } from 'react';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 
 interface MaximizedWidgetPortalProps {
     isOpen: boolean;
@@ -21,13 +22,8 @@ export function MaximizedWidgetPortal({
 }: MaximizedWidgetPortalProps) {
     const [mounted, setMounted] = useState(false);
     const [isAnimating, setIsAnimating] = useState(false);
-    const dialogRef = useRef<HTMLDivElement>(null);
-    const restoreFocusRef = useRef<HTMLElement | null>(null);
-    const onCloseRef = useRef(onClose);
 
-    useEffect(() => {
-        onCloseRef.current = onClose;
-    }, [onClose]);
+    const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: mounted && isOpen, onClose });
 
     // Handle mount state for SSR safety
     useEffect(() => {
@@ -46,46 +42,13 @@ export function MaximizedWidgetPortal({
 
     useEffect(() => {
         if (!isOpen) return;
-        restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        const frame = requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>('[data-maximized-close]')?.focus());
-        const handleKeys = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                event.stopPropagation();
-                onCloseRef.current();
-            }
-            if (event.key !== 'Tab' || !dialogRef.current) return;
-            const controls = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])')];
-            if (!controls.length) {
-                event.preventDefault();
-                dialogRef.current.focus();
-            } else if (event.shiftKey && document.activeElement === controls[0]) {
-                event.preventDefault();
-                controls[controls.length - 1].focus();
-            } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
-                event.preventDefault();
-                controls[0].focus();
-            }
-        };
-        document.addEventListener('keydown', handleKeys);
-        return () => {
-            cancelAnimationFrame(frame);
-            document.removeEventListener('keydown', handleKeys);
-            restoreFocusRef.current?.focus();
-        };
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (!isOpen) return;
         const previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
         return () => { document.body.style.overflow = previousOverflow; };
     }, [isOpen]);
 
-    // Handle backdrop click
-    const handleBackdropClick = useCallback((e: React.MouseEvent) => {
-        if (e.target === e.currentTarget) {
-            onClose();
-        }
+    const handleBackdropClick = useCallback((event: React.MouseEvent) => {
+        if (event.target === event.currentTarget) onClose();
     }, [onClose]);
 
     if (!mounted || !isOpen) return null;

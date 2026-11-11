@@ -48,6 +48,10 @@ def test_inventory_distinguishes_stored_admitted_missing_and_unsupported(tmp_pat
     fpt = cell(report, "income_statements", "FPT", "2025")["rows"][0]
     assert fpt["fields"]["revenue"] == {"stored": True, "admitted": True, "reason": None}
     assert fpt["fields"]["gross_profit"] == {"stored": True, "admitted": False, "reason": "unverified_monetary_unit"}
+    assert cell(report, "income_statements", "FPT", "2025")["field_counts"] == {
+        "observations": 13, "stored_non_null": 2, "admitted": 1,
+        "rejected": 1, "consumer_fault": 0, "missing": 11,
+    }
     assert fpt["fields"]["net_income"]["reason"] == "missing_value"
     vci = cell(report, "income_statements", "VCI", "2025")["rows"][0]
     assert vci["status"] == "unsupported_source"
@@ -98,6 +102,10 @@ def test_nonfinite_stored_value_is_consumer_fault(tmp_path, value):
     assert result["error_type"] == "ValueError"
     assert result["fields"]["revenue"] == {
         "stored": True, "admitted": None, "reason": "consumer_fault",
+    }
+    assert cell(report, "income_statements", "FPT", "2025")["field_counts"] == {
+        "observations": 13, "stored_non_null": 1, "admitted": 0,
+        "rejected": 0, "consumer_fault": 1, "missing": 12,
     }
 
 

@@ -241,10 +241,10 @@ def _financial_metrics(builder: ObservationBuilder, playbook: str) -> dict[str, 
             "regulatory": _bank_regulatory_metrics(builder.period),
         })
     elif playbook == "insurer":
-        metrics["insurance"] = [observe(IncomeStatement, key, label, raw_keys=(key,)) for key, label in (("insurance_premiums", "Explicit insurance premiums"), ("insurance_claims", "Explicit insurance claims"), ("investment_income", "Explicit investment income"))]
+        metrics["insurance"] = [_metric(key, label, builder.period, "Original insurer observation, subtype and gross/net earned/written basis are not established") for key, label in (("insurance_premiums", "Insurance premiums"), ("insurance_claims", "Insurance claims"), ("investment_income", "Investment income"))]
         metrics["underwriting"] = [_metric(key, label, builder.period, "Dedicated definition, legal-entity scope and regulatory basis are not retained") for key, label in (("underwriting_ratio", "Underwriting ratio"), ("solvency_ratio", "Regulatory solvency"))]
     else:
-        metrics["securities"] = [observe(table, key, label, raw_keys=(key,)) for table, key, label in ((IncomeStatement, "brokerage_revenue", "Explicit brokerage revenue"), (BalanceSheet, "margin_loans", "Explicit margin loans"), (IncomeStatement, "investment_income", "Explicit investment income"))]
+        metrics["securities"] = [_metric(key, label, builder.period, "Original securities observation, business-line definition and source mapping are not established") for key, label in (("brokerage_revenue", "Brokerage revenue"), ("margin_loans", "Margin loans"), ("investment_income", "Investment income"))]
         metrics["capital"] = [_metric("regulatory_capital", "Regulatory capital", builder.period, "No dedicated securities capital-safety definition and retained source observation")]
     return metrics
 

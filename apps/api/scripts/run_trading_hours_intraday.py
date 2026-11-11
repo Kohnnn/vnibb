@@ -17,10 +17,9 @@ logger = logging.getLogger("vnibb.trading_hours_intraday")
 
 async def _get_focus_symbols(limit: int = 50) -> list[str]:
     try:
-        from vnibb.providers.vnstock.runtime import get_listing_class
+        from vnibb.providers import market_data
 
-        listing = get_listing_class()(source="VCI")
-        group_symbols = listing.symbols_by_group(group="VN30")
+        group_symbols = market_data.listing("VCI", view="symbols_by_group", group="VN30")
         symbols = (
             group_symbols.tolist() if hasattr(group_symbols, "tolist") else list(group_symbols)
         )

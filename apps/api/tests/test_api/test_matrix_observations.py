@@ -155,6 +155,45 @@ async def test_each_playbook_builds_real_stored_observations(test_db, playbook, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("playbook,industry,dimension,fields", [
+    ("insurer", "Non-life insurance", "insurance", {
+        "insurance_premiums": 123, "insurance_claims": 45, "investment_income": 67,
+    }),
+    ("securities", "Securities", "securities", {
+        "brokerage_revenue": 123, "investment_income": 67, "margin_loans": 89,
+    }),
+])
+async def test_raw_sector_field_names_are_not_evidence_of_specific_business_metrics(
+    client, test_db, playbook, industry, dimension, fields,
+):
+    from vnibb.core.auth import User, require_active_user
+
+    async def owner():
+        return User(id="matrix-test-owner", email="", role="authenticated")
+
+    client._transport.app.dependency_overrides[require_active_user] = owner
+    for index, symbol in enumerate(("MXA", "MXB")):
+        test_db.add(Stock(id=990001 + index, symbol=symbol, industry=industry, is_active=1))
+        metadata = {"unit": "VND", "consolidation": "consolidated", **fields}
+        for model in (IncomeStatement, BalanceSheet):
+            row = statement(model, metadata=metadata)
+            row.id, row.symbol = 990001 + index, symbol
+            test_db.add(row)
+    await test_db.flush()
+    response = await client.post("/api/v1/matrix/snapshots", json={
+        "anchor_symbol": "MXA", "symbols": ["MXA", "MXB"],
+        "playbook_id": playbook, "period": "2024", "period_type": "year",
+    })
+    assert response.status_code == 201
+    result = cell(response.json(), "MXA", dimension)
+    assert result["state"] == "unavailable"
+    assert {item["key"] for item in result["payload"]["metrics"]} == set(fields)
+    for item in result["payload"]["metrics"]:
+        assert item["value"] is None
+        assert item["evidence_ids"] == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("source,close,expected_value,expected_unit,state", [
     ("vnstock_vnd:VCI", 72400, "72400", "VND", "non_comparable"),
     ("VCI", 72.4, "72400", "VND", "non_comparable"),

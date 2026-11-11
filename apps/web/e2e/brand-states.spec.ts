@@ -715,3 +715,167 @@ test('protected workspace chart header follows the control actually rendering (#
   await expect(readout).toContainText('1M', { timeout: 15_000 });
   await expect(widget.getByRole('button', { name: /^Period:/ })).toHaveCount(0);
 });
+
+test('maximized embedded chart permits keyboard-only forward and reverse exit', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+  });
+  await mount(page, [{ type: 'tradingview_chart', config: { symbol: 'NASDAQ:AAPL' } }]);
+  await baseRoutes(page);
+  // An opaque-origin local embed exercises the real browser iframe boundary without acquiring market data.
+  await page.route('**/embed-widget-advanced-chart.js', route => route.fulfill({
+    contentType: 'application/javascript',
+    body: `const frame = document.createElement('iframe');
+      frame.title = 'Chart test frame';
+      frame.setAttribute('sandbox', '');
+      frame.srcdoc = '<button>First frame control</button><button>Last frame control</button>';
+      frame.style.cssText = 'width:100%;height:160px';
+      document.currentScript.parentElement.appendChild(frame);`,
+  }));
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const card = page.locator('.widget-card-premium[data-widget-id="states-widget-0"]');
+  const opener = card.getByRole('button', { name: 'Maximize widget' });
+  await expect(opener).toBeVisible({ timeout: 45_000 });
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: /Advanced Chart/i });
+  const close = dialog.getByRole('button', { name: 'Minimize widget' });
+  const frame = dialog.locator('iframe[title="Chart test frame"]');
+  const first = frame.contentFrame().getByRole('button', { name: 'First frame control' });
+  const last = frame.contentFrame().getByRole('button', { name: 'Last frame control' });
+  const providerLink = dialog.getByRole('link', { name: 'Open in TradingView' });
+  await expect(card).toHaveAttribute('inert', '');
+  await expect(close).toBeFocused();
+  await expect(frame).toBeVisible({ timeout: 30_000 });
+
+  for (let i = 0; i < 20 && !(await first.evaluate(el => el === el.ownerDocument.activeElement)); i++) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(first).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(last).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(providerLink).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press('Shift+Tab');
+  await expect(providerLink).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  // Firefox may first focus the iframe element itself before its last control.
+  if (!(await last.evaluate(el => el === el.ownerDocument.activeElement))) await page.keyboard.press('Shift+Tab');
+  await expect(last).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(first).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  if (!(await close.evaluate(el => el === el.ownerDocument.activeElement))) await page.keyboard.press('Shift+Tab');
+  await expect(close).toBeFocused();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(card).not.toHaveAttribute('inert', '');
+  await expect(opener).toBeFocused();
+});
+
+test('compact ticker exposes price and freshness through keyboard scrolling', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+  });
+  await mount(page, [{ type: 'ticker_info', layout: { w: 8, h: 4 } }]);
+  await baseRoutes(page, {
+    '/quote': route => route.fulfill(json({ symbol: 'VCI', data: {
+      symbol: 'VCI', price: 57300, price_unit: 'VND', updated_at: '2026-11-03T07:00:00Z',
+    }, meta: { stale: true } })),
+  });
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const region = page.getByRole('region', { name: 'VCI ticker information' });
+  const row = region.getByRole('group', { name: 'VCI quote and freshness' });
+  await expect(region).toBeVisible({ timeout: 45_000 });
+  await expect(row.getByText('57,300.00')).toBeVisible();
+  await expect(row.getByText('Stale data')).toBeAttached();
+  // Traverse from the document and use only keyboard keys for both scroll axes.
+  for (let i = 0; i < 150 && !(await region.evaluate(el => el === document.activeElement)); i++) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(region).toBeFocused();
+  const beforeY = await region.evaluate(el => el.scrollTop);
+  await page.keyboard.press('PageDown');
+  await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(beforeY);
+  await page.keyboard.press('Tab');
+  await expect(row).toBeFocused();
+  const beforeX = await row.evaluate(el => el.scrollLeft);
+  for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowRight');
+  await expect.poll(() => row.evaluate(el => el.scrollLeft)).toBeGreaterThan(beforeX);
+});
+
+test('maximized Matrix inspector owns Escape before its parent', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mount(page, [{ type: 'research_matrix' }]);
+  await baseRoutes(page, {
+    '/matrix/playbooks': route => route.fulfill(json([])),
+    '/matrix/fixture': route => route.fulfill(json({
+      schema_version: 'matrix-v1', matrix_id: 'fixture', snapshot_id: 'fixture', revision: '1', created_at: '2025-12-31T00:00:00Z', synthetic: true,
+      anchor_symbol: 'FPT', playbook_id: 'nonfinancial', definition_revision: '1', period: '2025', period_type: 'year',
+      entities: [{ entity_id: 'FPT', symbol: 'FPT', name: 'FPT Company', sector: 'Technology' }],
+      dimensions: [{ dimension_id: 'profit', label: 'Profit quality', question: 'Is profit supported?', output_type: 'table', source_scope: 'Synthetic', definition_revision: '1' }],
+      cells: [{ result_id: 'result-FPT', entity_id: 'FPT', dimension_id: 'profit', result_revision: '1', state: 'supported', payload: { kind: 'table', metrics: [] }, evidence_ids: [], basis: 'Consolidated', limitations: [], review_state: 'unreviewed' }],
+      limitations: ['Synthetic fixture'],
+    })),
+  });
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const card = page.locator('.widget-card-premium[data-widget-id="states-widget-0"]');
+  const opener = card.getByRole('button', { name: 'Maximize widget' });
+  await expect(opener).toBeVisible({ timeout: 45_000 });
+  await opener.click();
+  const outer = page.getByRole('dialog', { name: /Research Matrix/ });
+  await expect(card).toHaveAttribute('inert', '');
+  await expect(outer.getByRole('button', { name: 'Minimize widget' })).toBeFocused();
+  await outer.getByRole('button', { name: 'Explore synthetic fixture' }).click();
+  const inspect = outer.getByRole('button', { name: 'Inspect FPT Profit quality' });
+  await expect(inspect).toBeVisible();
+  await inspect.click();
+  const inspector = page.getByRole('dialog', { name: 'Profit quality inspector' });
+  await expect(inspector.getByRole('button', { name: 'Close inspector' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(inspector).toBeHidden();
+  await expect(outer).toBeVisible();
+  await expect(inspect).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(outer).toBeHidden();
+  await expect(opener).toBeFocused();
+});
+
+test('ticker search closes before compact widget controls and restores focus', async ({ page }) => {
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+  });
+  await page.setViewportSize({ width: 320, height: 720 });
+  await mount(page, [{ type: 'ticker_info', layout: { w: 8, h: 4 } }]);
+  await baseRoutes(page);
+  await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
+  const more = page.getByRole('button', { name: 'More controls for Ticker Info' });
+  await expect(more).toBeVisible({ timeout: 30_000 });
+  await more.click();
+  const controls = page.getByRole('dialog', { name: 'Ticker Info controls' });
+  const ticker = controls.getByTitle('Select widget ticker');
+  await ticker.click();
+  const popup = page.getByRole('dialog', { name: 'Select ticker' });
+  await expect(popup.getByRole('textbox', { name: 'Search ticker' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(popup).toBeHidden();
+  await expect(controls).toBeVisible();
+  await expect(ticker).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(controls).toBeHidden();
+  await expect(more).toBeFocused();
+});

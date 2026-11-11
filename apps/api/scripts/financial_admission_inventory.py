@@ -171,8 +171,17 @@ def build_report(symbols, periods, datasets):
         for symbol in symbols:
             for period in periods:
                 rows = grouped[(symbol, period)]
+                fields = [field for row in rows for field in row["fields"].values()]
+                counts = {
+                    "observations": len(fields),
+                    "stored_non_null": sum(field["stored"] for field in fields),
+                    "admitted": sum(field["stored"] and field["admitted"] is True for field in fields),
+                    "rejected": sum(field["stored"] and field["admitted"] is False for field in fields),
+                    "consumer_fault": sum(field["stored"] and field["admitted"] is None for field in fields),
+                    "missing": sum(not field["stored"] for field in fields),
+                }
                 entries.append({"dataset": name, "symbol": symbol, "expected_period": period,
-                                "status": "present" if rows else "missing_row", "rows": rows})
+                                "status": "present" if rows else "missing_row", "field_counts": counts, "rows": rows})
     return {"read_only": True, "provider_calls": 0,
             "consumer_path": "MCP query_database_collection_data SQL source filter and _serialize_row; before pagination",
             "scope": {"symbols": symbols, "periods": periods, "datasets": list(MODELS),
@@ -180,6 +189,7 @@ def build_report(symbols, periods, datasets):
                       "interpretation": "operator-selected cells only; not a market or provider completeness denominator"},
             "limitations": ["Not MCP latest/snapshot, merged HTTP responses, provider availability, source rights, deployment identity, or actual paginated visibility.",
                             "Fiscal-year outliers and unclassified fiscal identities are diagnostics outside the denominator; cells use stored fiscal columns.",
+                            "Field counts are per stored row/column observation, not expected field completeness; a missing row has zero observations.",
                             "Stored values and raw evidence are not printed. Admission is not a provenance or source-rights certification."],
             "source_allowlist": list(ADMITTED_FINANCIAL_SOURCES), "cells": entries, "invalid_fiscal_year_rows": invalid,
             "unclassified_identity_rows": unclassified}

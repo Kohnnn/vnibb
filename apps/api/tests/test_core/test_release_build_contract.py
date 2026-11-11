@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -240,3 +241,104 @@ def test_free_release_image_never_imports_or_installs_paid_modules() -> None:
 def test_retired_premium_scripts_are_removed_without_shims() -> None:
     assert not (ROOT / "scripts/oracle/bootstrap_vnstock_premium.sh").exists()
     assert not (ROOT / "scripts/oracle/check_vnstock_premium.sh").exists()
+
+
+def _compose_auth_services(name: str, tmp_path: Path, password: str) -> dict:
+    if not shutil.which("docker"):
+        pytest.skip("Docker Compose is unavailable")
+    env = {
+        "PATH": os.defpath,
+        "HOME": str(tmp_path),
+        "DOCKER_CONFIG": str(tmp_path),
+        "VNIBB_API_IMAGE_REPOSITORY": "test.invalid/vnibb",
+        "VNIBB_API_IMAGE_DIGEST": "sha256:" + "a" * 64,
+        "SITE_HOSTNAME": "test.invalid",
+        "ACME_EMAIL": "test@test.invalid",
+        "POSTGRES_PASSWORD": "unused",
+        "MONGO_ROOT_USERNAME": "testuser",
+        "MONGO_ROOT_PASSWORD": password,
+        "REDIS_PASSWORD": password,
+        "SUPABASE_URL": "http://test.invalid",
+        "GOTRUE_DB_DATABASE_URL": "postgres://test.invalid/db",
+        "SUPABASE_JWT_SECRET": "unused",
+        "LOCAL_POSTGRES_PASSWORD": "unused",
+        "LOCAL_MONGO_PASSWORD": password,
+    }
+    result = subprocess.run(
+        ["docker", "compose", "--env-file", os.devnull, "-f", str(ROOT / name),
+         "config", "--format", "json"],
+        env=env, capture_output=True, text=True, check=True,
+    )
+    return json.loads(result.stdout)["services"]
+
+
+@pytest.mark.parametrize(
+    ("name", "service"),
+    [("docker-compose.oracle.yml", "mongo"), ("docker-compose.oracle.yml", "redis"),
+     ("docker-compose.data.local.yml", "mongo")],
+)
+def test_compose_auth_probes_keep_passwords_private_and_report_client_failure(
+    name: str, service: str, tmp_path: Path,
+) -> None:
+    password = os.urandom(12).hex() + "'\"\\$!"
+    services = _compose_auth_services(name, tmp_path, password)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    captured = tmp_path / "arguments"
+    for executable in ("mongosh", "redis-cli"):
+        stub = fake_bin / executable
+        stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGV_FILE"\nprintf "PONG\\n"\n')
+        stub.chmod(0o700)
+    probe = services[service]["healthcheck"]["test"]
+    assert probe[0] == "CMD-SHELL"
+    env = {"PATH": f"{fake_bin}:{os.defpath}", "ARGV_FILE": str(captured)}
+    env.update(services[service]["environment"])
+    env["MONGO_INITDB_ROOT_PASSWORD"] = password
+    env["REDIS_PASSWORD"] = password
+    result = subprocess.run(["sh", "-c", probe[1].replace("$$", "$")], env=env, capture_output=True)
+    assert result.returncode == 0
+    exposed = password.encode() in captured.read_bytes()
+    assert not exposed, f"{service} probe exposed its password in argv"
+
+    client = fake_bin / ("mongosh" if service == "mongo" else "redis-cli")
+    client.write_text("#!/bin/sh\nexit 42\n")
+    failed = subprocess.run(["sh", "-c", probe[1].replace("$$", "$")], env=env, capture_output=True)
+    assert failed.returncode != 0, f"{service} probe reported a failed client as healthy"
+
+
+def test_redis_compose_startup_and_health_authenticate_special_password(tmp_path: Path) -> None:
+    docker = shutil.which("docker")
+    if not docker:
+        pytest.skip("Docker is unavailable")
+    env = {"PATH": os.defpath, "HOME": str(tmp_path), "DOCKER_CONFIG": str(tmp_path)}
+    for args in (("info",), ("image", "inspect", "redis:7-alpine")):
+        if subprocess.run([docker, *args], env=env, capture_output=True).returncode:
+            pytest.skip("Docker daemon or cached redis:7-alpine image is unavailable")
+    password = os.urandom(12).hex() + "'\"\\$!\nend"
+    redis = _compose_auth_services("docker-compose.oracle.yml", tmp_path, password)["redis"]
+    name = "vnibb-compose-test-" + os.urandom(8).hex()
+    env["REDIS_PASSWORD"] = password
+
+    def run(*args: str, **kwargs: object) -> subprocess.CompletedProcess:
+        return subprocess.run([docker, *args], env=env, capture_output=True, **kwargs)
+
+    try:
+        command = [part.replace("$$", "$") for part in redis["command"]]
+        started = run("run", "-d", "--name", name, "--network", "none", "--pull", "never",
+                      "--mount", "type=tmpfs,destination=/data", "--env", "REDIS_PASSWORD", redis["image"], *command)
+        assert started.returncode == 0, "Redis container could not start"
+        probe = redis["healthcheck"]["test"][1].replace("$$", "$")
+        for _ in range(30):
+            result = run("exec", "--env", "REDIS_PASSWORD", name, "sh", "-c", probe)
+            if result.returncode == 0:
+                break
+            time.sleep(0.5)
+        assert result.returncode == 0, "Redis did not become healthy"
+        env["REDIS_PASSWORD"] = "incorrect-test-password"
+        assert run("exec", "--env", "REDIS_PASSWORD", name, "sh", "-c", probe).returncode != 0
+        args = run("top", name, "-eo", "pid,ppid,args")
+        logs = run("logs", name)
+        exposed = password.encode() in args.stdout or password.encode() in logs.stdout + logs.stderr
+        assert args.returncode == 0 and not exposed, "Redis exposed its password in argv or logs"
+    finally:
+        run("rm", "-f", name)

@@ -139,6 +139,55 @@ describe.each([
 describe.each([
     ['public', useRatioHistory],
     ['modular', useModularRatioHistory],
+] as const)('%s ratio history cancellation', (_name, useHistory) => {
+    it('aborts obsolete and unmounted requests without losing the new symbol data', async () => {
+        const client = createQueryClient();
+        const originalFetch = globalThis.fetch;
+        const aborted: string[] = [];
+        const finishPending: Array<() => void> = [];
+        const history: RatioHistoryResponse = { data: [{ period: '2025', pe: 12 }] };
+        const response = { ok: true, json: async () => history } as Response;
+        const fetchMock = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>((input, init) => {
+            const symbol = new URL(String(input)).pathname.split('/')[4];
+            if (symbol === 'VNM') return Promise.resolve(response);
+            const { promise, resolve, reject } = Promise.withResolvers<Response>();
+            finishPending.push(() => resolve(response));
+            init?.signal?.addEventListener('abort', () => {
+                aborted.push(symbol);
+                reject(new DOMException('Request aborted', 'AbortError'));
+            }, { once: true });
+            return promise;
+        });
+        globalThis.fetch = fetchMock;
+        const wrapper = ({ children }: { children: ReactNode }) =>
+            <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+        const view = renderHook(({ symbol }) => useHistory(symbol), {
+            initialProps: { symbol: 'FPT' }, wrapper,
+        });
+
+        try {
+            await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+            view.rerender({ symbol: 'VNM' });
+            await waitFor(() => expect(aborted).toEqual(['FPT']));
+            await waitFor(() => expect(view.result.current.data).toEqual(history));
+            expect(view.result.current.isSuccess).toBe(true);
+
+            view.rerender({ symbol: 'PAC' });
+            await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+            view.unmount();
+            await waitFor(() => expect(aborted).toEqual(['FPT', 'PAC']));
+        } finally {
+            view.unmount();
+            finishPending.forEach((finish) => finish());
+            client.clear();
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
+describe.each([
+    ['public', useRatioHistory],
+    ['modular', useModularRatioHistory],
 ] as const)('%s ratio history provider outcome', (_name, useHistory) => {
     it('distinguishes provider failure from empty success and retains data until recovery', async () => {
         const client = createQueryClient();

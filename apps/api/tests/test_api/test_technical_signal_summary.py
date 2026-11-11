@@ -228,7 +228,7 @@ async def test_direct_indicators_uses_shared_asyncio_thread_pool(monkeypatch):
         calls += 1
         return await original_to_thread(func, *args, **kwargs)
 
-    monkeypatch.setattr(technical, "get_quote_class", lambda: Quote)
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_quote_class", lambda: Quote)
     monkeypatch.setattr(asyncio, "to_thread", to_thread)
     monkeypatch.setattr(settings, "vnstock_timeout", 5, raising=False)
 

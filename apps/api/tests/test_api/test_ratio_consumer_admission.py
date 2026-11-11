@@ -130,7 +130,7 @@ async def test_metrics_history_admits_current_and_older_snapshot_percentages(tes
 
 
 @pytest.mark.asyncio
-async def test_provider_history_admits_each_percent_cell(test_db, monkeypatch):
+async def test_history_admits_each_percent_cell(test_db, monkeypatch):
     rows = [
         FinancialRatioData(symbol="VNM", period=str(2020 + index), roe=value, pe=10.0, ratio_units=units)
         for index, (units, value, _expected) in enumerate(CASES)
@@ -140,7 +140,8 @@ async def test_provider_history_admits_each_percent_cell(test_db, monkeypatch):
         return list(reversed(rows))
 
     monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider_rows)
-    ratios = await equity.get_ratio_history.__wrapped__(symbol="VNM", ratios="roe,pe", period="year", limit=20, db=test_db)
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", provider_rows)
+    ratios = await equity.get_ratio_history(symbol="VNM", ratios="roe,pe", period="year", limit=20, db=test_db)
     metrics = await equity.get_metrics_history.__wrapped__(
         symbol="VNM", days=30, metrics="roe,pe_ratio", period="year", db=test_db,
     )

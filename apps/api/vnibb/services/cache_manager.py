@@ -146,6 +146,15 @@ async def lock_ratio_writes(session: AsyncSession, symbol: str, period: str) -> 
         )
 
 
+async def lock_statement_writes(session: AsyncSession, model, symbol: str, period_type: str) -> None:
+    if session.get_bind().dialect.name == "postgresql":
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(
+                f"vnibb:{model.__tablename__}:{symbol.upper()}:{period_type}", 0
+            )))
+        )
+
+
 def _retains_financial_evidence(existing: Any, incoming: Any) -> bool:
     if existing is None:
         return True
@@ -1111,6 +1120,9 @@ class CacheManager:
             if model.__tablename__ == "financial_ratios":
                 for symbol, period in sorted({(row["symbol"].upper(), row["period_type"]) for row in rows}):
                     await lock_ratio_writes(session, symbol, period)
+            elif model.__tablename__ in {"income_statements", "balance_sheets", "cash_flows"}:
+                for symbol, period in sorted({(row["symbol"].upper(), row["period_type"]) for row in rows}):
+                    await lock_statement_writes(session, model, symbol, period)
             dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
             count = 0
             conflicts = []
@@ -1128,6 +1140,13 @@ class CacheManager:
                                existing.source in {"vietcap", "vietcap_vnd"} if source == "vietcap_vnd" else
                                existing.source not in {"vietcap", "vietcap_vnd", "issuer_report"})
                     if not allowed:
+                        conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
+                        continue
+                    if (model.__tablename__ in {"income_statements", "balance_sheets", "cash_flows"}
+                            and existing.source not in {"vietcap", "vietcap_vnd"}
+                            and isinstance(existing.raw_data, dict)
+                            and isinstance(existing.raw_data.get("_financial_lineage"), dict)
+                            and not _retains_financial_evidence(existing.raw_data, values.get("raw_data"))):
                         conflicts.append({"table": model.__tablename__, **{key: values[key] for key in keys}})
                         continue
                     # ponytail: automatic refreshes are additive; revisions require explicit reconciliation.

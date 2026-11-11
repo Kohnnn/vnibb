@@ -16,6 +16,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { QuantWarningBanner } from '@/components/ui/QuantWarningBanner';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { formatFinancialPeriodLabel } from '@/lib/financialPeriods';
 import { cn } from '@/lib/utils';
@@ -97,13 +98,14 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
       lastDataDate: null,
       fetchedAt: dataUpdatedAt,
       stale: isFallback,
+      warnings: data?.meta?.warnings,
       extra: {
         periods: rows.length,
         visibleSeries: activeSeries.length,
         focusRecent,
       },
     }));
-  }, [activeSeries.length, dataUpdatedAt, error, focusRecent, hasData, isFallback, onDataChange, rows, rows.length, symbol]);
+  }, [activeSeries.length, data?.meta?.warnings, dataUpdatedAt, error, focusRecent, hasData, isFallback, onDataChange, rows, rows.length, symbol]);
 
   const toggleSeries = (key: string) => {
     setVisibleSeries((current) => ({
@@ -178,7 +180,8 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
             />
           </div>
         </div>
-        <div className="flex-1 px-2 py-2">
+        <div className="flex min-h-0 flex-1 flex-col px-2 py-2">
+          <QuantWarningBanner warning={data?.meta?.warnings?.join(' ')} className="mb-2" />
           {isFallback && (
             <div role="alert" className="mb-2 text-[10px] text-[var(--color-warning)]">
               {error?.message} Showing previously received ratio history.{' '}
@@ -192,7 +195,7 @@ export function ValuationMultiplesChartWidget({ id, symbol, onRemove, onDataChan
           ) : !hasData ? (
             <WidgetEmpty message={`No valuation history for ${symbol}`} icon={<BarChart3 size={18} />} />
           ) : (
-            <ChartSizeBox className="h-full" minHeight={220}>
+            <ChartSizeBox className="min-h-0 flex-1" minHeight={220}>
               {({ width, height }) => (
                 <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                   <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" />

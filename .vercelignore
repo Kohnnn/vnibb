@@ -1,0 +1,28 @@
+# Source upload excludes for the CLI deployment path.
+# Vercel's source upload starts at the monorepo root, so this file mirrors what
+# git already refuses to ship (see .gitignore) plus the local build/test caches.
+# Build inputs (workspace manifests, lockfile, configs, sources, fonts, public
+# assets) are intentionally NOT excluded.
+
+# Local caches, test reports and build metadata
+.ruff_cache/
+.pytest_cache/
+coverage/
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/.swc/
+apps/web/public/sw.js
+apps/web/public/workbox-*.js
+*.tsbuildinfo
+node_modules*
+
+# Real environment files, logs and local database/backup artifacts
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.bak

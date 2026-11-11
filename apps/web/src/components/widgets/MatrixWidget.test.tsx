@@ -1,14 +1,22 @@
+import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import MatrixWidget from './MatrixWidget';
+import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
+import { MatrixInspector } from './matrix/MatrixInspector';
 import { matrixApi } from '@/lib/matrix';
-import type { MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
+import { APIError, fetchAPI } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+import type { MatrixEvidence, MatrixPreparation, MatrixSnapshot } from '@/types/matrix';
 
 let mockUser: { id: string; provider: string } | null = null;
 const mockUpdateWidget = jest.fn();
-const mockState = { dashboards: [{ id: 'dashboard', tabs: [{ id: 'tab', widgets: [{ id: 'matrix', config: {} }] }] }] };
+const mockState: { dashboards: { id: string; tabs: { id: string; widgets: { id: string; config: Record<string, unknown> }[] }[] }[] } = { dashboards: [{ id: 'dashboard', tabs: [{ id: 'tab', widgets: [{ id: 'matrix', config: {} }] }] }] };
 jest.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: mockUser }) }));
 jest.mock('@/contexts/DashboardContext', () => ({ useDashboard: () => ({ state: mockState, updateWidget: mockUpdateWidget }) }));
-jest.mock('@/lib/api', () => ({ fetchAPI: jest.fn(), APIError: class extends Error { status?: number } }));
+jest.mock('@/lib/env', () => ({ env: { apiUrl: 'https://api.example.test' } }));
+jest.mock('@/lib/supabase', () => ({ isSupabaseConfigured: true, supabase: { auth: { getSession: jest.fn() } } }));
+jest.mock('@/lib/api', () => ({ ...jest.requireActual('@/lib/api'), fetchAPI: jest.fn() }));
 
 const snapshot: MatrixSnapshot = {
   schema_version: 'matrix-v1', matrix_id: 'matrix-1', snapshot_id: 'snapshot-1', revision: 'revision-1', created_at: '2025-12-31T00:00:00Z', synthetic: true,
@@ -19,10 +27,14 @@ const snapshot: MatrixSnapshot = {
   limitations: ['Stored observations, not original filings.'],
 };
 
+const originalFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = originalFetch; });
+
 beforeEach(() => {
   mockUser = null;
   jest.restoreAllMocks();
   mockUpdateWidget.mockClear();
+  jest.mocked(fetchAPI).mockReset();
   jest.spyOn(matrixApi, 'playbooks').mockResolvedValue([{ playbook_id: 'nonfinancial', label: 'Nonfinancial', description: 'Stored classification required.', definition_revision: 'definition-1', dimensions: snapshot.dimensions }]);
   jest.spyOn(matrixApi, 'fixture').mockResolvedValue(snapshot);
   jest.spyOn(matrixApi, 'prepare').mockResolvedValue({ anchor_symbol: 'FPT', playbook_id: 'nonfinancial', symbols: ['FPT', 'CMG'], peer_basis: 'Same stored industry', periods: ['2025'], periods_by_symbol: { FPT: { year: ['2025'], quarter: ['2025-Q2'] }, CMG: { year: ['2025'], quarter: ['2025-Q2'] } }, period_type: 'year', limitations: [] });
@@ -33,6 +45,127 @@ beforeEach(() => {
   jest.spyOn(matrixApi, 'create').mockResolvedValue({ ...snapshot, synthetic: false });
   jest.spyOn(matrixApi, 'evidence').mockResolvedValue([]);
   jest.spyOn(matrixApi, 'selection');
+});
+
+it.each(['evidence', 'review', 'selection'] as const)('removes a displayed packet on a quarantine 409 from %s and permits explicit recreation', async (operation) => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  const realApi: { fetchAPI: typeof fetchAPI } = jest.requireActual('@/lib/api');
+  jest.mocked(fetchAPI).mockImplementation(realApi.fetchAPI);
+  jest.mocked(supabase!.auth.getSession).mockResolvedValue({ data: { session: { access_token: 'session-token' } }, error: null } as never);
+  const message = 'This saved Matrix snapshot contains sector values without verified original evidence. Recreate a new revision or revoke the affected snapshot before continuing.';
+  const network = jest.fn().mockResolvedValue({
+    ok: false, status: 409, statusText: 'Conflict',
+    json: async () => ({ code: 'matrix_snapshot_evidence_unverified', message, snapshot_ids: ['snapshot-1'], matrix_id: 'matrix-1' }),
+  });
+  globalThis.fetch = network;
+  if (operation === 'evidence') jest.mocked(matrixApi.evidence).mockRestore();
+  if (operation === 'selection') jest.mocked(matrixApi.selection).mockRestore();
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  expect(await screen.findAllByText('9,007,199,254,740,993.125 VND')).toHaveLength(2);
+  if (operation === 'selection') {
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select FPT Profit quality' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Follow up in VniAgent' }));
+  } else {
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect FPT Profit quality' }));
+    fireEvent.click(screen.getByRole('tab', { name: operation === 'evidence' ? 'Evidence' : 'Review' }));
+    if (operation === 'review') fireEvent.click(screen.getByRole('button', { name: 'Mark reviewed' }));
+  }
+  expect(await screen.findByRole('alert')).toHaveTextContent('without verified original evidence');
+  expect(screen.getByRole('alert')).toHaveFocus();
+  expect(screen.queryByRole('table', { name: 'Company research Matrix' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText('9,007,199,254,740,993.125 VND')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Revoke snapshot…' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Create new revision' })).toBeEnabled();
+  expect(matrixApi.create).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Create new revision' }));
+  await waitFor(() => expect(matrixApi.create).toHaveBeenCalledWith(expect.objectContaining({ matrix_id: 'matrix-1' })));
+  expect(network).toHaveBeenCalledTimes(1);
+});
+
+it.each(['close inspector', 'switch tabs'])('clears the current snapshot when evidence reports quarantine after %s', async (action) => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  const pending = Promise.withResolvers<MatrixEvidence[]>();
+  jest.mocked(matrixApi.evidence).mockReturnValue(pending.promise);
+  render(<MatrixWidget id="matrix" symbol="FPT" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Inspect FPT Profit quality' }));
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+  if (action === 'close inspector') fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+  else fireEvent.click(screen.getByRole('tab', { name: 'Result' }));
+  await act(async () => {
+    pending.reject(new APIError('Sector values lack verified original evidence.', 409, 'Conflict', { code: 'matrix_snapshot_evidence_unverified', snapshot_ids: ['snapshot-1'], matrix_id: 'matrix-1' }));
+    await pending.promise.catch(() => undefined);
+  });
+  expect(screen.getByRole('alert')).toHaveTextContent('verified original evidence');
+  expect(screen.queryByRole('table', { name: 'Company research Matrix' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.queryByText('9,007,199,254,740,993.125 VND')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Create new revision' })).toBeEnabled();
+  expect(matrixApi.create).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a different safe snapshot visible when an earlier evidence request reports quarantine', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  mockState.dashboards[0].tabs[0].widgets[0].config = { matrixView: { snapshotRefs: ['safe-snapshot'] } };
+  const pending = Promise.withResolvers<MatrixEvidence[]>();
+  jest.mocked(matrixApi.evidence).mockReturnValue(pending.promise);
+  jest.spyOn(matrixApi, 'snapshot').mockResolvedValue({ ...snapshot, synthetic: false, snapshot_id: 'safe-snapshot', cells: snapshot.cells.map((cell) => ({ ...cell, payload: { ...cell.payload, metrics: cell.payload.metrics?.map((metric) => ({ ...metric, display: 'Safe retained value' })) } })) });
+  try {
+    render(<MatrixWidget id="matrix" symbol="FPT" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Create snapshot' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect FPT Profit quality' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    fireEvent.change(screen.getByLabelText('Saved snapshot reference'), { target: { value: 'safe-snapshot' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open saved' }));
+    expect(await screen.findAllByText('Safe retained value')).toHaveLength(2);
+    await act(async () => {
+      pending.reject(new APIError('Sector values lack verified original evidence.', 409, 'Conflict', { code: 'matrix_snapshot_evidence_unverified', snapshot_ids: ['snapshot-1'], matrix_id: 'matrix-1' }));
+      await pending.promise.catch(() => undefined);
+    });
+    expect(screen.getByRole('table', { name: 'Company research Matrix' })).toBeInTheDocument();
+    expect(screen.getAllByText('Safe retained value')).toHaveLength(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  } finally {
+    mockState.dashboards[0].tabs[0].widgets[0].config = {};
+  }
+});
+
+it('opens a saved reference, explains a 409, and permits an explicit revoke without losing safe references', async () => {
+  mockUser = { id: 'owner-a', provider: 'supabase' };
+  mockState.dashboards[0].tabs[0].widgets[0].config = { matrixView: { snapshotRefs: ['snapshot-1', 'safe-snapshot'] } };
+  const realApi: { fetchAPI: typeof fetchAPI } = jest.requireActual('@/lib/api');
+  jest.mocked(fetchAPI).mockImplementation(realApi.fetchAPI);
+  jest.mocked(supabase!.auth.getSession).mockResolvedValue({ data: { session: { access_token: 'session-token' } }, error: null } as never);
+  const network = jest.fn().mockResolvedValue({ ok: false, status: 409, statusText: 'Conflict', json: async () => ({ code: 'matrix_snapshot_evidence_unverified', message: 'Sector values lack verified original evidence. Recreate a new revision or revoke the affected snapshot.', snapshot_ids: ['snapshot-1'], matrix_id: 'matrix-1' }) });
+  globalThis.fetch = network;
+  jest.spyOn(matrixApi, 'revoke').mockResolvedValue({ revoked: true });
+  try {
+    render(<MatrixWidget id="matrix" symbol="FPT" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open saved' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('verified original evidence');
+    expect(screen.getByRole('option', { name: 'safe-snapshot' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create new revision' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare peer scope' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create new revision' })).toBeEnabled());
+    expect(matrixApi.create).not.toHaveBeenCalled();
+    expect(matrixApi.revoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke snapshot…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm revoke' }));
+    await waitFor(() => expect(matrixApi.revoke).toHaveBeenCalledWith('snapshot-1'));
+    expect(mockUpdateWidget.mock.calls.at(-1)?.[3].config.matrixView.snapshotRefs).toEqual(['safe-snapshot']);
+    expect(network).toHaveBeenCalledTimes(1);
+  } finally {
+    mockState.dashboards[0].tabs[0].widgets[0].config = {};
+  }
 });
 
 it('keeps result selection stable when filtering and never creates research through view controls', async () => {
@@ -109,6 +242,9 @@ it('retains a selected common period on shortlist edits and never offers absent 
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, CMG' } });
   await waitFor(() => expect(screen.getByLabelText('Year')).toHaveValue('2023'));
   fireEvent.change(screen.getByLabelText('Companies · maximum 10'), { target: { value: 'FPT, XYZ' } });
+  // Settle the rejected availability request inside act: its catch calls
+  // setAvailability/setPeriodError, which would otherwise flush as a warning.
+  await waitFor(() => expect(matrixApi.periods).toHaveBeenLastCalledWith('FPT', ['FPT', 'XYZ']));
   expect(screen.getByLabelText('Year')).toHaveValue('');
   expect(screen.getByRole('button', { name: 'Create snapshot' })).toBeDisabled();
   expect(matrixApi.prepare).toHaveBeenCalledTimes(1);
@@ -304,17 +440,57 @@ it('removes owned content and ignores in-flight evidence after revocation', asyn
 
 it('traps narrow inspector keyboard focus and restores the initiating result', async () => {
   jest.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() } as unknown as MediaQueryList);
+  jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
   render(<MatrixWidget id="matrix" symbol="FPT" />);
   fireEvent.click(screen.getByRole('button', { name: 'Explore synthetic fixture' }));
   const result = await screen.findByRole('button', { name: 'Inspect FPT Profit quality' });
   result.focus(); fireEvent.click(result);
   const dialog = screen.getByRole('dialog');
   expect(dialog).toHaveAttribute('aria-modal', 'true');
-  expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus());
   fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
   expect(screen.getByRole('tab', { name: 'Review' })).toHaveFocus();
   fireEvent.keyDown(dialog, { key: 'Escape' });
   expect(result).toHaveFocus();
+});
+
+function NarrowInspectorHarness() {
+  const [outer, setOuter] = useState(false);
+  const [inspector, setInspector] = useState(false);
+  return <>
+    <button onClick={() => setOuter(true)}>Open matrix</button>
+    <MaximizedWidgetPortal isOpen={outer} title="Matrix workspace" onClose={() => setOuter(false)}>
+      <button onClick={() => setInspector(true)}>Inspect FPT Profit quality</button>
+      {inspector && <MatrixInspector snapshot={snapshot} cell={null} dimension={snapshot.dimensions[0]} canReview={false} busy={false} onClose={() => setInspector(false)} onReview={() => {}} onQuarantine={() => false} />}
+    </MaximizedWidgetPortal>
+  </>;
+}
+
+it('owns focus in the narrow inspector portal and closes it before the maximized widget', async () => {
+  jest.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, addEventListener: jest.fn(), removeEventListener: jest.fn() } as unknown as MediaQueryList);
+  jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue({ length: 1 } as DOMRectList);
+  const user = userEvent.setup();
+  render(<NarrowInspectorHarness />);
+  const outerOpener = screen.getByRole('button', { name: 'Open matrix' });
+  await user.click(outerOpener);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Minimize widget' })).toHaveFocus());
+  const inspect = screen.getByRole('button', { name: 'Inspect FPT Profit quality' });
+  await user.click(inspect);
+  const inspector = screen.getByRole('dialog', { name: 'Profit quality inspector' });
+  expect(inspector).toHaveAttribute('aria-modal', 'true');
+  const closeInspector = screen.getByRole('button', { name: 'Close inspector' });
+  await waitFor(() => expect(closeInspector).toHaveFocus());
+  await user.tab({ shift: true });
+  expect(closeInspector).toHaveFocus();
+  await user.tab();
+  expect(closeInspector).toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Profit quality inspector' })).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: 'Matrix workspace' })).toBeInTheDocument();
+  await waitFor(() => expect(inspect).toHaveFocus());
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Matrix workspace' })).not.toBeInTheDocument();
+  await waitFor(() => expect(outerOpener).toHaveFocus());
 });
 
 it('shows every frozen observation reference field without numeric conversion', async () => {

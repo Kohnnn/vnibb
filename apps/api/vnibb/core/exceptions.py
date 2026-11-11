@@ -96,6 +96,23 @@ class ProviderAuthError(ProviderError):
         self.code = f"PROVIDER_{provider.upper()}_AUTH_ERROR"
 
 
+class ProviderCredentialRefusedError(ProviderError, RuntimeError):
+    """Runtime credential policy refused acquisition.
+
+    A RuntimeError subclass keeps existing CLI/guard callers that fail closed on
+    RuntimeError working; ProviderError carries the machine-readable capability so
+    fetch boundaries can surface the refusal instead of degrading to empty data.
+    """
+
+    def __init__(self, message: str, provider: str = "vnstock", **kwargs):
+        super().__init__(
+            message=message,
+            provider=provider,
+            capability=kwargs.pop("capability", "provider_credentials_unavailable"),
+            **kwargs,
+        )
+
+
 class ProviderNotFoundError(ProviderError):
     """Provider returned 404."""
     

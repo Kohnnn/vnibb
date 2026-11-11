@@ -48,7 +48,7 @@ from vnibb.core.price_units import (
     persisted_price_source,
 )
 from vnibb.models.stock import Stock, StockPrice
-from vnibb.providers.vnstock.runtime import get_quote_class, validate_source
+from vnibb.providers import market_data
 
 logger = logging.getLogger("ohlcv_backfill")
 
@@ -133,10 +133,9 @@ def _fetch_vci(symbol: str, start_date: date, end_date: date) -> list[dict[str, 
     """Fetch daily OHLCV from free VCI, returning None when unavailable."""
 
     try:
-        Quote = get_quote_class()
-        source = validate_source("VCI")
-        quote = Quote(symbol=symbol, source=source)
-        df = quote.history(
+        source = market_data.validate_source("VCI")
+        df = market_data.history(
+            symbol, source,
             start=start_date.isoformat(),
             end=end_date.isoformat(),
             interval="1D",
@@ -144,7 +143,7 @@ def _fetch_vci(symbol: str, start_date: date, end_date: date) -> list[dict[str, 
         if df is None or len(df) == 0:
             return []
         import pandas as pd
-        df = pd.DataFrame(history_price_records(df, symbol=symbol, source=source, provider=quote, asset_type=getattr(quote, "asset_type", None)), index=df.index)
+        df = pd.DataFrame(history_price_records(df, symbol=symbol, source=source), index=df.index)
         if (df["price_unit"] == "unknown").any():
             return None
         df = df.rename(columns={c: c.lower() for c in df.columns})

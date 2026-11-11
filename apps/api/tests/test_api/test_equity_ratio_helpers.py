@@ -1,3 +1,4 @@
+import math
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -21,6 +22,57 @@ from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.financials import FinancialStatementData
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preferred", [float("nan"), float("inf"), float("-inf"), 0.0, 12.0])
+@pytest.mark.parametrize("mode,fallback", [
+    ("enriched", False), ("enriched", True),
+    ("skipped", False), ("skipped", True), ("vietcap", False),
+])
+async def test_ratio_endpoint_preserves_finite_growth_when_preferred_is_nonfinite(
+    monkeypatch, test_db, client, preferred, mode, fallback,
+):
+    from vnibb.api.v1 import equity
+    from vnibb.core import cache
+    from vnibb.models.trading import FinancialRatio
+
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    if fallback:
+        test_db.add(FinancialRatio(
+            id=905, symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+            source="fixture", pe_ratio=10.0, revenue_growth=7.0, earnings_growth=9.0,
+            raw_data={"ratio_units": {"revenue_growth": "percent", "earnings_growth": "percent"}},
+        ))
+    await test_db.commit()
+    if mode == "skipped" and not test_db.in_transaction():
+        await test_db.begin()
+
+    row = FinancialRatioData(
+        symbol="VNM", period="2024", pe=11.0,
+        revenue_growth=preferred, earnings_growth=preferred,
+        ratio_units={"revenue_growth": "percent", "earnings_growth": "percent"},
+        provider_evidence=[{"source": "vietcap"}] if mode == "vietcap" else [],
+    )
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(
+        return_value=[] if mode == "enriched" else [row],
+    ))
+    monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=20250))
+    monkeypatch.setattr(equity, "_load_ratio_statement_support", AsyncMock(
+        return_value={"income": [], "balance": [], "cashflow": []},
+        side_effect=RuntimeError("offline") if mode == "skipped" else None,
+    ))
+    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", AsyncMock(return_value=[row]))
+    if mode == "skipped":
+        monkeypatch.setattr(equity, "_enrich_missing_ratio_metrics", AsyncMock(side_effect=AssertionError("unexpected enrichment")))
+
+    response = await client.get("/api/v1/equity/VNM/ratios?period=year")
+
+    assert response.status_code == 200
+    result = response.json()["data"][0]
+    expected = (preferred, preferred) if math.isfinite(preferred) else ((7.0, 9.0) if fallback else (None, None))
+    assert (result["revenue_growth"], result["earnings_growth"]) == expected
+    assert result["pe"] == 11.0
 
 
 @pytest.mark.asyncio
@@ -90,6 +142,77 @@ async def test_ratio_endpoint_preserves_declared_dividend_yield_without_scale_gu
     assert response.data[0].dividend_yield == expected
     assert response.data[0].pe == 14.64
     assert {"dividendYield": value} in response.data[0].provider_evidence
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reported_revenue,reported_earnings,prior_revenue,prior_earnings,prior_unit,expected_revenue,expected_earnings",
+    [
+        (7.0, 9.0, 1000.0, 120.0, "VND", 7.0, 9.0),
+        (0.0, 0.0, 1000.0, 120.0, "VND", 0.0, 0.0),
+        (7.0, None, 1000.0, 120.0, "VND", 7.0, 25.0),
+        (None, 9.0, 1000.0, 120.0, "VND", 20.0, 9.0),
+        (None, None, 1000.0, 120.0, "VND", 20.0, 25.0),
+        (None, None, 1200.0, 150.0, "VND", 0.0, 0.0),
+        (None, None, None, None, "VND", None, None),
+        (None, None, 1000.0, 120.0, None, None, None),
+        (None, None, 0.0, 0.0, "VND", None, None),
+        (float("nan"), 9.0, 1000.0, 120.0, "VND", 20.0, 9.0),
+        (float("inf"), 9.0, 1000.0, 120.0, "VND", 20.0, 9.0),
+        (9.0, float("-inf"), 1000.0, 120.0, "VND", 9.0, 25.0),
+        (float("nan"), float("inf"), None, None, "VND", None, None),
+    ],
+)
+async def test_ratio_endpoint_prefers_reported_growth_and_only_derives_admitted_missing_values(
+    monkeypatch, test_db, client, reported_revenue, reported_earnings, prior_revenue,
+    prior_earnings, prior_unit, expected_revenue, expected_earnings,
+):
+    from vnibb.api.v1 import equity
+    from vnibb.core import cache
+    from vnibb.models.trading import FinancialRatio
+
+    monkeypatch.setattr(cache, "_memory_cache", {})
+    test_db.add(FinancialRatio(
+        id=904, symbol="VNM", period="2024", period_type="year", fiscal_year=2024,
+        source="vnstock", pe_ratio=10.0, revenue_growth=reported_revenue,
+        earnings_growth=reported_earnings,
+        raw_data={"ratio_units": {"revenue_growth": "percent", "earnings_growth": "percent"}},
+    ))
+    for year, revenue, net_income, value_unit in (
+        (2024, 1200.0, 150.0, "VND"),
+        (2023, prior_revenue, prior_earnings, prior_unit),
+    ):
+        statement = FinancialStatementData(
+            symbol="VNM", period=str(year), fiscal_year=year, statement_type="income",
+            source="fixture", currency="VND", value_unit=value_unit,
+            consolidation_basis="Consolidated", flow_basis="annual",
+            revenue=revenue, net_income=net_income,
+            unit_metadata={name: {"source_unit": "VND", "value_unit": "VND"}
+                           for name in ("revenue", "net_income")},
+        )
+        test_db.add(IncomeStatement(
+            id=year, symbol="VNM", period=str(year), period_type="year", fiscal_year=year,
+            source="fixture", revenue=revenue, net_income=net_income,
+            raw_data={"_financial_lineage": {
+                "value_unit": value_unit, "canonical_data": statement.model_dump(mode="json"),
+            }},
+        ))
+    await test_db.commit()
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[]))
+    provider_fetch = AsyncMock(side_effect=AssertionError("unexpected provider call"))
+    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider_fetch)
+
+    response = await client.get("/api/v1/equity/VNM/ratios?period=year")
+
+    assert response.status_code == 200
+    provider_fetch.assert_not_awaited()
+    row = next(item for item in response.json()["data"] if item["period"] == "2024")
+    assert row["revenue_growth"] == expected_revenue
+    assert row["earnings_growth"] == expected_earnings
+    if expected_revenue is not None:
+        assert row["ratio_units"]["revenue_growth"] == "percent"
+    if expected_earnings is not None:
+        assert row["ratio_units"]["earnings_growth"] == "percent"
 
 
 @pytest.mark.asyncio

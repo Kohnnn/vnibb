@@ -122,6 +122,8 @@ def history_price_records(
     actual_source = frame_fields.get("source") or attrs.get("source")
     if not isinstance(actual_source, str) and provider is not None and not isinstance(provider, str):
         actual_source = getattr(provider, "source", None)
+    elif not isinstance(actual_source, str):
+        actual_source = attrs.get("provider_source")
     actual_source = actual_source.upper() if isinstance(actual_source, str) else source.upper()
     if isinstance(provider, str):
         module = provider

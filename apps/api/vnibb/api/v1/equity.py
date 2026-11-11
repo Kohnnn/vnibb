@@ -24,7 +24,11 @@ from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory, get_db
-from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
+from vnibb.core.exceptions import (
+    ProviderCredentialRefusedError,
+    ProviderError,
+    ProviderTimeoutError,
+)
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
@@ -367,6 +371,8 @@ async def _load_financial_statement_fallback(
     statement_type: str,
     period: str,
     limit: int,
+    *,
+    source: str | None = None,
 ) -> list[FinancialStatementData]:
     """Read financial statements from local DB when provider data is unavailable."""
     symbol_upper = symbol.upper()
@@ -401,9 +407,12 @@ async def _load_financial_statement_fallback(
         )
         .order_by(model.fiscal_year.desc(), model.fiscal_quarter.desc())
     )
+    if source is not None:
+        stmt = stmt.where(model.source == source)
     if quarter_filter is not None:
         stmt = stmt.where(model.fiscal_quarter == quarter_filter)
-    stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
+    if source is None:
+        stmt = stmt.limit(max(limit, 8) if period_upper == "TTM" else limit)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -1062,6 +1071,74 @@ def _sort_financial_statement_rows(
     rows: list[FinancialStatementData],
 ) -> list[FinancialStatementData]:
     return sorted(rows, key=lambda item: _statement_period_sort_key(item.period))
+
+
+def _select_retained_financial_rows(
+    primary: list[FinancialStatementData], secondary: list[FinancialStatementData], limit: int,
+) -> list[FinancialStatementData]:
+    # ponytail: compare revisions only when a verified fiscal-revision contract exists.
+    def valid_identity(row: FinancialStatementData) -> bool:
+        return bool(re.fullmatch(r"20\d{2}", str(row.period))) and (
+            row.fiscal_year is None or row.fiscal_year == int(row.period)
+        ) and row.fiscal_quarter is None
+
+    def same_basis(first: FinancialStatementData, second: FinancialStatementData) -> bool:
+        return (
+            first.symbol.upper() == second.symbol.upper()
+            and first.statement_type == second.statement_type
+            and first.currency == second.currency == "VND"
+            and first.value_unit == second.value_unit == "VND"
+            and first.consolidation_basis in {"consolidated", "separate"}
+            and first.consolidation_basis == second.consolidation_basis
+            and first.flow_basis == second.flow_basis
+            and first.aggregation_basis == second.aggregation_basis
+        )
+
+    def withheld(row: FinancialStatementData, reason: str) -> FinancialStatementData:
+        return admit_statement_rows([row.model_copy(update={"unavailable_reason": reason})], "year")[0]
+
+    selected = {_financial_statement_identity(row): row for row in primary}
+    for row in secondary:
+        identity = _financial_statement_identity(row)
+        existing = selected.get(identity)
+        if existing is not None and existing.source != row.source:
+            if not same_basis(existing, row) or existing.source_periods != row.source_periods:
+                reason = "unverified_financial_basis"
+            elif existing.unavailable_reason or row.unavailable_reason:
+                reason = existing.unavailable_reason or row.unavailable_reason
+            else:
+                conflicting = any(
+                    isinstance(getattr(existing, name, None), (int, float))
+                    and isinstance(getattr(row, name, None), (int, float))
+                    and getattr(existing, name) != getattr(row, name)
+                    for name in FinancialStatementData.model_fields
+                    if name not in {"fiscal_year", "fiscal_quarter"}
+                )
+                reason = "conflicting_source_observations" if conflicting else "unverified_financial_revision"
+            selected[identity] = withheld(existing, reason)
+        elif existing is None:
+            references = [candidate for candidate in primary if valid_identity(candidate)]
+            if references and valid_identity(row):
+                reference = max(references, key=lambda candidate: int(candidate.period))
+                if not same_basis(reference, row):
+                    if int(row.period) > int(reference.period):
+                        row = withheld(row, row.unavailable_reason or "unverified_financial_basis")
+                    elif int(row.period) < int(reference.period):
+                        current = selected[_financial_statement_identity(reference)]
+                        if not current.unavailable_reason and not row.unavailable_reason and all(
+                            any(isinstance(getattr(candidate, name), (int, float))
+                                for name in FinancialStatementData.model_fields
+                                if name not in {"fiscal_year", "fiscal_quarter"})
+                            for candidate in (current, row)
+                        ):
+                            selected[_financial_statement_identity(reference)] = withheld(
+                                current, "unverified_financial_basis"
+                            )
+            selected[identity] = row
+    rows = list(selected.values())
+    if primary and secondary:
+        rows = [row for row in rows if valid_identity(row)]
+    return _sort_financial_statement_rows(rows)[-limit:]
 
 
 async def _is_bank_like_symbol(db: AsyncSession, symbol: str) -> bool:
@@ -4189,10 +4266,16 @@ async def _enrich_missing_ratio_metrics(
             item.provision_coverage = (abs(loan_loss_reserve) / gross_loans) * 100
 
         prev_revenue, prev_net_income, _prev_eps = prev_income_values.get(key, (None, None, None))
-        if revenue is not None and prev_revenue is not None:
+        # Treat nonfinite reported growth as unavailable so admitted statements can fill it.
+        if item.revenue_growth is not None and not math.isfinite(item.revenue_growth):
+            item.revenue_growth = None
+        if item.earnings_growth is not None and not math.isfinite(item.earnings_growth):
+            item.earnings_growth = None
+        # Reported values win: statements only fill a growth the ratio source did not report.
+        if item.revenue_growth is None and revenue is not None and prev_revenue is not None:
             item.revenue_growth = _growth_rate(revenue, prev_revenue)
             item.ratio_units["revenue_growth"] = "percent"
-        if net_income is not None and prev_net_income is not None:
+        if item.earnings_growth is None and net_income is not None and prev_net_income is not None:
             item.earnings_growth = _growth_rate(net_income, prev_net_income)
             item.ratio_units["earnings_growth"] = "percent"
 
@@ -4362,7 +4445,11 @@ async def get_historical_prices(
             )
         except Exception as exc:
             provider_error = exc
-            warnings.append("provider resolution failed; retained trusted partial rows")
+            warnings.append(
+                "provider credentials unavailable; trust stored rows only"
+                if isinstance(exc, ProviderCredentialRefusedError)
+                else "provider resolution failed; retained trusted partial rows"
+            )
             logger.warning(
                 "Historical endpoint provider failed (symbol=%s interval=%s): %s",
                 symbol_upper,
@@ -4394,11 +4481,17 @@ async def get_historical_prices(
             ),
         )
 
-    await _schedule_critical_reinforcement(
-        symbol=symbol_upper,
-        endpoint="equity.historical",
-        domains=["prices"],
-    )
+    if isinstance(provider_error, ProviderCredentialRefusedError):
+        warnings.append(
+            "provider credentials unavailable; reinforcement not scheduled until the runtime credential policy allows acquisition"
+        )
+    else:
+        await _schedule_critical_reinforcement(
+            symbol=symbol_upper,
+            endpoint="equity.historical",
+            domains=["prices"],
+        )
+
     empty_meta = _historical_resolution_meta(
         [],
         adjustment_mode,
@@ -5131,6 +5224,17 @@ async def get_financials(
                 )
                 mongo_data = _merge_financial_statement_rows(acquired, mongo_data)
         if mongo_data and all(row.source == "vietcap" for row in mongo_data):
+            if str(period).upper() in {"YEAR", "FY"} and db is not None:
+                try:
+                    retained = await _load_financial_statement_fallback(
+                        db=db, symbol=symbol, statement_type=statement_type, period=period, limit=limit, source="VCI",
+                    )
+                except Exception as exc:
+                    primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                    mongo_data = [row.model_copy(update={"unavailable_reason": "financial_source_comparison_unavailable"})
+                                  for row in mongo_data]
+                else:
+                    mongo_data = _select_retained_financial_rows(mongo_data, retained, limit)
             return StandardResponse(
                 data=admit_statement_rows(mongo_data, period), meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
                 error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
@@ -6717,6 +6821,11 @@ async def get_financial_ratios(
         # untouched until the single final admission pass.
         from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
         for item in mongo_ratio_rows:
+            for metric in ("revenue_growth", "earnings_growth"):
+                value = getattr(item, metric)
+                if value is not None and not math.isfinite(value):
+                    setattr(item, metric, None)
+                    item.ratio_units.pop(metric, None)
             for metric in PERCENT_RATIO_FIELDS:
                 if item.ratio_units.get(metric) != "percent":
                     if getattr(item, metric) is not None:
@@ -6812,6 +6921,14 @@ async def get_financial_ratios(
     elif primary_error is not None:
         acquisition_error = f"IQ financial source unavailable: {primary_error}"
 
+    for rows in (provider_ratio_rows, db_ratio_rows):
+        for item in rows:
+            for metric in ("revenue_growth", "earnings_growth"):
+                value = getattr(item, metric)
+                if value is not None and not math.isfinite(value):
+                    setattr(item, metric, None)
+                    item.ratio_units.pop(metric, None)
+
     data = _merge_ratio_row_collections(
         provider_ratio_rows,
         _merge_ratio_row_collections(mongo_ratio_rows, db_ratio_rows),
@@ -6892,7 +7009,6 @@ async def get_financial_ratios(
 
 
 @router.get("/{symbol}/ratios/history", response_model=StandardResponse[List[dict[str, Any]]])
-@cached(ttl=86400, key_prefix="ratios_history_v7_provider_deadline")
 async def get_ratio_history(
     symbol: str,
     ratios: str = Query("pe,pb,ps", description="Comma-separated ratio keys"),
@@ -6908,7 +7024,7 @@ async def get_ratio_history(
     try:
         data = await _load_mongo_financial_ratio_rows(symbol.upper(), period, limit=limit)
     except Exception as exc:
-        stored_errors.append(f"Mongo: {exc}")
+        stored_errors.append("Mongo")
         logger.warning("Stored Mongo ratio history unavailable for %s: %s", symbol.upper(), exc)
         data = []
     if not data:
@@ -6932,25 +7048,20 @@ async def get_ratio_history(
         except Exception as exc:
             if not release_read:
                 raise
-            stored_errors.append(f"SQL: {exc}")
+            stored_errors.append("SQL")
             logger.warning("Stored SQL ratio history unavailable for %s: %s", symbol.upper(), exc)
         finally:
             if release_read and db.in_transaction():
                 await db.rollback()
+    if not data and stored_errors:
+        return StandardResponse(
+            data=[], meta=MetaData(count=0),
+            error="Financial ratio history stored source unavailable: " + "; ".join(stored_errors),
+        )
+    warnings = ["Retained ratio history freshness and completeness are unverified."]
+    if stored_errors:
+        warnings.append("Retained ratio history stored source unavailable: " + "; ".join(stored_errors))
     try:
-        if not data:
-            data = await asyncio.wait_for(
-                VnstockFinancialRatiosFetcher.fetch(
-                    FinancialRatiosQueryParams(symbol=symbol.upper(), period=period)
-                ),
-                timeout=min(10, _provider_timeout_budget()),
-            )
-        if not data:
-            return StandardResponse(
-                data=[], meta=MetaData(count=0),
-                error=("Financial ratio history stored source unavailable: " + "; ".join(stored_errors))
-                if stored_errors else None,
-            )
         rows: List[dict[str, Any]] = []
         for item in data:
             # Admit through the shared site so `fcf_yield`/`ocf_sales` cannot
@@ -6965,14 +7076,12 @@ async def get_ratio_history(
             rows.append(row)
 
         rows = sorted(rows, key=lambda r: _ratio_period_sort_key(str(r.get("period", ""))))
-        return StandardResponse(data=rows[:limit], meta=MetaData(count=min(len(rows), limit)))
-    except Exception as exc:
-        error = (
-            "Financial ratio history provider deadline exceeded"
-            if isinstance(exc, (TimeoutError, ProviderTimeoutError))
-            else f"Financial ratio history provider unavailable: {exc}"
+        return StandardResponse(
+            data=rows[:limit], meta=MetaData(count=min(len(rows), limit), warnings=warnings),
         )
-        return StandardResponse(data=[], error=error)
+    except Exception as exc:
+        logger.warning("Stored ratio history could not be processed for %s: %s", symbol.upper(), exc)
+        return StandardResponse(data=[], error="Financial ratio history retained data unavailable")
 
 
 @router.get("/{symbol}/metrics/history", response_model=MetricsHistoryResponse)

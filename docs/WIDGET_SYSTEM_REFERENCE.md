@@ -35,6 +35,23 @@ Layout note:
 - Widget-library size badges are derived from that contract so the displayed size matches actual widget insertion behavior.
 - `widgetDefinitions.ts` and `WidgetRegistry.ts` keep mirrored defaults for discoverability, but the layout contract remains the operative source of truth.
 
+### Responsive workspace
+
+- Widget contents shrink to their panel, with keyboard-focusable local scroll regions for long content. Financial tables scroll inside their widget rather than widening the workspace; metric columns respond to widget width.
+- Breakpoint changes apply without animated position/size interpolation, which could make otherwise separate widgets cross over each other. Responsive layouts remain view-only; saved desktop placement is unchanged, and Auto-fit remains an explicit action.
+- The compact header keeps search, display settings, dashboard actions and alerts available. VniAgent and layout actions remain in **Dashboard actions** on narrow screens. The control group wraps to a second short row only when needed, including a 320 px signed-in layout.
+- Ticker search opens outside the compact widget-controls panel and stays within the viewport. Escape closes ticker search first, then the parent controls panel.
+- The compact Ticker Info row keeps the quote and its freshness on one keyboard-scrollable line, while a separately focusable region scrolls vertically. The clipping repair belongs to #236 and #200, not the unrelated closed Price Chart header issue #209.
+- The mobile navigation backdrop and drawer retain `z-50`, above the `z-40` navigation trigger and sidebar overlay. The later drawer panel paints above its same-layer backdrop, while nested ticker and Matrix portals use their higher existing layers; lowering only the backdrop would leave `z-40` peers able to paint above it.
+- The in-app wordmark uses the unchanged master SVG as a transparent, theme-ink mask. Fixed-channel artwork (README, app icons, email and social cards) retains its white field.
+- Market Overview index cards use panel-width auto-fit columns. Volume, high/low and each index's own observation date wrap without forcing a wider card; narrow panels retain all fields.
+- Peer Comparison wraps symbol and action groups independently. Table/chart and heatmap toggles expose their active state, all icon actions have names, and the metric column stays pinned while numeric columns scroll locally. No comparison columns are hidden.
+- Active tabs reveal within their own horizontal strip after tab changes and viewport resizes, without scrolling the page. Manage tabs remains available on phones.
+- Maximized widgets use the shared dialog focus trap: background focus returns inside, Tab wraps across controls and the native iframe tab stop, and closing restores the maximize button. Firefox ignores a frame focus issued inside the keydown, so that wrap retries once on the next task while the dialog is still topmost. Keys pressed inside an embedded frame and the browser's own chrome traversal never reach this document's keydown, so they remain browser-owned. The original card is inert while maximized; its single live content host moves into the modal.
+- The mobile Research Matrix inspector joins the same dialog stack when it portals outside a maximized widget. Escape closes the inspector first and restores its opener; the desktop inline inspector remains non-modal.
+
+Reference decisions: [OpenBB parameter positioning](https://docs.openbb.co/workspace/developers/widget-parameters/parameter-positioning) allows parameter controls to occupy multiple rows; [Chartrow holdings](https://chartrow.com/quote/arkk/holdings) keeps identity visible in a locally scrolling table, and its [top-performers views](https://chartrow.com/top-performers#view=drawdown&p=ytd) disclose secondary controls. This repair adopts contained control groups and pinned identity within existing views, not a new density setting, hidden financial columns or additional chart types.
+
 ## News Association Labels
 
 Company and related-news ranking is rule-based, not a calibrated probability. The UI shows the association reason and `rank N/100`; peer and sector matches are indirect, and a provider-related symbol is provider metadata rather than independent verification.
@@ -116,12 +133,28 @@ original source key remain non-comparable. Missing frozen references report
 Bank regulatory cells remain explicitly unavailable without the applicable
 circular/version, method, perimeter, observation date and reported/derived basis;
 accounting leverage or deposits never substitute for regulatory ratios.
+Insurer premium, claims and investment-income fields, and securities brokerage,
+margin-lending and investment-income fields, remain unavailable when only a raw
+field name is retained. Admission needs the original observation and its sector,
+business-line and gross/net or earned/written basis where applicable; a matching
+raw key alone cannot establish those definitions.
 
 Snapshots are owner-bound and immutable in the existing PostgreSQL `app_kv` store,
 one key per snapshot, with append-only revision-bound review events and separate
 revocation. Snapshot IDs are references, not grants: every open or handoff rechecks
 ownership and revocation, and cross-owner or revoked references disclose nothing.
 Revocation blocks future reads; it cannot retract data already exported.
+Historical non-synthetic snapshots containing these unverified non-null sector
+metrics are quarantined, not rewritten. An owned full snapshot, review or history
+page containing one returns `409 matrix_snapshot_evidence_unverified`; history
+identifies affected and unaffected snapshot IDs. Selection and evidence for safe
+cells remain usable unless their frozen evidence closure exposes an affected
+value. The owner may explicitly create a new revision under the same Matrix ID or
+revoke the old snapshot. Previously exported data cannot be retracted. Matrix-v1
+has no typed original sector-observation and basis proof, so it cannot currently
+admit such historical values; future admission requires an explicit typed contract.
+The retained sector findings are in `docs/research/matrix-insurer-evidence.md` and
+`docs/research/matrix-securities-evidence.md`.
 
 ### Handoff
 

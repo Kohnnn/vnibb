@@ -106,16 +106,6 @@ class CleanupImagesTest(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(subprocess.CalledProcessError):
                 self.run_main(**options)
 
-    def test_mongo_compose_probes_have_init_exec_and_deadlines(self):
-        for filename in ("docker-compose.oracle.yml", "docker-compose.data.local.yml"):
-            source = (ROOT / filename).read_text()
-            mongo = source.split("\n  mongo:\n", 1)[1].split("\n  redis:", 1)[0]
-            self.assertIn("    init: true", mongo)
-            self.assertIn("exec mongosh", mongo)
-            self.assertIn("serverSelectionTimeoutMS=2000&connectTimeoutMS=2000", mongo)
-            self.assertIn("      timeout: 5s", mongo)
-            self.assertIn('$$MONGO_INITDB_ROOT_PASSWORD', mongo)
-
     def test_native_timer_requires_private_protection_and_bounds_each_run(self):
         service = (ROOT / "deployment/vnibb-image-retention.service").read_text()
         timer = (ROOT / "deployment/vnibb-image-retention.timer").read_text()

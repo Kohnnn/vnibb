@@ -355,10 +355,8 @@ async def test_ratio_history_admits_fraction_metrics_from_stored_mongo_rows(clie
         ),
     ]
     monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=stored))
-    monkeypatch.setattr(
-        equity.VnstockFinancialRatiosFetcher, "fetch",
-        AsyncMock(side_effect=AssertionError("stored history must bypass provider")),
-    )
+    provider = AsyncMock(side_effect=AssertionError("stored history must bypass provider"))
+    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider)
 
     response = await client.get(
         "/api/v1/equity/VNM/ratios/history?period=year&ratios=ocf_sales,fcf_yield"
@@ -372,28 +370,78 @@ async def test_ratio_history_admits_fraction_metrics_from_stored_mongo_rows(clie
     assert rows["2023"]["fcf_yield"] is None
     assert rows["2022"]["ocf_sales"] == pytest.approx(17.5)
     assert rows["2022"]["fcf_yield"] == pytest.approx(5.2)
+    assert response.json()["error"] is None
+    assert any("unverified" in warning.lower() for warning in response.json()["meta"]["warnings"])
+    provider.assert_not_awaited()
+
 
 @pytest.mark.asyncio
-async def test_ratio_history_deadline_is_unavailable_not_empty_success(test_db, monkeypatch):
-    async def stalled_provider(*args, **kwargs):
-        assert not test_db.in_transaction()
-        await asyncio.Event().wait()
+async def test_ratio_history_http_empty_then_refresh_reads_retained_store(client, monkeypatch):
+    from vnibb.core import cache
 
-    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[]))
-    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", stalled_provider)
-    monkeypatch.setattr(equity, "_provider_timeout_budget", lambda: 0.01)
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: False)
+    mongo = AsyncMock(side_effect=[
+        [],
+        [FinancialRatioData(symbol="VNM", period="2025", pe=0.0)],
+        [FinancialRatioData(symbol="VNM", period="2025", pe=4.0)],
+    ])
+    provider = AsyncMock(return_value=[])
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", mongo)
+    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider)
 
-    response = await equity.get_ratio_history.__wrapped__(
-        "VNM", ratios="roe,pe", period="quarter", limit=20, db=test_db,
+    first = await client.get("/api/v1/equity/VNM/ratios/history?period=year&ratios=pe")
+    second = await client.get("/api/v1/equity/VNM/ratios/history?period=year&ratios=pe")
+    third = await client.get("/api/v1/equity/VNM/ratios/history?period=year&ratios=pe")
+
+    assert first.status_code == second.status_code == third.status_code == 200
+    assert first.json()["data"] == []
+    assert first.json()["error"] is None
+    assert first.json()["meta"]["count"] == 0
+    assert second.json()["data"] == [{"period": "2025", "pe": 0.0}]
+    assert second.json()["error"] is None
+    assert third.json()["data"] == [{"period": "2025", "pe": 4.0}]
+    assert third.json()["error"] is None
+    assert all(
+        "unverified" in response.json()["meta"]["warnings"][0].lower()
+        for response in (first, second, third)
     )
+    assert mongo.await_count == 3
+    provider.assert_not_awaited()
 
-    assert response.data == []
-    assert response.error == "Financial ratio history provider deadline exceeded"
+
+@pytest.mark.asyncio
+async def test_ratio_history_http_ignores_provider_era_cache(client, monkeypatch):
+    from vnibb.core import cache
+
+    monkeypatch.setattr(cache.settings, "environment", "development")
+    monkeypatch.setattr(cache, "_redis_cache_enabled", lambda: True)
+    monkeypatch.setattr(cache.redis_client, "_client", object())
+    cached = AsyncMock(return_value={
+        "data": [{"period": "2020", "pe": 99.0}], "meta": {"count": 1}, "error": None,
+    })
+    cache_write = AsyncMock()
+    monkeypatch.setattr(cache.redis_client, "get_json", cached)
+    monkeypatch.setattr(cache.redis_client, "set_json", cache_write)
+    monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[
+        FinancialRatioData(symbol="VNM", period="2025", pe=0.0),
+    ]))
+    provider = AsyncMock(side_effect=AssertionError("history must not acquire data"))
+    monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider)
+
+    response = await client.get("/api/v1/equity/VNM/ratios/history?period=year&ratios=pe")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == [{"period": "2025", "pe": 0.0}]
+    assert response.json()["error"] is None
+    cached.assert_not_awaited()
+    cache_write.assert_not_awaited()
+    provider.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed_store", ["mongo", "sql", "both"])
-async def test_ratio_history_http_store_failure_with_empty_provider_is_unavailable(
+async def test_ratio_history_http_store_failure_without_rows_is_unavailable(
     client, test_db, monkeypatch, failed_store,
 ):
     mongo = AsyncMock(return_value=[])
@@ -401,8 +449,14 @@ async def test_ratio_history_http_store_failure_with_empty_provider_is_unavailab
         mongo.side_effect = TimeoutError("Mongo read deadline")
     monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", mongo)
     if failed_store in {"sql", "both"}:
-        monkeypatch.setattr(test_db, "execute", AsyncMock(side_effect=TimeoutError("SQL read deadline")))
-    provider = AsyncMock(return_value=[])
+        execute = test_db.execute
+
+        async def failed_read(*args, **kwargs):
+            await execute(*args, **kwargs)
+            raise TimeoutError("SQL read deadline")
+
+        monkeypatch.setattr(test_db, "execute", failed_read)
+    provider = AsyncMock(side_effect=AssertionError("history must not acquire data"))
     monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider)
 
     response = await client.get("/api/v1/equity/VNM/ratios/history?period=year")
@@ -411,14 +465,15 @@ async def test_ratio_history_http_store_failure_with_empty_provider_is_unavailab
     assert response.json()["data"] == []
     assert "stored source unavailable" in response.json()["error"].lower()
     if failed_store in {"mongo", "both"}:
-        assert "Mongo read deadline" in response.json()["error"]
+        assert "Mongo" in response.json()["error"]
     if failed_store in {"sql", "both"}:
-        assert "SQL read deadline" in response.json()["error"]
-    provider.assert_awaited_once()
+        assert "SQL" in response.json()["error"]
+    assert not test_db.in_transaction()
+    provider.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("endpoint", ["ratios", "financial-ratios", "ratios/history"])
+@pytest.mark.parametrize("endpoint", ["ratios", "financial-ratios"])
 @pytest.mark.parametrize("retained", [False, True])
 @pytest.mark.parametrize("outcome", ["slow", "busy", "provider_error", "provider_timeout", "quota", "invalid_period", "empty"])
 async def test_ratio_http_provider_failure_preserves_stored_evidence(
@@ -427,6 +482,7 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
     from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
     from vnibb.providers.vnstock import runtime
     from types import SimpleNamespace
+    from vnibb.core import financial_lane
 
     class QuotaFinance:
         def ratio(self, **kwargs):
@@ -466,7 +522,7 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
         return kwargs["rows"]
 
     provider = AsyncMock(side_effect=provider_operation)
-    monkeypatch.setattr(runtime, "run_financial_provider", provider)
+    monkeypatch.setattr(financial_lane, "run_financial", provider)
     monkeypatch.setattr(equity, "_provider_timeout_budget", lambda: 0.01)
     monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[]))
     monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=20260))
@@ -480,8 +536,7 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
 
     assert response.status_code == 200
     payload = response.json()
-    stored_history = retained and endpoint == "ratios/history"
-    if outcome == "empty" or stored_history:
+    if outcome == "empty":
         assert payload["error"] is None
     else:
         assert payload["error"]
@@ -492,15 +547,12 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
         assert payload["meta"].get("last_data_date") is None
     else:
         assert payload["data"] == []
-    if stored_history:
-        provider.assert_not_awaited()
-    else:
-        provider.assert_awaited_once()
-        if outcome == "slow":
-            assert provider_cancelled.is_set()
-            assert "deadline exceeded" in payload["error"].lower()
+    provider.assert_awaited_once()
+    if outcome == "slow":
+        assert provider_cancelled.is_set()
+        assert "deadline exceeded" in payload["error"].lower()
 
-    if retained and not stored_history:
+    if retained:
         stored = await client.get("/api/v1/equity/VNM/ratios/history?ratios=pe&period=year")
         assert stored.json()["data"] == [{"period": "2025", "pe": 12.0}]
         assert stored.json()["error"] is None
@@ -702,8 +754,7 @@ async def test_historical_sql_bypasses_provider_preserving_price_basis(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("endpoint", ["events", "ratios"])
-async def test_owned_stored_read_failure_recovers_with_provider(test_db, monkeypatch, endpoint):
+async def test_owned_stored_read_failure_recovers_with_provider(test_db, monkeypatch):
     execute = test_db.execute
 
     async def failed_read(*args, **kwargs):
@@ -712,22 +763,12 @@ async def test_owned_stored_read_failure_recovers_with_provider(test_db, monkeyp
 
     async def healthy_provider(*args, **kwargs):
         assert not test_db.in_transaction()
-        if endpoint == "events":
-            return [{"symbol": "VNM", "event_type": "meeting"}]
-        return [FinancialRatioData(symbol="VNM", period="2025", pe=12)]
+        return [{"symbol": "VNM", "event_type": "meeting"}]
 
     monkeypatch.setattr(test_db, "execute", failed_read)
-    if endpoint == "events":
-        monkeypatch.setattr(equity.VnstockCompanyEventsFetcher, "fetch", healthy_provider)
-        response = await equity.get_company_events.__wrapped__("VNM", limit=5, db=test_db)
-        assert response.data[0]["event_type"] == "meeting"
-    else:
-        monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(side_effect=TimeoutError("Mongo deadline")))
-        monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", healthy_provider)
-        response = await equity.get_ratio_history.__wrapped__(
-            "VNM", ratios="pe", period="year", limit=5, db=test_db,
-        )
-        assert response.data == [{"period": "2025", "pe": 12}]
+    monkeypatch.setattr(equity.VnstockCompanyEventsFetcher, "fetch", healthy_provider)
+    response = await equity.get_company_events.__wrapped__("VNM", limit=5, db=test_db)
+    assert response.data[0]["event_type"] == "meeting"
     assert response.error is None
 
 
@@ -747,7 +788,7 @@ async def test_borrowed_stored_read_failure_propagates(test_db, monkeypatch, end
         if endpoint == "events":
             await equity.get_company_events.__wrapped__("VNM", limit=5, db=test_db)
         else:
-            await equity.get_ratio_history.__wrapped__(
+            await equity.get_ratio_history(
                 "VNM", ratios="pe", period="year", limit=5, db=test_db,
             )
 
@@ -757,7 +798,7 @@ async def test_borrowed_stored_read_failure_propagates(test_db, monkeypatch, end
 
 
 @pytest.mark.asyncio
-async def test_ratio_mongo_failure_retains_healthy_sql_source(test_db, monkeypatch):
+async def test_ratio_mongo_failure_retains_healthy_sql_source(client, test_db, monkeypatch):
     test_db.add(FinancialRatio(
         id=1, symbol="VNM", period="2025", period_type="year", fiscal_year=2025,
         pe_ratio=12,
@@ -767,9 +808,104 @@ async def test_ratio_mongo_failure_retains_healthy_sql_source(test_db, monkeypat
     monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(side_effect=TimeoutError("Mongo deadline")))
     monkeypatch.setattr(equity.VnstockFinancialRatiosFetcher, "fetch", provider)
 
-    response = await equity.get_ratio_history.__wrapped__(
-        "VNM", ratios="pe", period="year", limit=5, db=test_db,
-    )
+    response = await client.get("/api/v1/equity/VNM/ratios/history?ratios=pe&period=year")
 
-    assert response.data == [{"period": "2025", "pe": 12}]
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"] == [{"period": "2025", "pe": 12}]
+    assert payload["error"] is None
+    assert any("unverified" in warning.lower() for warning in payload["meta"]["warnings"])
+    assert any("Mongo" in warning for warning in payload["meta"]["warnings"])
     provider.assert_not_awaited()
+
+
+@pytest.fixture
+def isolated_vnstock_breaker(monkeypatch):
+    from vnibb.core.retry import vnstock_cb
+
+    monkeypatch.setattr(vnstock_cb, "failures", 0)
+    monkeypatch.setattr(vnstock_cb, "state", "CLOSED")
+    monkeypatch.setattr(vnstock_cb, "last_failure_time", None)
+    monkeypatch.setattr(vnstock_cb, "last_open_log_time", None)
+    return vnstock_cb
+
+
+@pytest.mark.asyncio
+async def test_historical_credential_refusal_is_unavailable_not_empty(
+    client, monkeypatch, isolated_vnstock_breaker,
+):
+    import sys
+    from types import ModuleType, SimpleNamespace
+    from unittest.mock import Mock
+
+    from vnibb.core.config import settings
+    from vnibb.providers.vnstock import runtime
+
+    sdk = ModuleType("vnstock")
+    sdk.status = Mock(return_value={"authenticated": True, "tier": "golden"})
+    monkeypatch.setitem(sys.modules, "vnstock", sdk)
+    monkeypatch.setattr(runtime, "find_spec", lambda name: None)
+    monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "free")
+    monkeypatch.setattr(settings, "vnstock_runtime_tier", "free")
+    monkeypatch.setattr(equity, "_load_historical_from_mongo", AsyncMock(return_value=([], [])))
+    monkeypatch.setattr(
+        equity.CacheManager,
+        "get_historical_prices",
+        AsyncMock(return_value=SimpleNamespace(hit=False, data=None)),
+    )
+    monkeypatch.setattr(equity, "_load_historical_from_recent_cache", AsyncMock(return_value=[]))
+    reinforcement = AsyncMock()
+    monkeypatch.setattr(equity, "_schedule_critical_reinforcement", reinforcement)
+
+    # Earlier provider failures must neither be counted as refusals nor erased by them.
+    isolated_vnstock_breaker.record_failure()
+    isolated_vnstock_breaker.record_failure()
+    last_failure_time = isolated_vnstock_breaker.last_failure_time
+    responses = [
+        await client.get(
+            "/api/v1/equity/historical?symbol=VNM&start_date=2026-06-08&end_date=2026-06-09"
+        )
+        for _ in range(isolated_vnstock_breaker.failure_threshold + 2)
+    ]
+
+    for response in responses:
+        payload = response.json()
+        assert response.status_code == 200
+        assert payload["data"] == []
+        assert payload["error"] is not None
+        assert "unavailable" in payload["error"].lower()
+        assert "credential" in payload["error"].lower()
+    assert sdk.status.call_count == isolated_vnstock_breaker.failure_threshold + 2
+    assert isolated_vnstock_breaker.state == "CLOSED"
+    assert isolated_vnstock_breaker.failures == 2
+    assert isolated_vnstock_breaker.last_failure_time == last_failure_time
+    reinforcement.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_historical_breaker_still_opens_for_provider_failures(
+    monkeypatch, isolated_vnstock_breaker,
+):
+    from unittest.mock import Mock
+
+    from vnibb.core.exceptions import ProviderError
+    from vnibb.providers.vnstock import runtime
+
+    quote_class = Mock(side_effect=ValueError("provider failed"))
+    monkeypatch.setattr(runtime, "get_quote_class", quote_class)
+    query = {
+        "symbol": "VNM", "start": "2026-06-08", "end": "2026-06-09",
+        "interval": "1D", "source": "VCI",
+    }
+    for _ in range(isolated_vnstock_breaker.failure_threshold):
+        with pytest.raises(ProviderError, match="provider failed"):
+            await equity.VnstockEquityHistoricalFetcher.extract_data(query)
+
+    assert isolated_vnstock_breaker.state == "OPEN"
+    with pytest.raises(RuntimeError, match="Circuit breaker is OPEN"):
+        await equity.VnstockEquityHistoricalFetcher.extract_data(query)
+    params = equity.EquityHistoricalQueryParams(
+        symbol="VNM", start_date=date(2026, 6, 8), end_date=date(2026, 6, 9),
+    )
+    assert await equity.VnstockEquityHistoricalFetcher.fetch(params) == []
+    assert quote_class.call_count == isolated_vnstock_breaker.failure_threshold
