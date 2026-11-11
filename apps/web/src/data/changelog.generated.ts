@@ -33,6 +33,7 @@ live in \`docs/\`.
 - Exclude local caches, test reports, generated service workers and real environment/database artifacts from Vercel CLI source uploads while preserving workspace build inputs and public assets; disable automatic previews only for the integration branch so reviewed work can be pushed without changing main production deployment behavior (#241).
 - Remove artificial per-event delays from the existing research-bundle cap/pruning/download regression without increasing its timeout or weakening its behavioral assertions (#241).
 
+- Expose the Listing Browser's selected exchange through \`aria-pressed\`, retaining the existing filter layout and brand tokens (#241).
 - Listing Browser filters wrap to their widget width rather than the viewport breakpoint. Native selects stay compact and long industry labels cannot force them outside a narrow widget; exchange, sort, search and clear behavior is retained (#222).
 - Comparison-derived OCF/Sales requires retained statement evidence matching the actual stored revenue and operating cash flow, with explicit VND units, field evidence, compatible source/consolidation and annual or single-quarter flow. Unknown or contradictory bases remain unavailable; measured zero OCF remains zero and TTM requires four consecutive compatible paired quarters. Other metrics and production financial acceptance are unchanged (#224, #106).
 - Watchlist ceiling/floor status uses neutral ink, not gain/loss colors. Status labels and icons remain visible; missing price-limit evidence stays muted (#200).

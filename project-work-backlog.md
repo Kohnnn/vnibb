@@ -10,6 +10,9 @@ Archive consultations cover all 37 indexed sessions below, but substantial middl
 
 Local execution evidence: [Continuing work evidence](docs/CONTINUING_WORK_EVIDENCE_2026-11-10.md) records reviewed repairs, exact verification failures/corrections and remaining operational gates. This historical index does not mark release acceptance from local merges or fixtures; preserve the per-row owners and prerequisites below.
 
+Current continuation (2026-11-11): reviewed work is published as draft [PR #243](https://github.com/Kohnnn/vnibb/pull/243), with a branch-specific no-preview setting; the four older draft PRs are not four missing implementations. #237/#240 are integrated supersets and #238 is patch-equivalent; close them as superseded only after the integration lands on `main`. #239 remains held and excluded. Final backend candidate `30065c96` passed configured Ruff, compile and 4,722 tests / 94 skipped. Rendered-Compose disposable authentication/persistence checks and local opaque-frame keyboard boundaries passed; live TradingView, production identity/data truth, source rights, real-identity Send and operational rotation remain distinct. Full revision-bound evidence and remaining prerequisites are in the linked evidence document; no older failed gate is relabeled green.
+
+
 ## 2. Immediate queue
 
 Read these as navigation to the single owning rows below, **not duplicate tasks**:
