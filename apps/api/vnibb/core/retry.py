@@ -4,6 +4,8 @@ from functools import wraps
 from typing import TypeVar, Callable, Any, Optional
 import time
 
+from vnibb.core.exceptions import ProviderCredentialRefusedError
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -110,6 +112,8 @@ def circuit_breaker(cb: CircuitBreaker):
                 result = await func(*args, **kwargs)
                 cb.record_success()
                 return result
+            except ProviderCredentialRefusedError:
+                raise
             except Exception as e:
                 cb.record_failure()
                 raise e

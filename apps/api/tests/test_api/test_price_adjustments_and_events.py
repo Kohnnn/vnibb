@@ -819,16 +819,30 @@ async def test_ratio_mongo_failure_retains_healthy_sql_source(client, test_db, m
     provider.assert_not_awaited()
 
 
+@pytest.fixture
+def isolated_vnstock_breaker(monkeypatch):
+    from vnibb.core.retry import vnstock_cb
+
+    monkeypatch.setattr(vnstock_cb, "failures", 0)
+    monkeypatch.setattr(vnstock_cb, "state", "CLOSED")
+    monkeypatch.setattr(vnstock_cb, "last_failure_time", None)
+    monkeypatch.setattr(vnstock_cb, "last_open_log_time", None)
+    return vnstock_cb
+
+
 @pytest.mark.asyncio
-async def test_historical_credential_refusal_is_unavailable_not_empty(client, monkeypatch):
+async def test_historical_credential_refusal_is_unavailable_not_empty(
+    client, monkeypatch, isolated_vnstock_breaker,
+):
     import sys
     from types import ModuleType, SimpleNamespace
+    from unittest.mock import Mock
 
     from vnibb.core.config import settings
     from vnibb.providers.vnstock import runtime
 
     sdk = ModuleType("vnstock")
-    sdk.status = lambda: {"authenticated": True, "tier": "golden"}
+    sdk.status = Mock(return_value={"authenticated": True, "tier": "golden"})
     monkeypatch.setitem(sys.modules, "vnstock", sdk)
     monkeypatch.setattr(runtime, "find_spec", lambda name: None)
     monkeypatch.setenv("VNSTOCK_RUNTIME_TIER", "free")
@@ -843,13 +857,55 @@ async def test_historical_credential_refusal_is_unavailable_not_empty(client, mo
     reinforcement = AsyncMock()
     monkeypatch.setattr(equity, "_schedule_critical_reinforcement", reinforcement)
 
-    response = await client.get(
-        "/api/v1/equity/historical?symbol=VNM&start_date=2026-06-08&end_date=2026-06-09"
-    )
+    # Earlier provider failures must neither be counted as refusals nor erased by them.
+    isolated_vnstock_breaker.record_failure()
+    isolated_vnstock_breaker.record_failure()
+    last_failure_time = isolated_vnstock_breaker.last_failure_time
+    responses = [
+        await client.get(
+            "/api/v1/equity/historical?symbol=VNM&start_date=2026-06-08&end_date=2026-06-09"
+        )
+        for _ in range(isolated_vnstock_breaker.failure_threshold + 2)
+    ]
 
-    payload = response.json()
-    assert response.status_code == 200
-    assert payload["data"] == []
-    assert "unavailable" in payload["error"].lower()
-    assert "credential" in payload["error"].lower()
+    for response in responses:
+        payload = response.json()
+        assert response.status_code == 200
+        assert payload["data"] == []
+        assert payload["error"] is not None
+        assert "unavailable" in payload["error"].lower()
+        assert "credential" in payload["error"].lower()
+    assert sdk.status.call_count == isolated_vnstock_breaker.failure_threshold + 2
+    assert isolated_vnstock_breaker.state == "CLOSED"
+    assert isolated_vnstock_breaker.failures == 2
+    assert isolated_vnstock_breaker.last_failure_time == last_failure_time
     reinforcement.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_historical_breaker_still_opens_for_provider_failures(
+    monkeypatch, isolated_vnstock_breaker,
+):
+    from unittest.mock import Mock
+
+    from vnibb.core.exceptions import ProviderError
+    from vnibb.providers.vnstock import runtime
+
+    quote_class = Mock(side_effect=ValueError("provider failed"))
+    monkeypatch.setattr(runtime, "get_quote_class", quote_class)
+    query = {
+        "symbol": "VNM", "start": "2026-06-08", "end": "2026-06-09",
+        "interval": "1D", "source": "VCI",
+    }
+    for _ in range(isolated_vnstock_breaker.failure_threshold):
+        with pytest.raises(ProviderError, match="provider failed"):
+            await equity.VnstockEquityHistoricalFetcher.extract_data(query)
+
+    assert isolated_vnstock_breaker.state == "OPEN"
+    with pytest.raises(RuntimeError, match="Circuit breaker is OPEN"):
+        await equity.VnstockEquityHistoricalFetcher.extract_data(query)
+    params = equity.EquityHistoricalQueryParams(
+        symbol="VNM", start_date=date(2026, 6, 8), end_date=date(2026, 6, 9),
+    )
+    assert await equity.VnstockEquityHistoricalFetcher.fetch(params) == []
+    assert quote_class.call_count == isolated_vnstock_breaker.failure_threshold
