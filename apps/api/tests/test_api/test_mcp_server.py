@@ -751,6 +751,64 @@ async def test_generic_financial_query_withholds_issuer_alongside_iq_and_vci(
 
 
 @pytest.mark.asyncio
+async def test_statement_query_bounds_page_and_hydrates_only_identity_competitors(
+    monkeypatch, test_engine, test_db,
+):
+    def statement_row(row_id, symbol, period, source, revenue):
+        lineage = {
+            "symbol": symbol, "statement_type": "income", "source": source,
+            "period": period, "fiscal_year": 2026, "fiscal_quarter": None,
+            "currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated",
+            "flow_basis": "annual", "aggregation_basis": "reported_annual",
+            "source_periods": [period], "unit_metadata": {},
+            "canonical_data": {
+                "symbol": symbol, "statement_type": "income", "period": period,
+                "fiscal_year": 2026, "fiscal_quarter": None, "source": source,
+                "value_unit": "VND", "revenue": revenue, "unit_metadata": {},
+            },
+        }
+        return server.IncomeStatement(
+            id=row_id, symbol=symbol, period=period, period_type="year", fiscal_year=2026,
+            source=source, revenue=float(revenue), raw_data={"_financial_lineage": lineage},
+        )
+
+    test_db.add_all([
+        statement_row(101, "FPT", "2026", "VCI", 100),
+        statement_row(102, "FPT", "FY2026", "vietcap", 120),
+        statement_row(103, "VNM", "2026", "VCI", 300),
+    ])
+    await test_db.commit()
+    await test_db.close()
+    monkeypatch.setattr(
+        server, "async_session_maker", async_sessionmaker(test_engine, expire_on_commit=False)
+    )
+    serialized_ids = []
+    serialize_row = server._serialize_row
+
+    def track_serialized(row, *, model=None):
+        serialized_ids.append(row["id"])
+        return serialize_row(row, model=model)
+
+    monkeypatch.setattr(server, "_serialize_row", track_serialized)
+
+    result = await server.query_database_collection_data(
+        collection="income_statements", period_type="year", limit=1,
+    )
+
+    assert result["row_count"] == 1
+    assert result["limit"] == 1
+    assert len(result["items"]) == 1
+    assert result["items"][0]["id"] == 101
+    assert result["items"][0]["revenue"] is None
+    assert result["items"][0]["data_status"] == "partial_unavailable"
+    assert result["items"][0]["unavailable_reason"] in {
+        "conflicting_source_observations", "unverified_financial_revision",
+    }
+    assert 102 in serialized_ids
+    assert 103 not in serialized_ids
+
+
+@pytest.mark.asyncio
 async def test_ai_and_mcp_snapshots_do_not_expose_newer_issuer_ratio(monkeypatch, test_engine, test_db):
     from vnibb.services import ai_context_service
 
