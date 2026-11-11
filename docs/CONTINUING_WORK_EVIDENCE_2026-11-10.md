@@ -64,6 +64,8 @@ The verification approval described a temporary, deployment-scoped route; Vercel
 
 Read-only reconciliation found one current `automation-bypass` record created `2026-08-18T11:09:43.949Z`, before verification, and SSO mode `all_except_custom_domains`. A fresh cookie-free, no-follow HEAD to the generated deployment returned HTTP 302 with redirect host `vercel.com`; custom production aliases are exempt by the observed mode. The installed CLI can take an environment secret, reuse a project secret or create one, so current metadata does not conclusively identify the earlier token source or prove no intervening creation/removal. No new bypass or token/settings change was performed in this reconciliation. Minimum owner action is to identify the existing token's owner/consumers before considering coordinated revocation; none was revoked blindly.
 
+Custody check command: `vercel project protection prj_Z5t3c7rTuWaFaFhkQhW2nA6nyJuz --scope vphk2001-gmailcoms-projects --json --non-interactive`, captured privately in the integration checkout with a 30-second deadline, exited 0; only field-presence, creation timestamp, counts and protection mode were emitted. The unauthenticated HEAD used in-process `fetch` with `redirect: 'manual'`, no cookies and a 30-second deadline against the prior generated host's `/dashboard`; it completed with `{status:302, locationHostname:'vercel.com'}` and has no subprocess exit status. Run-specific sanitized receipt: `local://vnibb-advisory-20261111-bypass-custody.md`. Raw secret-bearing metadata was not published.
+
 
 
 
