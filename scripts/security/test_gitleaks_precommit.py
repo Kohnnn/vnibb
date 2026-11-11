@@ -84,7 +84,9 @@ def main() -> None:
                 if '"' not in value and "'" not in value:
                     formats.extend([
                         ("assignment.env", f"{name}={value}\n"),
+                        ("compose.yaml", f"services:\n  api:\n    environment:\n      - {name}={value}\n"),
                         ("assignment.env", f"export {name}='{value}'\n"),
+                        ("shell.sh", f"export {name}='{value}';\n"),
                     ])
                 for filename, text in formats:
                     candidate = repo / filename
