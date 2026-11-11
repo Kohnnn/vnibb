@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from vnibb.core import financial_lane
 from vnibb.providers.vnstock import runtime
 
 
@@ -136,6 +137,4 @@ async def run_reference(operation, timeout: float | None, *, key: tuple):
     return await runtime.run_reference_provider(operation, timeout=timeout, key=key)
 
 async def run_financial(operation, timeout: float, *, key: tuple | None = None):
-    if key is None:
-        return await runtime.run_financial_provider(operation, timeout)
-    return await runtime.run_financial_provider(operation, timeout, key=key)
+    return await financial_lane.run_financial(operation, timeout, key=key)

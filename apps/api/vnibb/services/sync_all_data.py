@@ -267,7 +267,7 @@ class FullMarketSync:
         # Iterate symbols first so every symbol receives every required period before
         # progressing, rather than stranding later periods behind a large first pass.
         try:
-            from vnibb.providers.vnstock.lifecycle import financial_busy
+            from vnibb.core import financial_lane
             financial_cycle = any(name.startswith(("financials", "ratios")) for name, _ in stages)
             for symbol, name, operation in work:
                 state = stage_metadata[name]
@@ -277,7 +277,7 @@ class FullMarketSync:
                 if first_pass_only and state["receipts"].get(symbol, {}).get("outcome") in {"succeeded", "failed", "empty"}:
                     continue
                 remaining = budget_seconds - (time.monotonic() - started)
-                if remaining <= 0 or (financial_cycle and financial_busy()) or (max_attempts is not None and attempted >= max_attempts):
+                if remaining <= 0 or (financial_cycle and financial_lane.financial_busy()) or (max_attempts is not None and attempted >= max_attempts):
                     break
                 progress: dict = {}
                 attempted += 1
@@ -329,7 +329,7 @@ class FullMarketSync:
                     sync_id, status="running", success_count=sum(len(value["acquired_symbols"]) for value in stage_metadata.values()),
                     error_count=sum(len(value["failed_symbols"]) for value in stage_metadata.values()), additional_data=metadata,
                 )
-                if deadline.expired() or time.monotonic() - started >= budget_seconds or (financial_cycle and financial_busy()):
+                if deadline.expired() or time.monotonic() - started >= budget_seconds or (financial_cycle and financial_lane.financial_busy()):
                     break
         except BaseException as exc:
             if attempted and receipt.get("outcome") == "attempted":

@@ -482,6 +482,7 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
     from vnibb.core.exceptions import ProviderError, ProviderTimeoutError
     from vnibb.providers.vnstock import runtime
     from types import SimpleNamespace
+    from vnibb.core import financial_lane
 
     class QuotaFinance:
         def ratio(self, **kwargs):
@@ -521,7 +522,7 @@ async def test_ratio_http_provider_failure_preserves_stored_evidence(
         return kwargs["rows"]
 
     provider = AsyncMock(side_effect=provider_operation)
-    monkeypatch.setattr(runtime, "run_financial_provider", provider)
+    monkeypatch.setattr(financial_lane, "run_financial", provider)
     monkeypatch.setattr(equity, "_provider_timeout_budget", lambda: 0.01)
     monkeypatch.setattr(equity, "_load_mongo_financial_ratio_rows", AsyncMock(return_value=[]))
     monkeypatch.setattr(equity, "_get_latest_statement_period_key", AsyncMock(return_value=20260))

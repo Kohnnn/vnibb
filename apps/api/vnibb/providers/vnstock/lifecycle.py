@@ -30,7 +30,3 @@ def diagnostic_version() -> str:
 
 def diagnostic_facade(name: str) -> None:
     runtime.import_vnstock_symbol(name)
-
-
-def financial_busy() -> bool:
-    return runtime.financial_provider_busy()

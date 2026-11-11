@@ -10,6 +10,7 @@ from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import ForeignTrading, IntradayTrade, OrderFlowDaily
 from vnibb.providers.vnstock import runtime
+from vnibb.core import financial_lane
 from vnibb.services import (
     data_pipeline,
     mongo_market_data_service,
@@ -211,7 +212,7 @@ def consumer(monkeypatch):
     monkeypatch.setattr(data_pipeline, "async_session_maker", sql.session)
     monkeypatch.setattr(sync_all_data, "async_session_maker", sql.session)
     monkeypatch.setattr(runtime, "get_quote_class", lambda: Quote)
-    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: False)
+    monkeypatch.setattr(financial_lane, "financial_busy", lambda: False)
     monkeypatch.setattr(trading_acquisition, "fetch_primary_trades", primary)
     monkeypatch.setattr(mongo_market_data_service, "get_mongo_market_data_service", lambda: mongo)
     monkeypatch.setattr(data_pipeline.RateLimiter, "wait", AsyncMock())

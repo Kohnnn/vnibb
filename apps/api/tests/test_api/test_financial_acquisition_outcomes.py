@@ -272,6 +272,7 @@ async def test_extractor_passes_requested_count_to_supported_provider(monkeypatc
     import pandas as pd
     from vnibb.providers.vnstock import runtime
     from vnibb.providers.vnstock.financials import FinancialsQueryParams
+    from vnibb.core import financial_lane
 
     counts = []
 
@@ -285,7 +286,7 @@ async def test_extractor_passes_requested_count_to_supported_provider(monkeypatc
 
     monkeypatch.setattr(runtime, 'create_finance', lambda *args: Finance())
     monkeypatch.setattr(runtime, 'validate_source', lambda value: 'VCI')
-    monkeypatch.setattr(runtime, 'run_financial_provider', execute)
+    monkeypatch.setattr(financial_lane, 'run_financial', execute)
     params = FinancialsQueryParams(symbol='VNM', limit=108)
     await VnstockFinancialsFetcher.extract_data(VnstockFinancialsFetcher.transform_query(params))
     assert counts == [108]
