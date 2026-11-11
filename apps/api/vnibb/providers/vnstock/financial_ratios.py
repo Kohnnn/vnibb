@@ -191,7 +191,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
         query: dict[str, Any],
         credentials: Optional[dict[str, str]] = None,
     ) -> List[dict[str, Any]]:
-        from vnibb.providers.vnstock.runtime import run_financial_provider
+        from vnibb.core.financial_lane import run_financial
 
         def _fetch_sync() -> List[dict[str, Any]]:
             try:
@@ -276,7 +276,7 @@ class VnstockFinancialRatiosFetcher(BaseFetcher[FinancialRatiosQueryParams, Fina
                 ) from e
 
         try:
-            return await run_financial_provider(
+            return await run_financial(
                 _fetch_sync, settings.vnstock_timeout,
                 key=("financial_ratios", settings.vnstock_source, tuple(sorted(query.items()))),
             )

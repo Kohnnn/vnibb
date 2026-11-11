@@ -5,6 +5,7 @@ import pytest
 from vnibb.core.config import settings
 from vnibb.core.exceptions import ProviderError
 from vnibb.providers.vnstock import runtime
+from vnibb.core import financial_lane
 from vnibb.providers.vnstock.equity_screener import StockScreenerParams, VnstockScreenerFetcher
 from vnibb.providers.vnstock.financial_ratios import (
     FinancialRatiosQueryParams,
@@ -51,7 +52,7 @@ async def test_ratio_fetch_uses_vci_long_table_and_preserves_units(monkeypatch):
     calls = _fundamental(monkeypatch, frame)
     async def execute(operation, *args, **kwargs):
         return operation()
-    monkeypatch.setattr(runtime, "run_financial_provider", execute)
+    monkeypatch.setattr(financial_lane, "run_financial", execute)
     monkeypatch.setattr(settings, "vnstock_source", "VCI")
 
     rows = await VnstockFinancialRatiosFetcher.fetch(FinancialRatiosQueryParams(symbol="VNM", period="year"))
@@ -68,7 +69,7 @@ async def test_ratio_entitlement_is_not_empty_success(monkeypatch):
     _fundamental(monkeypatch, error=EntitlementError("VNSTOCK_TIER_ROUTE"))
     async def execute(operation, *args, **kwargs):
         return operation()
-    monkeypatch.setattr(runtime, "run_financial_provider", execute)
+    monkeypatch.setattr(financial_lane, "run_financial", execute)
     with pytest.raises(ProviderError, match="VNSTOCK_TIER_ROUTE"):
         await VnstockFinancialRatiosFetcher.fetch(FinancialRatiosQueryParams(symbol="VNM"))
 

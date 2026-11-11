@@ -6,9 +6,7 @@ import asyncio
 import os
 import sys
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from importlib.util import find_spec
-from threading import Lock
 from typing import Any
 
 from vnibb.core.config import settings
@@ -190,10 +188,6 @@ def finance_method_kwargs(method, period: str) -> dict:
     return kwargs
 
 
-_financial_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vnstock-financial")
-_financial_lock = Lock()
-_financial_future = None
-_financial_key: tuple | None = None
 _reference_jobs: dict[tuple, asyncio.Future] = {}
 
 
@@ -216,25 +210,3 @@ async def run_reference_provider(operation: Callable, timeout: float | None, *, 
 
         future.add_done_callback(finished)
     return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
-
-
-async def run_financial_provider(operation: Callable, timeout: float, *, key: tuple | None = None):
-    """Share identical work; never queue behind a still-running financial call."""
-    global _financial_future, _financial_key
-    with _financial_lock:
-        if _financial_future is not None and not _financial_future.done():
-            if key is None or key != _financial_key:
-                raise RuntimeError("Previous financial provider call is still running")
-        else:
-            _financial_future = _financial_executor.submit(operation)
-            _financial_key = key
-            _financial_future.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
-        future = _financial_future
-    wrapped = asyncio.wrap_future(future)
-    wrapped.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
-    return await asyncio.wait_for(asyncio.shield(wrapped), timeout=timeout)
-
-
-def financial_provider_busy() -> bool:
-    with _financial_lock:
-        return _financial_future is not None and not _financial_future.done()

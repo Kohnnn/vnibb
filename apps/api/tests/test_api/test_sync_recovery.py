@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from vnibb.core import scheduler
 from vnibb.models.scheduler_state import SchedulerJobState
 from vnibb.models.sync_status import SyncStatus
+from vnibb.core import financial_lane
 from vnibb.providers.vnstock import runtime
 from vnibb.providers.vnstock.financial_ratios import VnstockFinancialRatiosFetcher
 from vnibb.services import sync_all_data
@@ -124,7 +125,6 @@ async def test_unified_fundamental_is_used_without_legacy_wrapper(monkeypatch):
 @pytest.mark.asyncio
 async def test_timed_out_provider_never_queues_duplicate_thread(monkeypatch):
     release = Event()
-    from vnibb.providers.vnstock.lifecycle import financial_busy
     entered = Event()
 
     def blocked():
@@ -134,14 +134,14 @@ async def test_timed_out_provider_never_queues_duplicate_thread(monkeypatch):
 
     try:
         with pytest.raises(TimeoutError):
-            await runtime.run_financial_provider(blocked, 0.01)
+            await financial_lane.run_financial(blocked, 0.01)
         assert entered.is_set()
-        assert financial_busy()
+        assert financial_lane.financial_busy()
         with pytest.raises(RuntimeError, match="still running"):
-            await runtime.run_financial_provider(lambda: [1], 0.01)
+            await financial_lane.run_financial(lambda: [1], 0.01)
     finally:
         release.set()
-        await asyncio.wrap_future(runtime._financial_future)
+        await asyncio.wrap_future(financial_lane._future)
 
 
 @pytest.mark.asyncio
@@ -151,8 +151,8 @@ async def test_identical_provider_retries_share_real_executor_until_completion(m
     entered = Event()
     calls = []
     key = ("financial_ratios" if financial else "historical", "VNM", "VCI", "year")
-    runner = runtime.run_financial_provider if financial else runtime.run_reference_provider
-    executor = runtime._financial_executor if financial else asyncio.get_running_loop()
+    runner = financial_lane.run_financial if financial else runtime.run_reference_provider
+    executor = financial_lane._executor if financial else asyncio.get_running_loop()
     method = "submit" if financial else "run_in_executor"
     submit = getattr(executor, method)
     submissions = []
@@ -183,8 +183,8 @@ async def test_identical_provider_retries_share_real_executor_until_completion(m
         assert len(submissions) == 2
     finally:
         release.set()
-        if financial and runtime._financial_future is not None:
-            await asyncio.wrap_future(runtime._financial_future)
+        if financial and financial_lane._future is not None:
+            await asyncio.wrap_future(financial_lane._future)
         elif not financial:
             await asyncio.gather(*list(runtime._reference_jobs.values()), return_exceptions=True)
 
@@ -544,7 +544,7 @@ async def test_financial_cycle_stops_while_provider_is_busy(test_engine, monkeyp
     sessions = async_sessionmaker(test_engine, expire_on_commit=False)
     monkeypatch.setattr(sync_all_data, "async_session_maker", sessions)
     monkeypatch.setattr("vnibb.services.data_pipeline.async_session_maker", sessions)
-    monkeypatch.setattr(runtime, "financial_provider_busy", lambda: True)
+    monkeypatch.setattr(financial_lane, "financial_busy", lambda: True)
     attempted = []
 
     async def acquire(symbol, progress):

@@ -365,7 +365,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
         credentials: dict[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Fetch financial statement data from vnstock."""
-        from vnibb.providers.vnstock.runtime import run_financial_provider
+        from vnibb.core.financial_lane import run_financial
 
         def _fetch_sync() -> list[dict]:
             try:
@@ -822,7 +822,7 @@ class VnstockFinancialsFetcher(BaseFetcher[FinancialsQueryParams, FinancialState
             return records
 
         try:
-            return await run_financial_provider(_fetch_sync, settings.vnstock_timeout)
+            return await run_financial(_fetch_sync, settings.vnstock_timeout)
         except TimeoutError as exc:
             raise ProviderTimeoutError(
                 provider="vnstock",
