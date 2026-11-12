@@ -16,6 +16,8 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- Enforce MCP database-read deadlines across execution, session cleanup and the entire paginated read; preserve caller cancellation and normalized return values (#241).
+- Hide recipient-only research snapshots at expiry without waiting for the authorization refresh; announce expired or invalid responses as unavailable (#241).
 - Route direct SDK consumers through a provider-neutral capability boundary, isolate vnstock registration/startup policy and guard external SDK imports. The financial single-flight lane and busy predicate belong to neutral core scheduling rather than the vnstock runtime; preserve timeout/retry coordination and the offline recovery selfcheck (#230, #241).
 - Keep DNSE acquisition unavailable through a standalone refusal command before credentials, application imports or external I/O. No DNSE provider is installed; schemas, units, session coverage, source rights and publication remain separate gates (#231–#233, #241).
 - Add offline FHSC history, quote, per-symbol listing and financial payload transforms through the provider port. Preserve raw unknown-unit observations and withhold unsupported financial aliases; reject inconsistent fiscal periods and retain unknown quarterly flow basis. No live adapter or acquisition path is enabled (#233).
