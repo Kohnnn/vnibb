@@ -1323,9 +1323,10 @@ async def list_collection_documents(
     model = _resolve_collection_model(collection_id)
     statement = _apply_sql_queries(select(*_model_columns(model)), model, list(queries or []))
 
-    async with async_session_maker() as session:
-        result = await session.execute(statement)
-        return [_serialize_row(row, model=model) for row in result.mappings().all()]
+    async with asyncio.timeout(timeout_seconds):
+        async with async_session_maker() as session:
+            result = await session.execute(statement)
+            return [_serialize_row(row, model=model) for row in result.mappings().all()]
 
 
 async def list_collection_documents_paginated(
@@ -1351,22 +1352,23 @@ async def list_collection_documents_paginated(
     collected: list[dict[str, Any]] = []
     offset = 0
 
-    while max_documents is None or len(collected) < max_documents:
-        remaining = page_size if max_documents is None else min(page_size, max_documents - len(collected))
-        statement = _apply_sql_queries(
-            select(*_model_columns(model)),
-            model,
-            list(queries or []) + [_query_limit(remaining), _query_offset(offset)],
-        )
+    async with asyncio.timeout(timeout_seconds):
+        while max_documents is None or len(collected) < max_documents:
+            remaining = page_size if max_documents is None else min(page_size, max_documents - len(collected))
+            statement = _apply_sql_queries(
+                select(*_model_columns(model)),
+                model,
+                list(queries or []) + [_query_limit(remaining), _query_offset(offset)],
+            )
 
-        async with async_session_maker() as session:
-            result = await session.execute(statement)
-            page = [_serialize_row(row, model=model) for row in result.mappings().all()]
+            async with async_session_maker() as session:
+                result = await session.execute(statement)
+                page = [_serialize_row(row, model=model) for row in result.mappings().all()]
 
-        collected.extend(page)
-        if len(page) < remaining:
-            break
-        offset += len(page)
+            collected.extend(page)
+            if len(page) < remaining:
+                break
+            offset += len(page)
 
     return collected
 
