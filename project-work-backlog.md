@@ -14,6 +14,8 @@ Current continuation (2026-11-11): [PR #243](https://github.com/Kohnnn/vnibb/pul
 
 Post-release advisory follow-up: SDK tier interpolation was confirmed to disclose arbitrary metadata through historical errors/logs and replaced with fixed refusal text. Independently approved leaf `9311c8cf` is integrated on `codex/241-post-release-advisories-20261111`; candidate `5e1975e4` passed 79 credential-free/network-denied policy and historical consumer checks plus configured changed-line Ruff. This follow-up is not a claim of OCI deployment or completion of #231 credential custody/rights gates.
 
+Offline continuation (2026-11-13): candidate `9e81122b` on the same local advisory branch enforces MCP read deadlines and private-share expiry. Independently reviewed patches passed 11 network-denied database checks, changed-line Ruff, Python compile and an actual-component Chromium expiry/unavailable-state scenario. Frontend Jest/ESLint startup remains blocked; full-app recipient auth and real asyncpg cancellation recovery remain unverified. Provider inspection confirmed installed/pinned vnstock 5.2.1; publisher 6.0.0 availability is not migration or source-rights approval. See the dated evidence section above; no push, deployment or acquisition occurred.
+
 
 ## 2. Immediate queue
 
