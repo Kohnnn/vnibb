@@ -99,6 +99,13 @@ has `intrinsicValue`, `marginOfSafety`, `valuationMethod`, `valuationVerdict`,
 why, and every unrelated field preserved. It is idempotent and returns a v4 doc
 unchanged, so a stale derived snapshot/cache can never republish a value.
 
+`MongoMarketDataService.get_latest_fundamental_snapshots` calls
+`admit_fundamental_snapshot` on every returned document, so no consumer has to
+remember the gate. Moat scoring is a separate lineage: `moat`/`moatScore`/
+`moatFactors.interest_coverage` are kept for schema 3 onward (the interest
+coverage evidence exists there) and withheld only for older documents, so a
+current v4 document no longer loses its quality fields.
+
 Recompute is an explicit backfill over the affected symbols
 (`build_fundamental_screener.py --symbols …`, dry-run first); no automatic
 production recompute is implied by this change.

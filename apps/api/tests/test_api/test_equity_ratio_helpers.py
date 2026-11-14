@@ -1247,3 +1247,93 @@ async def test_enrich_missing_ratio_metrics_requires_reported_valuation_with_unk
     assert item.bvps == 20_000.0
     assert item.pe == provider_pe
     assert item.pb == provider_pb
+
+
+@pytest.mark.asyncio
+async def test_fundamental_analysis_never_publishes_superseded_derived_values(monkeypatch):
+    """Actual collection -> shared reader -> fundamental-analysis consumer.
+
+    A retained schema-3 snapshot and an unadmitted v4-shaped document must not
+    reach the valuation section, the derived snapshot or the quality reasons;
+    a current v4 snapshot must survive these seams intact.
+    """
+
+    from vnibb.core.config import settings
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    stale = {
+        "symbol": "FPT", "snapshotDate": "2026-06-14", "schemaVersion": 3,
+        "intrinsicValue": 30.48, "marginOfSafety": -64.02, "valuationMethod": "dcf",
+        "fcfPositive": True, "revenueCagr5y": 21.0, "profitCagr5y": 21.0,
+        "moat": "narrow", "moatScore": 60.0, "roe": 18.0,
+        "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    }
+    current = {
+        "symbol": "FPT", "snapshotDate": "2026-06-14", "schemaVersion": 4,
+        "intrinsicValue": 120000.0, "marginOfSafety": 25.0, "valuationMethod": "dcf",
+        "fcfPositive": True, "revenueCagr5y": 10.0, "profitCagr5y": 10.0,
+        "moat": "wide", "moatScore": 95.0, "roe": 22.5,
+        "inputs": {
+            "unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
+            "derivedCoverage": {"cagr": {}, "fcf": {}},
+        },
+    }
+
+    async def fake_profile(symbol, refresh, db):
+        return StandardResponse(data={"symbol": symbol, "company_name": "FPT Corp"})
+
+    async def empty_section(*_args, **_kwargs):
+        return StandardResponse(data=[])
+
+    snapshots = {"doc": stale}
+    collection_reads = []
+
+    class FundamentalCollection:
+        def aggregate(self, _pipeline):
+            collection_reads.append(True)
+            return [{"doc": dict(snapshots["doc"])}]
+
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: FundamentalCollection())
+    monkeypatch.setattr(settings, "mongodb_enabled", True)
+    monkeypatch.setattr(settings, "mongodb_url", "mongodb://127.0.0.1:1/vnibb-market")
+    monkeypatch.setattr(
+        "vnibb.api.v1.equity.get_mongo_market_data_service", lambda: service
+    )
+    monkeypatch.setattr("vnibb.api.v1.equity.get_profile", fake_profile)
+    for name in (
+        "get_financial_ratios", "get_financials", "get_shareholders",
+        "get_officers", "get_subsidiaries", "get_company_news", "get_company_events",
+    ):
+        monkeypatch.setattr(f"vnibb.api.v1.equity.{name}", empty_section)
+
+    stale_response = await get_fundamental_analysis("fpt", db=None)  # type: ignore[arg-type]
+    stale_data = stale_response.data
+
+    assert collection_reads, "the shared reader must have been exercised"
+    assert stale_data["valuation"] is None
+    assert stale_data["latest_fundamental_snapshot"]["derived"] is None
+    assert "schema" in stale_data["section_errors"]["valuation"]
+    retained = stale_data["fundamental_snapshot"]
+    assert retained["intrinsicValue"] is None
+    assert retained["fcfPositive"] is None
+    assert retained["revenueCagr5y"] is None
+    # Independent quality facts still reach the competitive-advantage reasons,
+    # without a superseded CAGR or FCF claim.
+    reasons = stale_data["competitive_advantage"]["reasons"]
+    assert "ROE 18.0%" in reasons
+    assert not any("CAGR" in reason or "FCF" in reason for reason in reasons), reasons
+    # The retained corpus document itself is untouched.
+    assert stale["intrinsicValue"] == 30.48
+
+    snapshots["doc"] = current
+    current_response = await get_fundamental_analysis("fpt", db=None)  # type: ignore[arg-type]
+    current_data = current_response.data
+
+    assert current_data["valuation"]["intrinsic_value"] == 120000.0
+    assert current_data["valuation"]["margin_of_safety"] == 25.0
+    assert current_data["latest_fundamental_snapshot"]["derived"]["fcfPositive"] is True
+    reasons = current_data["competitive_advantage"]["reasons"]
+    assert "5Y revenue CAGR 10.0%" in reasons
+    assert "Positive FCF" in reasons
+    assert current_data["competitive_advantage"]["moat"] == "wide"
