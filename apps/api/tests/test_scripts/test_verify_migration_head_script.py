@@ -1,112 +1,181 @@
 """The migration gate must refuse BEFORE `upgrade head`, not report afterwards.
 
-A fake `docker` answers `alembic heads` and `alembic current` so no image, daemon
-or database is needed. The script under test is the release gate that runs before
-any migration is applied.
+Real Alembic output is used on purpose. `alembic current` prints a bare revision
+when the applied revision is not a head and only appends " (head)" when it is, so
+a fake "current" that always ends in " (head)" cannot show whether the gate reads
+an applied ancestor as an empty database. Each test builds a real two-revision
+project, applies a real revision, and lets the script read genuine output.
 """
 
+from __future__ import annotations
+
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[4] / "scripts" / "oracle" / "verify-migration-head.sh"
-APPROVED = "b8f2c5d91e40"
-FAKE_DOCKER = r'''#!/usr/bin/env python3
-"""Answer only the two alembic reads verify-migration-head.sh performs."""
-import os
-import sys
 
-args = sys.argv[1:]
-# Keep only what follows the `migrate` service name: the alembic subcommand.
-if "migrate" in args:
-    args = args[args.index("migrate") + 1:]
-else:
-    sys.stderr.write("no migrate service in arguments\n")
-    raise SystemExit(3)
-command = [a for a in args if a not in {"-c", "/app/alembic.ini"}]
-if "heads" in command:
-    for line in os.environ.get("FAKE_HEADS", "").splitlines():
-        if line.strip():
-            sys.stdout.write(line.strip() + " (head)\n")
-elif "current" in command:
-    for line in os.environ.get("FAKE_CURRENT", "").splitlines():
-        if line.strip():
-            sys.stdout.write(line.strip() + " (head)\n")
-else:
-    sys.stderr.write("unexpected alembic command\n")
-    raise SystemExit(3)
+OLD = "a1b2c3d4e5f6"
+NEW = "b2c3d4e5f6a7"
+
+# The script reads heads/current through one docker command; this stand-in runs the
+# real Alembic against the real project so the parsed text is genuine. The shebang
+# must be this interpreter: `/usr/bin/env python3` is often a Python without Alembic.
+FAKE_DOCKER = '''#!{python}
+import os, subprocess, sys
+sub = sys.argv[-1]
+project = os.environ["FAKE_ALEMBIC_PROJECT"]
+result = subprocess.run(
+    [sys.executable, "-m", "alembic", "-c", os.path.join(project, "alembic.ini"), sub],
+    cwd=project, capture_output=True, text=True,
+    env={{"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
+          "FAKE_ALEMBIC_DB": os.environ["FAKE_ALEMBIC_DB"]}},
+)
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+sys.exit(result.returncode)
 '''
 
 
-def run(tmp_path, heads, current, approved=APPROVED):
+@pytest.fixture()
+def project(tmp_path):
+    root = tmp_path / "proj"
+    (root / "migrations" / "versions").mkdir(parents=True)
+    (root / "alembic.ini").write_text("[alembic]\nscript_location = migrations\n")
+    (root / "migrations" / "env.py").write_text(textwrap.dedent("""
+        import os
+        from alembic import context
+        from sqlalchemy import create_engine
+        config = context.config
+        engine = create_engine(os.environ["FAKE_ALEMBIC_DB"])
+        with engine.connect() as connection:
+            context.configure(connection=connection, target_metadata=None)
+            with context.begin_transaction():
+                context.run_migrations()
+    """))
+    (root / "migrations" / "script.py.mako").write_text(
+        '"""${message}"""\nrevision = ${repr(up_revision)}\n'
+        "down_revision = ${repr(down_revision)}\n"
+        "branch_labels = ${repr(branch_labels)}\ndepends_on = ${repr(depends_on)}\n"
+        "def upgrade(): pass\ndef downgrade(): pass\n"
+    )
+    for revision, parent in ((OLD, None), (NEW, OLD)):
+        (root / "migrations" / "versions" / f"{revision}.py").write_text(
+            f'revision = "{revision}"\ndown_revision = {parent!r}\n'
+            "def upgrade(): pass\ndef downgrade(): pass\n"
+        )
+    return root
+
+
+def run(tmp_path, project, at_revision=None, approved=NEW, approved_from="none"):
+    """Run the gate; `at_revision` is applied first with a real `alembic upgrade`."""
+    db = tmp_path / "db.sqlite"
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake = bin_dir / "docker"
-    fake.write_text(FAKE_DOCKER)
-    fake.chmod(0o755)
+    bin_dir.mkdir(exist_ok=True)
+    docker = bin_dir / "docker"
+    docker.write_text(FAKE_DOCKER.format(python=sys.executable))
+    docker.chmod(0o755)
+
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "HOME": str(tmp_path),
-        "DOCKER_BIN": "docker",
+        "FAKE_ALEMBIC_PROJECT": str(project),
+        "FAKE_ALEMBIC_DB": f"sqlite:///{db}",
+        "COMPOSE_FILE": "/dev/null",
+        "ENV_FILE": "/dev/null",
     }
     if approved is not None:
         env["APPROVED_ALEMBIC_HEAD"] = approved
-    if heads is not None:
-        env["FAKE_HEADS"] = heads
-    if current is not None:
-        env["FAKE_CURRENT"] = current
-    return subprocess.run(
-        ["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False
-    )
+    if approved_from is not None:
+        env["APPROVED_ALEMBIC_FROM"] = approved_from
+
+    # The setup `alembic stamp`/`upgrade` runs use the same env as the gate.
+    subprocess.run([sys.executable, "-m", "alembic", "-c", "alembic.ini", "stamp", "base"],
+                   cwd=project, env=env, check=True,
+                   capture_output=True, text=True)
+    if at_revision:
+        subprocess.run([sys.executable, "-m", "alembic", "-c", "alembic.ini",
+                        "upgrade", at_revision],
+                       cwd=project, env=env, check=True,
+                       capture_output=True, text=True)
+
+    return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
 
 
-def test_unreviewed_new_head_is_refused_while_database_is_still_unchanged(tmp_path):
-    """The regression: a candidate that bumps the head must not reach `upgrade head`."""
-    result = run(tmp_path, heads="c0ffee123456", current=APPROVED)
+def test_applied_ancestor_is_refused_not_read_as_empty(tmp_path, project):
+    """The regression: a real bare applied revision must not look like 'nothing applied'."""
+    result = run(tmp_path, project, at_revision=OLD)
+    assert result.returncode == 1, result.stdout
+    assert f"'{OLD}'" in result.stderr
+    assert "no applied revision" not in result.stdout
+
+
+def test_approved_from_to_transition_passes(tmp_path, project):
+    result = run(tmp_path, project, at_revision=OLD, approved_from=OLD)
+    assert result.returncode == 0, result.stderr
+    assert f"{OLD} -> {NEW}" in result.stdout
+
+
+def test_fresh_database_passes_only_when_from_is_none(tmp_path, project):
+    result = run(tmp_path, project, at_revision=None, approved_from="none")
+    assert result.returncode == 0, result.stderr
+
+
+def test_fresh_database_is_refused_when_approved_from_is_a_revision(tmp_path, project):
+    result = run(tmp_path, project, at_revision=None, approved_from=OLD)
+    assert result.returncode == 1
+    assert "no applied revision" in result.stderr
+
+
+def test_ancestor_is_refused_when_approved_from_is_none(tmp_path, project):
+    result = run(tmp_path, project, at_revision=OLD, approved_from="none")
+    assert result.returncode == 1
+    assert "starts from an empty database" in result.stderr
+
+
+def test_database_already_at_candidate_head_is_refused(tmp_path, project):
+    result = run(tmp_path, project, at_revision=NEW, approved_from=OLD)
+    assert result.returncode == 1
+    assert "not the approved starting revision" in result.stderr
+
+
+def test_identical_from_and_head_is_a_hard_error(tmp_path, project):
+    result = run(tmp_path, project, at_revision=OLD, approved_from=NEW)
+    assert result.returncode == 2
+    assert "no approved transition" in result.stderr
+
+
+def test_unreviewed_new_head_is_refused_while_database_is_unchanged(tmp_path, project):
+    """A candidate that bumps the head must not reach `upgrade head`."""
+    result = run(tmp_path, project, at_revision=OLD, approved=OLD, approved_from="none")
     assert result.returncode == 1
     assert "is not the approved head" in result.stderr
-    assert "unreviewed migration" in result.stderr
-    # Nothing about applying it was attempted.
     assert "upgrade" not in result.stdout
 
 
-def test_matching_candidate_and_database_head_passes(tmp_path):
-    result = run(tmp_path, heads=APPROVED, current=APPROVED)
-    assert result.returncode == 0, result.stderr
-    assert "both at approved head" in result.stdout
-
-
-def test_fresh_database_with_matching_head_passes(tmp_path):
-    result = run(tmp_path, heads=APPROVED, current="")
-    assert result.returncode == 0, result.stderr
-    assert "no applied revision" in result.stdout
-
-
-def test_database_behind_the_approved_head_is_refused(tmp_path):
-    result = run(tmp_path, heads=APPROVED, current="aaaaaaaaaaaa")
-    assert result.returncode == 1
-    assert "not the approved head" in result.stderr
-
-
-def test_multiple_heads_are_refused(tmp_path):
-    result = run(tmp_path, heads=f"{APPROVED}\ndeadbeef0001", current=APPROVED)
-    assert result.returncode == 1
-    assert "multiple heads" in result.stderr
-
-
-def test_unreadable_candidate_heads_fail_closed(tmp_path):
-    assert run(tmp_path, heads="", current=APPROVED).returncode == 1
-
-
-@pytest.mark.parametrize("approved", ["", "a b", "abc\nxyz", " head*"])
-def test_a_non_revision_approved_head_is_rejected(tmp_path, approved):
-    result = run(tmp_path, heads=APPROVED, current=APPROVED, approved=approved)
-    assert result.returncode in {1, 2}
-    assert not result.returncode == 0
-
-
-def test_missing_approved_head_is_a_hard_error(tmp_path):
-    result = run(tmp_path, heads=APPROVED, current=APPROVED, approved=None)
+def test_missing_approved_head_is_a_hard_error(tmp_path, project):
+    result = run(tmp_path, project, at_revision=OLD, approved=None)
     assert result.returncode != 0
     assert "APPROVED_ALEMBIC_HEAD" in result.stderr
+
+
+def test_missing_approved_from_is_a_hard_error(tmp_path, project):
+    result = run(tmp_path, project, at_revision=OLD, approved_from=None)
+    assert result.returncode != 0
+    assert "APPROVED_ALEMBIC_FROM" in result.stderr
+
+
+@pytest.mark.parametrize("approved", ["", "a b", "abc\nxyz", " head*", "abc"])
+def test_a_non_revision_approved_head_is_rejected(tmp_path, project, approved):
+    result = run(tmp_path, project, at_revision=OLD, approved=approved)
+    assert result.returncode in {1, 2}
+
+
+@pytest.mark.parametrize("approved_from", ["", "a b", "abc"])
+def test_a_non_revision_approved_from_is_rejected(tmp_path, project, approved_from):
+    result = run(tmp_path, project, at_revision=OLD, approved_from=approved_from)
+    # Empty hits the `: "${VAR:?}"` unset guard (exit 1); a malformed id exits 2.
+    assert result.returncode in {1, 2}

@@ -3,6 +3,11 @@
 Two producers would race for the same session cohort, so the configuration must
 refuse a non-scheduler role asking to start the scheduler rather than relying on
 an operator remembering to keep it disabled.
+
+The guard follows the consumer's rule, not a list of false spellings:
+`vnibb/api/main.py:_env_flag` starts the scheduler whenever
+`SKIP_SCHEDULER_STARTUP` is present and *not* one of 1/true/yes/on, so `''` and
+`no` both start a producer and must be refused here too.
 """
 
 import pytest
@@ -34,22 +39,27 @@ def test_scheduler_role_without_required_coordination_is_refused(monkeypatch):
         _settings(monkeypatch, scheduler_role="scheduler", scheduler_lock_mode="best_effort")
 
 
-def test_api_role_cannot_enable_scheduler_in_production(monkeypatch):
-    """The regression: an API process must never become a second producer."""
-    monkeypatch.setenv("SKIP_SCHEDULER_STARTUP", "false")
-    with pytest.raises(ValidationError, match="exactly one producer"):
-        _settings(monkeypatch, scheduler_role="api")
-
-
-@pytest.mark.parametrize("flag", ["0", "False", "no", "off"])
-def test_every_false_spelling_of_the_skip_flag_is_refused_for_api_role(monkeypatch, flag):
+@pytest.mark.parametrize(
+    "flag",
+    # Every present non-truthy value starts the consumer's scheduler, '' included.
+    ["0", "False", "no", "off", "", "   ", "disabled", "2"],
+)
+def test_any_present_nontruthy_skip_flag_is_refused_for_api_role(monkeypatch, flag):
+    """The regression: a value the consumer reads as 'start' must be refused."""
     monkeypatch.setenv("SKIP_SCHEDULER_STARTUP", flag)
     with pytest.raises(ValidationError, match="exactly one producer"):
         _settings(monkeypatch, scheduler_role="api")
 
 
-def test_api_role_with_scheduler_skipped_is_accepted(monkeypatch):
-    monkeypatch.setenv("SKIP_SCHEDULER_STARTUP", "true")
+@pytest.mark.parametrize("flag", ["1", "true", "TRUE", "yes", "on", " On "])
+def test_every_truthy_spelling_of_the_skip_flag_is_accepted(monkeypatch, flag):
+    monkeypatch.setenv("SKIP_SCHEDULER_STARTUP", flag)
+    assert _settings(monkeypatch, scheduler_role="api").scheduler_role == "api"
+
+
+def test_unset_skip_flag_keeps_the_api_default(monkeypatch):
+    """Absent means 'skip' for a non-scheduler role, which stays the safe default."""
+    monkeypatch.delenv("SKIP_SCHEDULER_STARTUP", raising=False)
     assert _settings(monkeypatch, scheduler_role="api").scheduler_role == "api"
 
 

@@ -65,11 +65,12 @@ Written permission #232 asks for, which is the only thing that closes #168:
 
 | Answer | Effect |
 |---|---|
-| Grant covering storage and public redisplay | #232 can be accepted for that source; #168 still needs the coverage contract |
-| Grant for storage only | Data may be stored but not shown; consumer features stay off |
+| Grant covering storage and public redisplay | Retained evidence for #232 only; #168 coverage and the #171 recovery preconditions are still required before any acquisition or production write |
+| Grant for storage only | Retained evidence only. It does not authorize acquisition or a write: storing needs the accepted #232 scope **and** the #168/#171 gates, so consumers stay off |
 | Refusal, or no answer | No acquisition, no enablement; fixtures remain the only use |
 | SSI | Not pursued — its terms §3 exclude third-party and processed redisplay |
 
 Credentials are gathered separately and are not permission. A key that exists
-while this file is unsent changes nothing: `providers/credential_policy.py`
-refuses acquisition for FHSC and DNSE in every environment.
+while this file is unsent changes nothing: the existing DNSE cold-start stop in
+`apps/api/scripts/import_dnse_daily.py` still refuses, and FHSC remains supplied
+payloads only. No source is enabled by this draft.

@@ -587,11 +587,24 @@ class Settings(BaseSettings):
             else:
                 # One authorized daily owner: a non-scheduler role may not start
                 # APScheduler, else two processes acquire the same session.
-                requested = (os.getenv("SKIP_SCHEDULER_STARTUP") or "").strip().lower()
-                if requested in {"0", "false", "no", "off"}:
+                #
+                # This must follow the consumer's rule, not a list of false
+                # spellings. `vnibb/api/main.py:_env_flag` reads any present value
+                # outside {1,true,yes,on} as false - including '' and 'no' - so the
+                # API process starts a producer for those. Absent means "skip" for
+                # a non-scheduler role, which stays the safe default.
+                requested = os.getenv("SKIP_SCHEDULER_STARTUP")
+                if requested is not None and requested.strip().lower() not in {
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                }:
                     errors.append(
                         f"SCHEDULER_ROLE={self.scheduler_role} must not start the scheduler in "
-                        "production; exactly one producer runs as SCHEDULER_ROLE=scheduler"
+                        "production; SKIP_SCHEDULER_STARTUP must be truthy (1/true/yes/on) or "
+                        "unset (the default skip), and exactly one producer runs as "
+                        "SCHEDULER_ROLE=scheduler"
                     )
 
             if errors:
