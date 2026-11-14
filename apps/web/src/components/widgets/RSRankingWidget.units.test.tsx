@@ -33,13 +33,15 @@ function query<T>(data: T | undefined): UseQueryResult<T, Error> {
 // Fixtures reproduce the two helper outputs from the ticket, plus the index,
 // zero/null and stale cases the acceptance criteria call for.
 const leaders: RSLeadersResponse = {
-    total: 5,
+    total: 6,
     leaders: [
         { symbol: 'TBX', rs_rating: 95, rs_rank: 1, price: 10000, price_unit: 'VND', price_source: 'vnstock_vnd:KBS', price_asof: '2026-03-09', rating_asof: '2026-03-10' },
         { symbol: 'THD', rs_rating: 90, rs_rank: 2, price: 113.5, price_unit: 'unknown', price_asof: '2026-03-10', rating_asof: '2026-03-10' },
         { symbol: 'VNINDEX', rs_rating: 88, rs_rank: 3, price: 1240.5, price_unit: 'index_points', price_asof: '2026-03-10', rating_asof: '2026-03-10' },
         { symbol: 'HII', rs_rating: 85, rs_rank: 4, price: 0, price_unit: 'VND', rating_asof: '2026-03-10' },
         { symbol: 'MSR', rs_rating: 84, rs_rank: 5, price: null, price_unit: 'unknown', rating_asof: '2026-03-10' },
+        // Carried forward from an undated seed: priced, but with no trade date.
+        { symbol: 'VND', rs_rating: 83, rs_rank: 6, price: 1000, price_unit: 'VND', price_asof: null, rating_asof: '2026-03-10' },
     ],
 }
 
@@ -89,6 +91,14 @@ test('renders a unit with every price and withholds an unverified unit', () => {
     const msr = screen.getByTestId('rs-price-MSR')
     expect(msr).toHaveTextContent('n/a')
     expect(msr.getAttribute('title')).toMatch(/no stored price observation/)
+
+    // A carried-forward price without its own trade date still renders, but says
+    // the observation date is unknown rather than borrowing the ranking date.
+    const undated = screen.getByTestId('rs-price-VND')
+    expect(undated).toHaveTextContent('1,000')
+    expect(undated).toHaveTextContent('VND')
+    expect(undated.getAttribute('title')).toMatch(/observation date unknown/)
+    expect(undated.getAttribute('title')).not.toMatch(/2026-03-10/)
 })
 
 test('discloses the price and rating observation dates instead of the fetch time', () => {
@@ -98,16 +108,19 @@ test('discloses the price and rating observation dates instead of the fetch time
     expect(screen.getByText(/price as of 2026-03-10/)).toBeInTheDocument()
     expect(screen.getByText(/As of/)).toBeInTheDocument()
 
-    // Only THD carries a value with an unverified unit; MSR has no observation.
+    // THD carries a value with an unverified unit; VND carries a price with no
+    // trade date; MSR has no observation at all.
     expect(publications[publications.length - 1]).toMatchObject({
         unknownUnitCount: 1,
+        undatedPriceCount: 1,
         priceAsOf: '2026-03-10',
         __widgetRuntime: {
             layoutHint: { empty: false },
             // Source observation, not the retrieval receipt (`fetchedAt`).
-            provenance: { updatedAt: '2026-03-10', fetchedAt: 0 },
+            provenance: { updatedAt: '2026-03-10', fetchedAt: 0, coverage: 'partial' },
         },
     })
+    expect(screen.getByText(/1 undated price/)).toBeInTheDocument()
 })
 
 test('applies the same unit policy to the gainers tab', () => {
@@ -135,4 +148,10 @@ test('describeRSPrice never emits a number without a certified unit', () => {
     expect(describeRSPrice({ price: -5, price_unit: 'VND' }).text).toBe('n/a')
     expect(describeRSPrice({ price: Number.NaN, price_unit: 'VND' }).text).toBe('n/a')
     expect(describeRSPrice({ price: null, price_unit: 'VND' }).text).toBe('n/a')
+    // An undated stored price says so; it never borrows the ranking date.
+    expect(describeRSPrice({ price: 1000, price_unit: 'VND', price_asof: null })).toEqual({
+        text: '1,000',
+        unitLabel: 'VND',
+        title: 'Stored price, observation date unknown in VND.',
+    })
 })

@@ -608,9 +608,16 @@ class RSRatingService:
 
     @staticmethod
     def _stored_rank_item(snapshot: Any) -> Dict[str, Any]:
-        """One stored ranking row with the price's own unit, source and observation date."""
+        """One stored ranking row with the price's own unit, source and observation date.
+
+        `price_asof` is the price's own trade date and nothing else. A row's
+        `snapshot_date` is when the ranking was calculated, so substituting it
+        for an undated price would present a carried-forward value (the writer
+        above copies `seed.price` with a possibly null `seed.trade_date` into
+        the new calculation day) as a fresh observation of that day.
+        """
         price = screener_price_record(snapshot)
-        price_asof = getattr(snapshot, "trade_date", None) or getattr(snapshot, "snapshot_date", None)
+        price_asof = getattr(snapshot, "trade_date", None)
         rating_asof = getattr(snapshot, "snapshot_date", None)
         return {
             "symbol": snapshot.symbol,

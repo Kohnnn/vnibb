@@ -82,9 +82,11 @@ async def test_stored_leaders_keep_the_price_own_unit_source_and_date(monkeypatc
     assert by_symbol["TBX"]["rating_asof"] == "2026-03-10"
     # An unknown unit keeps its number for the raw record, but the consumer sees
     # the admission marker rather than a unit inferred from 113.5's magnitude.
+    # The price carries no trade date, so its observation date stays unknown
+    # instead of borrowing the ranking's calculation day.
     assert by_symbol["THD"]["price"] == 113.5
     assert by_symbol["THD"]["price_unit"] == "unknown"
-    assert by_symbol["THD"]["price_asof"] == "2026-03-10"
+    assert by_symbol["THD"]["price_asof"] is None
     assert by_symbol["VNM"]["price"] == 500
     assert by_symbol["VNM"]["price_unit"] == "VND"
     assert by_symbol["VNINDEX"]["price_unit"] == "index_points"
@@ -182,3 +184,49 @@ async def test_live_rankings_never_inherit_a_unit_from_the_request(monkeypatch):
     })
     assert item.price is None
     assert item.price_unit == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_carried_forward_price_never_claims_the_calculation_day(monkeypatch):
+    """A seed copied without a trade date must not inherit the new snapshot date.
+
+    `_update_screener_snapshots` copies `seed.price` and `seed.trade_date` into a
+    row dated `snapshot_date`. When the seed itself had no trade date, reporting
+    `snapshot_date` as `price_asof` would present an older carried price as a
+    fresh observation of the calculation day.
+    """
+    carried = SimpleNamespace(
+        symbol="THD", company_name="THD", rs_rating=90, rs_rank=1,
+        price=1000.0, industry="Technology", extended_metrics={"price_unit": "VND"},
+        snapshot_date=date(2026, 3, 10), trade_date=None,
+    )
+    session = _Session([[date(2026, 3, 10)], [carried]])
+    monkeypatch.setattr(rs_rating_service, "get_db_context", lambda: session)
+
+    leaders = await RSRatingService().get_rs_leaders()
+    item = RSStockItem.model_validate(leaders[0]).model_dump()
+
+    assert item["price"] == 1000.0
+    assert item["price_unit"] == "VND"
+    assert item["price_asof"] is None
+    # The ranking date is still disclosed, separately from the price's date.
+    assert item["rating_asof"] == "2026-03-10"
+
+
+def test_stored_rank_item_never_derives_price_date_from_snapshot_date():
+    dated = SimpleNamespace(
+        symbol="FPT", company_name="FPT", rs_rating=90, rs_rank=1, price=100.0,
+        industry=None, extended_metrics={"price_unit": "VND"},
+        snapshot_date=date(2026, 3, 10), trade_date=date(2026, 3, 6),
+    )
+    assert RSRatingService._stored_rank_item(dated)["price_asof"] == "2026-03-06"
+    assert RSRatingService._stored_rank_item(dated)["rating_asof"] == "2026-03-10"
+
+    undated = SimpleNamespace(
+        symbol="FPT", company_name="FPT", rs_rating=90, rs_rank=1, price=100.0,
+        industry=None, extended_metrics={"price_unit": "VND"},
+        snapshot_date=date(2026, 3, 10), trade_date=None,
+    )
+    item = RSRatingService._stored_rank_item(undated)
+    assert item["price_asof"] is None
+    assert item["rating_asof"] == "2026-03-10"

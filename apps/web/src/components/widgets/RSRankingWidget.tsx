@@ -70,7 +70,9 @@ function formatRSPriceValue(value: number): string {
 export function describeRSPrice(
     stock: Pick<RSStockItem, 'price' | 'price_unit' | 'price_asof' | 'price_source'>,
 ): RSPriceDisplay {
-    const asOf = stock.price_asof ? ` as of ${stock.price_asof}` : '';
+    // An undated stored price has no observation date of its own; neither the
+    // ranking's calculation date nor the fetch time stands in for it.
+    const asOf = stock.price_asof ? ` as of ${stock.price_asof}` : ', observation date unknown';
     const source = stock.price_source ? ` (${stock.price_source})` : '';
     const raw = stock.price;
     if (raw === null || raw === undefined || !Number.isFinite(raw)) {
@@ -95,6 +97,15 @@ export function describeRSPrice(
         unitLabel: null,
         title: `Price unavailable: the stored observation${asOf}${source} has no verified currency or scale, so its raw value is withheld rather than compared as VND.`,
     };
+}
+
+/** True when the row shows a number at all (certified unit, usable value). */
+function isDisplayablePrice(
+    stock: Pick<RSStockItem, 'price' | 'price_unit'>,
+): boolean {
+    const raw = stock.price;
+    if (raw === null || raw === undefined || !Number.isFinite(raw) || raw <= 0) return false;
+    return stock.price_unit === 'VND' || stock.price_unit === 'index_points';
 }
 
 function latestDate(values: Array<string | null | undefined>): string | null {
@@ -134,18 +145,29 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
     const isFallback = Boolean(activeQuery.error && hasData);
 
     // Source observation dates only: the ranking's calculation date and each
-    // price's own date. Query receipts stay in `fetchedAt`.
+    // price's own date. Query receipts stay in `fetchedAt`. A price without a
+    // trade date keeps that gap visible rather than borrowing either clock.
     const priceAsOf = latestDate(activeItems.map((item) => item.price_asof));
     const ratingAsOf = latestDate(activeItems.map((item) => item.rating_asof));
     const unknownUnitCount = activeItems.filter(
         (item) => item.price != null && item.price_unit !== 'VND' && item.price_unit !== 'index_points',
     ).length;
+    // Only a price the row actually shows can be "undated": zero, negative,
+    // non-finite and unit-withheld values are already reported as unavailable.
+    const undatedPriceCount = activeItems.filter(
+        (item) => isDisplayablePrice(item) && !item.price_asof,
+    ).length;
     const health = deriveWidgetHealth({ updatedAt: ratingAsOf, stale: isFallback });
     const warnings = useMemo(
-        () => unknownUnitCount > 0
-            ? [`${unknownUnitCount} price${unknownUnitCount === 1 ? '' : 's'} withheld: stored observation has no verified unit`]
-            : [],
-        [unknownUnitCount],
+        () => [
+            ...(unknownUnitCount > 0
+                ? [`${unknownUnitCount} price${unknownUnitCount === 1 ? '' : 's'} withheld: stored observation has no verified unit`]
+                : []),
+            ...(undatedPriceCount > 0
+                ? [`${undatedPriceCount} price${undatedPriceCount === 1 ? '' : 's'} without a trade date: freshness unknown`]
+                : []),
+        ],
+        [undatedPriceCount, unknownUnitCount],
     );
 
     useEffect(() => {
@@ -163,16 +185,17 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
             lastDataDate: ratingAsOf,
             fetchedAt: activeQuery.dataUpdatedAt,
             cached: isFallback,
-            coverage: unknownUnitCount > 0 ? 'partial' : undefined,
+            coverage: unknownUnitCount > 0 || undatedPriceCount > 0 ? 'partial' : undefined,
             warnings,
             extra: {
                 count: activeItems.length,
                 limit,
                 priceAsOf,
                 unknownUnitCount,
+                undatedPriceCount,
             },
         }));
-    }, [activeItems.length, activeQuery.dataUpdatedAt, activeTab, hasData, isFallback, limit, onDataChange, priceAsOf, ratingAsOf, unknownUnitCount, warnings]);
+    }, [activeItems.length, activeQuery.dataUpdatedAt, activeTab, hasData, isFallback, limit, onDataChange, priceAsOf, ratingAsOf, undatedPriceCount, unknownUnitCount, warnings]);
 
     const handleRefresh = () => {
         activeQuery.refetch();
@@ -277,6 +300,7 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                         note={[
                             activeTab === 'leaders' ? 'Leaders' : activeTab === 'laggards' ? 'Laggards' : 'Gainers',
                             priceAsOf ? `price as of ${priceAsOf}` : null,
+                            undatedPriceCount > 0 ? `${undatedPriceCount} undated price${undatedPriceCount === 1 ? '' : 's'}` : null,
                             unknownUnitCount > 0 ? `${unknownUnitCount} price${unknownUnitCount === 1 ? '' : 's'} unverified` : null,
                         ].filter(Boolean).join(' · ')}
                         align="right"
