@@ -1091,3 +1091,130 @@ def test_conflicting_same_year_statement_observations_do_not_choose_valuation_tr
     assert snapshot.margin_of_safety is None
     assert "no established revision order" in snapshot.inputs["comparison_unavailable_reason"]
     assert inputs.balance_sheets[0]["_valuation_observations"] == [row["raw"] for row in records]
+
+
+class TestFcfNewestRowSelection:
+    def test_newest_incomplete_row_is_not_bridged_with_older_complete_years(self) -> None:
+        coverage = assess_fcf_coverage([
+            _cash_year(2021, 300.0, -100.0),
+            _cash_year(2022, 300.0, -100.0),
+            _cash_year(2023, 300.0, -100.0),
+            _cash_year(2024, None, -100.0),
+        ])
+
+        assert coverage["status"] == "partial"
+        assert coverage["baseFcf"] is None
+        assert coverage["baseYears"] == [2022, 2023]
+        assert coverage["incompleteWindowYears"] == [2024]
+        assert coverage["latestYear"] == 2024
+        assert coverage["positive"] is None
+        assert "2024" in coverage["reason"]
+
+    def test_complete_newest_rows_still_value(self) -> None:
+        coverage = assess_fcf_coverage([
+            _cash_year(2021, 260.0, -100.0),
+            _cash_year(2022, 280.0, -100.0),
+            _cash_year(2023, 300.0, -100.0),
+            _cash_year(2024, 320.0, -100.0),
+            _cash_year(2025, 340.0, -100.0),
+        ])
+
+        assert coverage["status"] == "complete"
+        assert coverage["baseYears"] == [2023, 2024, 2025]
+        assert coverage["baseFcf"] == pytest.approx((200.0 + 220.0 + 240.0) / 3)
+        assert coverage["incompleteWindowYears"] == []
+
+    def test_conflicting_capex_observation_withholds_that_year(self) -> None:
+        row = _cash_year(2025, 340.0, -100.0)
+        row["_valuation_conflicting_observations"] = ["purchase_of_fixed_assets"]
+        coverage = assess_fcf_coverage([
+            _cash_year(2023, 300.0, -100.0),
+            _cash_year(2024, 320.0, -100.0),
+            row,
+        ])
+
+        assert coverage["status"] == "partial"
+        assert coverage["baseFcf"] is None
+        assert coverage["incompleteWindowYears"] == [2025]
+        assert coverage["excluded"] == [{
+            "year": 2025,
+            "incomplete": [{"component": "capex", "reason": "conflicting_observations"}],
+        }]
+        assert coverage["positive"] is None
+
+
+class TestSnapshotWithNewestIncompleteFcf:
+    def test_unknown_newest_cash_flow_year_withholds_dcf_and_margin(self) -> None:
+        inputs = _happy_inputs()
+        inputs.cash_flows = inputs.cash_flows[:5] + [_cash_row(2025, ocf=300.0, capex=None)]
+        snapshot = compute_fundamental_snapshot(inputs)
+
+        assert snapshot.fcf_positive is None
+        assert snapshot.inputs["base_fcf"] is None
+        assert snapshot.intrinsic_value is None
+        assert snapshot.margin_of_safety is None
+        assert snapshot.valuation_method is None
+        assert snapshot.valuation_verdict is None
+        reason = snapshot.inputs["derived_unavailable_reason"]
+        assert "Free cash flow is unavailable" in reason
+        assert "2025" in reason
+        assert snapshot.inputs["derived_coverage"]["fcf"]["incompleteWindowYears"] == [2025]
+        # The 5Y CAGR fields are an independent lineage and stay published.
+        assert snapshot.revenue_cagr_5y == pytest.approx(10.0, rel=1e-6)
+
+
+class TestConflictingRestatementCoverage:
+    @staticmethod
+    def _normalized_income() -> list[dict[str, Any]]:
+        records = [
+            {
+                "observedAt": date(2026, 6, 14),
+                "raw": {"yearReport": year, "revenue": revenue, "currency_unit": "VND"},
+            }
+            for year, revenue in (
+                (2020, 100.0), (2021, 110.0), (2022, 121.0),
+                (2023, 133.1), (2024, 146.41), (2025, 161.051),
+            )
+        ]
+        # A later restatement of the newest year carries no revision authority.
+        records.append({
+            "observedAt": date(2026, 6, 15),
+            "raw": {"yearReport": 2025, "revenue": 999.0, "currency_unit": "VND"},
+        })
+        return _normalize_statement_rows(records)
+
+    def test_loader_conflict_marker_withholds_the_year_from_cagr(self) -> None:
+        rows = self._normalized_income()
+        newest = next(row for row in rows if row["yearReport"] == 2025)
+        assert newest["_valuation_conflicting_observations"] == ["revenue"]
+
+        coverage = assess_cagr_coverage(rows, "revenue")
+
+        assert coverage["published"] is None
+        assert {
+            "year": 2025, "field": "revenue", "reason": "conflicting_observations",
+        } in coverage["excluded"]
+        assert 999.0 not in [point["value"] for point in coverage["points"]]
+        assert coverage["endYear"] == 2024
+
+    def test_snapshot_from_loader_conflict_withholds_five_year_fields(self) -> None:
+        inputs = _happy_inputs()
+        inputs.income_statements = self._normalized_income()
+        snapshot = compute_fundamental_snapshot(inputs)
+
+        assert snapshot.revenue_cagr_5y is None
+        assert snapshot.inputs["derived_coverage"]["cagr"]["revenue"]["published"] is None
+
+
+class TestCagrMetadataIdentity:
+    def test_long_history_reports_the_selected_window_not_the_full_extent(self) -> None:
+        rows = [_income_row(year, value, 1.0) for year, value in (
+            (2010, 10.0), (2011, 11.0), (2012, 12.0), (2013, 13.0), (2014, 14.0),
+            (2020, 100.0), (2021, 110.0), (2022, 121.0), (2023, 133.1),
+            (2024, 146.41), (2025, 161.051),
+        )]
+        coverage = assess_cagr_coverage(rows, "revenue")
+
+        assert coverage["published"] == pytest.approx(10.0, rel=1e-6)
+        assert (coverage["startYear"], coverage["endYear"], coverage["spanYears"]) == (2020, 2025, 5)
+        assert (coverage["historyStartYear"], coverage["historyEndYear"]) == (2010, 2025)

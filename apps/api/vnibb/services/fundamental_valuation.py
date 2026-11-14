@@ -662,14 +662,27 @@ def _annual_field_series(
 
     Duplicate fiscal years with different values are a restatement without
     revision authority, so that year is withheld instead of using whichever
-    row happened to sort last.
+    row happened to sort last. The production loader collapses duplicate rows
+    and records the collapsed conflict in ``_valuation_conflicting_observations``;
+    a field named there is withheld for that year as well, because the surviving
+    value is one of several with no established order.
     """
 
+    aliases = {field, *VALUATION_FIELD_ALIASES.get(field, ())}
     by_year: dict[int, list[float]] = {}
     excluded: list[dict[str, Any]] = []
+    conflicted: set[int] = set()
     for row in rows or []:
         year = _row_year(row)
         if year is None:
+            continue
+        if isinstance(row, dict) and aliases & set(
+            row.get("_valuation_conflicting_observations") or ()
+        ):
+            conflicted.add(year)
+            excluded.append({
+                "year": year, "field": field, "reason": "conflicting_observations",
+            })
             continue
         value, reason = admit_valuation_field(
             row, field, declared_statement_unit=declared_statement_unit
@@ -678,15 +691,23 @@ def _annual_field_series(
             excluded.append({"year": year, "field": field, "reason": reason})
             continue
         by_year.setdefault(year, []).append(value)
-    ambiguous = sorted(year for year, values in by_year.items() if len(set(values)) > 1)
+    ambiguous = sorted(
+        year for year, values in by_year.items()
+        if year in conflicted or len(set(values)) > 1
+    )
     points = [
         (year, values[0]) for year, values in sorted(by_year.items()) if year not in ambiguous
     ]
     excluded.extend(
         {"year": year, "field": field, "reason": "ambiguous_restatement"}
-        for year in ambiguous
+        for year in ambiguous if year not in conflicted
     )
-    return {"points": points, "excluded": excluded, "ambiguous_years": ambiguous}
+    return {
+        "points": points,
+        "excluded": excluded,
+        "ambiguous_years": ambiguous,
+        "conflicting_years": sorted(conflicted),
+    }
 
 
 def assess_cagr_coverage(
@@ -737,6 +758,15 @@ def assess_cagr_coverage(
     result["windowStartYear"] = window_years[0]
     result["windowEndYear"] = end_year
     result["windowComplete"] = len(window) == len(window_years)
+    # startYear/endYear/spanYears identify the interval the reported value is
+    # actually computed over, not the extent of the retained history, so a long
+    # history never lends a 5Y claim to a shorter selected window.
+    if window:
+        result["startYear"] = window[0]
+        result["endYear"] = window[-1]
+        result["spanYears"] = window[-1] - window[0]
+        result["historyStartYear"] = years[0]
+        result["historyEndYear"] = years[-1]
     if window:
         result["coverage"] = "complete" if result["windowComplete"] else "gapped"
     if not window:
@@ -777,65 +807,82 @@ def assess_fcf_coverage(
 
     Capex is a required component: absent, blank or rejected capex makes that
     year's FCF unknown rather than equal to operating cash flow. A reported
-    ``0`` is an admitted observation. ``base_fcf`` is the mean of the newest
-    ``base_rows`` complete years and exists only when those are all complete.
+    ``0`` is an admitted observation.
+
+    ``base_fcf`` is the mean of the newest ``base_rows`` dated annual rows, and
+    requires every one of them to carry admitted OCF and capex. The window is
+    chosen before completeness is known, so an unknown newest year makes the
+    base unavailable instead of being bridged with older complete years.
     """
 
-    latest_positive: bool | None = None
-    latest_year: int | None = None
-    latest_reason: str | None = None
+    by_year: dict[int, dict[str, Any] | None] = {}
     excluded: list[dict[str, Any]] = []
-    complete: list[dict[str, Any]] = []
     for row in cash_flows or []:
         year = _row_year(row)
-        ocf, ocf_reason = admit_valuation_field(
-            row, "operating_cash_flow", declared_statement_unit=declared_statement_unit
-        )
-        capex, capex_reason = admit_valuation_field(
-            row, "capex", declared_statement_unit=declared_statement_unit
-        )
+        if year is None:
+            continue
+        conflicts = set(row.get("_valuation_conflicting_observations") or ()) if isinstance(row, dict) else set()
         incomplete = []
-        if ocf is None:
-            incomplete.append({"component": "operating_cash_flow", "reason": ocf_reason})
-        if capex is None:
-            incomplete.append({"component": "capex", "reason": capex_reason})
+        ocf = capex = None
+        if {"operating_cash_flow", *OCF_ALIASES} & conflicts:
+            incomplete.append({"component": "operating_cash_flow", "reason": "conflicting_observations"})
+        else:
+            ocf, ocf_reason = admit_valuation_field(
+                row, "operating_cash_flow", declared_statement_unit=declared_statement_unit
+            )
+            if ocf is None:
+                incomplete.append({"component": "operating_cash_flow", "reason": ocf_reason})
+        if {"capex", *CAPEX_ALIASES} & conflicts:
+            incomplete.append({"component": "capex", "reason": "conflicting_observations"})
+        else:
+            capex, capex_reason = admit_valuation_field(
+                row, "capex", declared_statement_unit=declared_statement_unit
+            )
+            if capex is None:
+                incomplete.append({"component": "capex", "reason": capex_reason})
         if incomplete:
             excluded.append({"year": year, "incomplete": incomplete})
+            by_year[year] = None
             continue
-        complete.append({"year": year, "ocf": ocf, "capex": capex, "fcf": ocf - abs(capex)})
-    complete.sort(key=lambda item: (item["year"] is None, item["year"]))
-    excluded_years = [item["year"] for item in excluded if item["year"] is not None]
-    complete_years = [item["year"] for item in complete if item["year"] is not None]
-    newest_year = max(complete_years + excluded_years, default=None)
-    latest_year = newest_year
+        by_year[year] = {"year": year, "ocf": ocf, "capex": capex, "fcf": ocf - abs(capex)}
+
+    dated_years = sorted(by_year)
+    newest_year = dated_years[-1] if dated_years else None
+    latest_positive: bool | None = None
+    latest_reason: str | None = None
     if newest_year is None:
         latest_reason = "no_dated_annual_cash_flow_row"
-    elif newest_year in complete_years:
-        latest_positive = next(
-            item["fcf"] > 0 for item in complete if item["year"] == newest_year
-        )
+    elif by_year[newest_year] is not None:
+        latest_positive = bool(by_year[newest_year]["fcf"] > 0)
     else:
-        latest_positive = None
         incomplete = next(item for item in excluded if item["year"] == newest_year)
         latest_reason = "latest_year_incomplete:" + ",".join(
             f"{part['component']}={part['reason']}" for part in incomplete["incomplete"]
         )
-    window = complete[-base_rows:]
-    status = "complete" if len(window) >= base_rows else "partial"
+
+    window_years = dated_years[-base_rows:]
+    window = [by_year[year] for year in window_years]
+    missing_years = [year for year, item in zip(window_years, window) if item is None]
+    status = "complete" if len(window) == base_rows and not missing_years else "partial"
     base_fcf: float | None = None
     reason: str | None = None
     if status == "complete":
         base_fcf = sum(item["fcf"] for item in window) / len(window)
     else:
-        reason = f"insufficient_complete_cash_flow_years:{len(complete)}/{base_rows}"
+        detail = f"; incomplete {', '.join(str(year) for year in missing_years)}" if missing_years else ""
+        reason = (
+            f"insufficient_complete_cash_flow_years:{len(window) - len(missing_years)}/{base_rows}"
+            f" newest dated rows{detail}"
+        )
     return {
         "status": status,
         "positive": latest_positive,
         "positiveReason": latest_reason,
-        "latestYear": latest_year,
+        "latestYear": newest_year,
         "baseFcf": base_fcf,
-        "baseYears": [item["year"] for item in window],
+        "baseYears": [item["year"] for item in window if item is not None],
         "baseRows": base_rows,
+        "incompleteWindowYears": missing_years,
         "excluded": excluded,
         "reason": reason,
     }
@@ -1380,6 +1427,7 @@ def compute_fundamental_snapshot(
                 "baseFcf": fcf_coverage.get("baseFcf"),
                 "baseYears": fcf_coverage.get("baseYears"),
                 "baseRows": fcf_coverage.get("baseRows"),
+                "incompleteWindowYears": fcf_coverage.get("incompleteWindowYears"),
                 "excluded": fcf_coverage.get("excluded"),
                 "reason": fcf_coverage.get("reason"),
             },
