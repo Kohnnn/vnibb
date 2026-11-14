@@ -266,16 +266,14 @@ export function findPreferredTabId<T extends { id: string; name: string }>(
  * the slug `financials` would make it fail against the fallback instead, so
  * both names — and the slug — resolve to the same role.
  */
-export type DashboardTabRole = 'financials' | 'overview' | 'technical' | 'quant';
-
-export const FINANCIAL_TAB_LABELS = ['fundamentals', 'financials'] as const;
-
-const ROLE_TAB_LABELS: Record<DashboardTabRole, readonly string[]> = {
-  financials: FINANCIAL_TAB_LABELS,
+export const ROLE_TAB_LABELS = {
+  financials: ['fundamentals', 'financials'],
   overview: ['overview'],
-  technical: ['technical', 'technical analysis'],
-  quant: ['quant', 'quant & technical', 'quant and technical'],
-};
+} as const
+
+// Only the roles the onboarding goals actually route to; `financials` is the
+// #253 fix, `overview` is the Follow-a-ticker target in the same handler.
+export type DashboardTabRole = keyof typeof ROLE_TAB_LABELS
 
 function normalizeLabel(label: string): string {
   return label.trim().toLowerCase().replace(/\s+/g, ' ');

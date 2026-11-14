@@ -75,13 +75,12 @@ describe('findRoleTab', () => {
     expect(findRoleTab([], 'financials')).toBeNull()
   })
 
-  it('does not confuse the Technical or Quant tabs with financials', () => {
+  it('does not confuse a non-financial tab with the financials role', () => {
     const tabs = [
       { id: 'tech', name: 'Technical' },
       { id: 'quant', name: 'Quant' },
     ]
     expect(findRoleTab(tabs, 'financials')).toBeNull()
-    expect(findRoleTab(tabs, 'technical')).toEqual(tabs[0])
-    expect(findRoleTab(tabs, 'quant')).toEqual(tabs[1])
+    expect(findRoleTab(tabs, 'overview')).toBeNull()
   })
 })
