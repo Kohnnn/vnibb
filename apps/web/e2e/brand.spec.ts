@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type BrowserContext } from '@playwright/test';
 
 /**
  * #196 brand acceptance: the wordmark renders in the app at the native 2048:446
@@ -8,6 +8,32 @@ import { expect, test } from '@playwright/test';
  * Run against a dev server on :3101:
  *   pnpm --filter frontend exec playwright test -c playwright.brand.config.ts
  */
+/**
+ * Containment: routed sockets are closed without ever calling `connectToServer`,
+ * and only GET/HEAD on the exact web origin of `baseURL` may leave the browser.
+ */
+async function installNetworkGuard(context: BrowserContext, baseURL?: string) {
+  const webOrigin = new URL(baseURL ?? 'http://127.0.0.1:3101').origin;
+  // Sandboxed (bwrap) Chromium reports `navigator.onLine === false`, so `fetchAPI`
+  // throws `Offline` before issuing the request and the query provider pauses.
+  await context.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'onLine', { get: () => true, configurable: true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await context.routeWebSocket(/.*/, (socket) => socket.close());
+  await context.route('**/*', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (['http:', 'https:'].includes(url.protocol) && url.origin === webOrigin && !url.pathname.startsWith('/api/') && ['GET', 'HEAD'].includes(request.method())) {
+      return route.continue();
+    }
+    return route.abort();
+  });
+}
+
+test.beforeEach(async ({ context, baseURL }) => {
+  await installNetworkGuard(context, baseURL);
+});
 
 const VIEWPORTS = [
   { name: '320', width: 320, height: 720 },

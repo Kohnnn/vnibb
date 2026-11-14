@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test';
 import { readFileSync, statSync } from 'node:fs';
 
 /**
@@ -15,6 +15,54 @@ const SCREENER_ROWS = [
     price: 92000, change_1d: 1.2, market_cap: 770000, pe: 14.2, dividend_yield: 2.1,
   },
 ];
+
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  'access-control-allow-headers': '*',
+};
+/** Only the loopback API port is answered synthetically; every other host/port is refused. */
+const isLoopbackApi = (url: URL) => ['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '8000';
+
+/**
+ * Containment: routed sockets are closed without ever calling `connectToServer`.
+ * Only GET/HEAD may leave the browser: the exact web origin of `baseURL` passes
+ * through, and the loopback API host (the built shell uses `localhost:8000`, not
+ * the web host) is fulfilled here with CORS, preflights included. `page.route`
+ * handlers still win over this context route, so the fixtures below fulfil first.
+ */
+async function installNetworkGuard(context: BrowserContext, baseURL?: string) {
+  const webOrigin = new URL(baseURL ?? 'http://127.0.0.1:3101').origin;
+  // Sandboxed (bwrap) Chromium reports `navigator.onLine === false`, so `fetchAPI`
+  // throws `Offline` before issuing the request and the query provider pauses.
+  await context.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'onLine', { get: () => true, configurable: true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await context.routeWebSocket(/.*/, (socket) => socket.close());
+  await context.route('**/*', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (!['http:', 'https:'].includes(url.protocol)) return route.abort();
+    if (isLoopbackApi(url)) {
+      if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS_HEADERS });
+      if (!['GET', 'HEAD'].includes(request.method())) return route.abort();
+      return route.fulfill({
+        contentType: 'application/json',
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ data: [], count: 0 }),
+      });
+    }
+    if (['GET', 'HEAD'].includes(request.method()) && url.origin === webOrigin && !url.pathname.startsWith('/api/')) {
+      return route.continue();
+    }
+    return route.abort();
+  });
+}
+
+test.beforeEach(async ({ context, baseURL }) => {
+  await installNetworkGuard(context, baseURL);
+});
 
 type Widget = { type: string; syncGroupId?: number; config?: Record<string, unknown>; layout?: Record<string, number> };
 
@@ -69,8 +117,7 @@ async function mount(page: Page, widgets: Widget[], options: { isEditable?: bool
     }));
   }, { widgets, options });
 }
-
-const json = (body: unknown) => ({ contentType: 'application/json', body: JSON.stringify(body) });
+const json = (body: unknown) => ({ contentType: 'application/json', headers: CORS_HEADERS, body: JSON.stringify(body) });
 
 /** Shell-safe defaults: correct shape for every endpoint that is not the case under test. */
 async function baseRoutes(
@@ -78,7 +125,14 @@ async function baseRoutes(
   overrides: Record<string, (route: Route) => Promise<void>> = {},
 ) {
   await page.route('**/api/v1/**', async (route) => {
+    const method = route.request().method();
     const url = new URL(route.request().url());
+    // Anything but the loopback API host is not ours to answer: fall back so the
+    // context allowlist decides (pass the web origin, refuse the rest).
+    if (!isLoopbackApi(url)) return route.fallback();
+    // The shell is cross-origin to the API, so the browser preflights first.
+    if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS_HEADERS });
+    if (!['GET', 'HEAD'].includes(method)) return route.abort();
     const path = url.pathname;
 
     // An override must fulfil the route it is handed; calling page.route() from
@@ -91,7 +145,9 @@ async function baseRoutes(
       }
     }
 
-    if (path.endsWith('/search/tickers')) return route.continue();
+    // Not fulfilled here: defer to the context allowlist, which answers the real
+    // loopback host or aborts. A bare `continue()` would bypass it.
+    if (path.endsWith('/search/tickers')) return route.fallback();
     if (path.endsWith('/screener/')) {
       const exchange = url.searchParams.get('exchange');
       const data = exchange ? SCREENER_ROWS.filter((row) => row.exchange === exchange) : SCREENER_ROWS;
@@ -121,7 +177,7 @@ test('ratio 500 with no rows renders the widget error state, not blank', async (
   await mount(page, [{ type: 'financial_ratios' }]);
   await baseRoutes(page, {
     '/ratios': (route) =>
-      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'provider failed' }) }),
+      route.fulfill({ ...json({ detail: 'provider failed' }), status: 500 }),
   });
 
   await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
@@ -315,13 +371,21 @@ test('market indices report each observation against its own source date', async
   await expect(widget.getByText('As of: 02 Nov 2026')).toBeVisible({ timeout: 30_000 });
   await expect(widget.getByText('As of: 30 Oct 2026')).toBeVisible({ timeout: 30_000 });
 });
-test('an index date stays on the traded day west of UTC', async ({ browser }) => {
+test('an index date stays on the traded day west of UTC', async ({ browser, baseURL }) => {
   // The API sends a bare `YYYY-MM-DD`. `new Date('2026-11-02')` is midnight UTC,
   // so a browser at a negative offset rendered that Monday as 01 Nov (Sunday).
   // A unit test cannot catch this: Jest freezes the ICU zone at startup, so the
   // assertion passes whatever `process.env.TZ` is set to. Only a real browser
   // with a real zone shows the defect.
-  const context = await browser.newContext({ timezoneId: 'America/New_York' });
+  // A hand-made context inherits none of `use`, so it needs baseURL for `goto('/…')`
+  // plus the same containment guard the fixture contexts receive; a service worker
+  // would otherwise serve the shell's own cached API replies.
+  const context = await browser.newContext({
+    baseURL,
+    timezoneId: 'America/New_York',
+    serviceWorkers: 'block',
+  });
+  await installNetworkGuard(context, baseURL);
   const page = await context.newPage();
   await mount(page, [{ type: 'market_overview' }]);
   await baseRoutes(page, {
@@ -519,7 +583,7 @@ for (const viewport of [{ name: '1024', width: 1024, height: 768 }, { name: '390
     await mount(page, [{ type: 'financial_ratios' }]);
     await baseRoutes(page, {
       '/ratios': (route) =>
-        route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ detail: 'provider failed' }) }),
+        route.fulfill({ ...json({ detail: 'provider failed' }), status: 500 }),
     });
 
     await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
@@ -720,7 +784,7 @@ test('maximized embedded chart permits keyboard-only forward and reverse exit', 
   test.setTimeout(120_000);
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.fallback() : route.abort();
   });
   await mount(page, [{ type: 'tradingview_chart', config: { symbol: 'NASDAQ:AAPL' } }]);
   await baseRoutes(page);
@@ -782,7 +846,7 @@ test('compact ticker exposes price and freshness through keyboard scrolling', as
   test.setTimeout(90_000);
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.fallback() : route.abort();
   });
   await mount(page, [{ type: 'ticker_info', layout: { w: 8, h: 4 } }]);
   await baseRoutes(page, {
@@ -816,7 +880,7 @@ test('maximized Matrix inspector owns Escape before its parent', async ({ page }
   test.setTimeout(90_000);
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.fallback() : route.abort();
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await mount(page, [{ type: 'research_matrix' }]);
@@ -857,7 +921,7 @@ test('maximized Matrix inspector owns Escape before its parent', async ({ page }
 test('ticker search closes before compact widget controls and restores focus', async ({ page }) => {
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
-    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.continue() : route.abort();
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1' ? route.fallback() : route.abort();
   });
   await page.setViewportSize({ width: 320, height: 720 });
   await mount(page, [{ type: 'ticker_info', layout: { w: 8, h: 4 } }]);

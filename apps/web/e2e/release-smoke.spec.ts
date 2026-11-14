@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type BrowserContext } from '@playwright/test';
 
 const screenerRows = [
   {
@@ -25,7 +25,61 @@ const screenerRows = [
   },
 ];
 
-test.beforeEach(async ({ page }) => {
+/** Mirrors the synthetic row in the gate's stdlib browser fixture; no backend serves search. */
+const tickerRows = [{ symbol: 'VCB', name: 'Vietcombank', type: 'vn_stock', exchange: 'HOSE', tv_symbol: 'HOSE:VCB' }];
+
+/**
+ * The built shell is served from the web origin but calls `http://localhost:8000`
+ * cross-origin, so every synthetic reply — payload or preflight — must carry CORS
+ * or the browser discards it before the app ever sees a row.
+ */
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+  'access-control-allow-headers': '*',
+};
+const json = (body: unknown) => ({ contentType: 'application/json', headers: CORS_HEADERS, body: JSON.stringify(body) });
+/** Only the loopback API port is answered synthetically; every other host/port is refused. */
+const isLoopbackApi = (url: URL) => ['localhost', '127.0.0.1'].includes(url.hostname) && url.port === '8000';
+
+/**
+ * Containment: routed sockets are closed without ever calling `connectToServer`.
+ * Only GET/HEAD may leave the browser: the exact web origin of `baseURL` passes
+ * through, and the loopback API host is answered here synthetically, since the
+ * built shell hardcodes `http://localhost:8000`. `page.route` handlers still win
+ * over this context route, so the fixtures below fulfil first and this only sees
+ * what escaped them.
+ */
+async function installNetworkGuard(context: BrowserContext, baseURL?: string) {
+  const webOrigin = new URL(baseURL ?? 'http://127.0.0.1:3101').origin;
+  // Sandboxed (bwrap) Chromium reports `navigator.onLine === false`, so `fetchAPI`
+  // throws `Offline` before issuing the request and the query provider pauses.
+  await context.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'onLine', { get: () => true, configurable: true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await context.routeWebSocket(/.*/, (socket) => socket.close());
+  await context.route('**/*', (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (!['http:', 'https:'].includes(url.protocol)) return route.abort();
+    if (isLoopbackApi(url)) {
+      if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS_HEADERS });
+      if (!['GET', 'HEAD'].includes(request.method())) return route.abort();
+      const body = url.pathname === '/api/v1/search/tickers'
+        ? { results: tickerRows, count: tickerRows.length }
+        : { data: [], count: 0 };
+      return route.fulfill(json(body));
+    }
+    if (['GET', 'HEAD'].includes(request.method()) && url.origin === webOrigin && !url.pathname.startsWith('/api/')) {
+      return route.continue();
+    }
+    return route.abort();
+  });
+}
+
+test.beforeEach(async ({ context, page, baseURL }) => {
+  await installNetworkGuard(context, baseURL);
   await page.addLocatorHandler(page.getByRole('dialog', { name: 'VniBB walkthrough' }), async (dialog) => {
     await dialog.getByRole('button', { name: 'Close walkthrough' }).click();
   });
@@ -59,34 +113,29 @@ test.beforeEach(async ({ page }) => {
   });
 
   await page.route('**/api/v1/**', async (route) => {
+    const method = route.request().method();
     const url = new URL(route.request().url());
+    // Anything but the loopback API host is not ours to answer: fall back so the
+    // context allowlist decides (pass the web origin's assets, refuse the rest).
+    if (!isLoopbackApi(url)) return route.fallback();
+    // The shell is cross-origin to the API, so the browser preflights first.
+    if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS_HEADERS });
+    if (!['GET', 'HEAD'].includes(method)) return route.abort();
     if (url.pathname.endsWith('/search/tickers')) {
-      await route.continue();
-      return;
+      return route.fulfill(json({ results: tickerRows, count: tickerRows.length }));
     }
     if (url.pathname.endsWith('/screener/')) {
       const exchange = url.searchParams.get('exchange');
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: exchange ? screenerRows.filter((row) => row.exchange === exchange) : screenerRows,
-          meta: { count: screenerRows.length, source: 'live' },
-        }),
-      });
-      return;
+      return route.fulfill(json({
+        data: exchange ? screenerRows.filter((row) => row.exchange === exchange) : screenerRows,
+        meta: { count: screenerRows.length, source: 'live' },
+      }));
     }
-    if (url.pathname.endsWith('/alerts/insider')) {
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify([]) });
-      return;
-    }
+    if (url.pathname.endsWith('/alerts/insider')) return route.fulfill(json([]));
     if (url.pathname.endsWith('/market/freshness')) {
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({ overall: 'fresh', buckets: [] }),
-      });
-      return;
+      return route.fulfill(json({ overall: 'fresh', buckets: [] }));
     }
-    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [], count: 0 }) });
+    return route.fulfill(json({ data: [], count: 0 }));
   });
 });
 
