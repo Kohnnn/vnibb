@@ -290,6 +290,29 @@ describe('earnings recap export context', () => {
     expect(margin.previous).toBeNull();
   });
 
+  it('withholds the margin delta when the two margins use different bases', () => {
+    // R3: numerically buildable margins on incompatible reporting bases are
+    // still not comparable, so the bridge and its export both stay withheld.
+    const onDataChange = jest.fn();
+    const latest = { ...row('2025-Q2', { revenue: 200, net_income: 40, eps: 4, gross_profit: 60 }), consolidation_basis: 'consolidated' };
+    const comparable = { ...row('2024-Q2', { revenue: 100, net_income: 20, eps: 2, gross_profit: 20 }), consolidation_basis: 'separate' };
+    income.mockReturnValue({ data: { data: [latest, comparable] }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
+    cashFlow.mockReturnValue({ data: { data: [] }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
+    quality.mockReturnValue(idle());
+    jest.mocked(useCompanyNews).mockReturnValue(idle());
+    jest.mocked(useCompanyEvents).mockReturnValue(idle());
+    render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" onDataChange={onDataChange} />);
+
+    const runtime = onDataChange.mock.calls.at(-1)?.[0];
+    const margin = runtime.metric_unavailable_reasons.gross_margin;
+    expect(margin.value).toBeNull();
+    expect(margin.unavailable_reason).toContain('consolidation basis');
+    // The two margins are real numbers, so only the basis withholds the delta.
+    expect(margin.current).toBeCloseTo(30, 5);
+    expect(margin.previous).toBeCloseTo(20, 5);
+    expect(runtime.comparison_unavailable_reason).toContain('consolidation basis');
+  });
+
   it('forwards a withheld bridge metric beyond the headline three', () => {
     // #258: the bridge rows are gross profit, operating income and pre-tax
     // profit; a suppressed one must stay explicit rather than vanish from the

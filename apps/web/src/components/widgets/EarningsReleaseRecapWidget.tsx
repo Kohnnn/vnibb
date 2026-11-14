@@ -121,7 +121,10 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
         // delta (or its reason) plus both sides explicitly.
         const currentMargin = marginOfIncome(latestIncome);
         const previousMargin = marginOfIncome(comparableIncome);
-        const marginDelta = currentMargin !== null && previousMargin !== null
+        // Both margins must also be on one reporting basis: a consolidated
+        // current margin beside a separate prior one is not a comparable delta,
+        // whatever the numbers are (#258).
+        const marginDelta = comparisonReason === null && currentMargin !== null && previousMargin !== null
             ? currentMargin - previousMargin
             : null;
         const marginReason = marginDelta !== null
