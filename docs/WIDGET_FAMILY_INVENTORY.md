@@ -89,24 +89,24 @@ screenshot capture timed out in this environment, so no visual artefacts exist.
 | 28 | `forex_rates` | rendered | 112 chars | regex+len |
 | 29 | `world_indices` | unavailable + named fallback | "Global index feed unavailable, using VN market index fallback" | text |
 
-**Counts, reconciled against the table above by counting its Basis column:**
-16 rows text-confirmed by the worker, 8 rows heuristic render presence
-(`regex+len`), 5 rows error/gate/unavailable (`alert_settings`,
-`database_inspector`, `quick_stats`, `market_breadth`, `world_indices`).
-16 + 8 + 5 = 29. **There is no "24 content" figure**: that number was wrong, and
-it wrongly merged the 8 heuristic rows into the text-confirmed total.
+**Worker-reported Run B dispositions:** 16 text-confirmed content/labelled-empty
+states, 8 heuristic-only rendered states (`regex+len`; content not confirmed),
+and 5 text-confirmed error/gate/unavailable states. That is 16 + 8 + 5 = 29 IDs
+enumerated. There is no "24 content" figure; that number was wrong.
 
-The 8 heuristic rows (`company_filings`, `events_calendar`,
+The 8 heuristic-only IDs are `company_filings`, `events_calendar`,
 `insider_deal_timeline`, `news_corporate_actions`, `subsidiaries`,
-`market_overview`, `commodities`, `forex_rates`) were marked "rendered" because
-the observation harness found no error string and a non-trivial text length. That
-is **render presence**, not a content verification: their Run B text was never
-read. In Run A the same IDs showed connection-failure text. Treat these 8 as
-"renders something that is not an error" and nothing stronger.
+`market_overview`, `commodities`, `forex_rates` - marked only because the
+observation harness found no error string and a non-trivial text length. Their
+content was not read and is not confirmed.
 
-The 16 text-confirmed rows are ones whose state was classified from their
-visible text (both content and labelled-empty). The 5 error/gate rows are also
-text-confirmed with named reasons.
+Worker-reported Run B conditions: no horizontal widget overflow at widths
+1440/1024/390/320 in light and dark, no blank or crashed widget, and sentiment
+labels measuring 12 px.
+
+**Run-specific DOM artifacts were not preserved/provided for independent
+review; these observations are unverified reports, not independent
+browser/visual acceptance.**
 
 Brand surfaces checked in Run B: direction colour confined to sentiment
 surfaces; notebook Export moved off the gain surface; sentiment labels measure
