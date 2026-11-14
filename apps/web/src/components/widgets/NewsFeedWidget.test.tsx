@@ -57,8 +57,8 @@ test('distinguishes exact symbol evidence, uncertain sector scores, zero fallbac
     const originalFetch = globalThis.fetch;
     const base = { source: 'Stored source', published_date: '2026-09-21T14:17:14', related_symbols: ['CEO'], sectors: [], read_count: 0, bookmarked: false };
     const articles = [
-        { ...base, id: 130723, title: 'Trận thua Atletico và cơn đau đầu cho Mourinho', relevance_score: 0.54, matched_symbols: [], match_reason: 'sector_keyword' },
-        { ...base, id: 'exact', title: 'MSR issuer notice', relevance_score: 1, matched_symbols: ['MSR'], match_reason: 'exact_symbol_title' },
+        { ...base, id: 130723, title: 'Trận thua Atletico và cơn đau đầu cho Mourinho', relevance_score: null, matched_symbols: [], match_reason: 'sector_keyword', association_class: 'sector_overlap' },
+        { ...base, id: 'exact', title: 'MSR issuer notice', relevance_score: 1, matched_symbols: ['MSR'], match_reason: 'exact_symbol_title', association_class: 'direct_company' },
         { ...base, id: 'zero', title: 'General market fallback', relevance_score: 0, matched_symbols: [], match_reason: null, is_market_wide_fallback: true },
         { ...base, id: 'missing', title: 'No association metadata' },
     ];
@@ -68,12 +68,13 @@ test('distinguishes exact symbol evidence, uncertain sector scores, zero fallbac
     const view = render(<QueryClientProvider client={client}><NewsFeedWidget symbol="MSR" /></QueryClientProvider>);
     try {
         expect(await screen.findByText(articles[0].title)).toBeInTheDocument();
-        expect(screen.getAllByText('Association unverified')).toHaveLength(2);
+        expect(screen.getAllByText('Association unverified')).toHaveLength(1);
+        expect(screen.getByText('Sector overlap · no company evidence')).toBeInTheDocument();
         expect(screen.getByText('Symbol mention: MSR')).toBeInTheDocument();
         expect(screen.getByText('Market-wide fallback')).toBeInTheDocument();
-        expect(screen.getByTitle(/Reason: sector_keyword; matched symbols: none; score: 0.54/)).toHaveTextContent('Association unverified');
+        expect(screen.getByTitle(/Reason: sector_keyword; matched symbols: none; score: unavailable/)).toHaveTextContent('Sector overlap · no company evidence');
         expect(screen.getByTitle(/Reason: unavailable; matched symbols: none; score: 0/)).toHaveTextContent('Market-wide fallback');
-        expect(screen.queryByText(/54%|84%/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/54%|84%|rank [0-9]/)).not.toBeInTheDocument();
         expect(screen.getAllByText('Source tags:')).toHaveLength(4);
     } finally {
         view.unmount();

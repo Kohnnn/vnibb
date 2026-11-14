@@ -17,8 +17,11 @@ from vnibb.services.news_service import (
     NewsItem,
     _contains_symbol,
     _extract_keywords,
+    _is_generic_taxonomy,
     _parse_published_at,
+    _sanitize_sector_taxonomy,
     _score_news_row,
+    _strip_boilerplate,
     get_company_news_rows,
     get_news_flow,
 )
@@ -89,6 +92,181 @@ def test_vnm_football_does_not_match_peer_name_substrings():
     )
     assert row["relevance_score"] == 0
     assert row["matched_symbols"] == []
+
+
+@pytest.mark.parametrize(
+    "taxonomy",
+    [
+        "Công ty cổ phần",
+        "Joint Stock Company",
+        "CTCP",
+        "JSC",
+        "Unknown",
+        "unclassified",
+        "N/A",
+        "",
+        None,
+        "Ngành nghề: Công ty TNHH",
+    ],
+)
+def test_legal_form_and_placeholder_taxonomy_is_not_an_industry(taxonomy):
+    """#250: a legal form or placeholder answers no industry question."""
+
+    assert _is_generic_taxonomy(taxonomy)
+    assert _sanitize_sector_taxonomy(taxonomy) is None
+    assert _extract_keywords(taxonomy) == []
+
+
+@pytest.mark.parametrize("taxonomy", ["Steel", "Ngân hàng", "Bất động sản", "dairy"])
+def test_real_sector_taxonomy_survives(taxonomy):
+    assert not _is_generic_taxonomy(taxonomy)
+    assert _sanitize_sector_taxonomy(taxonomy) == taxonomy
+    assert _extract_keywords(taxonomy)
+
+
+@pytest.mark.parametrize(
+    "taxonomy", ["Công ty cổ phần", "Joint Stock Company", "Unknown"]
+)
+def test_unrelated_health_article_scores_zero_for_legal_form_sector(taxonomy):
+    """The executed reproduction: boilerplate legal form scored 0.48/100."""
+
+    context = {
+        "symbol": "HPG",
+        "peer_symbols": [],
+        "company_keywords": [],
+        "sector_keywords": _extract_keywords(taxonomy),
+    }
+    row = _score_news_row(
+        {
+            "title": "Cholesterol cao: dấu hiệu cảnh báo bạn cần đi khám",
+            "content": (
+                "Cholesterol cao thường không có triệu chứng rõ ràng. "
+                "Bản quyền thuộc về Tạp chí sức khỏe."
+            ),
+            "category": taxonomy,
+        },
+        context,
+    )
+
+    assert row["relevance_score"] == 0
+    assert row["match_reason"] is None
+    assert row["association_class"] == "none"
+
+
+def test_boilerplate_footer_is_not_article_evidence():
+    context = {
+        "symbol": "HPG",
+        "peer_symbols": [],
+        "company_keywords": [],
+        "sector_keywords": ["thép"],
+    }
+    row = _score_news_row(
+        {
+            "title": "Cholesterol cao và nguy cơ tim mạch",
+            "content": "Đọc thêm về thép tại chuyên mục kinh doanh của chúng tôi.",
+        },
+        context,
+    )
+
+    assert _strip_boilerplate("Đọc thêm về thép tại chuyên mục.") == ""
+    assert row["relevance_score"] == 0
+    assert row["association_class"] == "none"
+
+
+def test_sector_overlap_is_labelled_but_carries_no_score():
+    """A shared industry is an association class, not a relevance number."""
+
+    context = {
+        "symbol": "HPG",
+        "peer_symbols": [],
+        "company_keywords": [],
+        "sector_keywords": ["thép"],
+    }
+    row = _score_news_row(
+        {"title": "Giá thép xây dựng tăng trong quý này", "content": "Nguồn cung thắt chặt."},
+        context,
+    )
+
+    assert row["relevance_score"] is None
+    assert row["match_reason"] == "sector_keyword"
+    assert row["association_class"] == "sector_overlap"
+    assert row["match_evidence"]["sector_keywords"] == ["thép"]
+
+
+def test_direct_company_and_verified_peer_keep_exact_evidence():
+    context = {
+        "symbol": "HPG",
+        "peer_symbols": ["HSG"],
+        "company_keywords": ["hoa phat"],
+        "sector_keywords": ["thép"],
+        "classification_provenance": {
+            "sector": "Thép",
+            "industry": "Thép",
+            "sector_source": "stock.sector",
+            "industry_source": "stock.industry",
+        },
+    }
+    direct = _score_news_row({"title": "HPG công bố kết quả kinh doanh"}, context)
+    peer = _score_news_row({"title": "HSG mở rộng công suất"}, context)
+    named = _score_news_row({"title": "Hoa Phat tăng sản lượng"}, context)
+
+    assert direct["association_class"] == "direct_company"
+    assert direct["relevance_score"] == 1.0
+    assert direct["matched_symbols"] == ["HPG"]
+    assert peer["association_class"] == "verified_peer"
+    assert peer["matched_symbols"] == ["HSG"]
+    assert peer["match_evidence"]["peer_symbols"] == ["HSG"]
+    assert named["association_class"] == "direct_company"
+    assert named["relevance_score"] == 0.84
+
+
+@pytest.mark.asyncio
+async def test_related_feed_does_not_admit_sector_overlap_or_boilerplate(monkeypatch):
+    """End-to-end service path: the unrelated article must not reach the feed."""
+
+    async def fake_latest_news(*, source=None, symbol, sentiment, limit, offset):
+        return [
+            {
+                "id": "health-1",
+                "title": "Cholesterol cao: dấu hiệu cảnh báo",
+                "summary": "Bản quyền thuộc về tạp chí sức khỏe.",
+                "source": "cafef",
+                "published_date": datetime(2026, 11, 10, 9, 0),
+                "url": "https://example.com/health-1",
+                "related_symbols": [],
+                "sentiment": "neutral",
+            },
+            {
+                "id": "steel-1",
+                "title": "HPG công bố sản lượng thép quý 4",
+                "summary": "Sản lượng tiêu thụ tăng.",
+                "source": "cafef",
+                "published_date": datetime(2026, 11, 10, 10, 0),
+                "url": "https://example.com/steel-1",
+                "related_symbols": ["HPG"],
+                "sentiment": "neutral",
+            },
+        ]
+
+    async def fake_context(_symbol):
+        return {
+            "symbol": "HPG",
+            "peer_symbols": [],
+            "company_keywords": [],
+            "sector_keywords": _extract_keywords("Công ty cổ phần"),
+        }
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.news_crawler.get_latest_news", fake_latest_news
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_context)
+
+    response = await get_news_flow(symbols=["HPG"], mode="related", limit=5)
+
+    assert [item.id for item in response.items] == ["steel-1"]
+    assert response.fallback_used is False
+    assert response.items[0].association_class == "direct_company"
+    assert response.items[0].relevance_score == 1.0
 
 
 def test_news_crawler_parses_rss_leaf_text_and_namespaced_fields():

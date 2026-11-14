@@ -94,6 +94,8 @@ export interface CompanyNewsData {
   matched_symbols?: string[];
   match_reason?: string | null;
   is_market_wide_fallback?: boolean;
+  association_class?: string | null;
+  match_evidence?: Record<string, unknown>;
 }
 
 export interface CompanyNewsResponse {

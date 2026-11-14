@@ -24,6 +24,7 @@ interface NewsCardProps {
     relevance_score?: number | null;
     match_reason?: string | null;
     is_market_wide_fallback?: boolean;
+    association_class?: string | null;
   };
 }
 
@@ -38,6 +39,13 @@ const SENTIMENT_CONFIG = {
 function NewsCardComponent({ news }: NewsCardProps) {
   const sentimentKey = (news.sentiment || 'neutral').toLowerCase() as keyof typeof SENTIMENT_CONFIG;
   const sentiment = SENTIMENT_CONFIG[sentimentKey] || SENTIMENT_CONFIG.neutral;
+  // #250: a number is shown only when the row proves this company or a verified
+  // peer. A sector overlap is labelled, never scored.
+  const supported =
+    news.association_class === 'direct_company' || news.association_class === 'verified_peer';
+  const associationLabel = supported
+    ? news.match_reason?.replaceAll('_', ' ') || 'Association unverified'
+    : 'Sector overlap';
   const SentimentIcon = sentiment.icon;
 
   return (
@@ -69,12 +77,19 @@ function NewsCardComponent({ news }: NewsCardProps) {
                   {symbol}
                 </span>
               ))}
-              {typeof news.relevance_score === 'number' && !news.is_market_wide_fallback && (
+              {news.match_reason && !news.is_market_wide_fallback && (
                 <span
                   className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-secondary)]"
-                  title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
+                  title={
+                    supported
+                      ? 'Rule-based ranking score, not a probability of company relevance.'
+                      : 'Industry overlap only. No company evidence, so no relevance score is shown.'
+                  }
                 >
-                  {news.match_reason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(news.relevance_score * 100)}/100
+                  {associationLabel}
+                  {supported && typeof news.relevance_score === 'number'
+                    ? ` · rank ${Math.round(news.relevance_score * 100)}/100`
+                    : ''}
                 </span>
               )}
             </div>

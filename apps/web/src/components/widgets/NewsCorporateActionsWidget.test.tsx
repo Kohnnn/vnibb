@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 
 import type { InsiderTrade } from '@/types/insider'
 import type { DividendsResponse } from '@/lib/api'
+import type { CompanyNewsResponse } from '@/types/equity'
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries'
 import { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget'
 
@@ -66,6 +67,40 @@ test.each([
   expect(screen.getByText(payout)).toBeInTheDocument()
   expect(screen.queryByText('VND0')).not.toBeInTheDocument()
 })
+
+test('shows no ranking number for a sector overlap but keeps direct-company rank', () => {
+  mockUseCompanyNews.mockReturnValue(queryResult<CompanyNewsResponse>({
+    symbol: 'HPG',
+    count: 2,
+    data: [
+      {
+        symbol: 'HPG',
+        title: 'Giá thép xây dựng tăng trong quý này',
+        source: 'cafef',
+        match_reason: 'sector_keyword',
+        association_class: 'sector_overlap',
+        relevance_score: null,
+      },
+      {
+        symbol: 'HPG',
+        title: 'HPG công bố kết quả kinh doanh',
+        source: 'cafef',
+        match_reason: 'exact_symbol_title',
+        association_class: 'direct_company',
+        relevance_score: 1,
+      },
+    ],
+  }))
+  mockUseInsiderDeals.mockReturnValue(queryResult([]))
+  mockUseDividends.mockReturnValue(queryResult<DividendsResponse>({ data: [] }))
+
+  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
+
+  expect(screen.getByText('sector keyword')).toBeInTheDocument()
+  expect(screen.getByText(/exact symbol title · rank 100\/100/)).toBeInTheDocument()
+  expect(screen.queryByText(/sector keyword · rank/)).not.toBeInTheDocument()
+})
+
 test.each(['dividend', 'insider'] as const)('top-level retry recovers terminal %s errors', (failedSection) => {
   const refetchNews = jest.fn()
   const terminalError = new Error('Request failed')

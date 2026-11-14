@@ -49,6 +49,7 @@ interface NewsArticle {
     matched_symbols?: string[];
     match_reason?: string | null;
     is_market_wide_fallback?: boolean;
+    association_class?: string | null;
 }
 
 function NewsAssociation({ article, symbol }: { article: NewsArticle; symbol: string }) {
@@ -57,8 +58,10 @@ function NewsAssociation({ article, symbol }: { article: NewsArticle; symbol: st
         && ['exact_symbol_title', 'exact_symbol_body', 'exact_symbol_related'].includes(article.match_reason ?? '');
     const label = article.is_market_wide_fallback
         ? 'Market-wide fallback'
-        : exact ? `Symbol mention: ${symbol}` : 'Association unverified';
-    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}.`;
+        : exact ? `Symbol mention: ${symbol}`
+        : article.association_class === 'sector_overlap' ? 'Sector overlap · no company evidence'
+        : 'Association unverified';
+    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}; class: ${article.association_class ?? 'unavailable'}.`;
     return <span title={detail} className="text-[10px] text-[var(--text-muted)]">{label}</span>;
 }
 
