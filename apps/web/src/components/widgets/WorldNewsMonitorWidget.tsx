@@ -328,8 +328,8 @@ function WorldNewsMonitorWidgetComponent({
         <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              <Radio className="h-3 w-3 text-[var(--color-positive)]" />
-              Live Source Links
+              <Radio className="h-3 w-3 text-[var(--text-muted)]" />
+              Live source links
             </div>
             <WidgetMeta
               updatedAt={observation.lastDataDate}
@@ -419,9 +419,9 @@ function WorldNewsMonitorWidgetComponent({
               )}
             </div>
           </form>
-          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-[var(--color-negative)]">{customError}</div>}
+          {customError && <div role="alert" className="mt-1 text-[10px] font-semibold text-[var(--text-secondary)]">{customError}</div>}
           {!customError && customNotice && (
-            <div className="mt-1 text-[10px] font-semibold text-[var(--color-positive)]">{customNotice}</div>
+            <div role="status" className="mt-1 text-[10px] font-semibold text-[var(--color-text-secondary)]">{customNotice}</div>
           )}
           {customFeedFailure ? (
             <div role="alert" className="mt-1 truncate text-[10px] text-[var(--color-warning)]">
@@ -459,8 +459,8 @@ function WorldNewsMonitorWidgetComponent({
               {visibleArticles.map((article: WorldNewsArticle) => (
                 <article key={article.id} className="p-3 transition-colors hover:bg-[var(--bg-tertiary)]/30">
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[var(--color-positive)]">
-                      Live
+                    <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--color-accent-primary)]">
+                      Stream
                     </span>
                     <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-primary)]">
                       {article.region}
@@ -511,7 +511,7 @@ function WorldNewsMonitorWidgetComponent({
                       href={article.feed_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-positive)]"
+                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)]"
                     >
                       <Rss className="h-2.5 w-2.5" />
                       Feed
@@ -520,7 +520,7 @@ function WorldNewsMonitorWidgetComponent({
                       type="button"
                       onClick={() => handlePinArticle(article)}
                       disabled={pinnedIds[article.id]}
-                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-[var(--color-state-border)] hover:text-[var(--color-warning)] disabled:cursor-default disabled:border-[var(--color-state-border)] disabled:text-[var(--color-positive)]"
+                      className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase transition-colors hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)] disabled:cursor-default disabled:border-[var(--color-state-border)] disabled:text-[var(--color-accent-primary)]"
                       title={pinnedIds[article.id] ? 'Pinned to research notebook' : 'Pin to research notebook'}
                     >
                       {pinnedIds[article.id] ? <Check className="h-2.5 w-2.5" /> : <BookmarkPlus className="h-2.5 w-2.5" />}
