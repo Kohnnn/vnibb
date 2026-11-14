@@ -163,17 +163,37 @@ def test_boilerplate_footer_is_not_article_evidence():
     row = _score_news_row(
         {
             "title": "Cholesterol cao và nguy cơ tim mạch",
-            "content": "Đọc thêm về thép tại chuyên mục kinh doanh của chúng tôi.",
+            "content": "Bản quyền thuộc về Tạp chí sức khỏe. Đọc thêm về thép tại chuyên mục.",
         },
         context,
     )
 
     assert _strip_boilerplate("Đọc thêm về thép tại chuyên mục.") == ""
+    assert _strip_boilerplate("Nguồn: Tạp chí sức khỏe") == ""
     assert row["relevance_score"] == 0
     assert row["association_class"] == "none"
 
 
-def test_sector_overlap_is_labelled_but_carries_no_score():
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Nguồn cung của HPG tăng trong quý này.",
+        "Nguồn cung thép trong nước đang thắt chặt.",
+        "Chia sẻ tại đại hội, HPG công bố kế hoạch mới.",
+    ],
+)
+def test_reporting_sentences_opening_with_nguon_or_chia_se_survive(sentence):
+    """#250 review: those words open ordinary reporting, not only footers."""
+
+    assert _strip_boilerplate(sentence) == sentence
+
+
+def test_source_metadata_segment_is_still_dropped():
+    assert _strip_boilerplate("Nguồn: CafeF") == ""
+    assert _strip_boilerplate("Source: Reuters") == ""
+
+
+def test_verified_sector_overlap_is_labelled_but_carries_no_score():
     """A shared industry is an association class, not a relevance number."""
 
     context = {
@@ -181,6 +201,7 @@ def test_sector_overlap_is_labelled_but_carries_no_score():
         "peer_symbols": [],
         "company_keywords": [],
         "sector_keywords": ["thép"],
+        "classification_provenance": {"sector": "Thép", "sector_source": "stock.sector"},
     }
     row = _score_news_row(
         {"title": "Giá thép xây dựng tăng trong quý này", "content": "Nguồn cung thắt chặt."},
@@ -189,14 +210,19 @@ def test_sector_overlap_is_labelled_but_carries_no_score():
 
     assert row["relevance_score"] is None
     assert row["match_reason"] == "sector_keyword"
-    assert row["association_class"] == "sector_overlap"
+    assert row["association_class"] == "verified_sector"
     assert row["match_evidence"]["sector_keywords"] == ["thép"]
+    assert row["match_evidence"]["matched_terms"] == [
+        {"term": "thép", "field": "title", "kind": "sector_keyword"}
+    ]
+    assert row["match_evidence"]["classification"]["sector"] == "Thép"
 
 
 def test_direct_company_and_verified_peer_keep_exact_evidence():
     context = {
         "symbol": "HPG",
         "peer_symbols": ["HSG"],
+        "peer_classification_basis": "industry",
         "company_keywords": ["hoa phat"],
         "sector_keywords": ["thép"],
         "classification_provenance": {
@@ -213,16 +239,83 @@ def test_direct_company_and_verified_peer_keep_exact_evidence():
     assert direct["association_class"] == "direct_company"
     assert direct["relevance_score"] == 1.0
     assert direct["matched_symbols"] == ["HPG"]
+    assert direct["match_evidence"]["matched_terms"] == [
+        {"term": "HPG", "field": "title", "kind": "symbol"}
+    ]
     assert peer["association_class"] == "verified_peer"
     assert peer["matched_symbols"] == ["HSG"]
     assert peer["match_evidence"]["peer_symbols"] == ["HSG"]
+    # A peer-only row still carries why the peer set was trusted.
+    assert peer["match_evidence"]["classification"] == {
+        "sector": "Thép",
+        "industry": "Thép",
+        "sector_source": "stock.sector",
+        "industry_source": "stock.industry",
+        "peer_basis": "industry",
+    }
     assert named["association_class"] == "direct_company"
     assert named["relevance_score"] == 0.84
+    # The actual keyword is retained, never the rule identifier.
+    assert named["match_evidence"]["matched_terms"] == [
+        {"term": "hoa phat", "field": "title", "kind": "company_name"}
+    ]
 
 
 @pytest.mark.asyncio
-async def test_related_feed_does_not_admit_sector_overlap_or_boilerplate(monkeypatch):
-    """End-to-end service path: the unrelated article must not reach the feed."""
+async def test_rejected_taxonomy_does_not_fall_back_to_exchange_peers(monkeypatch):
+    """#250 review: an exchange is not an industry, so it names no peers."""
+
+    from vnibb.models.stock import Stock
+    from vnibb.services import news_service
+
+    class _FakeSession:
+        def __init__(self):
+            self.queries = []
+
+        async def scalar(self, _query):
+            return Stock(
+                symbol="HPG",
+                sector="Công ty cổ phần",
+                industry="Unknown",
+                exchange="HOSE",
+                short_name="CTCP",
+                company_name="Công ty cổ phần",
+            )
+
+        async def execute(self, query):
+            self.queries.append(str(query))
+
+            class _Rows:
+                def scalars(self):
+                    class _Scalars:
+                        def all(self):
+                            return ["AAA", "BBB"]
+
+                    return _Scalars()
+
+            return _Rows()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    session = _FakeSession()
+    monkeypatch.setattr(news_service, "async_session_maker", lambda: session)
+
+    context = await news_service._load_symbol_context("HPG")
+
+    assert context["peer_symbols"] == []
+    assert context["sector_keywords"] == []
+    assert context["peer_classification_basis"] is None
+    assert session.queries == []
+    assert set(context["classification_provenance"]["rejected"]) == {"sector", "industry"}
+
+
+@pytest.mark.asyncio
+async def test_related_feed_retains_verified_sector_but_drops_unrelated(monkeypatch):
+    """Verified sector rows keep a label; no-association rows never enter."""
 
     async def fake_latest_news(*, source=None, symbol, sentiment, limit, offset):
         return [
@@ -237,13 +330,23 @@ async def test_related_feed_does_not_admit_sector_overlap_or_boilerplate(monkeyp
                 "sentiment": "neutral",
             },
             {
-                "id": "steel-1",
+                "id": "sector-1",
+                "title": "Giá thép xây dựng tăng trong quý này",
+                "summary": "Nguồn cung trong nước thắt chặt.",
+                "source": "cafef",
+                "published_date": datetime(2026, 11, 10, 10, 0),
+                "url": "https://example.com/sector-1",
+                "related_symbols": [],
+                "sentiment": "neutral",
+            },
+            {
+                "id": "direct-1",
                 "title": "HPG công bố sản lượng thép quý 4",
                 "summary": "Sản lượng tiêu thụ tăng.",
                 "source": "cafef",
-                "published_date": datetime(2026, 11, 10, 10, 0),
-                "url": "https://example.com/steel-1",
-                "related_symbols": ["HPG"],
+                "published_date": datetime(2026, 11, 10, 11, 0),
+                "url": "https://example.com/direct-1",
+                "related_symbols": [],
                 "sentiment": "neutral",
             },
         ]
@@ -253,7 +356,8 @@ async def test_related_feed_does_not_admit_sector_overlap_or_boilerplate(monkeyp
             "symbol": "HPG",
             "peer_symbols": [],
             "company_keywords": [],
-            "sector_keywords": _extract_keywords("Công ty cổ phần"),
+            "sector_keywords": ["thép"],
+            "classification_provenance": {"sector": "Thép", "sector_source": "stock.sector"},
         }
 
     monkeypatch.setattr(
@@ -262,11 +366,71 @@ async def test_related_feed_does_not_admit_sector_overlap_or_boilerplate(monkeyp
     monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_context)
 
     response = await get_news_flow(symbols=["HPG"], mode="related", limit=5)
+    by_id = {item.id: item for item in response.items}
 
-    assert [item.id for item in response.items] == ["steel-1"]
+    assert set(by_id) == {"sector-1", "direct-1"}
     assert response.fallback_used is False
-    assert response.items[0].association_class == "direct_company"
-    assert response.items[0].relevance_score == 1.0
+    assert by_id["direct-1"].association_class == "direct_company"
+    assert by_id["direct-1"].relevance_score == 1.0
+    # The legitimate steel-only article survives, unscored and labelled.
+    assert by_id["sector-1"].association_class == "verified_sector"
+    assert by_id["sector-1"].relevance_score is None
+    assert by_id["sector-1"].match_evidence["sector_keywords"] == ["thép"]
+
+
+@pytest.mark.asyncio
+async def test_provider_fallback_rows_are_rescored_not_promoted(monkeypatch):
+    """#250 review: the request symbol is metadata, not article evidence."""
+
+    async def fake_company_news(_query):
+        return [
+            SimpleNamespace(
+                title="Volkswagen launches new SUV line",
+                summary="Automotive market update.",
+                source="cafef",
+                published_at=datetime(2026, 11, 10, 8, 0),
+                url="https://example.com/unrelated",
+                category="Auto",
+            )
+        ]
+
+    async def fake_context(_symbol):
+        return {
+            "symbol": "HPG",
+            "peer_symbols": [],
+            "company_keywords": ["hoa phat"],
+            "sector_keywords": ["thép"],
+            "classification_provenance": {},
+        }
+
+    async def empty_ranked(**_kwargs):
+        return ([], False)
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.VnstockCompanyNewsFetcher.fetch", fake_company_news
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_context)
+    monkeypatch.setattr(
+        "vnibb.services.news_service.get_ranked_news_rows", empty_ranked
+    )
+    monkeypatch.setattr(
+        "vnibb.services.news_service._enrich_sentiment_rows", _identity_rows
+    )
+
+    rows = await get_company_news_rows("HPG", limit=5)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["association_class"] == "none"
+    assert row["relevance_score"] == 0.0
+    assert row["matched_symbols"] == []
+    assert row["match_evidence"]["provider_validated_text"] is False
+
+
+async def _identity_rows(rows):
+    return rows
+
+
 
 
 def test_news_crawler_parses_rss_leaf_text_and_namespaced_fields():
@@ -867,6 +1031,8 @@ async def test_get_company_news_rows_merges_provider_and_ranked_related_results(
                     "url": "https://example.com/vci-margin",
                     "relevance_score": 0.91,
                     "matched_symbols": ["VCI"],
+                    "match_reason": "exact_symbol_title",
+                    "association_class": "direct_company",
                     "is_market_wide_fallback": False,
                     "sentiment": "neutral",
                     "sentiment_score": None,

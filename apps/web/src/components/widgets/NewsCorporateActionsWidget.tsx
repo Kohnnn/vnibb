@@ -264,12 +264,18 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                           {item.sentiment || 'neutral'}
                           {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
                         </span>
-                        {item.match_reason && (
+                        {(item.match_reason || item.association_class) && (
                           <span
                             className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 font-semibold uppercase text-[var(--color-accent-primary)]"
-                            title="Rule-based ranking score, not a probability of company relevance."
+                            title={
+                              supportsRank(item)
+                                ? 'Rule-based ranking score, not a probability of company relevance.'
+                                : 'Shared industry or unverified metadata only. No company evidence, so no relevance score is shown.'
+                            }
                           >
-                            {item.match_reason.replaceAll('_', ' ')}
+                            {item.association_class === 'verified_sector'
+                              ? 'industry overlap · no company evidence'
+                              : item.match_reason?.replaceAll('_', ' ') || 'association unverified'}
                             {supportsRank(item)
                               ? ` · rank ${Math.round((item.relevance_score as number) * 100)}/100`
                               : ''}

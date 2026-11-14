@@ -399,8 +399,13 @@ async def test_news_feed_endpoint_keeps_sector_overlap_unscored_and_labelled(
                     "matched_symbols": [],
                     "relevance_score": None,
                     "match_reason": "sector_keyword",
-                    "association_class": "sector_overlap",
-                    "match_evidence": {"sector_keywords": ["thép"]},
+                    "association_class": "verified_sector",
+                    "match_evidence": {
+                        "sector_keywords": ["thép"],
+                        "matched_terms": [
+                            {"term": "thép", "field": "title", "kind": "sector_keyword"}
+                        ],
+                    },
                     "is_market_wide_fallback": False,
                 }
             ],
@@ -415,9 +420,10 @@ async def test_news_feed_endpoint_keeps_sector_overlap_unscored_and_labelled(
 
     assert response.status_code == 200
     article = response.json()["articles"][0]
-    assert article["association_class"] == "sector_overlap"
+    assert article["association_class"] == "verified_sector"
     assert article["relevance_score"] is None
-    assert article["match_evidence"] == {"sector_keywords": ["thép"]}
+    assert article["match_evidence"]["sector_keywords"] == ["thép"]
+    assert article["match_evidence"]["matched_terms"][0]["term"] == "thép"
     assert article["matched_symbols"] == []
     assert article["is_market_wide_fallback"] is False
 
@@ -437,7 +443,11 @@ async def test_news_flow_endpoint_exposes_direct_association_evidence(client, mo
                     "relevance_score": 1.0,
                     "match_reason": "exact_symbol_title",
                     "association_class": "direct_company",
-                    "match_evidence": {"matched_terms": ["exact_symbol_title"]},
+                    "match_evidence": {
+                        "matched_terms": [
+                            {"term": "HPG", "field": "title", "kind": "symbol"}
+                        ]
+                    },
                 }
             ],
             False,
@@ -454,7 +464,9 @@ async def test_news_flow_endpoint_exposes_direct_association_evidence(client, mo
     assert response.status_code == 200
     item = response.json()["items"][0]
     assert item["association_class"] == "direct_company"
-    assert item["match_evidence"] == {"matched_terms": ["exact_symbol_title"]}
+    assert item["match_evidence"]["matched_terms"] == [
+        {"term": "HPG", "field": "title", "kind": "symbol"}
+    ]
     assert item["relevance_score"] == 1.0
 
 

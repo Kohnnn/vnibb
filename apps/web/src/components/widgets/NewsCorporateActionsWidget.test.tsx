@@ -78,7 +78,7 @@ test('shows no ranking number for a sector overlap but keeps direct-company rank
         title: 'Giá thép xây dựng tăng trong quý này',
         source: 'cafef',
         match_reason: 'sector_keyword',
-        association_class: 'sector_overlap',
+        association_class: 'verified_sector',
         relevance_score: null,
       },
       {
@@ -96,9 +96,9 @@ test('shows no ranking number for a sector overlap but keeps direct-company rank
 
   render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
 
-  expect(screen.getByText('sector keyword')).toBeInTheDocument()
+  expect(screen.getByText('industry overlap · no company evidence')).toBeInTheDocument()
   expect(screen.getByText(/exact symbol title · rank 100\/100/)).toBeInTheDocument()
-  expect(screen.queryByText(/sector keyword · rank/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/industry overlap · no company evidence · rank/)).not.toBeInTheDocument()
 })
 
 test.each(['dividend', 'insider'] as const)('top-level retry recovers terminal %s errors', (failedSection) => {

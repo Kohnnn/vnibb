@@ -39,13 +39,29 @@ const SENTIMENT_CONFIG = {
 function NewsCardComponent({ news }: NewsCardProps) {
   const sentimentKey = (news.sentiment || 'neutral').toLowerCase() as keyof typeof SENTIMENT_CONFIG;
   const sentiment = SENTIMENT_CONFIG[sentimentKey] || SENTIMENT_CONFIG.neutral;
-  // #250: a number is shown only when the row proves this company or a verified
-  // peer. A sector overlap is labelled, never scored.
-  const supported =
-    news.association_class === 'direct_company' || news.association_class === 'verified_peer';
-  const associationLabel = supported
-    ? news.match_reason?.replaceAll('_', ' ') || 'Association unverified'
-    : 'Sector overlap';
+  // #250: the association class drives the label, never the score or symbol
+  // count -- a sector row has neither, and market-wide fallback must still be
+  // visibly distinct. Only direct/verified-peer rows may show a rank.
+  const associationClass =
+    news.association_class ?? (news.is_market_wide_fallback ? 'general_market' : null);
+  const ranked =
+    associationClass === 'direct_company' || associationClass === 'verified_peer';
+  const associationLabel =
+    associationClass === 'direct_company' || associationClass === 'verified_peer'
+      ? news.match_reason?.replaceAll('_', ' ') || 'Association unverified'
+      : associationClass === 'verified_sector'
+        ? 'Industry overlap · no company evidence'
+        : associationClass === 'general_market'
+          ? 'Market-wide fallback'
+          : 'Association unverified';
+  const associationDetail =
+    associationClass === 'direct_company' || associationClass === 'verified_peer'
+      ? 'Rule-based ranking score, not a probability of company relevance.'
+      : associationClass === 'verified_sector'
+        ? 'Shared industry only. No company evidence, so no relevance score is shown.'
+        : associationClass === 'general_market'
+          ? 'Broad market article, not an association with this issuer.'
+          : 'Association metadata unavailable; no company evidence.';
   const SentimentIcon = sentiment.icon;
 
   return (
@@ -67,7 +83,7 @@ function NewsCardComponent({ news }: NewsCardProps) {
             {news.title}
           </h4>
 
-          {((news.matched_symbols?.length ?? 0) > 0 || (news.relevance_score ?? 0) > 0) && (
+          {(associationClass || news.match_reason || news.is_market_wide_fallback) && (
             <div className="mb-1.5 flex flex-wrap gap-1">
               {news.matched_symbols?.slice(0, 3).map((symbol) => (
                 <span
@@ -77,21 +93,15 @@ function NewsCardComponent({ news }: NewsCardProps) {
                   {symbol}
                 </span>
               ))}
-              {news.match_reason && !news.is_market_wide_fallback && (
-                <span
-                  className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-secondary)]"
-                  title={
-                    supported
-                      ? 'Rule-based ranking score, not a probability of company relevance.'
-                      : 'Industry overlap only. No company evidence, so no relevance score is shown.'
-                  }
-                >
-                  {associationLabel}
-                  {supported && typeof news.relevance_score === 'number'
-                    ? ` · rank ${Math.round(news.relevance_score * 100)}/100`
-                    : ''}
-                </span>
-              )}
+              <span
+                className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-secondary)]"
+                title={associationDetail}
+              >
+                {associationLabel}
+                {ranked && typeof news.relevance_score === 'number'
+                  ? ` · rank ${Math.round(news.relevance_score * 100)}/100`
+                  : ''}
+              </span>
             </div>
           )}
 
