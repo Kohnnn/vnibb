@@ -109,4 +109,48 @@ describe('WidgetLibrary modal containment', () => {
             jest.restoreAllMocks();
         }
     });
+
+    it.each(['Escape', 'Close', 'backdrop'] as const)(
+        'removes the obscured workspace from keyboard and AT while open, restoring it on %s',
+        (dismiss) => {
+            jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+            const onClose = jest.fn();
+            try {
+                // A pre-existing `inert` (a maximized widget's original card) and a
+                // pre-existing aria-hidden must come back exactly as they were.
+                const workspace = document.createElement('div');
+                workspace.innerHTML = '<button>Fundamental Analysis</button><div inert></div>';
+                const alreadyInert = workspace.lastElementChild as HTMLElement;
+                alreadyInert.setAttribute('aria-hidden', 'false');
+                const labelled = document.createElement('div');
+                labelled.setAttribute('aria-hidden', 'true');
+                document.body.append(workspace, labelled);
+
+                const { rerender } = render(<WidgetLibrary isOpen onClose={onClose} />);
+                const drawer = screen.getByRole('dialog', { name: 'Add widgets' });
+                expect(drawer).toHaveAttribute('aria-modal', 'true');
+
+                // Background is gone from the AT surface, not merely untabbable.
+                expect(workspace).toHaveAttribute('inert');
+                expect(workspace).toHaveAttribute('aria-hidden', 'true');
+                expect(drawer.closest('[inert]')).toBeNull();
+
+                if (dismiss === 'Escape') fireEvent.keyDown(drawer, { key: 'Escape' });
+                else if (dismiss === 'Close') fireEvent.click(screen.getByRole('button', { name: 'Close widget library' }));
+                else fireEvent.click(drawer.closest('[data-widget-library-portal]')!.querySelector('[aria-hidden][tabindex="-1"]')!);
+
+                rerender(<WidgetLibrary isOpen={false} onClose={onClose} />);
+                expect(workspace).not.toHaveAttribute('inert');
+                expect(workspace).not.toHaveAttribute('aria-hidden');
+                expect(alreadyInert).toHaveAttribute('inert');
+                expect(alreadyInert).toHaveAttribute('aria-hidden', 'false');
+                expect(labelled).toHaveAttribute('aria-hidden', 'true');
+
+                workspace.remove();
+                labelled.remove();
+            } finally {
+                jest.restoreAllMocks();
+            }
+        },
+    );
 });

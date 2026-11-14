@@ -133,15 +133,43 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
     const [selectedWidgetTypes, setSelectedWidgetTypes] = useState<WidgetType[]>([]);
 
-    // #261: the drawer is modal, so its own trap owns Escape, Tab wrapping and
-    // focus return. A separate capture-phase Escape listener duplicated the
-    // close (drawer *and* the layer beneath it, #109) and the focusin tracker
-    // below let escaped background focus replace the real opener.
+    // Declared before the trap on purpose: effect cleanups run in declaration
+    // order, so the background must be un-inerted *before* the trap restores
+    // focus to the opener. A still-inert opener silently refuses focus.
+    //
+    // `aria-modal` alone leaves the obscured workspace in the accessibility
+    // tree. The native `inert` attribute removes every background control from
+    // both the keyboard and AT surfaces while the drawer is open, and the exact
+    // previous state is restored on close (some hosts already carry `inert`,
+    // e.g. a maximized widget's original card).
+    useEffect(() => {
+        if (!isOpen || typeof document === 'undefined') return;
+        const portal = document.querySelector('[data-widget-library-portal]');
+        if (!portal) return;
+        const previous = Array.from(document.body.children)
+            .filter((element) => element !== portal)
+            .map((element) => ({ element, inert: element.hasAttribute('inert'), ariaHidden: element.getAttribute('aria-hidden') }));
+        for (const { element } of previous) {
+            element.setAttribute('inert', '');
+            element.setAttribute('aria-hidden', 'true');
+        }
+        return () => {
+            for (const { element, inert, ariaHidden } of previous) {
+                if (!inert) element.removeAttribute('inert');
+                if (ariaHidden === null) element.removeAttribute('aria-hidden');
+                else element.setAttribute('aria-hidden', ariaHidden);
+            }
+        };
+    }, [isOpen]);
     const drawerRef = useDialogFocusTrap<HTMLDivElement>({
         enabled: isOpen,
         onClose,
         initialFocusTo: searchInputRef,
     });
+    // #261: the drawer is modal, so its own trap owns Escape, Tab wrapping and
+    // focus return. A separate capture-phase Escape listener duplicated the
+    // close (drawer *and* the layer beneath it, #109) and the focusin tracker
+    // let escaped background focus replace the real opener.
 
     useEffect(() => {
         if (isOpen) return;
@@ -283,8 +311,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
 
     // Portalled to body like the other overlays so the trap's containment and
     // the `aria-modal` dialog are not nested inside the workspace tree.
-    if (typeof document === 'undefined') return null;
     return createPortal(
+        <div data-widget-library-portal>
         <AnimatePresence>
             {isOpen && (
                 <>
@@ -620,7 +648,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                     </motion.div>
                 </>
             )}
-        </AnimatePresence>,
+        </AnimatePresence>
+        </div>,
         document.body,
     );
 }
