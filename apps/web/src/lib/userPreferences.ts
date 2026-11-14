@@ -297,10 +297,7 @@ export function findRoleTab<T extends { id: string; name: string }>(
   tabs: readonly T[],
   role: DashboardTabRole,
 ): T | null {
-  const candidates = ROLE_TAB_LABELS[role];
-  return tabs.find((tab) => labelMatchesRole(tab.name, candidates))
-    ?? tabs.find((tab) => candidates.includes(normalizeLabel(tab.name)))
-    ?? null;
+  return tabs.find((tab) => labelMatchesRole(tab.name, ROLE_TAB_LABELS[role])) ?? null;
 }
 
 export function findPreferredDashboardId<T extends { id: string; name: string; tabs?: Array<{ name: string }> }>(
