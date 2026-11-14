@@ -594,17 +594,17 @@ class RSRatingService:
             if not row.symbol or normalized.get("close") is None:
                 continue
             observed = getattr(row, "time", None)
+            # The row's own `source` column is stored provenance too; a row that
+            # declares `vnstock_vnd:VCI` must not be reported as source-less just
+            # because it needed no unit inference.
+            stored_source = getattr(row, "source", None)
             evidence[row.symbol] = {
                 "price": float(normalized["close"]),
                 "price_unit": normalized["price_unit"],
-                "price_source": normalized.get("price_source"),
+                "price_source": normalized.get("price_source") or (stored_source or None),
                 "price_asof": observed.isoformat()[:10] if observed is not None else None,
             }
         return evidence
-
-    async def _get_latest_price_map(self, db: AsyncSession, symbols: List[str]) -> Dict[str, float]:
-        evidence = await self._get_latest_price_evidence(db, symbols)
-        return {symbol: item["price"] for symbol, item in evidence.items()}
 
     @staticmethod
     def _stored_rank_item(snapshot: Any) -> Dict[str, Any]:
