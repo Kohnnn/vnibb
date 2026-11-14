@@ -101,6 +101,12 @@ from vnibb.services.data_pipeline import (
 )
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
+from vnibb.services.foreign_flow_coverage import (
+    PROVIDER_ROW_CAP,
+    build_foreign_flow_coverage,
+    provider_row_limit,
+    requested_session_dates,
+)
 from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
@@ -6611,13 +6617,21 @@ async def _load_foreign_trading_fallback(
     db: AsyncSession,
     symbol: str,
     limit: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[ForeignTradingData]:
-    result = await db.execute(
+    statement = (
         select(ForeignTrading)
         .where(ForeignTrading.symbol == symbol.upper())
         .order_by(ForeignTrading.trade_date.desc())
         .limit(limit)
     )
+    if start_date is not None:
+        statement = statement.where(ForeignTrading.trade_date >= start_date)
+    if end_date is not None:
+        statement = statement.where(ForeignTrading.trade_date <= end_date)
+    result = await db.execute(statement)
     rows = result.scalars().all()
     return [
         ForeignTradingData(
@@ -6634,74 +6648,95 @@ async def _load_foreign_trading_fallback(
     ]
 
 
-def _latest_foreign_trading_date(data: list[Any]) -> str | None:
-    for row in data:
-        date_value = getattr(row, "date", None)
-        if date_value:
-            return str(date_value)
-        if isinstance(row, dict) and row.get("date"):
-            return str(row.get("date"))
-    return None
-
-
 @router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
 async def get_foreign_trading(
     symbol: str,
     limit: int = Query(60, ge=1, le=365),
+    sessions: Optional[int] = Query(
+        None,
+        ge=1,
+        le=260,
+        description=(
+            "Market sessions requested, counted back from the latest expected "
+            "session. Omit to read the latest retained rows."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
+    """Foreign flow for an explicit market-session window.
+
+    A row count is not a calendar window: retained history can be sparse, so a
+    window is qualified against exchange sessions and the response discloses
+    the requested and observed ranges, gaps and the last validated session
+    (#249). Rows dated on a weekend or closure are excluded rather than summed,
+    and rows whose buy/sell volumes are unknown never become zero.
+    """
     symbol_upper = symbol.upper()
+    provider_limit = provider_row_limit(sessions, limit)
+    provider_error: str | None = None
+    provider_rows: list[ForeignTradingData] = []
     try:
-        data = await asyncio.wait_for(
+        provider_rows = await asyncio.wait_for(
             VnstockForeignTradingFetcher.fetch(
-                ForeignTradingQueryParams(symbol=symbol_upper, limit=min(limit, 100))
+                ForeignTradingQueryParams(symbol=symbol_upper, limit=provider_limit)
             ),
             timeout=30,
         )
-        if data:
-            limited_data = data[:limit]
-            latest_date = _latest_foreign_trading_date(limited_data)
-            return StandardResponse(
-                data=limited_data,
-                meta=MetaData(
-                    count=len(limited_data),
-                    symbol=symbol_upper,
-                    last_data_date=latest_date,
-                ),
-            )
-
-        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
-        return StandardResponse(
-            data=fallback,
-            meta=MetaData(
-                count=len(fallback),
-                symbol=symbol_upper,
-                last_data_date=fallback[0].date if fallback else None,
-            ),
-            error="Live foreign trading feed returned no rows; using cached database fallback." if fallback else None,
-        )
     except (asyncio.TimeoutError, ProviderTimeoutError):
-        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
-        return StandardResponse(
-            data=fallback,
-            meta=MetaData(
-                count=len(fallback),
-                symbol=symbol_upper,
-                last_data_date=fallback[0].date if fallback else None,
-            ),
-            error="Request timed out" if not fallback else "Live foreign trading request timed out; using cached database fallback.",
+        provider_error = "live foreign trading feed timed out"
+    except Exception as exc:  # provider failure must not hide retained rows
+        provider_error = f"live foreign trading feed unavailable: {exc}"
+
+    window_start: date | None = None
+    window_end: date | None = None
+    if sessions:
+        requested_days = requested_session_dates(sessions)
+        if requested_days:
+            window_start, window_end = requested_days[0], requested_days[-1]
+
+    retained = await _load_foreign_trading_fallback(
+        db,
+        symbol_upper,
+        max(limit, sessions or 0),
+        start_date=window_start,
+        end_date=window_end,
+    )
+    coverage = build_foreign_flow_coverage(
+        [*provider_rows, *retained],
+        requested_sessions=sessions,
+        start_date=window_start,
+        end_date=window_end,
+    )
+
+    warnings: list[str] = list(coverage.warnings)
+    if provider_error:
+        warnings.insert(
+            0,
+            provider_error + ("; using cached database fallback" if retained else ""),
         )
-    except Exception as e:
-        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
-        return StandardResponse(
-            data=fallback,
-            meta=MetaData(
-                count=len(fallback),
-                symbol=symbol_upper,
-                last_data_date=fallback[0].date if fallback else None,
-            ),
-            error=str(e) if not fallback else f"Live foreign trading unavailable; using cached database fallback: {e}",
+    if sessions and sessions > PROVIDER_ROW_CAP:
+        warnings.append(
+            f"the live feed caps a request at {PROVIDER_ROW_CAP} rows; "
+            f"{sessions}-session coverage relies on retained history"
         )
+    # The envelope and meta carry the same degradation record: a consumer that
+    # keeps rows must still see why the window is partial (#249).
+    coverage.warnings = warnings
+
+    return StandardResponse(
+        data=coverage.rows,
+        meta=MetaData(
+            count=len(coverage.rows),
+            symbol=symbol_upper,
+            last_data_date=(
+                coverage.last_validated_session.isoformat()
+                if coverage.last_validated_session
+                else None
+            ),
+            **coverage.meta(),
+        ),
+        error="; ".join(warnings) if warnings else None,
+    )
 
 
 @router.get("/{symbol}/subsidiaries", response_model=StandardResponse[List[Any]])

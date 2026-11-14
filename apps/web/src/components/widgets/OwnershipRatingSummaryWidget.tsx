@@ -8,7 +8,7 @@ import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { useForeignTrading, useInsiderSentiment, useShareholders } from '@/lib/queries';
-import { buildOwnershipSummary } from '@/lib/ownershipAnalytics';
+import { FOREIGN_WINDOW_SESSIONS, buildOwnershipSummary } from '@/lib/ownershipAnalytics';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE, formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
@@ -38,32 +38,51 @@ function formatCompact(value: number | null | undefined) {
 export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChange }: OwnershipRatingSummaryWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || ''
   const shareholdersQuery = useShareholders(upperSymbol, Boolean(upperSymbol))
-  const foreignQuery = useForeignTrading(upperSymbol, { limit: 20, enabled: Boolean(upperSymbol) })
+  const foreignQuery = useForeignTrading(upperSymbol, {
+    sessions: FOREIGN_WINDOW_SESSIONS,
+    enabled: Boolean(upperSymbol),
+  })
   const insiderQuery = useInsiderSentiment(upperSymbol, { days: 90, enabled: Boolean(upperSymbol) })
 
   const shareholders = shareholdersQuery.data?.data
   const foreignFlow = foreignQuery.data?.data
+  const foreignCoverage = foreignQuery.data?.meta
   const insider = insiderQuery.data
   const shareholderError = useMemo(() => shareholdersQuery.error || (shareholdersQuery.data?.error ? new Error(shareholdersQuery.data.error) : null), [shareholdersQuery.error, shareholdersQuery.data?.error])
-  const summary = useMemo(() => buildOwnershipSummary(shareholders, foreignFlow, insider), [shareholders, foreignFlow, insider])
+  const foreignEnvelopeError = !foreignQuery.error && foreignQuery.data?.error ? foreignQuery.data.error : null
+  const summary = useMemo(
+    () => buildOwnershipSummary(shareholders, foreignFlow, insider, foreignCoverage),
+    [shareholders, foreignFlow, insider, foreignCoverage],
+  )
   const hasData = summary.availableSources > 0
   const isLoading = (shareholdersQuery.isLoading || foreignQuery.isLoading || insiderQuery.isLoading) && !hasData
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
+  // A response-level fallback/error from the foreign feed is retained even
+  // when numeric rows still arrive (#249): the total becomes a partial read.
   const error = shareholderError || foreignQuery.error || insiderQuery.error
+    || (foreignEnvelopeError ? new Error(foreignEnvelopeError) : null)
   const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
   const gradeTone = summary.grade === 'A' ? 'text-[var(--color-positive)]' : summary.grade === 'B' ? 'text-[var(--color-accent-primary)]' : summary.grade === 'C' ? 'text-[var(--color-warning)]' : summary.grade === 'D' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]'
   const warnings = useMemo(() => {
     const inputs = [
       ['Shareholders', { ...shareholdersQuery, error: shareholderError }, summary.holderCount !== null && summary.holderCount > 0],
-      ['Foreign flow', foreignQuery, summary.foreignNetVolume !== null],
+      ['Foreign flow', { ...foreignQuery, error: foreignQuery.error || (foreignEnvelopeError ? new Error(foreignEnvelopeError) : null) }, summary.foreignNetVolume !== null],
       ['Insider sentiment', insiderQuery, summary.insiderNetValue !== null],
     ] as const
+    const coverage = summary.foreignFlowCoverage
+    const coverageNote = coverage.status === 'unavailable'
+      ? null
+      : coverage.status === 'partial'
+        ? [`Foreign flow: ${coverage.observedSessions}/${coverage.requestedSessions} sessions observed${coverage.startDate ? ` (${coverage.startDate} to ${coverage.endDate})` : ''}${coverage.gapSessions ? `, ${coverage.gapSessions} gap(s)` : ''}; ${coverage.requestedSessions}D total withheld.`]
+        : []
     return inputs.flatMap(([name, query, usable]) => query.error
       ? [`${name}: ${usable ? 'refresh failed; retained data may be stale' : 'unavailable (request failed)'}.`]
       : !usable ? [`${name}: ${query.isLoading ? 'loading' : 'no usable observations'}.`] : [])
+      .concat(coverageNote)
+      .concat(coverage.warning && coverage.status !== 'partial' ? [`Foreign flow: ${coverage.warning}.`] : [])
       .concat(summary.holderCount && summary.ownershipUnitStatus !== 'explicit' ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [])
       .concat(summary.score === null ? ['Composite withheld until all three inputs and ownership percentage units are usable.'] : [])
-  }, [shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
+  }, [foreignEnvelopeError, shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
   const ownershipHealth: WidgetHealthState | undefined = error && hasData
     ? { status: 'stale', label: 'Refresh failed', detail: warnings.join(' ') }
     : summary.coverage !== 'complete' && !isLoading
@@ -138,7 +157,15 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
           <div className="grid flex-1 grid-cols-2 gap-2 xl:grid-cols-4">
             <MetricCard label="Top 3" value={formatPct(summary.top3Pct)} tone="text-[var(--color-accent-primary)]" />
             <MetricCard label="Top 10" value={formatPct(summary.top10Pct)} tone="text-[var(--color-accent-primary)]" />
-            <MetricCard label="Foreign Net 20D" value={formatCompact(summary.foreignNetVolume)} tone={signedToneClass(summary.foreignNetVolume)} />
+            <MetricCard
+              label={summary.foreignFlowCoverage.status === 'complete'
+                ? `Foreign Net ${summary.foreignFlowCoverage.requestedSessions}D`
+                : summary.foreignFlowCoverage.status === 'partial'
+                  ? 'Foreign Net (partial)'
+                  : 'Foreign Net'}
+              value={formatCompact(summary.foreignNetVolume)}
+              tone={signedToneClass(summary.foreignNetVolume)}
+            />
             <MetricCard label="Insider Net 90D" value={formatCompact(summary.insiderNetValue)} tone={signedToneClass(summary.insiderNetValue)} />
             <MetricCard label="Reported Institutional" value={formatCompact(summary.institutionalCount)} tone="text-[var(--text-primary)]" />
             <MetricCard label="Reported Foreign Holders" value={formatCompact(summary.foreignCount)} tone="text-[var(--text-primary)]" />

@@ -1942,7 +1942,7 @@ async def test_foreign_trading_smoke_returns_data(client, monkeypatch):
         return [
             ForeignTradingData(
                 symbol="VNM",
-                date="2026-02-15",
+                date="2026-02-13",
                 buy_volume=120000,
                 sell_volume=80000,
                 net_volume=40000,
@@ -1958,7 +1958,7 @@ async def test_foreign_trading_smoke_returns_data(client, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 1
-    assert payload["meta"]["last_data_date"] == "2026-02-15"
+    assert payload["meta"]["last_data_date"] == "2026-02-13"
     assert payload["data"][0]["net_volume"] == 40000
 
 

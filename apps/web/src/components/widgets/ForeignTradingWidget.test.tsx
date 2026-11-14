@@ -152,14 +152,14 @@ describe('ForeignTradingWidget volumes', () => {
     expect(await screen.findByText('2026-05-28')).toBeInTheDocument();
     expect(screen.getByText('Net buy +1.0K')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry|Try Again/ })).not.toBeInTheDocument();
-    expect(getForeignTrading).toHaveBeenNthCalledWith(2, 'FPT', { limit: 66 });
+    expect(getForeignTrading).toHaveBeenNthCalledWith(2, 'FPT', { limit: undefined, sessions: 60 });
 
     fireEvent.click(screen.getByRole('button', { name: '1M' }));
     expect(await screen.findByText('No data for FPT')).toBeInTheDocument();
     expect(screen.getByText('Coverage gap')).toBeInTheDocument();
     expect(screen.queryByText('2026-05-28')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry|Try Again/ })).not.toBeInTheDocument();
-    expect(getForeignTrading).toHaveBeenNthCalledWith(3, 'FPT', { limit: 22 });
+    expect(getForeignTrading).toHaveBeenNthCalledWith(3, 'FPT', { limit: undefined, sessions: 20 });
 
     fireEvent.click(screen.getByRole('button', { name: '6M' }));
     expect(await screen.findByText('2026-05-27')).toBeInTheDocument();
@@ -167,7 +167,73 @@ describe('ForeignTradingWidget volumes', () => {
     expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
     expect(screen.queryByText('Coverage gap')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry|Try Again/ })).not.toBeInTheDocument();
-    expect(getForeignTrading).toHaveBeenNthCalledWith(4, 'FPT', { limit: 132 });
+    expect(getForeignTrading).toHaveBeenNthCalledWith(4, 'FPT', { limit: undefined, sessions: 120 });
     client.clear();
+  });
+
+  it('discloses the admitted session window instead of a row count', async () => {
+    jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    mockUseForeignTrading.mockReturnValue({
+      data: {
+        symbol: 'HPG',
+        count: 2,
+        data: [
+          { symbol: 'HPG', date: '2026-10-27', buy_volume: 1500, sell_volume: 500 },
+          { symbol: 'HPG', date: '2026-10-26', buy_volume: 500, sell_volume: 1500 },
+        ],
+        meta: {
+          count: 2,
+          symbol: 'HPG',
+          last_data_date: '2026-10-27',
+          requested_session_count: 20,
+          observed_session_count: 2,
+          observed_start_date: '2026-10-26',
+          observed_end_date: '2026-10-27',
+          gap_session_count: 18,
+          window_net_volume: null,
+          coverage_status: 'partial',
+          provider_row_cap_applied: false,
+          non_session_dates: ['2026-10-25'],
+          calendar_verified: true,
+        },
+      },
+      isLoading: false, isFetching: false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
+    } as unknown as UseQueryResult<ForeignTradingResponse, Error>);
+
+    render(<ForeignTradingWidget id="foreign-coverage" symbol="HPG" />);
+
+    // The window note states observed/requested sessions and the real range.
+    expect(await screen.findByText(/2\/20 sessions/)).toHaveTextContent('2026-10-26');
+    // An unqualified partial window must not present a net position.
+    const netPosition = screen.getByText('Net Position').parentElement!.parentElement!.lastElementChild!;
+    expect(netPosition).toHaveTextContent(/^Unavailable$/);
+    // Rejected weekend rows are disclosed rather than silently summed.
+    expect(screen.getByRole('status')).toHaveTextContent('non-session');
+  });
+
+  it('keeps a capped provider window and the admitted total visible together', async () => {
+    jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    mockUseForeignTrading.mockReturnValue({
+      data: {
+        symbol: 'HPG', count: 1,
+        data: [{ symbol: 'HPG', date: '2026-10-27', buy_volume: 1500, sell_volume: 500 }],
+        meta: {
+          count: 1,
+          requested_session_count: 250,
+          observed_session_count: 1,
+          gap_session_count: 249,
+          window_net_volume: 1000,
+          coverage_status: 'partial',
+          provider_row_cap: 100,
+          provider_row_cap_applied: true,
+        },
+      },
+      isLoading: false, isFetching: false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
+    } as unknown as UseQueryResult<ForeignTradingResponse, Error>);
+
+    render(<ForeignTradingWidget id="foreign-cap" symbol="HPG" />);
+
+    expect(await screen.findByText(/1\/250 sessions/)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('caps 100 rows');
   });
 });

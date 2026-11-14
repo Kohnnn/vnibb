@@ -33,7 +33,8 @@ export const equityQueryKeys = {
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
     ratioHistory: (symbol: string, period: string, ratios: string[], limit?: number) => ['ratioHistory', symbol, period, ratios, limit] as const,
     metricsHistory: (symbol: string, limit?: number) => ['metricsHistory', symbol, limit] as const,
-    foreignTrading: (symbol: string, limit?: number) => ['foreignTrading', symbol, limit] as const,
+    foreignTrading: (symbol: string, limit?: number, sessions?: number) =>
+        ['foreignTrading', symbol, limit, sessions] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
     flowCoverage: (days: number) => ['flowCoverage', days] as const,
     correlationMatrix: (symbol: string, days: number, topN: number) => ['correlationMatrix', symbol, days, topN] as const,
@@ -158,13 +159,20 @@ export function usePriceDepth(symbol: string, enabled = true) {
     });
 }
 
+export interface ForeignTradingQueryOptions {
+    /** Session window requested from the API; omit for latest retained rows. */
+    sessions?: number;
+    limit?: number;
+    enabled?: boolean;
+}
+
 export function useForeignTrading(
     symbol: string,
-    options?: { limit?: number; enabled?: boolean }
+    options?: ForeignTradingQueryOptions
 ) {
     return useQuery({
-        queryKey: equityQueryKeys.foreignTrading(symbol, options?.limit),
-        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit }),
+        queryKey: equityQueryKeys.foreignTrading(symbol, options?.limit, options?.sessions),
+        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit, sessions: options?.sessions }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.foreignTrading),

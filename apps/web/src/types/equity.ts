@@ -355,15 +355,41 @@ export interface ForeignTradingData {
   net_value?: number;
 }
 
+export type ForeignFlowCoverageStatus = 'complete' | 'partial' | 'unavailable';
+
+export interface ForeignTradingMeta {
+  count: number;
+  symbol?: string;
+  last_data_date?: string | null;
+  /** Session window requested by the consumer, if any. */
+  requested_start_date?: string | null;
+  requested_end_date?: string | null;
+  requested_session_count?: number | null;
+  /** Sessions actually matched by an admitted row. */
+  observed_session_count?: number | null;
+  observed_start_date?: string | null;
+  observed_end_date?: string | null;
+  last_validated_session?: string | null;
+  gap_session_count?: number | null;
+  gap_session_dates?: string[];
+  non_session_dates?: string[];
+  duplicate_session_dates?: string[];
+  undated_row_count?: number | null;
+  out_of_window_row_count?: number | null;
+  window_net_volume?: number | null;
+  coverage_status?: ForeignFlowCoverageStatus;
+  window_contract?: 'sessions' | 'latest_retained_rows';
+  calendar_verified?: boolean | null;
+  provider_row_cap?: number | null;
+  provider_row_cap_applied?: boolean;
+  warnings?: string[];
+}
+
 export interface ForeignTradingResponse {
   symbol: string;
   count: number;
   data: ForeignTradingData[];
-  meta?: {
-    count: number;
-    symbol?: string;
-    last_data_date?: string | null;
-  };
+  meta?: ForeignTradingMeta;
   error?: string | null;
 }
 

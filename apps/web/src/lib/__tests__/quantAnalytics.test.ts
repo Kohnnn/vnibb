@@ -105,16 +105,28 @@ function insider(netValue: number | null, valueUnit: string | null): InsiderSent
   }
 }
 
+/** 20 qualifying weekday sessions ending 2026-05-29 (#249). */
+function flowWindow(buy: number, sell: number) {
+  const days: { date: string; buy_volume: number; sell_volume: number }[] = []
+  for (const day = new Date(Date.UTC(2026, 4, 29)); days.length < 20; day.setUTCDate(day.getUTCDate() - 1)) {
+    const weekday = day.getUTCDay()
+    if (weekday !== 0 && weekday !== 6) {
+      days.push({ date: day.toISOString().slice(0, 10), buy_volume: buy, sell_volume: sell })
+    }
+  }
+  return days
+}
+
 describe('ownership analytics', () => {
-  it('scores canonical percentage ownership and positive admitted flows', () => {
+  it('scores canonical percentage ownership and a fully covered 20-session flow window', () => {
     const summary = buildOwnershipSummary([
       { symbol: 'FPT', shareholder_name: 'Fund A', shareholder_type: 'Institutional fund', ownership_pct: 30, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
       { symbol: 'FPT', shareholder_name: 'Foreign B', shareholder_type: 'Foreign investor', ownership_pct: 20, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
       { symbol: 'FPT', shareholder_name: 'Exec C', shareholder_type: 'Management insider', ownership_pct: 10, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
-    ], [{ buy_volume: 1000, sell_volume: 250 }], insider(500, 'VND'))
+    ], flowWindow(1000, 250), insider(20 * 750, 'VND'))
     expect(summary.top3Pct).toBe(60)
-    expect(summary.foreignNetVolume).toBe(750)
-    expect(summary.insiderNetValue).toBe(500)
+    expect(summary.foreignNetVolume).toBe(20 * 750)
+    expect(summary.insiderNetValue).toBe(20 * 750)
     expect(summary.grade).toBe('A')
   })
 
