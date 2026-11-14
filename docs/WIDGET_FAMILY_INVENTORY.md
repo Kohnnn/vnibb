@@ -89,16 +89,24 @@ screenshot capture timed out in this environment, so no visual artefacts exist.
 | 28 | `forex_rates` | rendered | 112 chars | regex+len |
 | 29 | `world_indices` | unavailable + named fallback | "Global index feed unavailable, using VN market index fallback" | text |
 
-Counts from Run B: **24 render content or a labelled empty state, 5 show an
-error/gate/unavailable state** (`alert_settings`, `database_inspector`,
-`quick_stats`, `market_breadth`, `world_indices`). No widget was blank or
-crashed at any width.
+**Counts, reconciled against the table above by counting its Basis column:**
+16 rows text-confirmed by the worker, 8 rows heuristic render presence
+(`regex+len`), 5 rows error/gate/unavailable (`alert_settings`,
+`database_inspector`, `quick_stats`, `market_breadth`, `world_indices`).
+16 + 8 + 5 = 29. **There is no "24 content" figure**: that number was wrong, and
+it wrongly merged the 8 heuristic rows into the text-confirmed total.
 
-Rows marked "regex+len" were classified by the observation harness detecting no
-error string plus a non-trivial text length - weaker than the text-confirmed
-rows and not re-verified here because the services are shut down. In Run A those
-same IDs showed connection-failure text; I am not claiming their Run B content
-was read in full.
+The 8 heuristic rows (`company_filings`, `events_calendar`,
+`insider_deal_timeline`, `news_corporate_actions`, `subsidiaries`,
+`market_overview`, `commodities`, `forex_rates`) were marked "rendered" because
+the observation harness found no error string and a non-trivial text length. That
+is **render presence**, not a content verification: their Run B text was never
+read. In Run A the same IDs showed connection-failure text. Treat these 8 as
+"renders something that is not an error" and nothing stronger.
+
+The 16 text-confirmed rows are ones whose state was classified from their
+visible text (both content and labelled-empty). The 5 error/gate rows are also
+text-confirmed with named reasons.
 
 Brand surfaces checked in Run B: direction colour confined to sentiment
 surfaces; notebook Export moved off the gain surface; sentiment labels measure
