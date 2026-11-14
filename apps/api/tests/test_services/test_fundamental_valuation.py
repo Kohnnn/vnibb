@@ -304,6 +304,14 @@ class TestCagrCoverage:
             ({"_financial_lineage": {"unit_metadata": {
                 "netRevenue": {"unavailable_reason": "unit_mismatch"},
             }}}, "rejected:unit_mismatch"),
+            ({"unit_metadata": {
+                "revenue": {"value_unit": "VND"},
+                "net_sales": {"unavailable_reason": "unit_mismatch"},
+            }}, "rejected:unit_mismatch"),
+            ({"unit_metadata": {
+                "Revenue": {"value_unit": "VND"},
+                "Net Sales": {"unavailable_reason": "unit_mismatch"},
+            }}, "rejected:unit_mismatch"),
             ({"currency_unit": "USD"}, "unknown_currency"),
         ],
     )

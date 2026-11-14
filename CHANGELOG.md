@@ -13,6 +13,14 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Apply admitted fiscal, unit and source evidence before cash-flow aliases, growth comparisons, Earnings Quality grades and earnings-recap context; preserve measured zero and explicit unavailable reasons. Use the same case-preserving field admission for valuation inputs and refuse incomparable margin exports (#245–#248, #257, #258).
+- Withhold FCF and DCF when the newest required capex observations are incomplete; calculate CAGR from comparable fiscal endpoints and clear obsolete formula-derived screener values while preserving independent facts (#247, #248).
+- Disclose foreign-flow session coverage and normal source overlap separately; preserve requested long windows and cap unwindowed merged results once. Keep RS price units and observation dates distinct from rating dates (#249, #251).
+- Separate direct-company, verified-peer, industry-only and general-market news evidence; strip source footers per field before normalization and retain available fallback rows when company context is unavailable (#250).
+- Order Dividend Ladder around the market-local date and preserve qualified Prediction Alerts baseline intervals, UTC observation clocks and threshold-independent coverage through activity records (#259, #260).
+- Normalize fresh template geometry through the adopted widget-size contract, route Financial Review by settled workspace roles and contain the Add Widgets chooser with native background inertness and named dismissal controls (#252, #253, #261).
+- Select the latest retained MCP price membership before chronological presentation and cap corporate-action sources by their effective timeline date; align standalone setup and authenticated revision-bound smoke commands with executable fixtures (#254–#256, #262).
+- Verify the explicitly approved database migration starting revision and target, including schema-unchanged releases, and refuse competing scheduler ownership using the startup consumer's flag semantics. Permission drafts remain unsent and source/recovery gates remain unchanged (#171, #172, #232).
 - Enforce deadlines in MCP `list_collection_documents` and `list_collection_documents_paginated` across execution, session cleanup and each complete paginated read; preserve caller cancellation and normalized return values. This is not a request-wide deadline (#241).
 - Hide recipient-only research snapshots at expiry without waiting for the authorization refresh; announce expired or invalid responses as unavailable (#241).
 - Route direct SDK consumers through a provider-neutral capability boundary, isolate vnstock registration/startup policy and guard external SDK imports. The financial single-flight lane and busy predicate belong to neutral core scheduling rather than the vnstock runtime; preserve timeout/retry coordination and the offline recovery selfcheck (#230, #241).
