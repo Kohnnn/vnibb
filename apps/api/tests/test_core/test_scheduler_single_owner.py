@@ -12,7 +12,6 @@ The guard follows the consumer's rule, not a list of false spellings:
 
 import pytest
 from pydantic import ValidationError
-
 from vnibb.core.config import Settings
 
 PRODUCTION = {

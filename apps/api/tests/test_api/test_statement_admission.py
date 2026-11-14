@@ -11,7 +11,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
 from vnibb.services import statement_admission as admission
 
 

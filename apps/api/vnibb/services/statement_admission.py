@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from vnibb.services.financial_service import (
     _monetary_evidence_admitted,
@@ -475,7 +476,7 @@ def admit_valuation_span(
     window = ordered[-count:]
     if len(window) < count:
         return None, f"insufficient_annual_periods_for_{field}"
-    if any(right[0] != left[0] + 1 for left, right in zip(window, window[1:])):
+    if any(right[0] != left[0] + 1 for left, right in zip(window, window[1:], strict=False)):
         return None, f"non_consecutive_annual_periods_for_{field}"
     values: list[float] = []
     for year, row in window:

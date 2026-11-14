@@ -750,7 +750,7 @@ def assess_fcf_coverage(
 
     window_years = dated_years[-base_rows:]
     window = [by_year[year] for year in window_years]
-    missing_years = [year for year, item in zip(window_years, window) if item is None]
+    missing_years = [year for year, item in zip(window_years, window, strict=True) if item is None]
     status = "complete" if len(window) == base_rows and not missing_years else "partial"
     base_fcf: float | None = None
     reason: str | None = None

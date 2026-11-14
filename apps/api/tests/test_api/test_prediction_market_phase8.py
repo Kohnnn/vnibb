@@ -15,7 +15,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import (

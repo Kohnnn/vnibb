@@ -5,10 +5,9 @@ count must never stand in for a calendar window, and a weekend date must never
 be summed as a session.
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
-
 from vnibb.api.v1 import equity as equity_module
 from vnibb.models.trading import ForeignTrading
 from vnibb.providers.vnstock.foreign_trading import ForeignTradingData

@@ -13,10 +13,11 @@ volumes are unknown is never coerced to zero.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from math import isfinite
-from typing import Any, Sequence
+from typing import Any
 
 from vnibb.core.config import settings
 from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata

@@ -741,9 +741,11 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     """
     from types import SimpleNamespace
 
-    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
+    from vnibb.services.statement_admission import (
+        restore_lineage_statement as _restore_lineage_statement,
+    )
 
     # `model_dump` shape: every field present, unstated metrics explicit `None`.
     canonical = dict.fromkeys(FinancialStatementData.model_fields)
@@ -793,9 +795,11 @@ def test_lineage_serves_what_the_canonical_proves(stored, canonical_state, expec
     """
     from types import SimpleNamespace
 
-    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
+    from vnibb.services.statement_admission import (
+        restore_lineage_statement as _restore_lineage_statement,
+    )
 
     canonical = {
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
@@ -833,9 +837,11 @@ def test_lineage_serves_a_metric_that_has_no_sql_column():
     """
     from types import SimpleNamespace
 
-    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
+    from vnibb.services.statement_admission import (
+        restore_lineage_statement as _restore_lineage_statement,
+    )
 
     canonical = {
         "symbol": "HPG", "period": "2025", "period_type": "year", "fiscal_year": 2025,
@@ -880,9 +886,11 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(
     """
     from types import SimpleNamespace
 
-    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import CashFlow
+    from vnibb.services.statement_admission import (
+        restore_lineage_statement as _restore_lineage_statement,
+    )
 
     canonical = dict.fromkeys(FinancialStatementData.model_fields)
     canonical.update({

@@ -6,7 +6,6 @@ from datetime import date
 from types import SimpleNamespace
 
 import pytest
-
 from vnibb.api.v1.rs_rating import RSGainerItem, RSStockItem
 from vnibb.models.stock import StockPrice
 from vnibb.services import rs_rating_service
