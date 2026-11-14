@@ -546,9 +546,17 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
     title = _normalize_text(row.get("title"))
     # #250: publisher/footer/navigation text is not article evidence. Matching
     # it let a legal form or sector phrase in boilerplate admit any article.
+    # Each field is stripped on its own: an unprefixed join would let an
+    # unpunctuated "Nguồn: CafeF" summary swallow the real content field.
     body = _normalize_text(
-        _strip_boilerplate(
-            " ".join(filter(None, [row.get("summary"), row.get("content"), row.get("category")]))
+        " ".join(
+            filter(
+                None,
+                (
+                    _strip_boilerplate(_normalize_text(row.get(field)))
+                    for field in ("summary", "content", "category")
+                ),
+            )
         )
     )
     related_symbols = _parse_symbols(row.get("related_symbols"))
@@ -716,7 +724,24 @@ async def _hydrate_company_news_fallback(symbol: str | None, limit: int) -> list
         # evidence. Each provider row is scored like any other row; an article
         # that fails every check stays association-unverified with no rank
         # instead of being promoted to a direct-company claim.
-        context = await _load_symbol_context(fallback_symbol)
+        #
+        # The context lookup is local to these rows: a DB outage must degrade
+        # the scoring, not discard provider rows that are already in hand.
+        context_available = True
+        try:
+            context = await _load_symbol_context(fallback_symbol)
+        except Exception as error:
+            logger.warning(
+                "Company news fallback context unavailable",
+                extra={"symbol": fallback_symbol, "error": str(error)},
+            )
+            context_available = False
+            context = {
+                "symbol": None,
+                "peer_symbols": [],
+                "sector_keywords": [],
+                "company_keywords": [],
+            }
         for idx, item in enumerate(company_news):
             if item.url in used_urls:
                 continue
@@ -741,6 +766,11 @@ async def _hydrate_company_news_fallback(symbol: str | None, limit: int) -> list
                 },
                 {**context, "symbol": fallback_symbol if symbol else None},
             )
+            if not context_available:
+                row["match_evidence"] = {
+                    **(row.get("match_evidence") or {}),
+                    "context_available": False,
+                }
             # The provider's own tag is kept for display, but only after
             # scoring, so it can never serve as its own evidence (#250).
             row["related_symbols"] = [fallback_symbol] if symbol else []
@@ -750,6 +780,7 @@ async def _hydrate_company_news_fallback(symbol: str | None, limit: int) -> list
                 row["match_reason"] = None
                 row["is_market_wide_fallback"] = not symbol
                 row["match_evidence"] = {
+                    **(row.get("match_evidence") or {}),
                     "provider": "company_news",
                     "request_symbol": fallback_symbol,
                     "provider_validated_text": False,

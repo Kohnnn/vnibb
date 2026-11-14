@@ -193,6 +193,26 @@ def test_source_metadata_segment_is_still_dropped():
     assert _strip_boilerplate("Source: Reuters") == ""
 
 
+def test_unpunctuated_source_summary_does_not_consume_the_content_field():
+    """#250 review: strip each field, or a bare 'Nguồn: X' eats the body."""
+
+    context = {"symbol": "HPG", "peer_symbols": [], "company_keywords": []}
+    row = _score_news_row(
+        {
+            "title": "Thị trường điều chỉnh nhẹ",
+            "summary": "Nguồn: CafeF",
+            "content": "HPG công bố kế hoạch mới.",
+        },
+        context,
+    )
+
+    assert row["association_class"] == "direct_company"
+    assert row["relevance_score"] == 0.94
+    assert row["match_evidence"]["matched_terms"] == [
+        {"term": "HPG", "field": "body", "kind": "symbol"}
+    ]
+
+
 def test_verified_sector_overlap_is_labelled_but_carries_no_score():
     """A shared industry is an association class, not a relevance number."""
 
@@ -425,6 +445,73 @@ async def test_provider_fallback_rows_are_rescored_not_promoted(monkeypatch):
     assert row["relevance_score"] == 0.0
     assert row["matched_symbols"] == []
     assert row["match_evidence"]["provider_validated_text"] is False
+
+
+@pytest.mark.asyncio
+async def test_provider_fallback_survives_context_outage_without_self_verification(
+    monkeypatch,
+):
+    """#250 review: a DB outage degrades scoring, it does not drop live rows."""
+
+    async def fake_company_news(_query):
+        return [
+            SimpleNamespace(
+                title="Volkswagen launches new SUV line",
+                summary="Automotive market update.",
+                source="cafef",
+                published_at=datetime(2026, 11, 10, 8, 0),
+                url="https://example.com/unrelated",
+                category="Auto",
+            ),
+            SimpleNamespace(
+                title="HPG công bố kế hoạch mới",
+                summary="Kế hoạch sản xuất quý 4.",
+                source="cafef",
+                published_at=datetime(2026, 11, 10, 9, 0),
+                url="https://example.com/hpg-plan",
+                category="Steel",
+            ),
+        ]
+
+    async def raising_context(_symbol):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.VnstockCompanyNewsFetcher.fetch", fake_company_news
+    )
+    monkeypatch.setattr(
+        "vnibb.services.news_service._load_symbol_context", raising_context
+    )
+
+    # The fallback owns this behaviour; the primary lookup in
+    # `get_company_news_rows` is a separate pre-existing contract.
+    from vnibb.services.news_service import _hydrate_company_news_fallback
+
+    rows = await _hydrate_company_news_fallback("HPG", 5)
+
+    # Both available provider rows survive the DB outage instead of rethrowing.
+    by_url = {row["url"]: row for row in rows}
+    assert set(by_url) == {
+        "https://example.com/unrelated",
+        "https://example.com/hpg-plan",
+    }
+    # Without context nothing can be verified, so the unrelated row makes no
+    # claim and carries no rank; the request symbol cannot verify itself.
+    unrelated = by_url["https://example.com/unrelated"]
+    assert unrelated["association_class"] == "none"
+    assert unrelated["relevance_score"] == 0.0
+    assert unrelated["matched_symbols"] == []
+    assert unrelated["match_reason"] is None
+    assert unrelated["match_evidence"]["context_available"] is False
+    assert unrelated["match_evidence"]["provider_validated_text"] is False
+    # The outage degrades scoring, it does not rewrite evidence: a title that
+    # genuinely names the issuer still proves the direct association.
+    named = by_url["https://example.com/hpg-plan"]
+    assert named["association_class"] == "direct_company"
+    assert named["match_evidence"]["matched_terms"] == [
+        {"term": "HPG", "field": "title", "kind": "symbol"}
+    ]
+    assert named["match_evidence"]["context_available"] is False
 
 
 async def _identity_rows(rows):
