@@ -31,7 +31,8 @@ from vnibb.services.financial_service import (
 
 # Canonical metric -> raw provider aliases. Only the spellings the persisted
 # rows and the premium-record corpus actually use; a spelling outside this table
-# is not evidence of the metric.
+# is not evidence of the metric. The statement readers and `fundamental_valuation`
+# resolve one metric through this table, so admission and derivation agree.
 FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "revenue": (
         "revenue", "netRevenue", "net_revenue", "net_sales",
@@ -44,12 +45,20 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "operating_cash_flow": (
         "operating_cash_flow", "operatingCashFlow", "fromOperating",
         "net_cash_flows_from_operating_activities", "cash_from_operations",
+        "net_cash_inflows_outflows_from_operating_activities",
+        "lưu chuyển tiền thuần từ hoạt động kinh doanh",
     ),
     "capex": (
         "capex", "capital_expenditure", "capitalExpenditure",
         "payment_for_fixed_assets_and_other_long_term_assets",
+        "purchase_of_fixed_assets", "purchases_of_fixed_assets",
+        "payment_for_fixed_assets_constructions_and_other_long_term_assets",
     ),
     "total_assets": ("total_assets", "totalAssets", "total_asset", "asset"),
+    "equity": (
+        "equity", "total_equity", "owners_equity", "shareholders_equity",
+        "owner_equity", "b_owners_equity", "viii_capital_and_funds",
+    ),
     "eps": ("eps", "earningPerShare", "earningsPerShare", "basicEps"),
     "ebitda": ("ebitda", "EBITDA"),
 }
@@ -365,14 +374,25 @@ def admit_valuation_field(
     if value is None:
         return None, "nonfinite"
 
-    lineage = row.get("raw_data") if isinstance(row.get("raw_data"), Mapping) else {}
+    # One rejection, under any spelling of the metric and in any evidence
+    # location, keeps the field out: an alias must never re-enter a metric the
+    # unit admission withheld.
+    names = {field, alias, *(name for name in FIELD_ALIASES.get(field, ()))}
+    raw_data = row.get("raw_data") if isinstance(row.get("raw_data"), Mapping) else {}
+    lineage_block = raw_data.get("_financial_lineage")
+    if not isinstance(lineage_block, Mapping):
+        lineage_block = row.get("_financial_lineage")
+    lineage_block = lineage_block if isinstance(lineage_block, Mapping) else {}
+    canonical = lineage_block.get("canonical_data")
     for evidence in (
         row.get("unit_metadata") or {},
-        ((lineage.get("_financial_lineage") or {}).get("canonical_data") or {}).get("unit_metadata") or {},
-        (lineage.get("_financial_lineage") or {}).get("unit_metadata") or {},
+        canonical.get("unit_metadata") if isinstance(canonical, Mapping) else {},
+        lineage_block.get("unit_metadata") or {},
     ):
-        if isinstance(evidence, Mapping):
-            entry = evidence.get(field) or evidence.get(alias)
+        if not isinstance(evidence, Mapping):
+            continue
+        for name in names:
+            entry = evidence.get(name)
             if isinstance(entry, Mapping) and entry.get("unavailable_reason"):
                 return None, f"rejected:{entry['unavailable_reason']}"
 

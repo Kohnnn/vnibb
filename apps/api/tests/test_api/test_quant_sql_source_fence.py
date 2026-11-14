@@ -8,6 +8,15 @@ from vnibb.core.database import get_db
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 
 
+_UNITS = {
+    "revenue": {"source_unit": "VND", "value_unit": "VND"},
+    "net_income": {"source_unit": "VND", "value_unit": "VND"},
+    "eps": {"source_unit": "VND", "value_unit": "VND/share"},
+    "operating_cash_flow": {"source_unit": "VND", "value_unit": "VND"},
+    "total_assets": {"source_unit": "VND", "value_unit": "VND"},
+}
+
+
 def _lineage(**overrides):
     """What the pipeline persists beside an admitted statement row."""
     lineage = {
@@ -16,16 +25,44 @@ def _lineage(**overrides):
         "value_unit": "VND",
         "consolidation_basis": "consolidated",
         "flow_basis": "single_quarter",
-        "unit_metadata": {
-            "revenue": {"source_unit": "VND", "value_unit": "VND"},
-            "net_income": {"source_unit": "VND", "value_unit": "VND"},
-            "eps": {"source_unit": "VND", "value_unit": "VND/share"},
-            "operating_cash_flow": {"source_unit": "VND", "value_unit": "VND"},
-            "total_assets": {"source_unit": "VND", "value_unit": "VND"},
-        },
+        "unit_metadata": dict(_UNITS),
     }
     lineage.update(overrides)
     return {"_financial_lineage": lineage}
+
+
+def _canonical(symbol, period, statement_type, metrics, **overrides):
+    """A persisted canonical envelope, as the writer actually stores it.
+
+    The column readers restore this copy and reconcile it against the stored
+    columns, so a bare lineage dictionary is not admitted evidence.
+    """
+    from vnibb.providers.vnstock.financials import FinancialStatementData
+
+    envelope = {
+        name: 0.0
+        for name, info in FinancialStatementData.model_fields.items()
+        if str(info.annotation) in {"int", "float", "Optional[int]", "Optional[float]", "float | None", "int | None"}
+    }
+    envelope.update(
+        symbol=symbol,
+        period=period,
+        statement_type=statement_type,
+        period_type="quarter",
+        fiscal_year=int(period[-4:]),
+        fiscal_quarter=int(period[1]),
+        source="vietcap",
+        currency="VND",
+        value_unit="VND",
+        consolidation_basis="consolidated",
+        flow_basis=None if statement_type == "balance" else "single_quarter",
+        source_periods=[],
+        unit_metadata={name: dict(unit) for name, unit in _UNITS.items() if name in metrics},
+        **metrics,
+    )
+    envelope.update(overrides)
+    envelope["raw_data"] = {}
+    return {"_financial_lineage": {"canonical_data": envelope}}
 
 
 def _client(session):
@@ -63,10 +100,17 @@ async def test_earnings_quality_excludes_issuer_before_limit_and_keeps_legacy(is
                     "period_type": "quarter", "fiscal_year": year, "fiscal_quarter": quarter,
                     "source": null() if index >= 6 else "vietcap",
                 }
+                period = common["period"]
                 session.add_all([
-                    IncomeStatement(**common, revenue=100, net_income=20, eps=2, raw_data=_lineage()),
-                    CashFlow(**common, operating_cash_flow=80, raw_data=_lineage()),
-                    BalanceSheet(**common, total_assets=200, raw_data=_lineage(flow_basis=None)),
+                    IncomeStatement(**common, revenue=100, net_income=20, eps=2,
+                                    raw_data=_canonical("FPT", period, "income",
+                                                        {"revenue": 100, "net_income": 20, "eps": 2})),
+                    CashFlow(**common, operating_cash_flow=80,
+                             raw_data=_canonical("FPT", period, "cashflow",
+                                                 {"operating_cash_flow": 80})),
+                    BalanceSheet(**common, total_assets=200,
+                                 raw_data=_canonical("FPT", period, "balance",
+                                                     {"total_assets": 200})),
                 ])
                 issuer_year = year + 3
                 issuer_common = {
@@ -127,10 +171,12 @@ async def test_earnings_quality_does_not_grade_rows_without_unit_lineage():
             assert data["checks"] == []
             assert data["coverage"]["status"] == "unavailable"
             assert payload["error"] == data["coverage"]["unavailable_reason"]
-            # The per-period reasons name the actual gate that refused them.
+            # The per-period reasons name the actual gate that refused them: the
+            # statement loader withholds the field, so the shared admission
+            # reports its explicit rejection, not a reader-local guess.
             availability = data["coverage"]["component_availability"]["Q2-2025"]
-            assert availability["revenue"] == "legacy_unit_basis_unconfirmed"
-            assert availability["operating_cash_flow"] == "legacy_unit_basis_unconfirmed"
+            assert availability["revenue"] == "rejected:unverified_statement_currency_or_unit"
+            assert availability["operating_cash_flow"] == "rejected:unverified_statement_currency_or_unit"
     finally:
         await engine.dispose()
 
@@ -147,18 +193,23 @@ async def test_earnings_quality_withholds_mixed_basis_ratios():
                     "period_type": "quarter", "fiscal_year": 2025, "fiscal_quarter": quarter,
                     "source": "vietcap",
                 }
+                period = common["period"]
                 session.add(IncomeStatement(
-                    **common, revenue=100, net_income=100, eps=2, raw_data=_lineage(),
+                    **common, revenue=100, net_income=100, eps=2,
+                    raw_data=_canonical("QAZ", period, "income",
+                                        {"revenue": 100, "net_income": 100, "eps": 2}),
                 ))
                 # Cash flow is a million-VND YTD series, the balance sheet a
                 # consolidated VND snapshot: neither may pair with the income.
                 session.add(CashFlow(
                     **common, operating_cash_flow=120,
-                    raw_data=_lineage(value_unit="million_VND", flow_basis="cumulative_ytd"),
+                    raw_data=_canonical("QAZ", period, "cashflow",
+                                        {"operating_cash_flow": 120},
+                                        value_unit="million_VND", flow_basis="cumulative_ytd"),
                 ))
                 session.add(BalanceSheet(
                     **common, total_assets=20_000,
-                    raw_data=_lineage(flow_basis=None, value_unit="VND"),
+                    raw_data=_canonical("QAZ", period, "balance", {"total_assets": 20_000}),
                 ))
             await session.commit()
 
@@ -171,7 +222,7 @@ async def test_earnings_quality_withholds_mixed_basis_ratios():
             assert data["accruals_ratio_pct"] is None
             availability = data["coverage"]["component_availability"]["Q2-2025"]
             assert availability["revenue"] is None
-            assert availability["operating_cash_flow"] == "unverified_statement_currency_or_unit"
+            assert availability["operating_cash_flow"] == "rejected:unverified_statement_currency_or_unit"
             assert availability["total_assets"] is None
             assert availability["cross_statement_basis"] == "cross_statement_basis_mismatch"
     finally:
@@ -190,21 +241,24 @@ async def test_earnings_quality_reports_partial_ratios_without_a_grade():
                     "period_type": "quarter", "fiscal_year": 2025, "fiscal_quarter": quarter,
                     "source": "vietcap",
                 }
+                period = common["period"]
                 # Revenue and OCF are admitted, net income is not: cash
                 # conversion is computable, accruals are not.
                 session.add(IncomeStatement(
                     **common, revenue=100, eps=2,
-                    raw_data=_lineage(unit_metadata={
-                        "revenue": {"source_unit": "VND", "value_unit": "VND"},
-                        "eps": {"source_unit": "VND", "value_unit": "VND/share"},
-                    }),
+                    raw_data=_canonical("QAZ", period, "income", {"revenue": 100, "eps": 2},
+                                        unit_metadata={
+                                            "revenue": {"source_unit": "VND", "value_unit": "VND"},
+                                            "eps": {"source_unit": "VND", "value_unit": "VND/share"},
+                                        }),
                 ))
                 session.add(CashFlow(
-                    **common, operating_cash_flow=120, raw_data=_lineage(),
+                    **common, operating_cash_flow=120,
+                    raw_data=_canonical("QAZ", period, "cashflow", {"operating_cash_flow": 120}),
                 ))
                 session.add(BalanceSheet(
                     **common, total_assets=20_000,
-                    raw_data=_lineage(flow_basis=None),
+                    raw_data=_canonical("QAZ", period, "balance", {"total_assets": 20_000}),
                 ))
             await session.commit()
 
@@ -224,5 +278,96 @@ async def test_earnings_quality_reports_partial_ratios_without_a_grade():
             assert data["accruals_ratio_pct"] is None
             assert data["coverage"]["unavailable_reason"]
             assert data["series"][0]["cross_statement_basis_reason"] is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_earnings_quality_serves_canonical_not_a_disagreeing_sql_column():
+    """A stored column the lineage no longer backs is withheld, as in statements."""
+    engine = await _fresh_session()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            for index, quarter in enumerate((1, 2)):
+                period = f"Q{quarter}-2025"
+                common = {
+                    "id": index + 1, "symbol": "QAZ", "period": period,
+                    "period_type": "quarter", "fiscal_year": 2025, "fiscal_quarter": quarter,
+                    "source": "vietcap",
+                }
+                # The column was overwritten to 200 but the canonical still says
+                # 100: neither copy may be graded, and no rate may divide it.
+                session.add(IncomeStatement(
+                    **common, revenue=200, net_income=200, eps=4,
+                    raw_data=_canonical("QAZ", period, "income",
+                                        {"revenue": 100, "net_income": 100, "eps": 2}),
+                ))
+                session.add(CashFlow(
+                    **common, operating_cash_flow=120,
+                    raw_data=_canonical("QAZ", period, "cashflow", {"operating_cash_flow": 120}),
+                ))
+                session.add(BalanceSheet(
+                    **common, total_assets=20_000,
+                    raw_data=_canonical("QAZ", period, "balance", {"total_assets": 20_000}),
+                ))
+            await session.commit()
+
+            async with _client(session) as client:
+                response = await client.get("/quant/QAZ/earnings-quality")
+
+            assert response.status_code == 200
+            data = response.json()["data"]
+            assert data["grade"] is None
+            assert data["revenue_quality_pct"] is None
+            assert data["accruals_ratio_pct"] is None
+            availability = data["coverage"]["component_availability"]["Q2-2025"]
+            assert availability["revenue"] == "rejected:stored_statement_disagrees_with_lineage"
+            assert availability["net_income"] == "rejected:stored_statement_disagrees_with_lineage"
+            # The stored 200 is never graded as revenue.
+            assert all(row["revenue"] is None for row in data["series"])
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_earnings_quality_withholds_a_canonical_with_another_fiscal_identity():
+    """A canonical describing another quarter cannot certify this row's columns."""
+    engine = await _fresh_session()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            for index, quarter in enumerate((1, 2)):
+                period = f"Q{quarter}-2025"
+                common = {
+                    "id": index + 1, "symbol": "QAZ", "period": period,
+                    "period_type": "quarter", "fiscal_year": 2025, "fiscal_quarter": quarter,
+                    "source": "vietcap",
+                }
+                # The persisted canonical is for the wrong quarter.
+                session.add(IncomeStatement(
+                    **common, revenue=100, net_income=100, eps=2,
+                    raw_data=_canonical("QAZ", f"Q{quarter}-2024", "income",
+                                        {"revenue": 100, "net_income": 100, "eps": 2}),
+                ))
+                session.add(CashFlow(
+                    **common, operating_cash_flow=120,
+                    raw_data=_canonical("QAZ", f"Q{quarter}-2024", "cashflow",
+                                        {"operating_cash_flow": 120}),
+                ))
+                session.add(BalanceSheet(
+                    **common, total_assets=20_000,
+                    raw_data=_canonical("QAZ", f"Q{quarter}-2024", "balance",
+                                        {"total_assets": 20_000}),
+                ))
+            await session.commit()
+
+            async with _client(session) as client:
+                response = await client.get("/quant/QAZ/earnings-quality")
+
+            assert response.status_code == 200
+            data = response.json()["data"]
+            assert data["grade"] is None
+            assert data["revenue_quality_pct"] is None
+            assert data["accruals_ratio_pct"] is None
+            assert all(row["revenue"] is None for row in data["series"])
     finally:
         await engine.dispose()

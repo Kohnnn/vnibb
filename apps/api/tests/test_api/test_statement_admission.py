@@ -184,6 +184,52 @@ def test_valuation_field_passes_a_rejection_through():
     assert admission.admit_valuation_field(row, "revenue") == (None, "rejected:unverified_monetary_unit")
 
 
+def test_valuation_field_rejects_any_alias_and_top_level_lineage():
+    """A rejection under another spelling, or in the row's own lineage, wins.
+
+    The valuation helper is the one admission primitive, so it must honour the
+    statement-side rule: a metric withheld under any alias stays withheld, and
+    lineage carried at the row's top level counts as evidence too.
+    """
+    # `net_profit_after_tax` is a canonical alias of net income.
+    assert admission.admit_valuation_field(
+        {
+            "net_income": 100, "unit": "VND",
+            "unit_metadata": {"net_profit_after_tax": {"unavailable_reason": "unverified_monetary_unit"}},
+        },
+        "net_income",
+    ) == (None, "rejected:unverified_monetary_unit")
+    # The same rejection inside the row's own `_financial_lineage`.
+    assert admission.admit_valuation_field(
+        {
+            "revenue": 100, "unit": "VND",
+            "_financial_lineage": {"unit_metadata": {"net_sales": {"unavailable_reason": "unverified_statement_basis"}}},
+        },
+        "revenue",
+    ) == (None, "rejected:unverified_statement_basis")
+    # And through the nested canonical copy.
+    assert admission.admit_valuation_field(
+        {
+            "revenue": 100, "unit": "VND",
+            "raw_data": {"_financial_lineage": {"canonical_data": {
+                "unit_metadata": {"revenue": {"unavailable_reason": "unverified_statement_currency_or_unit"}},
+            }}},
+        },
+        "revenue",
+    ) == (None, "rejected:unverified_statement_currency_or_unit")
+
+
+def test_valuation_field_aliases_match_the_valuation_loader():
+    """One alias table: derivation and admission resolve a metric identically."""
+    from vnibb.services.fundamental_valuation import VALUATION_FIELD_ALIASES
+
+    assert set(VALUATION_FIELD_ALIASES) == {
+        "revenue", "net_income", "operating_cash_flow", "capex", "total_assets", "equity",
+    }
+    for field, aliases in VALUATION_FIELD_ALIASES.items():
+        assert set(aliases) <= set(admission.FIELD_ALIASES[field]), field
+
+
 def test_valuation_span_requires_consecutive_complete_years():
     rows = [
         {"yearReport": 2021, "revenue": 1, "unit": "VND"},

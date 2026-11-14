@@ -187,7 +187,13 @@ export function isRawMetricAdmitted(entry: CashFlowData, metricKey: string): boo
     return declaredVndBasis(record);
 }
 
-/** The API recorded unit evidence for this metric: source and admitted unit. */
+/** A declared unit label in the API's own spelling (`million_VND` -> `MILLION VND`). */
+function normalizeUnitLabel(value: unknown): string | null {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    return value.trim().toUpperCase().replace(/[_-]+/g, ' ');
+}
+
+/** The API admitted this metric's declared source and target unit as VND. */
 function hasUnitEvidence(record: Record<string, unknown>, key: string): boolean {
     const raw = record.raw_data && typeof record.raw_data === 'object'
         ? (record.raw_data as Record<string, unknown>)
@@ -204,9 +210,12 @@ function hasUnitEvidence(record: Record<string, unknown>, key: string): boolean 
         if (!metadata || typeof metadata !== 'object') continue
         const entry = metadata as Record<string, unknown>
         if (entry.unavailable_reason) continue
-        const unit = typeof entry.value_unit === 'string' ? entry.value_unit : null
-        const sourceUnit = typeof entry.source_unit === 'string' ? entry.source_unit : null
-        if (unit && sourceUnit) return true
+        // The API's rule: the admitted target unit is VND and the source unit
+        // the value was declared in is also VND. `USD`/`USD` and
+        // `million_VND`/`million_VND` are evidence, but not VND evidence (#245).
+        const unit = normalizeUnitLabel(entry.value_unit)
+        const sourceUnit = normalizeUnitLabel(entry.source_unit)
+        if (unit === 'VND' && sourceUnit === 'VND') return true
     }
     return false
 }

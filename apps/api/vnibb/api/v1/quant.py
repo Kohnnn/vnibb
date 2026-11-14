@@ -3202,9 +3202,21 @@ async def get_earnings_quality(
     def _by_period(rows: Any) -> Dict[tuple, Any]:
         return {(row.fiscal_year, row.fiscal_quarter): row for row in rows if row.fiscal_quarter}
 
-    income_by_period = _by_period(income_result.scalars().all())
-    cash_by_period = _by_period(cash_result.scalars().all())
-    balance_by_period = _by_period(balance_result.scalars().all())
+    # Every row goes through the statement loader's own restoration and
+    # admission first: a stored column is not evidence, and the statement
+    # endpoints withhold exactly what this scorecard must not grade (#257).
+    income_by_period = _by_period(
+        statement_admission.admit_persisted_statement(row, "income", "quarter")
+        for row in income_result.scalars().all()
+    )
+    cash_by_period = _by_period(
+        statement_admission.admit_persisted_statement(row, "cashflow", "quarter")
+        for row in cash_result.scalars().all()
+    )
+    balance_by_period = _by_period(
+        statement_admission.admit_persisted_statement(row, "balance", "quarter")
+        for row in balance_result.scalars().all()
+    )
 
     period_rows: List[Dict[str, Any]] = []
     component_availability: Dict[str, Any] = {}

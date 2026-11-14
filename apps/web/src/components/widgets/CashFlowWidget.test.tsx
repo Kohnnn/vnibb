@@ -95,6 +95,23 @@ describe('cash flow raw alias admission', () => {
     expect(getRawMetric({ ...entry, raw_data: { change_in_receivables: 5 } } as never, 'change_in_receivables')).toBeNull();
   });
 
+  it.each([
+    ['USD', 'USD'],
+    ['million_VND', 'million_VND'],
+    ['VND', 'USD'],
+    ['VND/share', 'VND/share'],
+  ])('does not promote a %s/%s declaration as VND', (valueUnit, sourceUnit) => {
+    // #245: non-VND evidence is still evidence, but it is not VND. Only an
+    // admitted VND target with a VND source may take the table's currency scale.
+    const entry = {
+      ...admittedRow,
+      unit_metadata: { taxes_paid: { source_unit: sourceUnit, value_unit: valueUnit } },
+      raw_data: { taxes_paid: 4_775_780_000_000 },
+    };
+    expect(isRawMetricAdmitted(entry as never, 'taxes_paid')).toBe(false);
+    expect(getRawMetric(entry as never, 'taxes_paid')).toBeNull();
+  });
+
   it('refuses raw values on a row with no admitted VND basis', () => {
     const entry = { ...admittedRow, currency: null, value_unit: null, unit_metadata: {}, raw_data: { taxes_paid: 12 } };
     expect(isRawMetricAdmitted(entry as never, 'taxes_paid')).toBe(false);

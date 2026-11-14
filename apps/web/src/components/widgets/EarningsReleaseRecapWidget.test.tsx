@@ -263,4 +263,29 @@ describe('earnings recap export context', () => {
     expect(runtime.metric_unavailable_reasons.revenue.unavailable_reason).toContain('zero prior-period base');
     expect(runtime.quality_unavailable_reason).toBe('no admitted periods');
   });
+
+  it('forwards a withheld bridge metric beyond the headline three', () => {
+    // #258: the bridge rows are gross profit, operating income and pre-tax
+    // profit; a suppressed one must stay explicit rather than vanish from the
+    // runtime context.
+    const onDataChange = jest.fn();
+    const latest = row('2025-Q2', { revenue: 200, net_income: 40, eps: 4 });
+    const comparable = row('2024-Q2', { revenue: 100, net_income: 20, eps: 2 });
+    income.mockReturnValue({ data: { data: [latest, comparable] }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
+    cashFlow.mockReturnValue({ data: { data: [] }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
+    quality.mockReturnValue(idle());
+    jest.mocked(useCompanyNews).mockReturnValue(idle());
+    jest.mocked(useCompanyEvents).mockReturnValue(idle());
+    render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" onDataChange={onDataChange} />);
+
+    const runtime = onDataChange.mock.calls.at(-1)?.[0];
+    // A row without an operating-income figure is withheld with its reason.
+    expect(runtime.metric_unavailable_reasons.operating_income.unavailable_reason).toBeTruthy();
+    expect(runtime.metric_unavailable_reasons.gross_profit.unavailable_reason).toBeTruthy();
+    expect(runtime.metric_unavailable_reasons.pre_tax_profit.unavailable_reason).toBeTruthy();
+    expect(runtime.metric_unavailable_reasons.gross_margin.unavailable_reason).toBeTruthy();
+    // The admitted revenue rate carries no reason, so both states are distinct.
+    expect(runtime.metric_unavailable_reasons.revenue.value).not.toBeNull();
+    expect(runtime.metric_unavailable_reasons.revenue.unavailable_reason).toBeNull();
+  });
 });

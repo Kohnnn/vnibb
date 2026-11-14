@@ -106,18 +106,29 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             ?? withheldFieldReason(comparableIncome, field)
     );
 
-    // The per-metric admission results the tiles use, published verbatim to the
-    // widget context so an export cannot describe a withheld rate as growth (#258).
+    // The per-metric admission results every bridge row uses, published verbatim
+    // to the widget context so an export cannot describe a withheld rate as
+    // growth (#258). Net income, EPS and gross margin cover the headline tiles.
     const metricReasons = useMemo(() => {
         if (!latestIncome) return {};
         const describe = (field: string, current: number | null | undefined, previous: number | null | undefined) => {
             const result = yoyFor(field, current, previous);
             return { value: result.value, unavailable_reason: result.reason };
         };
+        // Gross margin is a ratio of two admitted fields, not one field: it is
+        // unavailable whenever either side's margin cannot be built.
+        const margin = (row: typeof latestIncome | undefined) => {
+            const value = marginOfIncome(row);
+            return value === null ? { value: null, unavailable_reason: comparisonReason ?? withheldFieldReason(row, 'gross_profit') ?? 'gross margin unavailable' } : { value, unavailable_reason: null };
+        };
         return {
             revenue: describe('revenue', latestIncome.revenue, comparableIncome?.revenue),
+            gross_profit: describe('gross_profit', latestIncome.gross_profit, comparableIncome?.gross_profit),
+            operating_income: describe('operating_income', latestIncome.operating_income, comparableIncome?.operating_income),
+            pre_tax_profit: describe('pre_tax_profit', latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax, comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax),
             net_income: describe('net_income', latestIncome.net_income, comparableIncome?.net_income),
             eps: describe('eps', latestIncome.eps, comparableIncome?.eps),
+            gross_margin: margin(latestIncome),
         };
     }, [comparableIncome, latestIncome, comparisonReason]);
 
