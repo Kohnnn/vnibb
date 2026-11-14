@@ -6694,12 +6694,13 @@ async def get_foreign_trading(
         if requested_days:
             window_start, window_end = requested_days[0], requested_days[-1]
 
-    # Both sources are read at the requested size; the limit is applied once,
-    # after merging and deduping, so disjoint sources cannot return 2×limit.
+    # Each source is read at the window's own size: a 120/250-session window
+    # must not be truncated to the default 60-row limit before the merge. The
+    # row limit is applied once, after dedupe, and only to unwindowed reads.
     retained = await _load_foreign_trading_fallback(
         db,
         symbol_upper,
-        limit,
+        max(limit, sessions or 0),
         start_date=window_start,
         end_date=window_end,
     )
@@ -6708,7 +6709,8 @@ async def get_foreign_trading(
         requested_sessions=sessions,
         start_date=window_start,
         end_date=window_end,
-        row_limit=limit,
+        row_limit=None if sessions else limit,
+        primary_source_count=len(provider_rows),
     )
 
     live_feed_empty = provider_error is None and not provider_rows

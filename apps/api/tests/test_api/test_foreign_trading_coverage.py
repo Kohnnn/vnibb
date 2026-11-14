@@ -318,6 +318,62 @@ async def test_disjoint_sources_return_exactly_the_latest_unwindowed_rows(
     assert payload["meta"]["last_validated_session"] == max(recent).isoformat()
 
 
+@pytest.mark.asyncio
+async def test_long_session_window_is_not_truncated_by_the_default_row_limit(
+    client, monkeypatch, test_db
+):
+    # 6M = 120 sessions; the request keeps the default limit of 60.
+    window = requested_session_dates(120)
+    test_db.add_all(
+        [
+            ForeignTrading(
+                id=1_000 + index,
+                symbol="VCI",
+                trade_date=day,
+                buy_volume=1_000,
+                sell_volume=400,
+            )
+            for index, day in enumerate(window)
+        ]
+    )
+    await test_db.commit()
+
+    # The live feed overlaps the newest cached sessions, so the merge keeps one
+    # row per session and 120 distinct sessions remain.
+    newest = sorted(window, reverse=True)[:100]
+
+    async def newest_fetch(params):
+        return [
+            ForeignTradingData(
+                symbol="VCI",
+                date=day.isoformat(),
+                buy_volume=1_000.0,
+                sell_volume=400.0,
+            )
+            for day in newest
+        ]
+
+    monkeypatch.setattr(
+        equity_module.VnstockForeignTradingFetcher, "fetch", newest_fetch, raising=True
+    )
+
+    response = await client.get("/api/v1/equity/VCI/foreign-trading?sessions=120")
+
+    payload = response.json()
+    assert payload["meta"]["count"] == 120
+    assert payload["meta"]["observed_session_count"] == 120
+    assert payload["meta"]["requested_session_count"] == 120
+    assert payload["meta"]["coverage_status"] == "complete"
+    assert payload["meta"]["gap_session_count"] == 0
+    # The 100 overlapping sessions collapse to one row each rather than adding,
+    # and a healthy live/cache overlap is not reported as a duplicate feed line.
+    assert payload["meta"]["duplicate_session_dates"] == []
+    assert payload["meta"]["source_overlap_session_count"] == 100
+    assert payload["meta"]["window_net_volume"] == 120 * 600
+    assert payload["meta"]["observed_start_date"] == window[0].isoformat()
+    assert payload["meta"]["observed_end_date"] == window[-1].isoformat()
+
+
 def test_calendar_metadata_is_disclosed_for_unverified_years(monkeypatch):
     monkeypatch.setattr(coverage_module, "market_calendar_metadata", lambda anchor: {"verified": False})
 

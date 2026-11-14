@@ -88,6 +88,7 @@ class ForeignFlowCoverage:
     gap_dates: list[date] = field(default_factory=list)
     non_session_dates: list[str] = field(default_factory=list)
     duplicate_session_dates: list[str] = field(default_factory=list)
+    source_overlap_sessions: int = 0
     undated_rows: int = 0
     out_of_window_rows: int = 0
     net_volume: float | None = None
@@ -117,6 +118,7 @@ class ForeignFlowCoverage:
             "gap_session_dates": [day.isoformat() for day in self.gap_dates],
             "non_session_dates": list(self.non_session_dates),
             "duplicate_session_dates": list(self.duplicate_session_dates),
+            "source_overlap_session_count": self.source_overlap_sessions,
             "undated_row_count": self.undated_rows,
             "out_of_window_row_count": self.out_of_window_rows,
             "window_net_volume": self.net_volume,
@@ -138,6 +140,7 @@ def build_foreign_flow_coverage(
     start_date: date | None = None,
     end_date: date | None = None,
     row_limit: int | None = None,
+    primary_source_count: int = 0,
 ) -> ForeignFlowCoverage:
     """Admit `rows` into the requested session window.
 
@@ -151,6 +154,11 @@ def build_foreign_flow_coverage(
     latest N *distinct* sessions, not 2N when the two sources are disjoint. A
     session window is instead bounded by its own sessions, so the limit does
     not apply there.
+
+    `primary_source_count` is how many leading `rows` came from the primary
+    source. A later repeat of one of those sessions is reported as a source
+    overlap rather than a duplicated feed line, so a healthy live/cache
+    overlap does not raise a data-quality warning.
     """
     coverage = ForeignFlowCoverage()
     ordered = [row for row in (rows or []) if row is not None]
@@ -191,8 +199,13 @@ def build_foreign_flow_coverage(
     seen: dict[date, Any] = {}
     non_session: list[str] = []
     duplicates: list[str] = []
+    overlaps: list[str] = []
 
-    for row in ordered:
+    # Rows are newest-first, so the first source to offer a session wins. When
+    # the caller unions sources with `primary_source_count` live rows followed
+    # by retained rows, a second sighting of a session from the other source is
+    # a normal overlap, not a defective feed.
+    for index, row in enumerate(ordered):
         session = market_session_date(_row_date(row))
         if session is None:
             coverage.undated_rows += 1
@@ -205,7 +218,12 @@ def build_foreign_flow_coverage(
             coverage.out_of_window_rows += 1
             continue
         if session in seen:
-            duplicates.append(session.isoformat())
+            # A repeat inside the live feed is a duplicated line; a repeat from
+            # the retained read is the normal overlap between the two sources.
+            if 0 < primary_source_count <= index:
+                overlaps.append(session.isoformat())
+            else:
+                duplicates.append(session.isoformat())
             continue
         seen[session] = row
 
@@ -220,6 +238,7 @@ def build_foreign_flow_coverage(
         coverage.last_validated_session = admitted[0][0]
     coverage.non_session_dates = sorted(set(non_session))
     coverage.duplicate_session_dates = sorted(set(duplicates))
+    coverage.source_overlap_sessions = len(set(overlaps))
 
     if coverage.windowed:
         missing = [day for day in expected_days if day not in seen]
