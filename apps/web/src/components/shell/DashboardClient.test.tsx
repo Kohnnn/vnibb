@@ -103,16 +103,23 @@ jest.mock('@/components/modals', () => ({
 }));
 jest.mock('@/components/onboarding/OnboardingWalkthrough', () => ({
   // The route regression drives the real `onGoalSelect` the page passes down;
-  // only the walkthrough's own presentation is stubbed.
-  OnboardingWalkthrough: ({ open, onGoalSelect }: {
+  // only the walkthrough's own presentation is stubbed. The returned boolean is
+  // surfaced in the DOM so a fake success cannot hide: the walkthrough opens its
+  // guide only on `true`, so `false` here must mean "not routed".
+  OnboardingWalkthrough: ({ open, onGoalSelect, workspaceReady }: {
     open: boolean;
     onGoalSelect: (goalId: string, symbol?: string) => boolean;
-  }) => open ? (
-    <section role="dialog" aria-label="Dashboard walkthrough">
-      <button onClick={() => onGoalSelect('evaluate_company', 'HPG')}>Open Financial review</button>
-      <button onClick={() => onGoalSelect('follow_ticker', 'HPG')}>Open Ticker workspace</button>
-    </section>
-  ) : null,
+    workspaceReady: boolean;
+  }) => {
+    const [routed, setRouted] = jest.requireActual<typeof import('react')>('react').useState<boolean | null>(null);
+    return open ? (
+      <section role="dialog" aria-label="Dashboard walkthrough" data-workspace-ready={workspaceReady}>
+        <button onClick={() => setRouted(onGoalSelect('evaluate_company', 'HPG'))}>Open Financial review</button>
+        <button onClick={() => setRouted(onGoalSelect('follow_ticker', 'HPG'))}>Open Ticker workspace</button>
+        <span data-testid="route-result">{routed === null ? 'none' : String(routed)}</span>
+      </section>
+    ) : null;
+  },
 }));
 jest.mock('@/components/modals/PromptsLibrary', () => ({ PromptsLibrary: () => null }));
 jest.mock('@/components/ui/CopilotArtifactPanel', () => ({ CopilotArtifactPanel: () => null }));
@@ -359,31 +366,21 @@ describe('onboarding goal routing across published and bundled layouts', () => {
     expect(mockUpdateSyncGroupSymbol).toHaveBeenCalledWith('default-fundamental', 1, 'HPG');
   });
 
-  it('holds a goal requested before the catalogue settles and routes it once settled', async () => {
-    jest.useFakeTimers();
-    setViewport(1440);
-    mockWalkthroughEligible = true;
-    mockCatalogueReady = false;
-    const tabs = [tab('tab-default-fundamental-fundamentals', 'Fundamentals')];
-    mockDashboards = [fundamentalDashboard(tabs)];
-    mockActiveDashboard = mockDashboards[0];
-    mockActiveTab = tabs[0];
+  it('reports a failed route honestly when the workspace has no financial tab', async () => {
+    // Readiness settled, but this layout carries no financial surface: the
+    // handler must return false rather than claim a route the user never got.
+    await openWalkthroughWith([tab('tab-default-fundamental-discovery', 'Discovery')]);
 
-    const view = render(<DashboardPage />);
-    await act(async () => { jest.advanceTimersByTime(300); });
-    await screen.findByRole('dialog', { name: 'Dashboard walkthrough' });
-
-    // Not routed yet, and - the #253 regression - not reported as unavailable
-    // during a normal slow catalog load.
     fireEvent.click(screen.getByRole('button', { name: 'Open Financial review' }));
+
+    expect(screen.getByTestId('route-result')).toHaveTextContent('false');
     expect(mockSetActiveTab).not.toHaveBeenCalled();
-    expect(screen.queryByText(/unavailable/i)).not.toBeInTheDocument();
+    expect(mockSetActiveDashboard).not.toHaveBeenCalled();
+  });
 
-    // The catalog settles; the replay effect must run the held goal exactly once.
-    mockCatalogueReady = true;
-    view.rerender(<DashboardPage />);
+  it('passes catalog readiness to the walkthrough instead of queueing goals', async () => {
+    await openWalkthroughWith([tab('tab-default-fundamental-fundamentals', 'Fundamentals')], false);
 
-    expect(mockSetActiveDashboard).toHaveBeenCalledWith('default-fundamental');
-    expect(mockSetActiveTab).toHaveBeenCalledWith('tab-default-fundamental-fundamentals');
+    expect(screen.getByRole('dialog', { name: 'Dashboard walkthrough' })).toHaveAttribute('data-workspace-ready', 'false');
   });
 });

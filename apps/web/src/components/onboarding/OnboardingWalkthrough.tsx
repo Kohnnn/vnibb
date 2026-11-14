@@ -39,6 +39,12 @@ interface OnboardingWalkthroughProps {
   onSkip: () => void
   onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean
   onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void
+  /**
+   * #253: the workspace catalog has settled, so a goal can be routed for real.
+   * Until then goals are shown disabled: `onGoalSelect` answers only "did this
+   * route now", and the guide must never open on an unrouted goal.
+   */
+  workspaceReady: boolean
 }
 
 const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
@@ -137,7 +143,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
-export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelect, onComplete }: OnboardingWalkthroughProps) {
+export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelect, onComplete, workspaceReady }: OnboardingWalkthroughProps) {
   const [isMounted, setIsMounted] = useState(false)
   const [stage, setStage] = useState<'goal' | 'ticker' | 'guide'>('goal')
   const [selectedGoal, setSelectedGoal] = useState<OnboardingGoalId | null>(null)
@@ -179,6 +185,9 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
   const suggestions = useMemo(() => searchStocks(tickerInput, 6), [tickerInput])
 
   const routeGoal = (goalId: OnboardingGoalId, symbol?: string) => {
+    // Belt and braces: the buttons are disabled until ready, but routing must
+    // never be attempted against a catalog that has not settled.
+    if (!workspaceReady) return
     const routed = onGoalSelect(goalId, symbol)
     if (!routed) {
       setRouteError('This view is unavailable right now. Close the walkthrough and try again.')
@@ -422,11 +431,16 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
 
         {stage === 'goal' ? (
           <div className="mt-5 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
+            {!workspaceReady ? (
+              <p role="status" className="py-3 text-xs font-medium text-[var(--text-muted)]">
+                Preparing your workspace…
+              </p>
+            ) : null}
             {ONBOARDING_GOALS.map((goal, index) => {
               const goalPresentation = GOAL_PRESENTATION[goal.id]
               const Icon = goalPresentation.icon
               return (
-                <button key={goal.id} type="button" data-walkthrough-initial-focus={index === 0 ? 'true' : undefined} onClick={() => chooseGoal(goal.id)} className="group grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 py-4 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">
+                <button key={goal.id} type="button" disabled={!workspaceReady} data-walkthrough-initial-focus={index === 0 ? 'true' : undefined} onClick={() => chooseGoal(goal.id)} className="group grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 py-4 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent">
                   <span className="grid h-10 w-10 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors group-hover:border-[var(--border-strong)] group-hover:text-[var(--text-primary)]"><Icon size={18} /></span>
                   <span>
                     <span className="block text-sm font-semibold text-[var(--text-primary)]">{goal.label}</span>

@@ -76,7 +76,7 @@ const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m)
 const AppsLibrary = dynamic(() => import('@/components/modals').then((m) => ({ default: m.AppsLibrary })), { ssr: false });
 const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; onStarterPromptRequest?: (promptKey: StarterPromptKey, workflow: ResearchStarter['workflow']) => void; sharedTickerGroups?: readonly WidgetGroupId[]; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
 const AICopilot = dynamic(() => import('@/components/ui/AICopilot').then((m) => ({ default: m.AICopilot })), { ssr: false });
-const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void }> })), { ssr: false });
+const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void; workspaceReady: boolean }> })), { ssr: false });
 
 export default function DashboardPage() {
     return (
@@ -212,8 +212,6 @@ function DashboardContent() {
         tabId: string;
     } | null>(null);
     const autoWalkthroughQueuedRef = useRef(false);
-    // #253: a walkthrough goal asked for before the catalog settled.
-    const pendingGoalRef = useRef<{ goalId: OnboardingGoalId; symbol?: string } | null>(null);
     const dragStateRef = useRef<{ pane: 'left' | 'right' | null; startX: number; startWidth: number }>({
         pane: null,
         startX: 0,
@@ -1085,17 +1083,11 @@ function DashboardContent() {
         // the bundled fallback labels it "Financials"; matching one exact name
         // made this goal return false against the other layout.
         //
-        // The catalogue settles asynchronously (published system templates are
-        // fetched after first paint, and the walkthrough auto-opens on first
-        // visit). Returning false before it settles is wrong: the walkthrough
-        // turns that into "This view is unavailable right now" during a normal
-        // slow catalog load, for a view that is about to exist. Hold the intent
-        // and route it the moment the catalogue is ready instead.
-        if (!dashboardCatalogueReady) {
-            pendingGoalRef.current = { goalId, symbol };
-            return true;
-        }
-
+        // The return value answers exactly one question - did this route the
+        // user right now - so a caller may show the guide only on `true`.
+        // Readiness is not this function's business: the walkthrough does not
+        // offer a goal until the catalogue has settled, so there is no
+        // queued-intent case to report.
         const dashboard = state.dashboards.find((item) => item.id === MAIN_FUNDAMENTAL_DASHBOARD_ID);
         const tab = dashboard ? findRoleTab(dashboard.tabs, goalId === 'follow_ticker' ? 'overview' : 'financials') : null;
         if (!dashboard || !tab || !symbol) return false;
@@ -1106,16 +1098,7 @@ function DashboardContent() {
         setTemplateApplyStatus({ message: `Opened ${symbol} ${tab.name}.`, tone: 'success' });
         selectOnboardingGoal(goalId);
         return true;
-    }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, dashboardCatalogueReady, setActiveDashboard, setActiveTab, state.dashboards]);
-
-    // #253: replay a goal that arrived before the catalog settled, exactly once,
-    // through the same handler so the published/fallback resolution is shared.
-    useEffect(() => {
-        if (!dashboardCatalogueReady || !pendingGoalRef.current) return;
-        const pending = pendingGoalRef.current;
-        pendingGoalRef.current = null;
-        handleOnboardingGoalSelect(pending.goalId, pending.symbol);
-    }, [dashboardCatalogueReady, handleOnboardingGoalSelect]);
+    }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab, state.dashboards]);
 
     const handleOnboardingComplete = useCallback((goalId: OnboardingGoalId, openVniAgent = false) => {
         completeWalkthrough(goalId);
@@ -1827,6 +1810,7 @@ function DashboardContent() {
                 onSkip={skipWalkthrough}
                 onGoalSelect={handleOnboardingGoalSelect}
                 onComplete={handleOnboardingComplete}
+                workspaceReady={dashboardCatalogueReady}
             />
         </div>
     );
