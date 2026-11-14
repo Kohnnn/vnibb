@@ -34,10 +34,10 @@ if [ "$APPROVED_ALEMBIC_FROM" != "none" ] \
   echo "verify-migration-head: APPROVED_ALEMBIC_FROM must be a single revision id or 'none'" >&2
   exit 2
 fi
-if [ "$APPROVED_ALEMBIC_FROM" = "$APPROVED_ALEMBIC_HEAD" ]; then
-  echo "verify-migration-head: approved FROM and HEAD are identical; there is no approved transition" >&2
-  exit 2
-fi
+# FROM == HEAD is a code-only release: nothing to migrate, but it is only valid if
+# the candidate image and the database are both verified at that exact revision.
+# That falls out of the checks below, so it is a verified no-op, not a bypass.
+
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.oracle.yml}"
 ENV_FILE="${ENV_FILE:-deployment/env.oracle}"
@@ -112,4 +112,8 @@ else
   fi
 fi
 
-echo "verify-migration-head: approved transition ${APPROVED_ALEMBIC_FROM} -> ${APPROVED_ALEMBIC_HEAD} confirmed on the candidate image and database"
+if [ "$APPROVED_ALEMBIC_FROM" = "$APPROVED_ALEMBIC_HEAD" ]; then
+  echo "verify-migration-head: no-op release; candidate image and database both verified at '$APPROVED_ALEMBIC_HEAD'"
+else
+  echo "verify-migration-head: approved transition ${APPROVED_ALEMBIC_FROM} -> ${APPROVED_ALEMBIC_HEAD} confirmed on the candidate image and database"
+fi

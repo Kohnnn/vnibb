@@ -142,10 +142,19 @@ def test_database_already_at_candidate_head_is_refused(tmp_path, project):
     assert "not the approved starting revision" in result.stderr
 
 
-def test_identical_from_and_head_is_a_hard_error(tmp_path, project):
-    result = run(tmp_path, project, at_revision=OLD, approved_from=NEW)
-    assert result.returncode == 2
-    assert "no approved transition" in result.stderr
+def test_code_only_release_at_the_approved_head_is_a_verified_noop(tmp_path, project):
+    """An ordinary release already at the head must pass, not trip a guard."""
+    result = run(tmp_path, project, at_revision=NEW, approved=NEW, approved_from=NEW)
+    assert result.returncode == 0, result.stderr
+    assert "no-op release" in result.stdout
+    assert NEW in result.stdout
+
+
+def test_equal_from_and_head_still_requires_the_database_to_match(tmp_path, project):
+    """FROM == HEAD is not a bypass: a database elsewhere is still refused."""
+    result = run(tmp_path, project, at_revision=OLD, approved=NEW, approved_from=NEW)
+    assert result.returncode == 1
+    assert "not the approved starting revision" in result.stderr
 
 
 def test_unreviewed_new_head_is_refused_while_database_is_unchanged(tmp_path, project):
