@@ -17,7 +17,6 @@ from vnibb.services.fundamental_valuation import (
     ValuationConfig,
     _normalize_statement_rows,
     admit_fundamental_snapshot,
-    admit_valuation_field,
     assess_cagr_coverage,
     assess_fcf_coverage,
     compute_cagr_over_years,
@@ -34,6 +33,7 @@ from vnibb.services.fundamental_valuation import (
     load_fundamental_inputs,
     to_document,
 )
+from vnibb.services.statement_admission import admit_valuation_field
 
 
 def _income_row(year: int, revenue: float | None, npat: float | None) -> dict[str, Any]:
@@ -286,6 +286,38 @@ class TestCagrCoverage:
 
         assert coverage["published"] == pytest.approx(10.0, rel=1e-9)
 
+    def test_case_and_spaced_keys_preserve_cagr(self) -> None:
+        rows = [{"yearReport": year, "Revenue": 100.0 * 1.1 ** (year - 2020),
+                 "currency_unit": "VND"} for year in range(2020, 2026)]
+
+        coverage = assess_cagr_coverage(rows, "revenue")
+
+        assert coverage["published"] == pytest.approx(10.0)
+        assert coverage["excluded"] == []
+
+    @pytest.mark.parametrize(
+        ("evidence", "reason"),
+        [
+            ({"unit_metadata": {"netRevenue": {"unavailable_reason": "unit_mismatch"}}},
+             "rejected:unit_mismatch"),
+            ({"_financial_lineage": {"unit_metadata": {
+                "netRevenue": {"unavailable_reason": "unit_mismatch"},
+            }}}, "rejected:unit_mismatch"),
+            ({"currency_unit": "USD"}, "unknown_currency"),
+        ],
+    )
+    def test_rejected_alias_and_foreign_currency_cannot_publish_cagr(
+        self, evidence: dict[str, Any], reason: str,
+    ) -> None:
+        rows = _revenue_years({year: 100.0 * 1.1 ** (year - 2020)
+                               for year in range(2020, 2026)})
+        rows[2].update(evidence)
+
+        coverage = assess_cagr_coverage(rows, "revenue", declared_statement_unit="VND")
+
+        assert coverage["published"] is None
+        assert {"year": 2022, "field": "revenue", "reason": reason} in coverage["excluded"]
+
 
 # --- field admission ------------------------------------------------------------
 
@@ -370,6 +402,17 @@ class TestFcfCoverage:
         assert coverage["positive"] is True
         assert coverage["baseFcf"] == pytest.approx((200.0 + 200.0 + 200.0) / 3)
         assert coverage["baseYears"] == [2022, 2023, 2024]
+
+    def test_case_and_spaced_keys_preserve_fcf(self) -> None:
+        rows = [{"yearReport": year, "Operating Cash Flow": 300.0,
+                 "Purchase_Of_Fixed_Assets": -100.0, "currency_unit": "VND"}
+                for year in (2022, 2023, 2024)]
+
+        coverage = assess_fcf_coverage(rows)
+
+        assert coverage["baseFcf"] == 200.0
+        assert coverage["positive"] is True
+        assert coverage["excluded"] == []
 
     def test_explicit_zero_capex_is_a_valid_complete_row(self) -> None:
         coverage = assess_fcf_coverage([

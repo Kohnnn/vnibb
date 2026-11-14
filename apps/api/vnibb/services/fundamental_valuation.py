@@ -26,6 +26,7 @@ from typing import Any
 
 from vnibb.core.price_units import persisted_price_record
 from vnibb.providers.vnstock.financials import admitted_interest_expense
+from vnibb.services import statement_admission
 
 logger = logging.getLogger(__name__)
 
@@ -534,120 +535,6 @@ def compute_cagr_over_years(points: Sequence[tuple[int, float]]) -> float | None
         return None
 
 
-# Canonical valuation field -> raw alias tuple. Every monetary input is
-# resolved through these, so admission and derivation agree on one convention.
-VALUATION_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "revenue": REVENUE_ALIASES,
-    "net_income": NPAT_ALIASES,
-    "operating_cash_flow": OCF_ALIASES,
-    "capex": CAPEX_ALIASES,
-    "total_assets": TOTAL_ASSETS_ALIASES,
-    "equity": EQUITY_ALIASES,
-}
-
-
-def _rejection_reason(row: Any, field: str, alias: str | None) -> str | None:
-    """First explicit unit rejection recorded for a field, if any."""
-
-    if not isinstance(row, dict):
-        return None
-    sources: list[dict[str, Any]] = []
-    if isinstance(row.get("unit_metadata"), dict):
-        sources.append(row["unit_metadata"])
-    raw = row.get("raw_data") if isinstance(row.get("raw_data"), dict) else {}
-    lineage = (raw or {}).get("_financial_lineage")
-    if not isinstance(lineage, dict):
-        lineage = row.get("_financial_lineage")
-    lineage = lineage if isinstance(lineage, dict) else {}
-    canonical = lineage.get("canonical_data")
-    for candidate in (
-        (canonical or {}).get("unit_metadata") if isinstance(canonical, dict) else None,
-        lineage.get("unit_metadata"),
-    ):
-        if isinstance(candidate, dict):
-            sources.append(candidate)
-    keys = {field, *VALUATION_FIELD_ALIASES.get(field, ())}
-    if alias:
-        keys.add(alias)
-    for source in sources:
-        for key in keys:
-            evidence = source.get(key)
-            if isinstance(evidence, dict) and evidence.get("unavailable_reason"):
-                return str(evidence["unavailable_reason"])
-    return None
-
-
-def _declared_scale(row: dict[str, Any], alias: str) -> tuple[float | None, str | None]:
-    """Resolve the remaining VND scale multiplier; never from numeric magnitude.
-
-    ``_normalize_statement_rows`` already multiplied a stored value by any
-    scale it could read and kept that scale in ``_valuation_unit_lineage``, so
-    an already-normalized row's remaining multiplier is 1 (never a second
-    conversion). Un-normalized rows convert only from exactly readable units.
-    """
-
-    lineage = row.get("_valuation_unit_lineage")
-    evidence = lineage.get(alias) if isinstance(lineage, dict) else None
-    if isinstance(evidence, dict) and evidence.get("scaleToVnd") is not None:
-        return 1.0, None
-    units = row.get("units")
-    declared: Any = units.get(alias) if isinstance(units, dict) and alias in units else None
-    if declared is None:
-        declared = (
-            row.get("currency_unit") or row.get("unit")
-            or row.get("value_unit") or row.get("_value_unit")
-        )
-    if declared is None or not str(declared).strip():
-        return None, "declared_scale_unknown"
-    label = str(declared).strip().lower().replace("_", " ")
-    scale = _CURRENCY_SCALES.get(label)
-    if scale is not None:
-        return float(scale), None
-    if any(token in label for token in ("vnd", "vnđ", "đồng", "dong")):
-        return None, "declared_scale_unknown"
-    return None, "unknown_currency"
-
-
-def admit_valuation_field(
-    row: Any,
-    field: str,
-    *,
-    declared_statement_unit: str | None = None,
-) -> tuple[float | None, str | None]:
-    """Admit one monetary field of a raw annual row as VND, or say why not.
-
-    Returns ``(value_vnd, None)`` only with evidenced VND scale; otherwise
-    ``(None, reason)`` with a stable machine reason:
-
-    * ``missing`` / ``blank`` / ``nonfinite`` — no usable observation, while a
-      reported ``0`` remains an admitted observation;
-    * ``rejected:<reason>`` — a field explicitly rejected by unit admission,
-      which must not re-enter through an alias or a numeric coercion;
-    * ``declared_scale_unknown`` / ``unknown_currency`` — currency or scale is
-      not evidenced, so no scale may be assumed.
-    """
-
-    aliases = VALUATION_FIELD_ALIASES.get(field)
-    if not aliases or not isinstance(row, dict):
-        return None, "missing"
-    alias = next((name for name in aliases if _pick(row, name) is not None), None)
-    if alias is None:
-        return None, "missing"
-    raw_value = _pick(row, alias)
-    if isinstance(raw_value, str) and not raw_value.strip():
-        return None, "blank"
-    value = _to_float(raw_value)
-    if value is None:
-        return None, "nonfinite"
-    rejected = _rejection_reason(row, field, alias)
-    if rejected is not None:
-        return None, f"rejected:{rejected}"
-    scale, reason = _declared_scale(row, alias)
-    if scale is None:
-        if declared_statement_unit == "VND":
-            return value, None
-        return None, reason
-    return value * scale, None
 def _row_year(row: Any) -> int | None:
     return _report_year(row) if isinstance(row, dict) else None
 
@@ -668,7 +555,7 @@ def _annual_field_series(
     value is one of several with no established order.
     """
 
-    aliases = {field, *VALUATION_FIELD_ALIASES.get(field, ())}
+    aliases = {field, *statement_admission.FIELD_ALIASES.get(field, ())}
     by_year: dict[int, list[float]] = {}
     excluded: list[dict[str, Any]] = []
     conflicted: set[int] = set()
@@ -684,7 +571,7 @@ def _annual_field_series(
                 "year": year, "field": field, "reason": "conflicting_observations",
             })
             continue
-        value, reason = admit_valuation_field(
+        value, reason = statement_admission.admit_valuation_field(
             row, field, declared_statement_unit=declared_statement_unit
         )
         if value is None:
@@ -827,7 +714,7 @@ def assess_fcf_coverage(
         if {"operating_cash_flow", *OCF_ALIASES} & conflicts:
             incomplete.append({"component": "operating_cash_flow", "reason": "conflicting_observations"})
         else:
-            ocf, ocf_reason = admit_valuation_field(
+            ocf, ocf_reason = statement_admission.admit_valuation_field(
                 row, "operating_cash_flow", declared_statement_unit=declared_statement_unit
             )
             if ocf is None:
@@ -835,7 +722,7 @@ def assess_fcf_coverage(
         if {"capex", *CAPEX_ALIASES} & conflicts:
             incomplete.append({"component": "capex", "reason": "conflicting_observations"})
         else:
-            capex, capex_reason = admit_valuation_field(
+            capex, capex_reason = statement_admission.admit_valuation_field(
                 row, "capex", declared_statement_unit=declared_statement_unit
             )
             if capex is None:
