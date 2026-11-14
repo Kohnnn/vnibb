@@ -27,3 +27,40 @@ The native workspace uses five primary content families for fit/overflow review.
 The 13 previously placeholder-routed Widgets now load their named implementations: `seasonality_spiral_heatmap`, `market_lab`, `signal_robustness_lab`, `edge_half_life`, `pair_lab`, `parkinson_volatility`, `ema_respect`, `volume_delta`, `amihud_illiquidity`, `income_sankey`, `big_flow_monitor`, `positioning_dashboard`, `world_indices`. Focused regressions exercise selected loaded, incomplete, unavailable, and loss-making states; they do **not** prove every provider-driven state for all 175 registrations. No registry entry uses a placeholder loader.
 
 The phone/desktop shared-shell and backup checks are recorded in [workspace acceptance](WORKSPACE_ACCEPTANCE_2026-09-27.md). Provider-specific TradingView iframe interiors, live-data chart labels and unusual native containers without targeted evidence remain outside that browser proof; the shell owns the outer frame, dimensions, loading/error state and control access, not third-party DOM.
+
+## Observed render dispositions — non-financial family (2026-11-14)
+
+Source-only family assignment above is not render proof. A local Chromium pass
+mounted the 29 non-financial IDs in a saved workspace on a dev build with a
+synthetic fixture API, and each row below records what that run actually
+rendered. Widths 1440/1024/390/320 x light/dark; no path had horizontal widget
+overflow. Nothing here is a live-data or deployment claim, and no width changed
+widget behaviour.
+
+Content rendered (state observed, not assumed):
+`ai_analysis` (ready-to-analyze), `alert_activity_inbox` (0 unread, labelled
+non-durable), `earnings_release_recap`, `earnings_season_monitor` (0 results),
+`events_calendar` (0 events), `investor_event_calendar` (0/10 symbols, missing
+provider labelled unavailable), `market_news`, `news_feed`, `news_flow`,
+`news_corporate_actions`, `notes`, `price_alerts` (0 active, browser-local
+labelled), `research_browser` (source list), `world_news_live_stream` (polling
+stream labels), `world_news_monitor`, `world_news_sources`,
+`source_transparent_research_notebook` (empty + export).
+
+Honest failure / gate states, each with its own reason text:
+`alert_settings` (server error), `quick_stats` (quote unavailable),
+`market_breadth` (universe unavailable), `world_indices` (global feed
+unavailable, VN fallback named), `database_inspector` (admin access required),
+`company_filings` / `subsidiaries` / `market_overview` / `market_sentiment` /
+`commodities` / `forex_rates` (connection). These are the widgets' own
+degraded paths under a fixture with no provider, not crashes and not blank
+panels.
+
+Brand-surfaces checked in that pass: direction colour is confined to sentiment
+surfaces; the notebook Export action was moved off the gain surface; sentiment
+labels measure 12 px (`--font-size-sm`) in both the feed badge and the card meta
+row.
+
+**Not proven:** provider-driven states for all 175 registrations; the 13
+TradingView iframe interiors; live provider data; Firefox/WebKit (no binaries
+offline). Family membership is unchanged by this section.
