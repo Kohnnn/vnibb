@@ -264,6 +264,32 @@ describe('earnings recap export context', () => {
     expect(runtime.quality_unavailable_reason).toBe('no admitted periods');
   });
 
+  it('exports the margin delta, never the current margin, when the prior side is withheld', () => {
+    // R3: the bridge row's delta is null when the previous gross profit is
+    // rejected. The export must not publish the current margin as an available
+    // comparison; it carries the delta reason and both sides explicitly.
+    const onDataChange = jest.fn();
+    const latest = row('2025-Q2', { revenue: 200, net_income: 40, eps: 4, gross_profit: 60 });
+    const comparable = {
+      ...row('2024-Q2', { revenue: 100, net_income: 20, eps: 2, gross_profit: 30 }),
+      gross_profit: null,
+      unit_metadata: { gross_profit: { unavailable_reason: 'unverified_monetary_unit' } },
+    };
+    income.mockReturnValue({ data: { data: [latest, comparable] }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
+    cashFlow.mockReturnValue({ data: { data: [] }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
+    quality.mockReturnValue(idle());
+    jest.mocked(useCompanyNews).mockReturnValue(idle());
+    jest.mocked(useCompanyEvents).mockReturnValue(idle());
+    render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" onDataChange={onDataChange} />);
+
+    const runtime = onDataChange.mock.calls.at(-1)?.[0];
+    const margin = runtime.metric_unavailable_reasons.gross_margin;
+    expect(margin.value).toBeNull();
+    expect(margin.unavailable_reason).toContain('unverified_monetary_unit');
+    expect(margin.current).toBeCloseTo(30, 5);
+    expect(margin.previous).toBeNull();
+  });
+
   it('forwards a withheld bridge metric beyond the headline three', () => {
     // #258: the bridge rows are gross profit, operating income and pre-tax
     // profit; a suppressed one must stay explicit rather than vanish from the

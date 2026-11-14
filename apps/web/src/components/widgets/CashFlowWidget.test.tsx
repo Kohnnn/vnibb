@@ -97,12 +97,10 @@ describe('cash flow raw alias admission', () => {
 
   it.each([
     ['USD', 'USD'],
-    ['million_VND', 'million_VND'],
     ['VND', 'USD'],
     ['VND/share', 'VND/share'],
   ])('does not promote a %s/%s declaration as VND', (valueUnit, sourceUnit) => {
-    // #245: non-VND evidence is still evidence, but it is not VND. Only an
-    // admitted VND target with a VND source may take the table's currency scale.
+    // #245: a different currency is not evidence for a VND figure.
     const entry = {
       ...admittedRow,
       unit_metadata: { taxes_paid: { source_unit: sourceUnit, value_unit: valueUnit } },
@@ -110,6 +108,61 @@ describe('cash flow raw alias admission', () => {
     };
     expect(isRawMetricAdmitted(entry as never, 'taxes_paid')).toBe(false);
     expect(getRawMetric(entry as never, 'taxes_paid')).toBeNull();
+  });
+
+  it.each(['million_VND', 'Bn. VND', 'billion VND'])(
+    'promotes a certified converted source declared in %s',
+    (sourceUnit) => {
+      // The API accepts a source_unit naming the provider's original scale while
+      // the value is already normalized to VND; only the currency must match.
+      const entry = {
+        ...admittedRow,
+        unit_metadata: { taxes_paid: { source_unit: sourceUnit, value_unit: 'VND' } },
+        raw_data: { taxes_paid: 4_775_780_000_000 },
+      };
+      expect(isRawMetricAdmitted(entry as never, 'taxes_paid')).toBe(true);
+      expect(getRawMetric(entry as never, 'taxes_paid')).toBe(4_775_780_000_000);
+    },
+  );
+
+  it('refuses a metadata unit that contradicts the admitted target', () => {
+    // `{value_unit: VND, source_unit: VND, unit: USD}` is self-contradictory;
+    // the API rejects it and so must the table.
+    const entry = {
+      ...admittedRow,
+      unit_metadata: { taxes_paid: { value_unit: 'VND', source_unit: 'VND', unit: 'USD' } },
+      raw_data: { taxes_paid: 4_775_780_000_000 },
+    };
+    expect(isRawMetricAdmitted(entry as never, 'taxes_paid')).toBe(false);
+    expect(getRawMetric(entry as never, 'taxes_paid')).toBeNull();
+  });
+
+  it('admits a component-evidenced metric only when every component is VND', () => {
+    const admitted = {
+      ...admittedRow,
+      unit_metadata: {
+        taxes_paid: {
+          components: [
+            { value_unit: 'VND', source_unit: 'million_VND' },
+            { value_unit: 'VND', source_unit: 'Bn. VND' },
+          ],
+        },
+      },
+      raw_data: { taxes_paid: 12 },
+    };
+    expect(isRawMetricAdmitted(admitted as never, 'taxes_paid')).toBe(true);
+    const mixed = {
+      ...admitted,
+      unit_metadata: {
+        taxes_paid: {
+          components: [
+            { value_unit: 'VND', source_unit: 'VND' },
+            { value_unit: 'USD', source_unit: 'USD' },
+          ],
+        },
+      },
+    };
+    expect(isRawMetricAdmitted(mixed as never, 'taxes_paid')).toBe(false);
   });
 
   it('refuses raw values on a row with no admitted VND basis', () => {

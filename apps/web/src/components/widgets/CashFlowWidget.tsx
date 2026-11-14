@@ -187,13 +187,48 @@ export function isRawMetricAdmitted(entry: CashFlowData, metricKey: string): boo
     return declaredVndBasis(record);
 }
 
-/** A declared unit label in the API's own spelling (`million_VND` -> `MILLION VND`). */
-function normalizeUnitLabel(value: unknown): string | null {
+/** The currency family a unit label names, ignoring scale (API `_unit_currency`). */
+function unitCurrency(value: unknown): string | null {
     if (typeof value !== 'string' || !value.trim()) return null;
-    return value.trim().toUpperCase().replace(/[_-]+/g, ' ');
+    const label = value.trim().toLowerCase();
+    const families: [string, string][] = [
+        ['vnd', 'vnd'], ['vnđ', 'vnd'], ['đồng', 'vnd'], ['dong', 'vnd'],
+        ['usd', 'usd'], ['$', 'usd'], ['eur', 'eur'], ['jpy', 'jpy'],
+    ];
+    return families.find(([token]) => label.includes(token))?.[1] ?? null;
 }
 
-/** The API admitted this metric's declared source and target unit as VND. */
+/**
+ * The API's own monetary-evidence rule, ported verbatim (`financial_service
+ * ._monetary_evidence_admitted`): a role whose currency differs from the
+ * target refuses the evidence, `unit`/`value_unit` must name the target
+ * exactly, and every component must admit recursively.
+ *
+ * A certified *converted* source is accepted: `source_unit` records the
+ * provider's original scale (`Bn. VND`, `million_VND`) while the value is
+ * already normalized to VND. A source naming another currency still is not.
+ */
+function monetaryEvidenceAdmitted(metadata: unknown, unit: string): boolean {
+    if (!metadata || typeof metadata !== 'object') return false
+    const entry = metadata as Record<string, unknown>
+    if (entry.unavailable_reason) return false
+    const target = unitCurrency(unit)
+    for (const key of ['unit', 'value_unit', 'source_unit']) {
+        const claimed = unitCurrency(entry[key])
+        if (claimed !== null && target !== null && claimed !== target) return false
+    }
+    if (['unit', 'value_unit'].some((key) => entry[key] !== undefined && entry[key] !== null && entry[key] !== unit)) {
+        return false
+    }
+    const components = entry.components
+    if (Array.isArray(components) && components.length > 0) {
+        return components.every((component) => monetaryEvidenceAdmitted(component, unit))
+    }
+    const declared = entry.unit !== undefined ? entry.unit : entry.value_unit
+    return declared === unit && Boolean(entry.source_unit || entry.unitEvidence)
+}
+
+/** The API admitted this metric as VND on its declared and original units. */
 function hasUnitEvidence(record: Record<string, unknown>, key: string): boolean {
     const raw = record.raw_data && typeof record.raw_data === 'object'
         ? (record.raw_data as Record<string, unknown>)
@@ -204,20 +239,10 @@ function hasUnitEvidence(record: Record<string, unknown>, key: string): boolean 
     const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
         ? (lineage.canonical_data as Record<string, unknown>)
         : {}
-    for (const source of [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata]) {
-        if (!source || typeof source !== 'object') continue
-        const metadata = (source as Record<string, unknown>)[key]
-        if (!metadata || typeof metadata !== 'object') continue
-        const entry = metadata as Record<string, unknown>
-        if (entry.unavailable_reason) continue
-        // The API's rule: the admitted target unit is VND and the source unit
-        // the value was declared in is also VND. `USD`/`USD` and
-        // `million_VND`/`million_VND` are evidence, but not VND evidence (#245).
-        const unit = normalizeUnitLabel(entry.value_unit)
-        const sourceUnit = normalizeUnitLabel(entry.source_unit)
-        if (unit === 'VND' && sourceUnit === 'VND') return true
-    }
-    return false
+    return [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata].some((source) => {
+        if (!source || typeof source !== 'object') return false
+        return monetaryEvidenceAdmitted((source as Record<string, unknown>)[key], 'VND')
+    })
 }
 
 /** The row declares the VND basis the table would format under. */

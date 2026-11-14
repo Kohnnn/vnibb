@@ -115,12 +115,21 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             const result = yoyFor(field, current, previous);
             return { value: result.value, unavailable_reason: result.reason };
         };
-        // Gross margin is a ratio of two admitted fields, not one field: it is
-        // unavailable whenever either side's margin cannot be built.
-        const margin = (row: typeof latestIncome | undefined) => {
-            const value = marginOfIncome(row);
-            return value === null ? { value: null, unavailable_reason: comparisonReason ?? withheldFieldReason(row, 'gross_profit') ?? 'gross margin unavailable' } : { value, unavailable_reason: null };
-        };
+        // Gross margin is a ratio of two admitted fields on both periods, and
+        // the bridge publishes its *delta*. A current margin with an unbuildable
+        // prior one is not an available comparison, so the export carries the
+        // delta (or its reason) plus both sides explicitly.
+        const currentMargin = marginOfIncome(latestIncome);
+        const previousMargin = marginOfIncome(comparableIncome);
+        const marginDelta = currentMargin !== null && previousMargin !== null
+            ? currentMargin - previousMargin
+            : null;
+        const marginReason = marginDelta !== null
+            ? null
+            : comparisonReason
+                ?? (currentMargin === null
+                    ? withheldFieldReason(latestIncome, 'gross_profit') ?? 'current gross margin unavailable'
+                    : withheldFieldReason(comparableIncome, 'gross_profit') ?? 'comparison gross margin unavailable');
         return {
             revenue: describe('revenue', latestIncome.revenue, comparableIncome?.revenue),
             gross_profit: describe('gross_profit', latestIncome.gross_profit, comparableIncome?.gross_profit),
@@ -128,7 +137,14 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             pre_tax_profit: describe('pre_tax_profit', latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax, comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax),
             net_income: describe('net_income', latestIncome.net_income, comparableIncome?.net_income),
             eps: describe('eps', latestIncome.eps, comparableIncome?.eps),
-            gross_margin: margin(latestIncome),
+            // `value` is the bridge's own delta, so the export and the rendered
+            // row cannot disagree about what was compared.
+            gross_margin: {
+                value: marginDelta,
+                unavailable_reason: marginReason,
+                current: currentMargin,
+                previous: previousMargin,
+            },
         };
     }, [comparableIncome, latestIncome, comparisonReason]);
 
