@@ -319,16 +319,54 @@ def comparison_detail(
 # --------------------------------------------------------------------------
 
 
-def _declared_scale(row: Mapping[str, Any], alias: str) -> tuple[float | None, Any]:
+def _normalized_key(key: Any) -> str:
+    """One comparison form for a persisted key (`Purchase Of X` == `purchase_of_x`)."""
+    return str(key).strip().lower().replace(" ", "_")
+
+
+def _pick_alias(row: Mapping[str, Any], aliases: Sequence[str]) -> tuple[Any, Any]:
+    """The first alias that names a non-null value, with the row's actual key.
+
+    Persisted premium records keep their provider spelling, so a metric may be
+    stored as `Revenue` or `Purchase_Of_Fixed_Assets`. The actual key is
+    returned because the scale and unit evidence are keyed by it.
+    """
+    index: dict[str, Any] = {}
+    for key in row:
+        index.setdefault(_normalized_key(key), key)
+    for alias in aliases:
+        actual = index.get(_normalized_key(alias))
+        if actual is not None and row.get(actual) is not None:
+            return actual, row.get(actual)
+    return None, None
+
+
+def _evidence_entry(evidence: Any, names: set[str]) -> Mapping[str, Any] | None:
+    """The evidence entry for any spelling of a metric in `names`."""
+    if not isinstance(evidence, Mapping):
+        return None
+    wanted = {_normalized_key(name) for name in names}
+    for key, entry in evidence.items():
+        if isinstance(entry, Mapping) and _normalized_key(key) in wanted:
+            return entry
+    return None
+
+
+def _declared_scale(row: Mapping[str, Any], alias: Any) -> tuple[float | None, Any]:
     units = row.get("units")
-    declared = units.get(alias) if isinstance(units, Mapping) and alias in units else None
+    declared = None
+    if isinstance(units, Mapping):
+        for key, unit in units.items():
+            if _normalized_key(key) == _normalized_key(alias):
+                declared = unit
+                break
     for key in ("currency_unit", "unit", "_value_unit", "value_unit"):
         if declared is not None:
             break
         declared = row.get(key)
     if declared is None:
         return None, None
-    return _DECLARED_SCALES.get(str(declared).strip().lower().replace("_", " ")), declared
+    return _DECLARED_SCALES.get(_normalized_key(declared).replace("_", " ")), declared
 
 
 def _names_vnd(declared: Any) -> bool:
@@ -336,14 +374,12 @@ def _names_vnd(declared: Any) -> bool:
     return any(token in label for token in ("vnd", "vnđ", "đồng", "dong"))
 
 
-def _valuation_lineage_scale(row: Mapping[str, Any], alias: str) -> float | None:
+def _valuation_lineage_scale(row: Mapping[str, Any], alias: Any) -> float | None:
     lineage = row.get("_valuation_unit_lineage")
     if not isinstance(lineage, Mapping):
         return None
-    evidence = lineage.get(alias)
-    if not isinstance(evidence, Mapping):
-        return None
-    scale = evidence.get("scaleToVnd")
+    evidence = _evidence_entry(lineage, {str(alias)})
+    scale = (evidence or {}).get("scaleToVnd")
     return float(scale) if isinstance(scale, (int, float)) else None
 
 
@@ -364,10 +400,11 @@ def admit_valuation_field(
     """
     if not isinstance(row, Mapping):
         return None, "missing"
-    alias = next((name for name in FIELD_ALIASES.get(field, (field,)) if row.get(name) is not None), None)
+    # Keys keep their provider spelling, so a metric is matched case- and
+    # space-insensitively and the row's actual key carries its unit evidence.
+    alias, raw_value = _pick_alias(row, FIELD_ALIASES.get(field, (field,)))
     if alias is None:
         return None, "missing"
-    raw_value = row.get(alias)
     if isinstance(raw_value, str) and not raw_value.strip():
         return None, "blank"
     value = _number(raw_value)
@@ -391,10 +428,9 @@ def admit_valuation_field(
     ):
         if not isinstance(evidence, Mapping):
             continue
-        for name in names:
-            entry = evidence.get(name)
-            if isinstance(entry, Mapping) and entry.get("unavailable_reason"):
-                return None, f"rejected:{entry['unavailable_reason']}"
+        entry = _evidence_entry(evidence, names)
+        if entry is not None and entry.get("unavailable_reason"):
+            return None, f"rejected:{entry['unavailable_reason']}"
 
     normalized_scale = _valuation_lineage_scale(row, alias)
     if normalized_scale is not None:

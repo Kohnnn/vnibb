@@ -184,6 +184,47 @@ def test_valuation_field_passes_a_rejection_through():
     assert admission.admit_valuation_field(row, "revenue") == (None, "rejected:unverified_monetary_unit")
 
 
+def test_valuation_field_matches_provider_key_spellings():
+    """Persisted keys keep their provider spelling; lookup must still find them.
+
+    `_normalize_statement_rows` preserves keys like `Revenue`,
+    `Purchase_Of_Fixed_Assets` or `Net Sales`, so an exact `row.get(alias)`
+    would silently report `missing` for a row that states the metric.
+    """
+    assert admission.admit_valuation_field(
+        {"Revenue": 1000, "unit": "million VND"}, "revenue",
+    ) == (1_000_000_000.0, None)
+    assert admission.admit_valuation_field(
+        {"Purchase_Of_Fixed_Assets": 5, "unit": "VND"}, "capex",
+    ) == (5.0, None)
+    assert admission.admit_valuation_field(
+        {"Net Sales": 7, "unit": "VND"}, "revenue",
+    ) == (7.0, None)
+    # The same value stays a foreign-currency refusal, not a silent pass.
+    assert admission.admit_valuation_field({"Revenue": 1000, "unit": "USD"}, "revenue") == (
+        None, "unknown_currency",
+    )
+    # The scale lineage is keyed by the provider's spelling too.
+    assert admission.admit_valuation_field(
+        {
+            "Revenue": 1_000_000_000, "unit": "billion VND",
+            "_valuation_unit_lineage": {"revenue": {"scaleToVnd": 1_000_000_000}},
+        },
+        "revenue",
+    ) == (1_000_000_000.0, None)
+    # A rejection is found under the row's spelling and under any alias.
+    assert admission.admit_valuation_field(
+        {"Revenue": 5, "unit": "VND",
+         "unit_metadata": {"Revenue": {"unavailable_reason": "unverified_monetary_unit"}}},
+        "revenue",
+    ) == (None, "rejected:unverified_monetary_unit")
+    assert admission.admit_valuation_field(
+        {"Revenue": 5, "unit": "VND",
+         "unit_metadata": {"Net_Sales": {"unavailable_reason": "unverified_statement_basis"}}},
+        "revenue",
+    ) == (None, "rejected:unverified_statement_basis")
+
+
 def test_valuation_field_rejects_any_alias_and_top_level_lineage():
     """A rejection under another spelling, or in the row's own lineage, wins.
 
