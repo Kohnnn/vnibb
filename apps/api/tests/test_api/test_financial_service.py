@@ -523,9 +523,27 @@ async def test_get_financials_with_ttm_filters_specific_quarter_after_normalizat
 def test_growth_absolute_prior_denominator(current, previous, expected, transition):
     result = _growth_rate(current, previous)
     assert result == pytest.approx(expected) if expected is not None else result is None
-    detail = _growth_detail(current, previous)
+    # The rate convention above is per-metric arithmetic; the published detail
+    # only exists for a pair of admitted rows, so it is checked separately.
+    detail = _growth_detail(_admitted_row(2025, current), _admitted_row(2024, previous), "revenue",
+                            period_kind="annual", statement_type="income")
     assert detail["transition"] == transition
     assert detail["negative_base"] == (previous is not None and previous < 0)
+
+
+def _admitted_row(fiscal_year: int, revenue: float | None):
+    from types import SimpleNamespace
+    lineage = {
+        "source": "vietcap", "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": "annual",
+    }
+    return SimpleNamespace(
+        period=str(fiscal_year), fiscal_year=fiscal_year, revenue=revenue,
+        source="vietcap", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="annual",
+        raw_data={"_financial_lineage": lineage},
+        unit_metadata={"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+    )
 
 
 def test_ttm_latest_balance_snapshot_preserves_missing_inventory():

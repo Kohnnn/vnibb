@@ -63,10 +63,18 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
         lastDataDate: null,
         fetchedAt: query.dataUpdatedAt,
         stale: Boolean(query.error && hasData),
-        extra: hasData ? { points: availableGrowthPoints } : undefined,
+        extra: {
+          points: availableGrowthPoints,
+          // An withheld rate travels with its reason, so downstream context
+          // cannot present it as zero growth (#246).
+          unavailable: Object.fromEntries(
+            rows.filter((row) => row.annualReason || row.quarterReason)
+              .map((row) => [row.key, { annual: row.annualReason, quarter: row.quarterReason }]),
+          ),
+        },
       }),
     )
-  }, [onDataChange, hasData, query.dataUpdatedAt, query.error, upperSymbol, availableGrowthPoints])
+  }, [onDataChange, hasData, query.dataUpdatedAt, query.error, upperSymbol, availableGrowthPoints, rows])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view growth bridge" icon={<TrendingUp size={18} />} />
@@ -122,7 +130,9 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
                         <span>{annualLabel}</span>
                         <span className={signedToneClass(row.annual)}>
-                          {formatPercent(row.annual, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}
+                          {row.annual === null && row.annualReason
+                            ? <span className="text-[10px] text-[var(--color-warning)]">{row.annualReason}</span>
+                            : formatPercent(row.annual, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}
                           {row.annualLabel && <span className="ml-1 text-[10px] text-[var(--color-warning)]">({row.annualLabel})</span>}
                         </span>
                       </div>
@@ -138,7 +148,9 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
                       <div className="relative z-10 flex h-full items-center justify-between px-3 text-xs text-[var(--text-primary)]">
                         <span>{quarterLabel}</span>
                         <span className={row.quarter !== null && row.quarter >= 0 ? 'text-[var(--color-accent-primary)]' : 'text-[var(--color-warning)]'}>
-                          {formatPercent(row.quarter, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}
+                          {row.quarter === null && row.quarterReason
+                            ? <span className="text-[10px]">{row.quarterReason}</span>
+                            : formatPercent(row.quarter, { decimals: 1, input: 'percent', signed: true, clamp: 'yoy_change' })}
                           {row.quarterLabel && <span className="ml-1 text-[10px] text-[var(--color-warning)]">({row.quarterLabel})</span>}
                         </span>
                       </div>

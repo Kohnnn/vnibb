@@ -94,15 +94,52 @@ const RAW_CASHFLOW_ALIASES: Record<string, string[]> = {
 function toNumeric(value: unknown): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string') {
-        const parsed = Number(value.toString().replace(/,/g, '').trim());
+        // A blank string is a missing observation, not a reported zero.
+        const trimmed = value.toString().replace(/,/g, '').trim();
+        if (!trimmed) return null;
+        const parsed = Number(trimmed);
         return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
 }
 
-function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
+/**
+ * The field-level rejection the API recorded for a metric, wherever its
+ * evidence lives: the row's `unit_metadata`, its persisted canonical copy, or
+ * the lineage dictionary. A rejected field is not a missing one, so an
+ * explicit reason must survive into the table instead of being refilled from
+ * the raw provider alias (issue #245).
+ */
+export function fieldWithheldReason(entry: CashFlowData, metricKey: string): string | null {
+    const record = entry as unknown as Record<string, unknown>;
+    const raw = entry.raw_data && typeof entry.raw_data === 'object'
+        ? (entry.raw_data as Record<string, unknown>)
+        : {};
+    const lineage = raw._financial_lineage && typeof raw._financial_lineage === 'object'
+        ? (raw._financial_lineage as Record<string, unknown>)
+        : {};
+    const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
+        ? (lineage.canonical_data as Record<string, unknown>)
+        : {};
+    const sources = [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata];
+    for (const source of sources) {
+        if (!source || typeof source !== 'object') continue;
+        const metadata = (source as Record<string, unknown>)[metricKey];
+        if (metadata && typeof metadata === 'object') {
+            const reason = (metadata as Record<string, unknown>).unavailable_reason;
+            if (typeof reason === 'string' && reason.trim()) return reason;
+        }
+    }
+    return null;
+}
+
+/** A raw provider alias, only as the evidence it is: never a monetary value. */
+export function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
     const rawData = entry.raw_data;
     if (!rawData || typeof rawData !== 'object') return null;
+    // A field the unit admission withheld cannot be republished from its raw
+    // alias under the table's currency scale (#245).
+    if (fieldWithheldReason(entry, metricKey)) return null;
 
     for (const alias of RAW_CASHFLOW_ALIASES[metricKey] || []) {
         const direct = toNumeric((rawData as Record<string, unknown>)[alias]);

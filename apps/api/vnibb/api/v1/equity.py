@@ -93,6 +93,7 @@ from vnibb.providers.vnstock.shareholders import (
 from vnibb.providers.vnstock.stock_quote import StockQuoteData, VnstockStockQuoteFetcher
 from vnibb.providers.vnstock.subsidiaries import SubsidiariesQueryParams, VnstockSubsidiariesFetcher
 from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
+from vnibb.services import statement_admission as _statement_admission
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import (
@@ -5545,23 +5546,77 @@ def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optiona
         return None
     return ((current - previous) / abs(previous)) * 100
 
-def _growth_detail(current: Optional[float], previous: Optional[float]) -> dict[str, Any]:
-    value = _growth_rate(current, previous)
-    transition = None
-    if current is not None and previous is not None:
-        if previous < 0 < current:
-            transition = "loss_to_profit"
-        elif current < 0 < previous:
-            transition = "profit_to_loss"
-    return {"value": value, "current": current, "previous": previous,
-            "negative_base": previous is not None and previous < 0, "transition": transition,
-            "unavailable_reason": "missing_base_or_value" if current is None or previous is None else
-                "zero_base" if previous == 0 else "nonfinite_value" if value is None else None}
+def _statement_period_kind(row: Any, default: str) -> str:
+    """The row's own declared flow basis, so admission rejects a mismatch."""
+    flow_basis = _statement_admission.basis_of(row, "flow_basis")
+    return {
+        "annual": "annual",
+        "single_quarter": "single_quarter",
+        "cumulative_ytd": "cumulative_ytd",
+        "trailing_twelve_months": "ttm",
+    }.get(str(flow_basis or "").lower(), default)
 
+def _growth_detail(
+    current: Any,
+    previous: Any,
+    field: str,
+    *,
+    period_kind: str,
+    statement_type: str,
+    convention: str = "absolute_prior_denominator",
+) -> dict[str, Any]:
+    """One growth rate, or the reason it cannot be published (#246).
+
+    Values come from the shared statement admission, so a populated lineage
+    dictionary is not itself evidence: currency, scale, consolidation, flow
+    basis, issuer source and fiscal step are compared before any arithmetic.
+    Reported zero, loss bases and rejected fields stay distinct.
+    """
+    comparison = _statement_admission.comparison_detail(
+        current, previous, field,
+        statement_type=statement_type, period_kind=period_kind,
+    )
+    current_value, previous_value = comparison["current"], comparison["previous"]
+    reason = comparison["unavailable_reason"]
+    value = None
+    transition = None
+    if reason is None:
+        value = _growth_rate(current_value, previous_value)
+        if previous_value == 0:
+            reason = "zero_base"
+        elif value is None:
+            reason = "nonfinite_value"
+        if previous_value < 0 < current_value:
+            transition = "loss_to_profit"
+        elif current_value < 0 < previous_value:
+            transition = "profit_to_loss"
+    detail: dict[str, Any] = {
+        "value": value,
+        "current": current_value,
+        "previous": previous_value,
+        "current_period": getattr(current, "period", None),
+        "previous_period": getattr(previous, "period", None),
+        "field_unavailable_reason": {
+            "current": comparison["current_reason"], "previous": comparison["previous_reason"],
+        },
+        "transition": transition,
+        # Retained for the client comparison label: a loss base is a real rate
+        # with a negative denominator, not a comparable growth percentage.
+        "negative_base": previous_value is not None and previous_value < 0,
+        "unavailable_reason": reason,
+        "basis_status": comparison["basis_status"],
+        "source": comparison["source"],
+        "currency": comparison["currency"],
+        "value_unit": comparison["value_unit"],
+        "consolidation_basis": comparison["consolidation_basis"],
+        "flow_basis": comparison["flow_basis"],
+        "growth_convention": convention,
+    }
+    return detail
 
 
 @router.get("/{symbol}/growth", response_model=StandardResponse[dict[str, Any]])
-@cached(ttl=3600, key_prefix="equity_growth")
+@cached(ttl=3600, key_prefix="equity_growth_v2_admitted")
 async def get_growth_rates(
     symbol: str,
     db: AsyncSession = Depends(get_db),
@@ -5594,6 +5649,27 @@ async def get_growth_rates(
     annual_balance = (await db.execute(annual_balance_stmt)).scalars().all()
     quarterly_income = (await db.execute(quarterly_income_stmt)).scalars().all()
 
+    current_annual = annual_income[0] if annual_income else None
+    previous_annual = annual_income[1] if len(annual_income) > 1 else None
+    current_balance = annual_balance[0] if annual_balance else None
+    previous_balance = annual_balance[1] if len(annual_balance) > 1 else None
+
+    latest_quarter = quarterly_income[0] if quarterly_income else None
+    same_quarter_prev_year = None
+    if latest_quarter and latest_quarter.fiscal_quarter:
+        comparison_stmt = (
+            select(IncomeStatement)
+            .where(
+                IncomeStatement.symbol == symbol_upper,
+                IncomeStatement.period_type == "quarter",
+                IncomeStatement.fiscal_year == latest_quarter.fiscal_year - 1,
+                IncomeStatement.fiscal_quarter == latest_quarter.fiscal_quarter,
+                or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+            )
+            .limit(1)
+        )
+        same_quarter_prev_year = (await db.execute(comparison_stmt)).scalar_one_or_none()
+
     yoy: dict[str, Optional[float]] = {
         "revenue_growth": None,
         "earnings_growth": None,
@@ -5608,81 +5684,50 @@ async def get_growth_rates(
         "ebitda_growth": None,
     }
     comparisons: dict[str, dict[str, Any]] = {"yoy": {}, "qoq": {}}
-    same_quarter_prev_year = None
 
-    if len(annual_income) >= 2 and annual_income[0].fiscal_year == annual_income[1].fiscal_year + 1:
-        current, previous = annual_income[0], annual_income[1]
-        yoy["revenue_growth"] = _growth_rate(current.revenue, previous.revenue)
-        yoy["earnings_growth"] = _growth_rate(current.net_income, previous.net_income)
-        yoy["eps_growth"] = _growth_rate(current.eps, previous.eps)
-        yoy["ebitda_growth"] = _growth_rate(current.ebitda, previous.ebitda)
-
-    if len(annual_balance) >= 2 and annual_balance[0].fiscal_year == annual_balance[1].fiscal_year + 1:
-        current, previous = annual_balance[0], annual_balance[1]
-        yoy["asset_growth"] = _growth_rate(current.total_assets, previous.total_assets)
-
-    latest_quarter = quarterly_income[0] if quarterly_income else None
-    if latest_quarter and latest_quarter.fiscal_quarter:
-        comparison_stmt = (
-            select(IncomeStatement)
-            .where(
-                IncomeStatement.symbol == symbol_upper,
-                IncomeStatement.period_type == "quarter",
-                IncomeStatement.fiscal_year == latest_quarter.fiscal_year - 1,
-                IncomeStatement.fiscal_quarter == latest_quarter.fiscal_quarter,
-                or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
-            )
-            .limit(1)
+    annual_kind = _statement_period_kind(current_annual, "annual")
+    for name, field in (
+        ("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
+        ("eps_growth", "eps"), ("ebitda_growth", "ebitda"),
+    ):
+        detail = _growth_detail(
+            current_annual, previous_annual, field,
+            period_kind=annual_kind, statement_type="income",
         )
-        same_quarter_prev_year = (await db.execute(comparison_stmt)).scalar_one_or_none()
-        if same_quarter_prev_year:
-            qoq["revenue_growth"] = _growth_rate(
-                latest_quarter.revenue,
-                same_quarter_prev_year.revenue,
-            )
-            qoq["earnings_growth"] = _growth_rate(
-                latest_quarter.net_income,
-                same_quarter_prev_year.net_income,
-            )
-            qoq["eps_growth"] = _growth_rate(latest_quarter.eps, same_quarter_prev_year.eps)
-            qoq["ebitda_growth"] = _growth_rate(
-                latest_quarter.ebitda, same_quarter_prev_year.ebitda
-            )
-    for scope, current, previous in [
-        ("yoy", annual_income[0] if annual_income else None, annual_income[1] if len(annual_income) > 1 else None),
-        ("qoq", latest_quarter, same_quarter_prev_year),
-    ]:
-        for name, field in [("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
-                            ("eps_growth", "eps"), ("ebitda_growth", "ebitda")]:
-            detail = _growth_detail(getattr(current, field, None), getattr(previous, field, None))
-            detail["current_period"] = getattr(current, "period", None)
-            detail["previous_period"] = getattr(previous, "period", None)
-            if current is not None and previous is not None and current.fiscal_year != previous.fiscal_year + 1:
-                detail.update(value=None, unavailable_reason="non_comparable_periods")
-            current_lineage = (getattr(current, "raw_data", None) or {}).get("_financial_lineage") or {}
-            previous_lineage = (getattr(previous, "raw_data", None) or {}).get("_financial_lineage") or {}
-            detail["basis_status"] = "confirmed" if current_lineage and previous_lineage else "legacy_basis_unconfirmed"
-            detail["source"] = getattr(current, "source", None)
-            for basis_name in ("value_unit", "consolidation_basis", "flow_basis"):
-                current_basis, previous_basis = current_lineage.get(basis_name), previous_lineage.get(basis_name)
-                detail[basis_name] = current_basis
-                if current_basis is not None and previous_basis is not None and current_basis != previous_basis:
-                    detail.update(value=None, unavailable_reason="incompatible_reporting_basis", basis_status="incompatible")
-            (yoy if scope == "yoy" else qoq)[name] = detail["value"]
-            comparisons[scope][name] = detail
+        yoy[name] = detail["value"]
+        comparisons["yoy"][name] = detail
 
+    asset_detail = _growth_detail(
+        current_balance, previous_balance, "total_assets",
+        period_kind="instant", statement_type="balance",
+    )
+    yoy["asset_growth"] = asset_detail["value"]
+    comparisons["yoy"]["asset_growth"] = asset_detail
+
+    quarter_kind = _statement_period_kind(latest_quarter, "single_quarter")
+    for name, field in (
+        ("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
+        ("eps_growth", "eps"), ("ebitda_growth", "ebitda"),
+    ):
+        detail = _growth_detail(
+            latest_quarter, same_quarter_prev_year, field,
+            period_kind=quarter_kind, statement_type="income",
+        )
+        qoq[name] = detail["value"]
+        comparisons["qoq"][name] = detail
 
     payload = {
         "symbol": symbol_upper,
-        "yoy": yoy,
-        "qoq": qoq,
         "growth_convention": "absolute_prior_denominator",
         "growth_formula": "((current - previous) / abs(previous)) * 100",
         "quarter_comparison": "same_quarter_previous_year",
+        "admission_contract": "statement_admission_v1",
+        "yoy": yoy,
+        "qoq": qoq,
         "comparisons": comparisons,
         "as_of": {
-            "annual": annual_income[0].period if annual_income else None,
-            "quarter": latest_quarter.period if latest_quarter else None,
+            "annual": getattr(current_annual, "period", None),
+            "quarter": getattr(latest_quarter, "period", None),
         },
     }
     return StandardResponse(data=payload, meta=MetaData(count=1))

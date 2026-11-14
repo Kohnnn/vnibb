@@ -555,6 +555,13 @@ export interface CashFlowData {
   period?: string;
   updated_at?: string;
   raw_data?: Record<string, unknown>;
+  unit_metadata?: Record<string, { unavailable_reason?: string | null } & Record<string, unknown>>;
+  currency?: string | null;
+  value_unit?: string | null;
+  consolidation_basis?: string | null;
+  flow_basis?: string | null;
+  aggregation_basis?: string | null;
+  source_periods?: string[];
   operating_cash_flow?: number;
   investing_cash_flow?: number;
   financing_cash_flow?: number;

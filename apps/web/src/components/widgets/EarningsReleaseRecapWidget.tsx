@@ -1,7 +1,7 @@
 'use client';
 
 import { memo, useEffect, useMemo } from 'react';
-import { CalendarClock, FileText, Newspaper, Sparkles } from 'lucide-react';
+import { CalendarClock, Newspaper, Sparkles } from 'lucide-react';
 
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty, WidgetError } from '@/components/ui/widget-states';
@@ -14,6 +14,7 @@ import { formatDate, formatRelativeTime } from '@/lib/formatDate';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
 import { percentToneClass } from '@/lib/priceColor';
+import { incomparableReason, priorYearQuarterKey, quarterKey, rowForQuarter, withheldFieldReason } from '@/lib/statementAdmission';
 
 interface EarningsReleaseRecapWidgetProps {
     id: string;
@@ -36,20 +37,20 @@ function marginOfIncome(
         : null;
 }
 
-function yoyChange(current: number | null | undefined, previous: number | null | undefined): number | null {
-    if (current == null || previous == null || previous === 0) return null;
-    return ((current - previous) / Math.abs(previous)) * 100;
-}
-
-function normalizeQuarterPeriod(period: string | undefined): string | null {
-    const label = String(period || '').trim().toUpperCase();
-    if (!label) return null;
-    const yearMatch = label.match(/(20\d{2})/);
-    const quarterMatch = label.match(/Q([1-4])/);
-    if (yearMatch && quarterMatch) {
-        return `${yearMatch[1]}-Q${quarterMatch[1]}`;
-    }
-    return yearMatch ? yearMatch[1] : label;
+/**
+ * One comparison rate, or the reason it cannot be stated. A zero base is not a
+ * 100% increase, and a base whose basis differs from the current period is not
+ * a rate at all.
+ */
+function growthOf(
+    current: number | null | undefined,
+    previous: number | null | undefined,
+    reason: string | null,
+): { value: number | null; reason: string | null } {
+    if (reason) return { value: null, reason };
+    if (current == null || previous == null) return { value: null, reason: 'value not reported for both periods' };
+    if (previous === 0) return { value: null, reason: 'zero prior-period base' };
+    return { value: ((current - previous) / Math.abs(previous)) * 100, reason: null };
 }
 
 function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove, onDataChange }: EarningsReleaseRecapWidgetProps) {
@@ -68,141 +69,131 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
         () => [...(cashFlowQuery.data?.data || [])].sort((left, right) => periodSortKey(right.period) - periodSortKey(left.period)),
         [cashFlowQuery.data?.data]
     );
-
     const latestIncome = orderedIncomeRows[0] || null;
-    const comparableIncome = useMemo(() => {
-        if (!latestIncome?.period) return orderedIncomeRows[1] || null;
-        const latestPeriod = normalizeQuarterPeriod(latestIncome.period);
-        if (!latestPeriod) return orderedIncomeRows[1] || null;
-        const yearMatch = latestPeriod.match(/(20\d{2})-Q([1-4])/);
-        if (!yearMatch) return orderedIncomeRows[1] || null;
-        const comparableKey = `${Number(yearMatch[1]) - 1}-Q${yearMatch[2]}`;
-        return orderedIncomeRows.find((row) => normalizeQuarterPeriod(row.period) === comparableKey) || orderedIncomeRows[1] || null;
-    }, [latestIncome?.period, orderedIncomeRows]);
+    const latestQuarterKey = quarterKey(latestIncome?.period);
+    const comparisonKey = priorYearQuarterKey(latestQuarterKey);
 
-    const latestCash = useMemo(() => {
-        if (!latestIncome?.period) return orderedCashRows[0] || null;
-        const targetKey = normalizeQuarterPeriod(latestIncome.period);
-        return orderedCashRows.find((row) => normalizeQuarterPeriod(row.period) === targetKey) || orderedCashRows[0] || null;
-    }, [latestIncome?.period, orderedCashRows]);
+    // Only the same quarter one year earlier is a YoY comparison. The second
+    // newest row is a different period, so it is never substituted for the
+    // missing prior-year row (issue #258).
+    const comparableIncome = useMemo(
+        () => rowForQuarter(orderedIncomeRows, comparisonKey),
+        [comparisonKey, orderedIncomeRows]
+    );
+    const comparisonReason = useMemo(() => {
+        if (!latestIncome) return null;
+        if (!latestQuarterKey) return 'current period is not a fiscal quarter';
+        if (!comparableIncome) return `prior-year quarter ${comparisonKey} not reported`;
+        return incomparableReason(latestIncome, comparableIncome);
+    }, [comparableIncome, comparisonKey, latestIncome, latestQuarterKey]);
+
+    // Cash figures must belong to the recap's own quarter. Another period's row
+    // is disclosed as a mismatch, never shown as this quarter's cash.
+    const latestCash = useMemo(
+        () => rowForQuarter(orderedCashRows, latestQuarterKey),
+        [latestQuarterKey, orderedCashRows]
+    );
+    const cashMismatchPeriod = !latestCash && orderedCashRows.length > 0
+        ? orderedCashRows[0]?.period ?? null
+        : null;
+
+    /** A YoY rate for one field, or the reason it stays unavailable. */
+    const yoyFor = (field: string, current: number | null | undefined, previous: number | null | undefined) => growthOf(
+        current,
+        previous,
+        comparisonReason
+            ?? withheldFieldReason(latestIncome, field)
+            ?? withheldFieldReason(comparableIncome, field)
+    );
 
     const recapRows = useMemo(() => {
         if (!latestIncome) return [];
+        const metric = (
+            label: string,
+            field: string,
+            current: number | null | undefined,
+            previous: number | null | undefined,
+            decimals: number
+        ) => {
+            const { value } = yoyFor(field, current, previous);
+            return {
+                label,
+                current: convertFinancialValueForUnit(current ?? null, unitConfig, latestIncome.period),
+                previous: convertFinancialValueForUnit(previous ?? null, unitConfig, comparableIncome?.period),
+                change: value,
+                formatter: (value: number | null) => formatNumber(value, { decimals }),
+            };
+        };
+        const grossMargin = marginOfIncome(latestIncome);
+        const previousMargin = marginOfIncome(comparableIncome);
+        const comparableMargins = comparisonReason === null && grossMargin !== null && previousMargin !== null;
         return [
-            {
-                label: 'Revenue',
-                current: convertFinancialValueForUnit(latestIncome.revenue ?? null, unitConfig, latestIncome.period),
-                previous: convertFinancialValueForUnit(comparableIncome?.revenue ?? null, unitConfig, comparableIncome?.period),
-                change: yoyChange(
-                    convertFinancialValueForUnit(latestIncome.revenue, unitConfig, latestIncome.period),
-                    convertFinancialValueForUnit(comparableIncome?.revenue, unitConfig, comparableIncome?.period)
-                ),
-                formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
-            },
-            {
-                label: 'Gross Profit',
-                current: convertFinancialValueForUnit(latestIncome.gross_profit ?? null, unitConfig, latestIncome.period),
-                previous: convertFinancialValueForUnit(comparableIncome?.gross_profit ?? null, unitConfig, comparableIncome?.period),
-                change: yoyChange(
-                    convertFinancialValueForUnit(latestIncome.gross_profit, unitConfig, latestIncome.period),
-                    convertFinancialValueForUnit(comparableIncome?.gross_profit, unitConfig, comparableIncome?.period)
-                ),
-                formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
-            },
-            {
-                label: 'Operating Income',
-                current: convertFinancialValueForUnit(latestIncome.operating_income ?? null, unitConfig, latestIncome.period),
-                previous: convertFinancialValueForUnit(comparableIncome?.operating_income ?? null, unitConfig, comparableIncome?.period),
-                change: yoyChange(
-                    convertFinancialValueForUnit(latestIncome.operating_income, unitConfig, latestIncome.period),
-                    convertFinancialValueForUnit(comparableIncome?.operating_income, unitConfig, comparableIncome?.period)
-                ),
-                formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
-            },
-            {
-                label: 'Pre-tax Profit',
-                current: convertFinancialValueForUnit(latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax ?? null, unitConfig, latestIncome.period),
-                previous: convertFinancialValueForUnit(comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax ?? null, unitConfig, comparableIncome?.period),
-                change: yoyChange(
-                    convertFinancialValueForUnit(latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax, unitConfig, latestIncome.period),
-                    convertFinancialValueForUnit(comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax, unitConfig, comparableIncome?.period)
-                ),
-                formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
-            },
-            {
-                label: 'Net Income',
-                current: convertFinancialValueForUnit(latestIncome.net_income ?? null, unitConfig, latestIncome.period),
-                previous: convertFinancialValueForUnit(comparableIncome?.net_income ?? null, unitConfig, comparableIncome?.period),
-                change: yoyChange(
-                    convertFinancialValueForUnit(latestIncome.net_income, unitConfig, latestIncome.period),
-                    convertFinancialValueForUnit(comparableIncome?.net_income, unitConfig, comparableIncome?.period)
-                ),
-                formatter: (value: number | null) => formatNumber(value, { decimals: 0 }),
-            },
-            {
-                label: 'EPS',
-                current: convertFinancialValueForUnit(latestIncome.eps ?? null, unitConfig, latestIncome.period),
-                previous: convertFinancialValueForUnit(comparableIncome?.eps ?? null, unitConfig, comparableIncome?.period),
-                change: yoyChange(
-                    convertFinancialValueForUnit(latestIncome.eps, unitConfig, latestIncome.period),
-                    convertFinancialValueForUnit(comparableIncome?.eps, unitConfig, comparableIncome?.period)
-                ),
-                formatter: (value: number | null) => formatNumber(value, { decimals: 2 }),
-            },
+            metric('Revenue', 'revenue', latestIncome.revenue, comparableIncome?.revenue, 0),
+            metric('Gross Profit', 'gross_profit', latestIncome.gross_profit, comparableIncome?.gross_profit, 0),
+            metric('Operating Income', 'operating_income', latestIncome.operating_income, comparableIncome?.operating_income, 0),
+            metric(
+                'Pre-tax Profit', 'pre_tax_profit',
+                latestIncome.pre_tax_profit ?? latestIncome.profit_before_tax,
+                comparableIncome?.pre_tax_profit ?? comparableIncome?.profit_before_tax, 0
+            ),
+            metric('Net Income', 'net_income', latestIncome.net_income, comparableIncome?.net_income, 0),
+            metric('EPS', 'eps', latestIncome.eps, comparableIncome?.eps, 2),
             {
                 label: 'Gross Margin',
-                current: marginOfIncome(latestIncome),
-                previous: marginOfIncome(comparableIncome),
-                change: (() => {
-                    const current = marginOfIncome(latestIncome);
-                    const previous = marginOfIncome(comparableIncome);
-                    return current !== null && previous !== null ? current - previous : null;
-                })(),
+                current: grossMargin,
+                previous: previousMargin,
+                change: comparableMargins && grossMargin !== null && previousMargin !== null
+                    ? grossMargin - previousMargin
+                    : null,
                 formatter: (value: number | null) => formatPercent(value, { decimals: 1, input: 'percent', unit: 'pp', clamp: 'margin' }),
             },
         ];
-    }, [comparableIncome, latestIncome, unitConfig]);
+    }, [comparableIncome, comparisonReason, latestIncome, unitConfig]);
 
     const highlights = useMemo(() => {
         if (!latestIncome) return [];
         const grossMargin = marginOfIncome(latestIncome);
         const previousMargin = marginOfIncome(comparableIncome);
-        const marginDelta = grossMargin !== null && previousMargin !== null ? grossMargin - previousMargin : null;
+        const marginComparable = comparisonReason === null && grossMargin !== null && previousMargin !== null;
 
         // All four tiles are signed deltas, so all four take their tone from the
         // sign. Two used a fixed gain/warning colour, which painted a falling
         // net income or a shrinking margin as favourable.
         return [
-            { label: 'Revenue YoY', value: yoyChange(latestIncome.revenue, comparableIncome?.revenue) },
-            { label: 'Net Income YoY', value: yoyChange(latestIncome.net_income, comparableIncome?.net_income) },
-            { label: 'EPS YoY', value: yoyChange(latestIncome.eps, comparableIncome?.eps) },
-            { label: 'Gross Margin Delta', value: marginDelta },
+            { label: 'Revenue YoY', value: yoyFor('revenue', latestIncome.revenue, comparableIncome?.revenue).value },
+            { label: 'Net Income YoY', value: yoyFor('net_income', latestIncome.net_income, comparableIncome?.net_income).value },
+            { label: 'EPS YoY', value: yoyFor('eps', latestIncome.eps, comparableIncome?.eps).value },
+            {
+                label: 'Gross Margin Delta',
+                value: marginComparable && grossMargin !== null && previousMargin !== null ? grossMargin - previousMargin : null,
+            },
         ];
-    }, [comparableIncome, latestIncome]);
+    }, [comparableIncome, comparisonReason, latestIncome]);
 
     const narrative = useMemo(() => {
         if (!latestIncome) return null;
 
-        const revenueYoY = yoyChange(latestIncome.revenue, comparableIncome?.revenue);
-        const earningsYoY = yoyChange(latestIncome.net_income, comparableIncome?.net_income);
+        const revenue = yoyFor('revenue', latestIncome.revenue, comparableIncome?.revenue);
+        const earnings = yoyFor('net_income', latestIncome.net_income, comparableIncome?.net_income);
         const quality = earningsQualityQuery.data?.data;
+        const qualityReason = earningsQualityQuery.data?.error || quality?.coverage?.unavailable_reason || null;
 
-        const revenueText = revenueYoY === null
-            ? 'revenue trend is not comparable yet'
-            : revenueYoY >= 0
-                ? `revenue grew ${formatPercent(revenueYoY, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`
-                : `revenue contracted ${formatPercent(Math.abs(revenueYoY), { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`;
-        const earningsText = earningsYoY === null
-            ? 'earnings trend is still sparse'
-            : earningsYoY >= 0
-                ? `net income improved ${formatPercent(earningsYoY, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`
-                : `net income fell ${formatPercent(Math.abs(earningsYoY), { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`;
-        const qualityText = quality
-            ? `earnings quality is ${quality.grade.toLowerCase()} with a ${quality.trend.toLowerCase()} trend`
-            : 'earnings quality context is not available yet';
+        const describe = (value: number | null, reason: string | null, up: string, down: string, sparse: string) => {
+            if (value === null) return reason ? `${sparse} (${reason})` : sparse;
+            return value >= 0
+                ? `${up} ${formatPercent(value, { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`
+                : `${down} ${formatPercent(Math.abs(value), { decimals: 1, input: 'percent', clamp: 'yoy_change' })}`;
+        };
+        const revenueText = describe(revenue.value, revenue.reason, 'revenue grew', 'revenue contracted', 'revenue YoY is unavailable');
+        const earningsText = describe(earnings.value, earnings.reason, 'net income improved', 'net income fell', 'net income YoY is unavailable');
+        // A grade or trend is only quoted when it exists: an unavailable
+        // scorecard must not be described as Stable (issue #257).
+        const qualityText = quality?.grade
+            ? `earnings quality is ${quality.grade.toLowerCase()}${quality.trend ? ` with a ${quality.trend.toLowerCase()} trend` : ' with an unknown trend'}`
+            : `earnings quality is unavailable${qualityReason ? ` (${qualityReason})` : ''}`;
 
         return `${revenueText}, ${earningsText}, and ${qualityText}.`;
-    }, [comparableIncome?.net_income, comparableIncome?.revenue, earningsQualityQuery.data?.data, latestIncome]);
+    }, [comparableIncome?.net_income, comparableIncome?.revenue, earningsQualityQuery.data?.data, earningsQualityQuery.data?.error, latestIncome]);
 
     const hasData = Boolean(latestIncome || latestCash || earningsQualityQuery.data?.data || newsQuery.data?.data?.length || eventsQuery.data?.data?.length);
     const isLoading = incomeQuery.isLoading && cashFlowQuery.isLoading && newsQuery.isLoading && eventsQuery.isLoading;
@@ -225,9 +216,21 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             fetchedAt,
             derived:true,
             stale: Boolean(combinedError && hasData),
-            extra: { feeds: 5 },
+            extra: {
+                feeds: 5,
+                // The selected periods and every unavailable reason travel with
+                // the widget context, so a downstream agent cannot describe a
+                // substituted or non-comparable period as YoY (#258).
+                current_period: latestIncome?.period ?? null,
+                comparison_period: comparableIncome?.period ?? null,
+                expected_comparison_period: comparisonKey,
+                comparison_unavailable_reason: comparisonReason,
+                cash_period: latestCash?.period ?? null,
+                cash_mismatch_period: cashMismatchPeriod,
+                quality_unavailable_reason: earningsQualityQuery.data?.error ?? null,
+            },
         }));
-    }, [combinedError, fetchedAt, hasData, onDataChange, symbol]);
+    }, [cashMismatchPeriod, combinedError, comparableIncome?.period, comparisonKey, comparisonReason, earningsQualityQuery.data?.error, fetchedAt, hasData, latestCash?.period, latestIncome?.period, onDataChange, symbol]);
 
     return (
         <WidgetContainer
@@ -290,6 +293,11 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                             <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
                                 <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                                     <div className="mb-2 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">Quarter bridge</div>
+                                    <div className="mb-2 text-[10px] text-[var(--text-muted)]" data-testid="recap-comparison-note">
+                                        {comparisonReason
+                                            ? `YoY unavailable: ${comparisonReason}${comparisonKey ? ` (expected ${comparisonKey})` : ''}.`
+                                            : `YoY compares ${formatFinancialPeriodLabel(latestIncome?.period, { mode: 'quarter' })} with ${formatFinancialPeriodLabel(comparableIncome?.period, { mode: 'quarter' })}.`}
+                                    </div>
                                     <table className="w-full text-xs">
                                         <thead>
                                             <tr className="border-b border-[var(--border-subtle)] text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
@@ -323,18 +331,30 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                             <MiniMetric label="Net cash change" value={formatNumber(convertFinancialValueForUnit(latestCash?.net_change_in_cash ?? latestCash?.net_cash_flow ?? null, unitConfig, latestCash?.period), { decimals: 0 })} />
                                             <MiniMetric label="Quality grade" value={earningsQualityQuery.data?.data?.grade || '-'} />
                                         </div>
-                                        {earningsQualityQuery.data?.data ? (
+                                        <div className="mt-2 text-[10px] text-[var(--text-muted)]" role="status">
+                                            {latestCash?.period
+                                                ? `Cash flow period: ${formatFinancialPeriodLabel(latestCash.period, { mode: 'quarter' })}`
+                                                : cashMismatchPeriod
+                                                    ? `Unavailable: no cash flow statement for ${formatFinancialPeriodLabel(latestIncome?.period, { mode: 'quarter' })}. The latest retained period is ${formatFinancialPeriodLabel(cashMismatchPeriod, { mode: 'quarter' })} and is not shown here.`
+                                                    : 'Unavailable: no cash flow statement reported.'}
+                                        </div>
+                                        {earningsQualityQuery.data?.data?.grade ? (
                                             <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
                                                 <div className="font-semibold text-[var(--text-primary)]">
-                                                    {earningsQualityQuery.data.data.trend} trend · score {formatNumber(earningsQualityQuery.data.data.quality_score, { decimals: 1 })}
+                                                    {earningsQualityQuery.data.data.trend ?? 'Unknown'} trend · score {formatNumber(earningsQualityQuery.data.data.quality_score, { decimals: 1 })}
                                                 </div>
                                                 <ul className="mt-2 space-y-1">
-                                                    {earningsQualityQuery.data.data.checks.slice(0, 3).map((check) => (
+                                                    {(earningsQualityQuery.data.data.checks ?? []).slice(0, 3).map((check) => (
                                                         <li key={check}>• {check}</li>
                                                     ))}
                                                 </ul>
                                             </div>
-                                        ) : null}
+                                        ) : (
+                                            <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
+                                                Earnings quality unavailable
+                                                {earningsQualityQuery.data?.error ? `: ${earningsQualityQuery.data.error}` : '.'}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">

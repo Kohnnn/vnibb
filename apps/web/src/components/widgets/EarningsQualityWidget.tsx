@@ -46,7 +46,10 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
   )
 
   const payload = data?.data
-  const hasData = Boolean(payload)
+  // No admitted coverage means no grade, score or trend. That is not a truthy
+  // scorecard and not evidence of stable quality (issue #257).
+  const unavailableReason = data?.error || payload?.coverage?.unavailable_reason || null
+  const hasData = Boolean(payload?.grade)
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -59,9 +62,14 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       fetchedAt: payload?.computed_at || dataUpdatedAt || null,
       derived: true,
       stale: Boolean(error && hasData),
-      extra: { grade: payload?.grade || 'n/a' },
+      extra: {
+        grade: payload?.grade || 'n/a',
+        trend: payload?.trend ?? null,
+        coverage_status: payload?.coverage?.status ?? 'unavailable',
+        unavailable_reason: unavailableReason,
+      },
     }))
-  }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, upperSymbol])
+  }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, payload?.trend, payload?.coverage?.status, unavailableReason, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view earnings quality" icon={<ShieldCheck size={18} />} />
@@ -88,7 +96,10 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message="No quality data available" icon={<ShieldCheck size={18} />} />
+        <WidgetEmpty
+          message={unavailableReason ? `Earnings quality unavailable: ${unavailableReason}` : 'No quality data available'}
+          icon={<ShieldCheck size={18} />}
+        />
       ) : (
         <>
           <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
@@ -112,7 +123,7 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
               <div className="uppercase tracking-widest text-[var(--text-muted)]">Trend</div>
-              <div className="font-mono text-[var(--text-primary)]">{payload?.trend || 'Stable'}</div>
+              <div className="font-mono text-[var(--text-primary)]">{payload?.trend ?? 'Unknown'}</div>
             </div>
           </div>
 
