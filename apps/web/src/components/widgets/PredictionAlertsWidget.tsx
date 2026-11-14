@@ -279,21 +279,28 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
 
     useEffect(() => {
         if (state.kind !== 'ready') return;
+        // A partial window keeps honest rows, so every record carries the subset
+        // qualifier: the bell must not present one as full coverage.
+        const qualifier = state.status === 'complete' || !state.coverage
+            ? ''
+            : ` — coverage incomplete (${state.coverage.evaluatedMarkets} of ${state.coverage.comparableMarkets} markets evaluated, status ${state.status})`;
         for (const alert of state.alerts) {
-            // Activity records keep the measured span and the requested window so
-            // the bell panel cannot mistake one for the other.
+            // Identity includes the requested window as well as the observation
+            // clock: the same move seen through the 1h and 4h tabs is two
+            // comparisons with different interval evidence, and the activity
+            // store keeps the first record for a given ID.
             const span = alert.elapsedSeconds === null
                 ? 'an unmeasured interval'
                 : `${(alert.elapsedSeconds / 3600).toFixed(2)}h`;
             recordAlertActivity({
-                id: `prediction:${alert.source}:${alert.sourceId}:${alert.currentObservedAt ?? state.windowHours}:${alert.absoluteMovement}`,
+                id: `prediction:${alert.source}:${alert.sourceId}:${state.windowHours}h:${alert.currentObservedAt ?? alert.baselineObservedAt ?? 'unknown'}:${alert.absoluteMovement}`,
                 source: 'prediction_market',
                 triggerTime: alert.currentObservedAt ?? new Date().toISOString(),
                 deliveryClass: 'polled',
                 serverBacked: true,
                 title: `${alert.source} probability movement`,
                 detail: `${alert.question} · ${(Math.abs(alert.absoluteMovement) * 100).toFixed(1)}pp over ${span}`
-                    + ` (window ${state.windowHours}h)`,
+                    + ` (window ${state.windowHours}h)${qualifier}`,
             });
         }
     }, [state]);

@@ -413,4 +413,80 @@ describe('PredictionAlertsWidget', () => {
             expect(stored[0]?.triggerTime).toBe('2026-11-14T10:05:00+00:00');
         });
     });
+
+    it('keeps distinct activity records for the same move in two windows', async () => {
+        const alertAt = (windowHours: number, elapsedSeconds: number) => ({
+            window_hours: windowHours, min_movement_bps: 200, count: 1,
+            status: 'complete',
+            baseline_tolerance_seconds: 1800,
+            coverage: coverage(1, 1, 1),
+            alerts: [{
+                source: 'polymarket', source_id: 'same', question: 'Identical move?',
+                category: null, url: null, yes_price: 0.7, previous_yes_price: 0.5,
+                movement: 0.2, absolute_movement: 0.2, direction: 'up',
+                baseline_observed_at: '2026-11-14T06:00:00+00:00',
+                // Same current observation and same movement, different window.
+                current_observed_at: '2026-11-14T10:00:00+00:00',
+                elapsed_seconds: elapsedSeconds,
+            }],
+        });
+        (global.fetch as jest.Mock).mockImplementation((url: string) => {
+            if (!url.includes('/prediction-markets/alerts')) {
+                return Promise.resolve(new JsonTestResponse(JSON.stringify({ sources: [] })));
+            }
+            return Promise.resolve(new JsonTestResponse(JSON.stringify(
+                url.includes('window_hours=4') ? alertAt(4, 14_400) : alertAt(1, 3_600),
+            )));
+        });
+        localStorage.removeItem('vnibb-alert-activity-v1');
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
+
+        await waitFor(() => {
+            expect(screen.getByText(/over 1\.0h/i)).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Last 4h' }));
+        await waitFor(() => {
+            expect(screen.getByText(/over 4\.0h/i)).toBeInTheDocument();
+        });
+
+        const stored: Array<{ detail?: string }> = JSON.parse(
+            localStorage.getItem('vnibb-alert-activity-v1') || '[]',
+        );
+        // Both comparisons survive: a shared ID would drop the second, leaving
+        // only one window's interval evidence in the bell.
+        expect(stored).toHaveLength(2);
+        const details = stored.map((item) => item.detail).join('\n');
+        expect(details).toMatch(/over 1\.00h \(window 1h\)/);
+        expect(details).toMatch(/over 4\.00h \(window 4h\)/);
+    });
+
+    it('records the stale subset qualifier in bell activity', async () => {
+        await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 1,
+            status: 'stale',
+            baseline_tolerance_seconds: 1800,
+            coverage: coverage(3, 3, 1),
+            alerts: [{
+                source: 'polymarket', source_id: 'p-1', question: 'Partial coverage?',
+                category: null, url: null, yes_price: 0.6, previous_yes_price: 0.55,
+                movement: 0.05, absolute_movement: 0.05, direction: 'up',
+                baseline_observed_at: '2026-11-14T09:00:00+00:00',
+                current_observed_at: '2026-11-14T10:05:00+00:00',
+                elapsed_seconds: 3900,
+            }],
+        });
+        await waitFor(() => {
+            expect(screen.getByText(/Partial coverage\?/i)).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            const stored: Array<{ detail?: string }> = JSON.parse(
+                localStorage.getItem('vnibb-alert-activity-v1') || '[]',
+            );
+            expect(stored[0]?.detail).toMatch(
+                /coverage incomplete \(1 of 3 markets evaluated, status stale\)/,
+            );
+            expect(stored[0]?.detail).not.toMatch(/No market moved/);
+        });
+    });
 });

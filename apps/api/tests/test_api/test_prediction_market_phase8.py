@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import delete, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
@@ -595,8 +596,17 @@ async def test_alerts_return_both_timestamps_and_the_measured_interval(client, t
     assert body["count"] == 1
     row = body["alerts"][0]
     assert row["movement"] == pytest.approx(0.2)
-    assert datetime.fromisoformat(row["baseline_observed_at"]).replace(tzinfo=UTC) == now - timedelta(hours=1)
-    assert datetime.fromisoformat(row["current_observed_at"]).replace(tzinfo=UTC) == now
+    # SQLite returns these naive; the response must still state UTC explicitly,
+    # or a client east of UTC renders the source instant shifted.
+    baseline_at = datetime.fromisoformat(row["baseline_observed_at"])
+    current_at = datetime.fromisoformat(row["current_observed_at"])
+    observed_through = datetime.fromisoformat(body["data_observed_through"])
+    for stamp in (baseline_at, current_at, observed_through):
+        assert stamp.tzinfo is not None
+        assert stamp.utcoffset() == timedelta(0)
+    assert baseline_at == now - timedelta(hours=1)
+    assert current_at == now
+    assert observed_through == now
     assert row["elapsed_seconds"] == 3600
     # 1h window with a 30-minute band.
     assert 1800 <= row["elapsed_seconds"] <= 5400
@@ -707,3 +717,57 @@ async def test_alerts_tolerance_is_derived_from_the_shared_cadence(client):
     assert scheduled_cadence == body["cadence_minutes"]
     assert body["baseline_tolerance_seconds"] == 2 * scheduled_cadence * 60
     assert body["baseline_tolerance_seconds"] == int(tolerance.total_seconds())
+
+
+@pytest.mark.asyncio
+async def test_alerts_read_coverage_and_rows_in_one_statement(client, test_db, monkeypatch):
+    """One statement, so a commit cannot land between the counts and the rows.
+
+    Four separate SELECTs let a catalogue or snapshot commit land in between: the
+    counts could report ``comparable_markets == 0`` while the row read returned an
+    alert, which the route then discarded as ``no_baseline`` with a nonzero
+    evaluated count. A single statement sees a single database snapshot, so that
+    interleaving is unrepresentable.
+    """
+    now = datetime.now(UTC).replace(microsecond=0)
+    test_db.add(_market(source="kalshi", source_id="one", question="CPI?", yes_price=0.7))
+    test_db.add_all([
+        _snapshot("one", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("one", now, 0.7, source="kalshi"),
+    ])
+    await test_db.commit()
+
+    original = AsyncSession.execute
+    statements: list[str] = []
+
+    async def counting(session, statement, *args, **kwargs):
+        statements.append(str(statement))
+        return await original(session, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", counting)
+    body = await _alerts(client, window_hours=1)
+
+    assert len(statements) == 1, statements
+    assert "UNION" in statements[0].upper()
+    assert body["coverage"] == {
+        "comparable_markets": 1, "current_markets": 1, "evaluated_markets": 1,
+    }
+    assert body["status"] == "complete"
+    assert body["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_alerts_coverage_bounds_the_alert_set(client, test_db):
+    """No alert may come from a market the coverage counts did not evaluate."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    for source_id, current_at in (("fresh", now), ("stale-current", now - timedelta(minutes=45))):
+        test_db.add(_market(source="kalshi", source_id=source_id, question="CPI?", yes_price=0.7))
+        test_db.add(_snapshot(source_id, now - timedelta(hours=1), 0.5, source="kalshi"))
+        test_db.add(_snapshot(source_id, current_at, 0.7, source="kalshi"))
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1)
+    coverage = body["coverage"]
+    assert coverage["evaluated_markets"] <= coverage["current_markets"] <= coverage["comparable_markets"]
+    assert len(body["alerts"]) <= coverage["evaluated_markets"]
+    assert body["status"] == "stale"

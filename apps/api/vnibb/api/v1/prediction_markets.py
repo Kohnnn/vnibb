@@ -39,7 +39,10 @@ from typing import Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Float, and_, case, cast, exists, func, literal_column, or_, select
+from sqlalchemy import (
+    DateTime, Float, Integer, and_, case, cast, exists, func, literal_column, null, or_,
+    select, union_all,
+)
 from sqlalchemy import String as SA_String
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -561,45 +564,60 @@ def _alert_legs_query(model, *, cutoff: datetime, now: datetime, tolerance: time
     return current, baseline
 
 
-async def _alert_coverage(
-    db: AsyncSession, current, baseline,
-) -> tuple[PredictionMarketAlertCoverage, datetime | None]:
-    """Count window coverage per market, before ``min_movement_bps`` and ``limit``.
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Re-attach UTC to a naive DB timestamp.
 
-    ``comparable`` has an admissible baseline, ``current`` an admissible current
-    observation, ``evaluated`` both. Nothing here is inferred from the cutoff,
-    and neither ``limit`` nor the movement threshold can change these numbers.
+    SQLite drops ``tzinfo`` on ``DateTime(timezone=True)`` columns, so the
+    intraday observation clocks arrive naive even though they are UTC. Passing
+    them through unchanged would serialize without an offset and shift every
+    consumer-facing time by the reader's local offset.
     """
-    evaluated = select(
-        func.count().label("evaluated"),
-        func.max(current.c.captured_at).label("observed_through"),
-    ).select_from(current.join(baseline, and_(
+    if value is None:
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+def _alert_evaluation(current, baseline, *, threshold: float, limit: int):
+    """Coverage and ranked alert rows evaluated by ONE statement.
+
+    Four separate SELECTs each re-read the eligible universe and both legs, so a
+    concurrent catalogue or snapshot commit can land between them and yield an
+    impossible reading (``evaluated > current``, or a ranked row from a market
+    the count treated as absent). One statement sees one database snapshot, so
+    the counts and the rows always agree. The coverage branch is scalar
+    subqueries over the legs, so it stays independent of threshold and limit.
+    """
+    pairs = current.join(baseline, and_(
         current.c.source == baseline.c.source,
         current.c.source_id == baseline.c.source_id,
-    )))
-    comparable_markets = int(
-        (await db.execute(select(func.count()).select_from(baseline))).scalar_one()
-    )
-    current_markets = int(
-        (await db.execute(select(func.count()).select_from(current))).scalar_one()
-    )
-
-    row = (await db.execute(evaluated)).one()
-    return (
-        PredictionMarketAlertCoverage(
-            comparable_markets=comparable_markets,
-            current_markets=current_markets,
-            evaluated_markets=int(row.evaluated or 0),
-        ),
-        row.observed_through,
-    )
-
-
-def _alert_rows(current, baseline, *, threshold: float, limit: int):
-    """Rank evaluated movements by size in SQL, then transfer at most ``limit``."""
+    ))
     delta = current.c.yes_price - baseline.c.yes_price
-    return (
+    evaluated = select(current.c.source).select_from(pairs).subquery()
+
+    coverage = select(
+        literal_column("'coverage'").label("kind"),
+        select(func.count()).select_from(baseline).scalar_subquery().label("comparable_markets"),
+        select(func.count()).select_from(current).scalar_subquery().label("current_markets"),
+        select(func.count()).select_from(evaluated).scalar_subquery().label("evaluated_markets"),
+        select(func.max(current.c.captured_at)).select_from(pairs)
+        .scalar_subquery().label("observed_through"),
+        cast(null(), SA_String).label("source"),
+        cast(null(), SA_String).label("source_id"),
+        cast(null(), SA_String).label("question"),
+        cast(null(), SA_String).label("category"),
+        cast(null(), SA_String).label("url"),
+        cast(null(), Float).label("yes_price"),
+        cast(null(), Float).label("previous_yes_price"),
+        cast(null(), DateTime).label("current_observed_at"),
+        cast(null(), DateTime).label("baseline_observed_at"),
+        cast(null(), Float).label("movement"),
+    )
+    rows = (
         select(
+            literal_column("'alert'").label("kind"),
+            cast(null(), Integer).label("comparable_markets"),
+            cast(null(), Integer).label("current_markets"),
+            cast(null(), Integer).label("evaluated_markets"),
+            cast(null(), DateTime).label("observed_through"),
             current.c.source,
             current.c.source_id,
             current.c.question,
@@ -611,13 +629,20 @@ def _alert_rows(current, baseline, *, threshold: float, limit: int):
             baseline.c.captured_at.label("baseline_observed_at"),
             delta.label("movement"),
         )
-        .select_from(current.join(baseline, and_(
-            current.c.source == baseline.c.source,
-            current.c.source_id == baseline.c.source_id,
-        )))
+        .select_from(pairs)
         .where(func.abs(delta) >= threshold)
-        .order_by(func.abs(delta).desc(), current.c.source, current.c.source_id)
-        .limit(limit)
+    )
+    statement = union_all(coverage, rows).subquery()
+    return (
+        select(statement)
+        # Coverage is the first UNION branch, so it must sort first.
+        .order_by(
+            case((statement.c.kind == "coverage", 0), else_=1),
+            func.abs(statement.c.movement).desc(),
+            statement.c.source,
+            statement.c.source_id,
+        )
+        .limit(limit + 1)
     )
 
 
@@ -1039,8 +1064,9 @@ async def list_prediction_market_alerts(
         current, baseline = _alert_legs_query(
             PredictionMarketIntradaySnapshot, cutoff=cutoff, now=now, tolerance=tolerance,
         )
-        coverage, observed_through = await _alert_coverage(db, current, baseline)
-        rows = (await db.execute(_alert_rows(
+        # One statement: the coverage counts and at most ``limit`` ranked alerts,
+        # so the two can never disagree about which markets this window saw.
+        result = (await db.execute(_alert_evaluation(
             current, baseline, threshold=min_movement_bps / 10_000.0, limit=limit,
         ))).all()
     except (OperationalError, ProgrammingError) as error:
@@ -1050,18 +1076,27 @@ async def list_prediction_market_alerts(
         if not _is_missing_prediction_market_relation(error):
             raise
         return _response(status="unavailable")
+    counts, rows = result[0], result[1:]
+    coverage = PredictionMarketAlertCoverage(
+        comparable_markets=int(counts.comparable_markets or 0),
+        current_markets=int(counts.current_markets or 0),
+        evaluated_markets=int(counts.evaluated_markets or 0),
+    )
+    observed_through = _as_utc(counts.observed_through)
 
     if coverage.comparable_markets == 0 and coverage.current_markets == 0:
         return _response(status="empty", coverage=coverage)
     if coverage.comparable_markets == 0:
-        return _response(status="no_baseline", coverage=coverage)
+        return _response(status="no_baseline", coverage=coverage, observed_through=observed_through)
 
     alerts = []
     for row in rows:
-        elapsed = int((row.current_observed_at - row.baseline_observed_at).total_seconds())
+        baseline_at = _as_utc(row.baseline_observed_at)
+        current_at = _as_utc(row.current_observed_at)
+        elapsed = int((current_at - baseline_at).total_seconds())
         # The disclosed quantity must agree with the SQL bounds even if a future
         # query edit, clock skew or naive/aware mixing slips through.
-        if not span - tolerance <= timedelta(seconds=elapsed) <= span + tolerance:
+        if not (0 < elapsed and span - tolerance <= timedelta(seconds=elapsed) <= span + tolerance):
             continue
         alerts.append(PredictionMarketAlertRow(
             source=row.source, source_id=row.source_id, question=row.question,
@@ -1069,8 +1104,8 @@ async def list_prediction_market_alerts(
             previous_yes_price=row.previous_yes_price, movement=row.movement,
             absolute_movement=abs(row.movement),
             direction="up" if row.movement > 0 else "down",
-            baseline_observed_at=row.baseline_observed_at,
-            current_observed_at=row.current_observed_at,
+            baseline_observed_at=baseline_at,
+            current_observed_at=current_at,
             elapsed_seconds=elapsed,
         ))
 
