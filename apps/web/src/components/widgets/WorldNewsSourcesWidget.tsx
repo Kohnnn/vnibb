@@ -336,7 +336,7 @@ function WorldNewsSourcesWidgetComponent({
                         title={failedFeed ? `${failedFeed.reason} at ${formatFailedFeedTime(failedFeed.failed_at)}` : undefined}
                         className={failedFeed
                           ? 'inline-flex max-w-full items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)] hover:border-[var(--color-state-border)]'
-                          : 'inline-flex max-w-full items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-positive)] hover:border-[var(--color-state-border)]'}
+                          : 'inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)] hover:border-[var(--color-state-border)]'}
                       >
                         <Radio className="h-2.5 w-2.5" />
                         Feed {index + 1}{failedFeed ? ' failed' : ''}

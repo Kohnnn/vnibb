@@ -352,7 +352,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                                   {deal.insider_name || 'Insider'}
                                 </div>
                                 <div className="text-[10px] text-[var(--text-muted)]">
-                                  {deal.insider_position || '—'}
+                                  {deal.insider_position || EMPTY_VALUE}
                                 </div>
                               </div>
                               <div className="text-right">

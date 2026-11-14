@@ -5,6 +5,7 @@ import { ExternalLink, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatTimestamp } from '@/lib/formatDate';
 import { normalizeNewsItemTimestamp } from '@/lib/newsTime';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface NewsCardProps {
   news: {
@@ -27,18 +28,28 @@ interface NewsCardProps {
   };
 }
 
+// Provider-classified direction, kept on the direction tokens because the card
+// names it in words as well: colour is never the only signal (brand §13).
 const SENTIMENT_CONFIG = {
-  positive: { icon: TrendingUp, color: 'text-[var(--color-positive)]', bg: 'bg-[var(--color-positive-bg)]' },
-  bullish: { icon: TrendingUp, color: 'text-[var(--color-positive)]', bg: 'bg-[var(--color-positive-bg)]' },
-  negative: { icon: TrendingDown, color: 'text-[var(--color-negative)]', bg: 'bg-[var(--color-negative-bg)]' },
-  bearish: { icon: TrendingDown, color: 'text-[var(--color-negative)]', bg: 'bg-[var(--color-negative-bg)]' },
-  neutral: { icon: Minus, color: 'text-[var(--text-muted)]', bg: 'bg-[var(--bg-hover)]' },
+  positive: { icon: TrendingUp, label: 'Positive', color: 'text-[var(--color-positive)]', bg: 'bg-[var(--color-positive-bg)]' },
+  bullish: { icon: TrendingUp, label: 'Bullish', color: 'text-[var(--color-positive)]', bg: 'bg-[var(--color-positive-bg)]' },
+  negative: { icon: TrendingDown, label: 'Negative', color: 'text-[var(--color-negative)]', bg: 'bg-[var(--color-negative-bg)]' },
+  bearish: { icon: TrendingDown, label: 'Bearish', color: 'text-[var(--color-negative)]', bg: 'bg-[var(--color-negative-bg)]' },
+  neutral: { icon: Minus, label: 'Neutral', color: 'text-[var(--text-muted)]', bg: 'bg-[var(--bg-hover)]' },
 };
 
+export function getSentimentBadgeTone(sentiment: string | null | undefined) {
+  const key = (sentiment || 'neutral').toLowerCase() as keyof typeof SENTIMENT_CONFIG;
+  return SENTIMENT_CONFIG[key] || SENTIMENT_CONFIG.neutral;
+}
+
 function NewsCardComponent({ news }: NewsCardProps) {
-  const sentimentKey = (news.sentiment || 'neutral').toLowerCase() as keyof typeof SENTIMENT_CONFIG;
-  const sentiment = SENTIMENT_CONFIG[sentimentKey] || SENTIMENT_CONFIG.neutral;
+  const sentiment = getSentimentBadgeTone(news.sentiment);
   const SentimentIcon = sentiment.icon;
+  // A missing source publication date is unknown, never "now" (brand §22).
+  const publishedLabel = formatTimestamp(
+    normalizeNewsItemTimestamp(news as unknown as Record<string, unknown>),
+  );
 
   return (
     <a
@@ -48,9 +59,13 @@ function NewsCardComponent({ news }: NewsCardProps) {
       className="block p-3 hover:bg-[var(--bg-hover)] transition-colors group border-b border-[var(--border-color)] last:border-0"
     >
       <div className="flex gap-3">
-        {/* Sentiment indicator */}
-        <div className={cn("mt-1 p-1.5 rounded shrink-0", sentiment.bg)}>
-          <SentimentIcon className={cn("w-4 h-4", sentiment.color)} />
+        {/* Direction is named in words next to the glyph, so the card still
+            reads without colour (brand §13). */}
+        <div className={cn('mt-1 flex shrink-0 flex-col items-center gap-0.5 rounded p-1.5', sentiment.bg)}>
+          <SentimentIcon className={cn('w-4 h-4', sentiment.color)} />
+          <span className={cn('text-[8px] font-bold uppercase tracking-wide', sentiment.color)}>
+            {sentiment.label}
+          </span>
         </div>
 
         <div className="flex-1 min-w-0">
@@ -92,7 +107,9 @@ function NewsCardComponent({ news }: NewsCardProps) {
             <span className="px-1.5 py-0.5 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-secondary)]">{news.source}</span>
             <span>•</span>
             <span className="flex items-center gap-1">
-                {formatTimestamp(normalizeNewsItemTimestamp(news as unknown as Record<string, unknown>))}
+                {publishedLabel === '-' ? (
+                  <span title="The provider did not supply a publication date for this item.">{EMPTY_VALUE}</span>
+                ) : publishedLabel}
             </span>
             
             {news.symbols && news.symbols.length > 0 && (

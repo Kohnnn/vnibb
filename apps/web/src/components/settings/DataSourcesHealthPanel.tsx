@@ -10,11 +10,9 @@ import { EMPTY_VALUE } from '@/lib/units';
  * per backend table with last sync, age in days, status pill, and the
  * scheduled next sync window.
  *
- * Status colors:
- *   - fresh:    emerald
- *   - stale:    amber
- *   - critical: rose
- *   - unknown:  slate (no timestamp signal — table empty or schema drift)
+ * Status presentation (brand §13): saved/loading/warning/failed are system
+ * states, so every pill is neutral or blue and the word carries the meaning.
+ * Red and green are reserved for financial direction and are never used here.
  */
 
 import { CheckCircle2, AlertTriangle, AlertCircle, RefreshCw, HelpCircle } from 'lucide-react';

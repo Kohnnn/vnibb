@@ -458,8 +458,8 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                     <Bell size={12} className="text-[var(--color-accent-primary)]" />
                     <span className="text-[var(--text-muted)]">{activeAlerts.length} active</span>
                     {wsConnected && (
-                        <span className="flex items-center gap-1 text-[var(--color-positive)]">
-                            <span className="w-1.5 h-1.5 bg-[var(--color-positive-bg)] rounded-full animate-pulse" />
+                        <span className="flex items-center gap-1 text-[var(--color-accent-primary)]">
+                            <span className="w-1.5 h-1.5 bg-[var(--color-accent-fill)] rounded-full animate-pulse" />
                             Live
                         </span>
                     )}
@@ -633,7 +633,9 @@ interface AlertItemProps {
 function AlertItem({ alert, onRemove, onToggle }: AlertItemProps) {
     const isPercentCondition = alert.condition.includes('change');
     const Icon = alert.condition === 'above' || alert.condition === 'change_up' ? ArrowUp : ArrowDown;
-    const iconColor = alert.condition === 'above' || alert.condition === 'change_up' ? 'text-[var(--color-positive)]' : 'text-[var(--color-negative)]';
+    // A threshold's direction is not a gain or a loss: the arrow carries the
+    // direction, the colour stays interaction blue (#200).
+    const iconColor = 'text-[var(--color-accent-primary)]';
 
     return (
         <div
@@ -691,15 +693,15 @@ interface TriggeredAlertItemProps {
 }
 
 function TriggeredAlertItem({ alert, onRemove }: TriggeredAlertItemProps) {
-    const triggeredLabel = alert.triggeredAt ? formatTimestamp(alert.triggeredAt) : '—';
+    const triggeredLabel = alert.triggeredAt ? formatTimestamp(alert.triggeredAt) : EMPTY_VALUE;
 
     return (
-        <div className="flex items-center justify-between p-2 rounded bg-[var(--color-positive-bg)] border border-[var(--color-state-border)] group">
+        <div className="flex items-center justify-between p-2 rounded bg-[var(--color-state-bg)] border border-[var(--color-state-border)] group">
             <div className="flex items-center gap-2 min-w-0">
-                <Check size={14} className="text-[var(--color-positive)] shrink-0" />
+                <Check size={14} className="text-[var(--color-accent-primary)] shrink-0" />
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-[var(--color-positive)]">{alert.symbol}</span>
+                        <span className="text-sm font-medium text-[var(--text-primary)]">{alert.symbol}</span>
                         <span className="break-words whitespace-normal text-xs text-[var(--text-secondary)]">
                             {formatCondition(alert.condition)} {formatThreshold(alert)}
                         </span>

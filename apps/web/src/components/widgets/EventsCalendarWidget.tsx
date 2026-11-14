@@ -11,6 +11,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatShortDate } from '@/lib/formatDate';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface EventsCalendarWidgetProps {
     symbol: string;
@@ -26,15 +27,18 @@ const eventTypeIcons: Record<string, typeof Calendar> = {
     DEFAULT: Calendar,
 };
 
+// Event categories are taxonomy, not financial direction (#200). Green marks a
+// dividend event even when the payout fell, and reads as "favourable"; the type
+// word already carries the distinction, so every type uses the blue state tint.
 const eventTypeColors: Record<string, string> = {
-    DIVIDEND: 'text-[var(--color-positive)] bg-[var(--color-positive-bg)]',
+    DIVIDEND: 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]',
     SPLIT: 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]',
     AGM: 'text-[var(--color-accent-primary)] bg-[var(--color-state-bg)]',
     DEFAULT: 'text-[var(--text-secondary)] bg-[var(--bg-tertiary)]',
 };
 
 function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr || dateStr === 'None' || dateStr === '') return '-';
+    if (!dateStr) return EMPTY_VALUE;
     return formatShortDate(dateStr);
 }
 

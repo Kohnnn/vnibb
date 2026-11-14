@@ -281,7 +281,7 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                     ))}
                     {item.relevanceScore !== null && mode === 'related' && !item.isMarketWideFallback && (
                       <span
-                        className="rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-positive)]"
+                        className="rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]"
                         title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
                       >
                         {item.matchReason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevanceScore * 100)}/100

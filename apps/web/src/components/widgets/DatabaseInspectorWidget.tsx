@@ -11,6 +11,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchAPI } from '@/lib/api';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { EMPTY_VALUE } from '@/lib/units';
 
 interface TableData {
   name: string;
@@ -44,13 +45,15 @@ async function fetchTableSample(table: string, limit = 500): Promise<{ rows: Rec
   });
 }
 
-function formatValue(val: any): string {
-  if (val === null || val === undefined) return '-';
+/** A stored NULL is an absence, so it reads `n/a`; the dialect omits it as
+ *  `-`, which a reader mistakes for a measured flat (#198 glyph contract). */
+function formatValue(val: unknown): string {
+  if (val === null || val === undefined) return EMPTY_VALUE;
   if (typeof val === 'number') return val.toLocaleString();
-  if (typeof val === 'boolean') return val ? 'YES' : 'NO';
+  if (typeof val === 'boolean') return val ? 'true' : 'false';
   if (typeof val === 'string' && val.includes('T') && val.length > 10) {
       try {
-          return new Date(val).toLocaleDateString();
+          return new Date(val).toLocaleDateString('en-GB');
       } catch { return val; }
   }
   return String(val);
@@ -129,16 +132,25 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
 
   const columns = useMemo((): VirtualizedColumn<any>[] => {
     if (!rows.length || !sampleData?.rows?.[0]) return [];
-    return Object.keys(sampleData.rows[0]).map(key => ({
-        id: key,
-        header: key,
-        accessor: (row) => (
-            <span className="text-[var(--text-secondary)] font-mono text-[10px]">
-                {formatValue(row[key])}
-            </span>
-        ),
-        width: 120
-    }));
+    // Brand §21: financial figures are right-aligned in IBM Plex Mono. Column
+    // type comes from the sample itself, so a numeric column aligns right and a
+    // text column stays left instead of every column looking like a label.
+    return Object.keys(sampleData.rows[0]).map(key => {
+        const numeric = sampleData.rows.some((row) => typeof row[key] === 'number');
+        return {
+            id: key,
+            header: key,
+            align: numeric ? 'right' as const : 'left' as const,
+            accessor: (row: Record<string, unknown>) => (
+                <span className={numeric
+                    ? 'font-mono text-[10px] tabular-nums text-[var(--text-primary)]'
+                    : 'text-[10px] text-[var(--text-secondary)]'}>
+                    {formatValue(row[key])}
+                </span>
+            ),
+            width: 120,
+        };
+    });
   }, [rows, sampleData]);
 
   const handleExport = () => {
@@ -198,9 +210,9 @@ function DatabaseInspectorWidgetComponent({ onRemove, lastRefresh, onDataChange 
               <button
                 key={table.name}
                 onClick={() => setSelectedTable(table.name)}
-                className={`px-2 py-1 text-[10px] font-bold rounded transition-all uppercase ${
+                className={`px-2 py-1 text-[10px] font-semibold rounded-[var(--widget-radius)] transition-colors ${
                   selectedTable === table.name
-                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)] shadow-lg'
+                    ? 'bg-[var(--color-accent-fill)] text-[var(--color-on-accent)]'
                     : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
