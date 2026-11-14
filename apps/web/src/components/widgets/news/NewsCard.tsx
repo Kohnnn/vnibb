@@ -59,13 +59,11 @@ function NewsCardComponent({ news }: NewsCardProps) {
       className="block p-3 hover:bg-[var(--bg-hover)] transition-colors group border-b border-[var(--border-color)] last:border-0"
     >
       <div className="flex gap-3">
-        {/* Direction is named in words next to the glyph, so the card still
-            reads without colour (brand §13). */}
-        <div className={cn('mt-1 flex shrink-0 flex-col items-center gap-0.5 rounded p-1.5', sentiment.bg)}>
+        {/* The glyph carries the direction visually; the word is set in the meta
+            row at the approved compact size. An 8 px caption was below the
+            readable minimum (brand §13). */}
+        <div className={cn('mt-1 shrink-0 rounded p-1.5', sentiment.bg)}>
           <SentimentIcon className={cn('w-4 h-4', sentiment.color)} />
-          <span className={cn('text-[8px] font-bold uppercase tracking-wide', sentiment.color)}>
-            {sentiment.label}
-          </span>
         </div>
 
         <div className="flex-1 min-w-0">
@@ -105,6 +103,10 @@ function NewsCardComponent({ news }: NewsCardProps) {
           {/* Meta */}
           <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-tighter">
             <span className="px-1.5 py-0.5 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-secondary)]">{news.source}</span>
+            <span className={cn('flex items-center gap-1 rounded border border-[var(--color-state-border)] px-1.5 py-0.5 text-[length:var(--font-size-sm)] font-bold normal-case', sentiment.color)}>
+              <SentimentIcon className="w-3 h-3" aria-hidden />
+              {sentiment.label}
+            </span>
             <span>•</span>
             <span className="flex items-center gap-1">
                 {publishedLabel === '-' ? (
