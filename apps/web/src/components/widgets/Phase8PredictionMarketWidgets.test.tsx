@@ -266,112 +266,151 @@ describe('PredictionAlertsWidget', () => {
         expect(screen.queryByText('Old bucket alert')).not.toBeInTheDocument();
     });
 
-    it('claims no movement only for an evaluated zero-alert window', async () => {
+    const renderAlerts = async (body: Record<string, unknown>) => {
+        localStorage.removeItem('vnibb-alert-activity-v1');
         (global.fetch as jest.Mock).mockResolvedValueOnce(
-            new JsonTestResponse(JSON.stringify({
-                window_hours: 1,
-                min_movement_bps: 200,
-                count: 0,
-                alerts: [],
-                status: 'evaluated_zero',
-                coverage: {
-                    eligible_markets: 4,
-                    observed_markets: 4,
-                    current_markets: 4,
-                    evaluated_markets: 4,
-                    excluded_stale_markets: 0,
-                    excluded_no_baseline_markets: 0,
-                },
-                latest_observation_at: '2026-11-14T10:00:00+00:00',
-            })),
+            new JsonTestResponse(JSON.stringify(body)),
         );
         (global.fetch as jest.Mock).mockResolvedValue(
             new JsonTestResponse(JSON.stringify({ sources: [] })),
         );
         const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
-        await waitFor(() => {
-            expect(screen.getByText(/No alerts/i)).toBeInTheDocument();
+        const onDataChange = jest.fn();
+        render(
+            <QueryClientProvider client={client}>
+                <PredictionAlertsWidget onDataChange={onDataChange} />
+            </QueryClientProvider>,
+        );
+        return onDataChange;
+    };
+
+    const coverage = (comparable: number, current: number, evaluated: number) => ({
+        comparable_markets: comparable,
+        current_markets: current,
+        evaluated_markets: evaluated,
+    });
+
+    it('permits the no-movement claim only for a complete evaluated window', async () => {
+        const onDataChange = await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 0, alerts: [],
+            status: 'complete',
+            baseline_tolerance_seconds: 1800,
+            coverage: coverage(4, 4, 4),
+            data_observed_through: '2026-11-14T10:00:00+00:00',
         });
-        expect(screen.getByText(/No market moved more than 2pp/i)).toBeInTheDocument();
-        expect(screen.getByText(/4\/4 evaluated/i)).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByText(/No market moved more than 2pp/i)).toBeInTheDocument();
+        });
+        expect(
+            screen.getByText('No market moved more than 2pp in the last 1h (4 markets evaluated).'),
+        ).toBeInTheDocument();
         expect(screen.getByText(/Feed loaded/i)).toBeInTheDocument();
+        const runtime = onDataChange.mock.calls.at(-1)?.[0]?.__widgetRuntime;
+        expect(runtime.provenance.coverage).toBe('complete');
+        expect(runtime.layoutHint.empty).toBe(true);
     });
 
-    it('reports unavailable storage instead of an empty feed', async () => {
-        (global.fetch as jest.Mock).mockResolvedValueOnce(
-            new JsonTestResponse(JSON.stringify({
-                window_hours: 1,
-                min_movement_bps: 200,
-                count: 0,
-                alerts: [],
-                status: 'unavailable_storage',
-                storage_available: false,
-                coverage: null,
-                latest_observation_at: null,
-            })),
-        );
-        (global.fetch as jest.Mock).mockResolvedValue(
-            new JsonTestResponse(JSON.stringify({ sources: [] })),
-        );
-        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
-        await waitFor(() => {
-            expect(screen.getByText(/Alert storage unavailable/i)).toBeInTheDocument();
+    it('never claims no movement when coverage is incomplete', async () => {
+        const onDataChange = await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 0, alerts: [],
+            status: 'stale',
+            baseline_tolerance_seconds: 1800,
+            coverage: coverage(3, 2, 2),
+            data_observed_through: '2026-11-14T10:00:00+00:00',
         });
-        expect(screen.queryByText(/No market moved more than/i)).not.toBeInTheDocument();
-        expect(screen.queryByText(/No alerts/i)).not.toBeInTheDocument();
-        expect(screen.getByText(/Feed unavailable/i)).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByText(/Coverage incomplete/i)).toBeInTheDocument();
+        });
+        expect(screen.getByText(/2 of 3 markets evaluated/i)).toBeInTheDocument();
+        expect(screen.queryByText(/No market moved/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/Feed stale/i)).toBeInTheDocument();
+        const payload = onDataChange.mock.calls.at(-1)?.[0];
+        expect(payload.__widgetRuntime.layoutHint.empty).toBe(false);
+        expect(payload.__widgetRuntime.provenance.coverage).toBe('partial');
+        expect(payload.feedState).toBe('stale');
+        expect(payload.evaluatedMarkets).toBe(2);
+        expect(payload.comparableMarkets).toBe(3);
+        expect(payload.baselineToleranceSeconds).toBe(1800);
     });
 
-    it('labels sparse coverage and shows the actual comparison interval', async () => {
-        (global.fetch as jest.Mock).mockResolvedValueOnce(
-            new JsonTestResponse(JSON.stringify({
-                window_hours: 1,
-                min_movement_bps: 200,
-                count: 1,
-                status: 'evaluated',
-                baseline_tolerance_seconds: 1800,
-                latest_observation_at: '2026-11-14T10:05:00+00:00',
-                coverage: {
-                    eligible_markets: 3,
-                    observed_markets: 3,
-                    current_markets: 2,
-                    evaluated_markets: 2,
-                    excluded_stale_markets: 1,
-                    excluded_no_baseline_markets: 0,
-                },
-                alerts: [{
-                    source: 'polymarket',
-                    source_id: 'p-1',
-                    question: 'Will CPI print above 3%?',
-                    category: 'economic',
-                    url: null,
-                    yes_price: 0.6,
-                    previous_yes_price: 0.55,
-                    movement: 0.05,
-                    absolute_movement: 0.05,
-                    direction: 'up',
-                    observed_at: '2026-11-14T10:05:00+00:00',
-                    baseline_at: '2026-11-14T09:00:00+00:00',
-                    elapsed_seconds: 3900,
-                }],
-            })),
-        );
-        (global.fetch as jest.Mock).mockResolvedValue(
-            new JsonTestResponse(JSON.stringify({ sources: [] })),
-        );
-        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
+    it('reports an unreadable store instead of an empty feed', async () => {
+        const onDataChange = await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 0, alerts: [],
+            status: 'unavailable',
+            baseline_tolerance_seconds: 1800,
+            coverage: null,
+            data_observed_through: null,
+        });
+        await waitFor(() => {
+            expect(screen.getByText(/Alerts unavailable/i)).toBeInTheDocument();
+        });
+        expect(screen.queryByText(/No market moved/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/Feed unavailable/i)).toBeInTheDocument();
+        expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance.coverage).toBe('unknown');
+    });
+
+    it('distinguishes an empty store from missing history', async () => {
+        await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 0, alerts: [],
+            status: 'empty',
+            coverage: coverage(0, 0, 0),
+        });
+        await waitFor(() => {
+            expect(screen.getByText(/No intraday market observations yet/i)).toBeInTheDocument();
+        });
+        expect(screen.queryByText(/No market moved/i)).not.toBeInTheDocument();
+    });
+
+    it('explains a missing baseline without claiming a flat market', async () => {
+        await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 0, alerts: [],
+            status: 'no_baseline',
+            baseline_tolerance_seconds: 1800,
+            coverage: coverage(0, 1, 0),
+        });
+        await waitFor(() => {
+            expect(screen.getByText(/Not enough intraday history for the last 1h/i)).toBeInTheDocument();
+        });
+        expect(screen.getByText(/within 30 min of the 1h cutoff/i)).toBeInTheDocument();
+        expect(screen.queryByText(/No market moved/i)).not.toBeInTheDocument();
+    });
+
+    it('shows the measured interval and coverage evidence for a stale alert set', async () => {
+        const onDataChange = await renderAlerts({
+            window_hours: 1, min_movement_bps: 200, count: 1,
+            status: 'stale',
+            baseline_tolerance_seconds: 1800,
+            data_observed_through: '2026-11-14T10:05:00+00:00',
+            coverage: coverage(3, 3, 1),
+            alerts: [{
+                source: 'polymarket',
+                source_id: 'p-1',
+                question: 'Will CPI print above 3%?',
+                category: 'economic',
+                url: null,
+                yes_price: 0.6,
+                previous_yes_price: 0.55,
+                movement: 0.05,
+                absolute_movement: 0.05,
+                direction: 'up',
+                baseline_observed_at: '2026-11-14T09:00:00+00:00',
+                current_observed_at: '2026-11-14T10:05:00+00:00',
+                elapsed_seconds: 3900,
+            }],
+        });
         await waitFor(() => {
             expect(screen.getByText(/CPI print above/i)).toBeInTheDocument();
-            expect(screen.getByText(/2\/3 evaluated/i)).toBeInTheDocument();
         });
+        expect(screen.getByText(/1\/3 markets evaluated/i)).toBeInTheDocument();
+        expect(screen.getByText(/over 1\.1h/i)).toBeInTheDocument();
+        const payload = onDataChange.mock.calls.at(-1)?.[0];
+        expect(payload.__widgetRuntime.provenance.updatedAt).toBe('2026-11-14T10:05:00+00:00');
         await waitFor(() => {
-            const stored: Array<{ detail?: string }> = JSON.parse(
+            const stored: Array<{ detail?: string; triggerTime?: string }> = JSON.parse(
                 localStorage.getItem('vnibb-alert-activity-v1') || '[]',
             );
-            expect(stored[0]?.detail).toMatch(/over 1\.1h/);
+            expect(stored[0]?.detail).toMatch(/over 1\.08h \(window 1h\)/);
+            expect(stored[0]?.triggerTime).toBe('2026-11-14T10:05:00+00:00');
         });
     });
 });
