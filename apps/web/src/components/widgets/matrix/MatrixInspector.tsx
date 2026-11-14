@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { APIError } from '@/lib/api';
@@ -18,14 +18,20 @@ interface Props {
   onClose: () => void;
   onReview: (cell: MatrixCell) => void;
   onQuarantine: (reason: unknown) => boolean;
+  /**
+   * The control that opened this inspector. It survives the inline <-> portal
+   * switch at the 767/768 breakpoint, so the trap must restore it rather than
+   * whatever is focused when the trap attaches — which is BODY after a reparent.
+   */
+  returnFocusTo?: RefObject<HTMLElement | null>;
 }
 
-export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, onClose, onReview, onQuarantine }: Props) {
+export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, onClose, onReview, onQuarantine, returnFocusTo }: Props) {
   const [tab, setTab] = useState<'Result' | 'Evidence' | 'Basis' | 'Review'>('Result');
   const [evidence, setEvidence] = useState<MatrixEvidence[] | null>(null);
   const [error, setError] = useState('');
   const [narrow, setNarrow] = useState(false);
-  const panel = useDialogFocusTrap<HTMLElement>({ enabled: narrow, onClose });
+  const panel = useDialogFocusTrap<HTMLElement>({ enabled: narrow, onClose, returnFocusTo });
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
     const update = () => setNarrow(media.matches);

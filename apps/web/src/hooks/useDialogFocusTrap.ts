@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 
 const activeDialogs: HTMLElement[] = []
 
@@ -27,15 +27,31 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 export function useDialogFocusTrap<T extends HTMLElement>({
   enabled,
   onClose,
+  returnFocusTo,
+  initialFocusTo,
 }: {
   enabled: boolean
   onClose?: () => void
+  /**
+   * The original opener for this open session. Pass it when the dialog can
+   * reparent (inline <-> portal) while open: this effect only re-runs on
+   * `enabled`, so after a reparent `document.activeElement` is already BODY
+   * and would otherwise be captured as the "previous" target to restore.
+   */
+  returnFocusTo?: RefObject<HTMLElement | null>
+  /** Overrides first-tabbable as the entry point (e.g. a search field). */
+  initialFocusTo?: RefObject<HTMLElement | null>
 }) {
   const dialogRef = useRef<T | null>(null)
   const onCloseRef = useRef(onClose)
   useEffect(() => {
     onCloseRef.current = onClose
   }, [onClose])
+
+  const returnFocusToRef = useRef(returnFocusTo)
+  returnFocusToRef.current = returnFocusTo
+  const initialFocusToRef = useRef(initialFocusTo)
+  initialFocusToRef.current = initialFocusTo
 
   useEffect(() => {
     if (!enabled || typeof document === 'undefined' || typeof window === 'undefined') {
@@ -47,8 +63,11 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       return
     }
 
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
+    // BODY means "nothing is focused", never a return target: a reparent or a
+    // programmatic blur must not replace the real opener.
+    const captured = document.activeElement
+    const previouslyFocused = captured instanceof HTMLElement && captured !== document.body
+      ? captured
       : null
 
     activeDialogs.push(dialog)
@@ -56,8 +75,11 @@ export function useDialogFocusTrap<T extends HTMLElement>({
 
     const focusDialog = () => {
       if (!isTopDialog()) return
-      const firstFocusable = getFocusableElements(dialog)[0]
-      ;(firstFocusable || dialog).focus({ preventScroll: true })
+      const preferred = initialFocusToRef.current?.current
+      const target = preferred?.isConnected && dialog.contains(preferred)
+        ? preferred
+        : getFocusableElements(dialog)[0]
+      ;(target || dialog).focus({ preventScroll: true })
     }
 
     const focusTimeout = window.setTimeout(focusDialog, 0)
@@ -131,8 +153,14 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       document.removeEventListener('focusin', handleFocusIn)
       const wasTopDialog = isTopDialog()
       activeDialogs.splice(activeDialogs.lastIndexOf(dialog), 1)
-      if (wasTopDialog && previouslyFocused && document.contains(previouslyFocused)) {
-        previouslyFocused.focus({ preventScroll: true })
+      // A reparent (inline <-> portal at the 767px boundary) swaps the element
+      // while the dialog stays open. Restoring outward then strands focus on
+      // BODY outside the still-open dialog, so a live replacement node means
+      // "keep containing", not "closed".
+      const reparented = dialogRef.current !== dialog && Boolean(dialogRef.current?.isConnected)
+      const returnTarget = returnFocusToRef.current?.current ?? previouslyFocused
+      if (wasTopDialog && !reparented && returnTarget?.isConnected) {
+        returnTarget.focus({ preventScroll: true })
       }
     }
   }, [enabled])

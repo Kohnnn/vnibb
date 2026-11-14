@@ -47,7 +47,9 @@ describe('WidgetLibrary drawer recovery', () => {
 
         rerender(<WidgetLibrary isOpen onClose={onClose} />);
 
-        fireEvent.keyDown(window, { key: 'Escape' });
+        // The drawer's own modal trap owns Escape; a real keystroke originates
+        // on the focused control inside the dialog.
+        fireEvent.keyDown(screen.getByRole('dialog', { name: 'Add widgets' }), { key: 'Escape' });
         expect(onClose).toHaveBeenCalledTimes(1);
 
         rerender(<WidgetLibrary isOpen={false} onClose={onClose} />);
