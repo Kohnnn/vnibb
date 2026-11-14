@@ -102,7 +102,7 @@ from vnibb.services.data_pipeline import (
 )
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
-from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
+from vnibb.services.fundamental_valuation import admit_fundamental_snapshot, fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 from vnibb.services.vietcap_client import VietcapClient
@@ -2412,7 +2412,10 @@ async def _load_latest_fundamental_snapshot(symbol: str) -> dict[str, Any] | Non
     if not service.enabled:
         return None
     snapshots = await service.get_latest_fundamental_snapshots([symbol.upper()])
-    return snapshots.get(symbol.upper())
+    # A retained document written under a superseded formula still holds
+    # missing-capex-as-zero and nonnull-count numbers. Admission nulls those
+    # fields here so no cached pre-v4 value is republished as current.
+    return admit_fundamental_snapshot(snapshots.get(symbol.upper()))
 
 
 def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:

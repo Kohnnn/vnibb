@@ -1247,3 +1247,48 @@ async def test_enrich_missing_ratio_metrics_requires_reported_valuation_with_unk
     assert item.bvps == 20_000.0
     assert item.pe == provider_pe
     assert item.pb == provider_pb
+
+
+@pytest.mark.asyncio
+async def test_latest_snapshot_withholds_values_from_a_superseded_formula(monkeypatch):
+    """A retained pre-v4 document must not republish old-formula numbers.
+
+    Admission happens at the persistence boundary (`_load_latest_fundamental_
+    snapshot`), so every consumer of the loaded document sees the same
+    withheld fields rather than each re-deriving the schema check.
+    """
+    from vnibb.api.v1.equity import _load_latest_fundamental_snapshot
+    from vnibb.services.fundamental_valuation import SCHEMA_VERSION
+
+    legacy = {
+        "symbol": "HPG",
+        "schemaVersion": SCHEMA_VERSION - 1,
+        "intrinsicValue": 12_000,
+        "marginOfSafety": 30.0,
+        "valuationMethod": "dcf",
+        "valuationVerdict": "Undervalued",
+        "revenueCagr5y": 0.18,
+        "profitCagr5y": 0.21,
+        "fcfPositive": True,
+        "roe": 21.4,
+        "inputs": {"baseFcf": 1_000, "periodsUsed": ["2022", "2023"]},
+    }
+
+    class Service:
+        enabled = True
+
+        async def get_latest_fundamental_snapshots(self, symbols):
+            return {symbol: dict(legacy, inputs=dict(legacy["inputs"])) for symbol in symbols}
+
+    monkeypatch.setattr("vnibb.api.v1.equity.get_mongo_market_data_service", lambda: Service())
+
+    admitted = await _load_latest_fundamental_snapshot("hpg")
+
+    # Derived values go; unrelated observations stay.
+    for field in ("intrinsicValue", "marginOfSafety", "valuationMethod", "valuationVerdict",
+                  "revenueCagr5y", "profitCagr5y", "fcfPositive"):
+        assert admitted[field] is None
+    assert admitted["roe"] == 21.4
+    assert admitted["inputs"]["baseFcf"] == 1_000
+    assert "predates formula schema" in admitted["inputs"]["derivedUnavailableReason"]
+    assert admitted["inputs"]["derivedWithheldFields"]
