@@ -3,16 +3,19 @@ import userEvent from '@testing-library/user-event';
 import { WidgetLibrary } from './WidgetLibrary';
 
 const mockAddWidget = jest.fn();
+let mockEditable = true;
 
 jest.mock('@/contexts/DashboardContext', () => ({
     useDashboard: () => ({
-        activeDashboard: { id: 'personal', name: 'Personal', isEditable: true },
+        activeDashboard: { id: 'personal', name: 'Personal', isEditable: mockEditable },
         activeTab: { id: 'tab', name: 'Tab', widgets: [] },
         addWidget: mockAddWidget,
     }),
 }));
 
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
+
+beforeEach(() => { mockEditable = true; mockAddWidget.mockClear(); });
 
 // #261: the drawer overlaid the workspace but its own controls were only the
 // first stop — Shift+Tab reached the icon-only X, a second Shift+Tab escaped to
@@ -78,6 +81,30 @@ describe('WidgetLibrary modal containment', () => {
 
             opener.remove();
             background.remove();
+        } finally {
+            jest.restoreAllMocks();
+        }
+    });
+
+    it('keeps a read-only workspace non-insertable and clears the selection when dismissed', async () => {
+        jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+        mockEditable = false;
+        try {
+            const { rerender } = render(<WidgetLibrary isOpen onClose={jest.fn()} />);
+
+            const addButtons = screen.getAllByRole('button', { name: 'Add' });
+            expect(addButtons.every((button) => button.hasAttribute('disabled'))).toBe(true);
+            fireEvent.click(addButtons[0]);
+            expect(mockAddWidget).not.toHaveBeenCalled();
+
+            // Selection state is dropped on dismissal, so a reopen starts clean.
+            mockEditable = true;
+            rerender(<WidgetLibrary isOpen onClose={jest.fn()} />);
+            fireEvent.click(screen.getAllByRole('checkbox', { name: /^Select / })[0]);
+            expect(screen.getByText(/1 selected/)).toBeInTheDocument();
+            rerender(<WidgetLibrary isOpen={false} onClose={jest.fn()} />);
+            rerender(<WidgetLibrary isOpen onClose={jest.fn()} />);
+            expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument();
         } finally {
             jest.restoreAllMocks();
         }

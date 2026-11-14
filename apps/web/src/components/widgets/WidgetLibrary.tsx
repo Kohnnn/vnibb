@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { WidgetPreview } from './WidgetPreview';
+import { getRegisteredWidgetIds } from '@/components/widgets/WidgetRegistry';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { WidgetType } from '@/types/dashboard';
 

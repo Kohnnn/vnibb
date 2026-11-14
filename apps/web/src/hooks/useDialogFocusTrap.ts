@@ -62,7 +62,6 @@ export function useDialogFocusTrap<T extends HTMLElement>({
     if (!dialog) {
       return
     }
-
     // BODY means "nothing is focused", never a return target: a reparent or a
     // programmatic blur must not replace the real opener.
     const captured = document.activeElement
@@ -101,7 +100,13 @@ export function useDialogFocusTrap<T extends HTMLElement>({
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!isTopDialog()) return
-      if (event.key === 'Escape' && onCloseRef.current) {
+      // A nested dialog may not be trapped itself (the inline Matrix inspector
+      // only traps when narrow) and its React onKeyDown runs after this native
+      // listener. Escape inside a descendant dialog belongs to that dialog, so
+      // one Escape closes one layer; the next reaches this one.
+      const target = event.target
+      const nestedDialog = target instanceof Element ? target.closest('[role="dialog"]') : null
+      if (event.key === 'Escape' && onCloseRef.current && !(nestedDialog && nestedDialog !== dialog)) {
         event.preventDefault()
         event.stopPropagation()
         onCloseRef.current()
@@ -137,10 +142,18 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       }
     }
 
+    // A nested overlay may own focus while open — e.g. a ticker picker or a
+    // Matrix inspector portalled to body from inside this dialog. Reclaiming
+    // would steal focus back to this layer and strand the picker.
+    const ownedDialog = (node: EventTarget | null) => node instanceof Element
+      ? node.closest('[role="dialog"]')
+      : null
+
     const handleFocusIn = (event: FocusEvent) => {
-      if (isTopDialog() && event.target instanceof Node && !dialog.contains(event.target)) {
-        focusDialog()
-      }
+      if (!isTopDialog() || !(event.target instanceof Node) || dialog.contains(event.target)) return
+      const nested = ownedDialog(event.target)
+      if (nested && nested !== dialog) return
+      focusDialog()
     }
 
     dialog.addEventListener('keydown', handleKeyDown)

@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MaximizedWidgetPortal } from './MaximizedWidgetPortal';
-import { MatrixInspector } from './matrix/MatrixInspector';
+import { MaximizedWidgetPortal } from '../MaximizedWidgetPortal';
+import { MatrixInspector } from './MatrixInspector';
 import type { MatrixSnapshot } from '@/types/matrix';
 
 // #236: at 1024px the inline inspector's Close owns focus; resizing to 321px
@@ -36,10 +36,18 @@ const snapshot: MatrixSnapshot = {
 function ResponsiveHarness() {
   const [maximized, setMaximized] = useState(false);
   const [inspected, setInspected] = useState(false);
+  // Mirrors MatrixWidget: the Inspect control is captured when it opens and
+  // restored after the inspector unmounts.
+  const focusOrigin = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (inspected || !focusOrigin.current) return;
+    const target = focusOrigin.current;
+    if (target.isConnected) target.focus({ preventScroll: true });
+  }, [inspected]);
   return <>
     <button onClick={() => setMaximized(true)}>Maximize widget</button>
     <MaximizedWidgetPortal isOpen={maximized} title="Matrix workspace" onClose={() => setMaximized(false)}>
-      <button onClick={() => setInspected(true)}>Inspect DEMO_A Signed number</button>
+      <button onClick={(event) => { focusOrigin.current = event.currentTarget; setInspected(true); }}>Inspect DEMO_A Signed number</button>
       {inspected && <MatrixInspector
         snapshot={snapshot}
         cell={snapshot.cells[0]}
@@ -69,7 +77,9 @@ async function openInspector(width: 'wide' | 'narrow', media: ControllableMediaQ
     expect(inspector).toHaveAttribute('aria-modal', 'true');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Close inspector' })).toHaveFocus());
   } else {
-    expect(inspector).not.toHaveAttribute('aria-modal');
+    // Inline it is not modal, but still reports the state explicitly; the
+    // reported live reading at 1024px was aria-modal="false".
+    expect(inspector).toHaveAttribute('aria-modal', 'false');
   }
   media.set(width === 'narrow');
   return { user, maximizeOpener, inspect, outer };
@@ -85,11 +95,12 @@ describe.each([
     jest.spyOn(window, 'matchMedia').mockReturnValue(media as unknown as MediaQueryList);
     try {
       const { user, maximizeOpener, inspect, outer } = await openInspector(opened, media);
-
-      // Cross the breakpoint with the inspector open.
+      // Cross the breakpoint with the inspector open. The reparent is a React
+      // state update, so wait for the new node rather than reuse the old one.
       media.set(resized === 'narrow');
+      await waitFor(() => expect(screen.getByRole('dialog', { name: 'Profit quality inspector' }))
+        .toHaveAttribute('aria-modal', resized === 'narrow' ? 'true' : 'false'));
       const inspector = screen.getByRole('dialog', { name: 'Profit quality inspector' });
-      expect(inspector).toHaveAttribute('aria-modal', resized === 'narrow' ? 'true' : 'false');
       await waitFor(() => expect(inspector.contains(document.activeElement)).toBe(true));
 
       // First Escape closes only the inspector and lands inside the still-open Matrix.

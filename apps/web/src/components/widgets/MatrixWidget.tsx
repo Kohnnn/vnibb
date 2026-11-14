@@ -213,14 +213,15 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     focusOrigin.current = document.activeElement as HTMLElement;
     setInspected({ dimension, resultId: cell?.result_id });
   };
-  const closeInspector = () => {
-    setInspected(null);
-    // Restore after the inspector unmounts and any child trap tears down: while
-    // narrow the trap restores this same node itself, and an immediate focus
-    // call would be bounced back into the still-mounted dialog.
+  const closeInspector = () => setInspected(null);
+  // Restore after the inspector has unmounted and its child trap has torn
+  // down; a synchronous focus inside the handler would be reclaimed by the
+  // still-mounted trap. Runs post-commit, so an Escape lands the opener.
+  useEffect(() => {
+    if (inspected || !focusOrigin.current) return;
     const target = focusOrigin.current;
-    queueMicrotask(() => { if (target?.isConnected) target.focus({ preventScroll: true }); });
-  };
+    if (target.isConnected) target.focus({ preventScroll: true });
+  }, [inspected]);
   const keyboard = (event: KeyboardEvent<HTMLButtonElement>, row: number, col: number, cell: MatrixCell) => {
     if (event.key === ' ') { event.preventDefault(); toggleCell(cell.result_id); return; }
     const offsets: Record<string, [number, number]> = { ArrowRight: [0, 1], ArrowLeft: [0, -1], ArrowDown: [1, 0], ArrowUp: [-1, 0] };
