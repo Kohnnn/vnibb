@@ -49,16 +49,21 @@ interface NewsArticle {
     matched_symbols?: string[];
     match_reason?: string | null;
     is_market_wide_fallback?: boolean;
+    association_class?: string | null;
 }
 
 function NewsAssociation({ article, symbol }: { article: NewsArticle; symbol: string }) {
     const matched = article.matched_symbols ?? [];
     const exact = matched.some(value => value.toUpperCase() === symbol.toUpperCase())
         && ['exact_symbol_title', 'exact_symbol_body', 'exact_symbol_related'].includes(article.match_reason ?? '');
-    const label = article.is_market_wide_fallback
+    const label = article.is_market_wide_fallback || article.association_class === 'general_market'
         ? 'Market-wide fallback'
-        : exact ? `Symbol mention: ${symbol}` : 'Association unverified';
-    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}.`;
+        : article.association_class === 'verified_sector'
+            ? 'Industry overlap · no company evidence'
+            : article.association_class === 'direct_company' || article.association_class === 'verified_peer'
+                ? (exact ? `Symbol mention: ${symbol}` : 'Association unverified')
+                : 'Association unverified';
+    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}; class: ${article.association_class ?? 'unavailable'}.`;
     return <span title={detail} className="text-[10px] text-[var(--text-muted)]">{label}</span>;
 }
 

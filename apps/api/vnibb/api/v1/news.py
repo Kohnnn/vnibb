@@ -86,6 +86,9 @@ class NewsArticle(BaseModel):
     matched_symbols: list[str] = []
     match_reason: str | None = None
     is_market_wide_fallback: bool = False
+    # #250: which association the row actually has, and the evidence for it.
+    association_class: str | None = None
+    match_evidence: dict[str, Any] = {}
 
 
 class NewsFeed(BaseModel):
@@ -153,6 +156,8 @@ async def get_news_feed(
                 matched_symbols=item.get("matched_symbols", []),
                 match_reason=item.get("match_reason"),
                 is_market_wide_fallback=bool(item.get("is_market_wide_fallback", False)),
+                association_class=item.get("association_class"),
+                match_evidence=item.get("match_evidence") or {},
             )
         )
 

@@ -43,6 +43,18 @@ function formatDividendType(type: string | null | undefined): string {
   return 'Other';
 }
 
+/** #250: only direct-company/verified-peer rows carry a ranking number. */
+function supportsRank(item: {
+  association_class?: string | null;
+  relevance_score?: number | null;
+}): boolean {
+  return (
+    (item.association_class === 'direct_company' || item.association_class === 'verified_peer') &&
+    typeof item.relevance_score === 'number' &&
+    item.relevance_score > 0
+  );
+}
+
 export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange }: NewsCorporateActionsWidgetProps) {
   const [pinned, setPinned] = useState<Record<string, boolean>>({});
   const {
@@ -252,14 +264,23 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                           {item.sentiment || 'neutral'}
                           {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
                         </span>
-                        {typeof item.relevance_score === 'number' && item.relevance_score > 0 ? (
+                        {(item.match_reason || item.association_class) && (
                           <span
                             className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 font-semibold uppercase text-[var(--color-accent-primary)]"
-                            title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
+                            title={
+                              supportsRank(item)
+                                ? 'Rule-based ranking score, not a probability of company relevance.'
+                                : 'Shared industry or unverified metadata only. No company evidence, so no relevance score is shown.'
+                            }
                           >
-                            {item.match_reason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevance_score * 100)}/100
+                            {item.association_class === 'verified_sector'
+                              ? 'industry overlap · no company evidence'
+                              : item.match_reason?.replaceAll('_', ' ') || 'association unverified'}
+                            {supportsRank(item)
+                              ? ` · rank ${Math.round((item.relevance_score as number) * 100)}/100`
+                              : ''}
                           </span>
-                        ) : null}
+                        )}
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         {item.source && <span>{item.source}</span>}
