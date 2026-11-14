@@ -28,6 +28,23 @@ from vnibb.providers.vnstock.stock_quote import StockQuoteData
 from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
 
+
+def annual_lineage(*fields: str) -> dict:
+    """The lineage the pipeline persists beside an admitted annual row.
+
+    Growth arithmetic requires a declared shared basis; a bare row is legacy
+    evidence and publishes no rate.
+    """
+    return {
+        "_financial_lineage": {
+            "source": "vietcap", "currency": "VND", "value_unit": "VND",
+            "consolidation_basis": "consolidated", "flow_basis": "annual",
+            "unit_metadata": {
+                field: {"source_unit": "VND", "value_unit": "VND"} for field in fields
+            },
+        }
+    }
+
 @pytest.fixture
 def quote_database(test_engine, monkeypatch):
     monkeypatch.setattr("vnibb.api.v1.equity.async_session_factory", async_sessionmaker(
@@ -1848,6 +1865,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 net_income=200,
                 eps=2.0,
                 ebitda=300,
+                raw_data=annual_lineage("revenue", "net_income", "eps", "ebitda"),
             ),
             IncomeStatement(
                 id=2,
@@ -1859,6 +1877,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 net_income=160,
                 eps=1.6,
                 ebitda=240,
+                raw_data=annual_lineage("revenue", "net_income", "eps", "ebitda"),
             ),
             BalanceSheet(
                 id=1,
@@ -1867,6 +1886,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 period_type="year",
                 fiscal_year=2024,
                 total_assets=5000,
+                raw_data=annual_lineage("total_assets"),
             ),
             BalanceSheet(
                 id=2,
@@ -1875,6 +1895,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 period_type="year",
                 fiscal_year=2023,
                 total_assets=4000,
+                raw_data=annual_lineage("total_assets"),
             ),
         ]
     )
@@ -1894,9 +1915,9 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
 async def test_growth_endpoint_msr_negative_base_keeps_reported_earnings(client, test_db):
     test_db.add_all([
         IncomeStatement(id=91, symbol="MSR", period="2024", period_type="year", fiscal_year=2024,
-                        net_income=-1_638_456_685_000),
+                        net_income=-1_638_456_685_000, raw_data=annual_lineage("net_income")),
         IncomeStatement(id=92, symbol="MSR", period="2025", period_type="year", fiscal_year=2025,
-                        net_income=11_292_963_000),
+                        net_income=11_292_963_000, raw_data=annual_lineage("net_income")),
     ])
     await test_db.commit()
     response = await client.get("/api/v1/equity/MSR/growth")
@@ -1908,7 +1929,7 @@ async def test_growth_endpoint_msr_negative_base_keeps_reported_earnings(client,
     assert detail["current"] == 11_292_963_000
     assert detail["negative_base"] is True
     assert detail["transition"] == "loss_to_profit"
-    assert detail["basis_status"] == "legacy_basis_unconfirmed"
+    assert detail["basis_status"] == "confirmed"
 
 
 @pytest.mark.asyncio
