@@ -125,8 +125,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
-      - name: Install Chromium
-        run: pnpm --filter frontend exec playwright install --with-deps chromium
+      # Browser provisioning is split so a failure names its own cause. The
+      # combined `install --with-deps` step failed with a bare exit 1 on this
+      # workflow's own main revision, leaving no attributable output: the apt
+      # dependency layer and the browser download are different failure domains
+      # and are now separate, cached, and deadline-bounded.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-chromium-
+      - name: Install Chromium browser
+        run: pnpm --filter frontend exec playwright install chromium
+      - name: Install Chromium system dependencies
+        run: pnpm --filter frontend exec playwright install-deps chromium
       - name: Build frontend
         run: pnpm --filter frontend build
       - name: Run Chromium release smoke
@@ -185,9 +199,11 @@ jobs:
           key: playwright-${{ runner.os }}-${{ matrix.engine }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             playwright-${{ runner.os }}-${{ matrix.engine }}-
-      # Same install form as chromium-release-smoke; only the engine differs.
-      - name: Install ${{ matrix.engine }}
-        run: pnpm --filter frontend exec playwright install --with-deps ${{ matrix.engine }}
+      # Same split as chromium-release-smoke so a failure names the layer.
+      - name: Install ${{ matrix.engine }} browser
+        run: pnpm --filter frontend exec playwright install ${{ matrix.engine }}
+      - name: Install ${{ matrix.engine }} system dependencies
+        run: pnpm --filter frontend exec playwright install-deps ${{ matrix.engine }}
       - name: Build frontend
         run: pnpm --filter frontend build
       - name: Run ${{ matrix.engine }} smoke specs

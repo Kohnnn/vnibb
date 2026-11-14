@@ -9,6 +9,7 @@ environment variables in production will cause the application to fail fast.
 """
 
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -582,6 +583,15 @@ class Settings(BaseSettings):
                     errors.append(
                         "SCHEDULER_ROLE=scheduler requires SCHEDULER_LOCK_ENABLED=true and "
                         "SCHEDULER_LOCK_MODE=required in production"
+                    )
+            else:
+                # One authorized daily owner: a non-scheduler role may not start
+                # APScheduler, else two processes acquire the same session.
+                requested = (os.getenv("SKIP_SCHEDULER_STARTUP") or "").strip().lower()
+                if requested in {"0", "false", "no", "off"}:
+                    errors.append(
+                        f"SCHEDULER_ROLE={self.scheduler_role} must not start the scheduler in "
+                        "production; exactly one producer runs as SCHEDULER_ROLE=scheduler"
                     )
 
             if errors:

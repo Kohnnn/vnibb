@@ -205,3 +205,39 @@ def fhsc_financials(symbol: str, payload: Any, *, statement_type: str, period: s
     data = _envelope(payload, list)
     granularity = "quarter" if period.startswith("quarter") else "year"
     return [_financial_row(_symbol(symbol), entry, canonical_type, granularity) for entry in data]
+
+
+# Documented FHSC surface, bound to the endpoints the transforms above consume.
+# A capability absent from this table is *unavailable*: it is never a zero, an
+# empty frame, or a silent fallback to another source.
+CAPABILITIES: dict[str, dict[str, Any]] = {
+    "bars": {"available": True, "endpoint": "market/history", "transform": "fhsc_history"},
+    "quotes": {"available": True, "endpoint": "market/quote", "transform": "fhsc_quote"},
+    "listing": {
+        "available": True,
+        "endpoint": "market/symbol",
+        "transform": "fhsc_listing",
+        "limitation": "per-symbol detail only; a listing is not a symbol universe",
+    },
+    "fundamentals": {
+        "available": True,
+        "endpoint": "fundamental/statements",
+        "transform": "fhsc_financials",
+        "limitation": "metric codes are raw; canonical alias, unit and basis stay unknown",
+    },
+    "news": {"available": False, "reason": "fhsc_news_transform_not_implemented"},
+    "corporate_actions": {"available": False, "reason": "fhsc_corporate_actions_not_documented"},
+    "trading_calendar": {"available": False, "reason": "fhsc_calendar_not_documented"},
+}
+
+
+def capability_report() -> dict[str, Any]:
+    """Report each capability as available or explicitly unavailable with a reason."""
+    return {
+        "source": "fhsc",
+        "acquisition": "offline_only",
+        "capabilities": {name: dict(spec) for name, spec in CAPABILITIES.items()},
+        "unavailable": sorted(
+            name for name, spec in CAPABILITIES.items() if not spec["available"]
+        ),
+    }
