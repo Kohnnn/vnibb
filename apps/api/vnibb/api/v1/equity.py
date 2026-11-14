@@ -283,89 +283,6 @@ async def _refresh_profile_cache(symbol: str) -> None:
             raise
         logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
 
-# Model field -> SQL column for the financial fields whose names differ. The
-# MCP reader applies the same mapping, so both readers resolve one column.
-_STATEMENT_SQL_COLUMNS = {
-    "pre_tax_profit": "income_before_tax",
-    "profit_before_tax": "income_before_tax",
-    "tax_expense": "income_tax",
-    "long_term_liabilities": "non_current_liabilities",
-}
-_STATEMENT_CANONICAL_ALIASES = {
-    "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
-    "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
-    "equity": "total_equity", "total_equity": "equity",
-    "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
-    "capital_expenditure": "capex", "capex": "capital_expenditure",
-}
-
-
-
-
-def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restored: FinancialStatementData) -> FinancialStatementData:
-    """Serve a stored row from its `canonical_data` while the two agree.
-
-    A sync can leave a canonical that no longer describes the row the upsert
-    kept. Restoring such a canonical would serve a value its lineage does not
-    back, and copying the stored column over it while keeping the canonical's
-    provenance certifies it anyway. Only the disagreeing metrics are withheld,
-    each with its own unavailable reason, so the rest of the statement stays
-    readable.
-    """
-    unavailable = dict(restored.unit_metadata)
-    cleared = {}
-    withheld = {}
-    seen: set[str] = set()
-    for name in FinancialStatementData.model_fields:
-        if name in seen or name in {"fiscal_year", "fiscal_quarter"}:
-            continue
-        # A semantic alias names the same metric (`capex` for
-        # `capital_expenditure`), so every spelling shares one decision and a
-        # withheld metric is cleared under all of its names.
-        family = {name, *(alias for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
-                          if target == name)}
-        seen |= family
-        # The SQL column may be named for any spelling in the family (`capex`
-        # has no column; `capital_expenditure` does).
-        column = next((_STATEMENT_SQL_COLUMNS.get(field, field) for field in sorted(family)
-                       if hasattr(row, _STATEMENT_SQL_COLUMNS.get(field, field))
-                       and isinstance(getattr(row, _STATEMENT_SQL_COLUMNS.get(field, field)), (int, float))),
-                      _STATEMENT_SQL_COLUMNS.get(name, name))
-        stored_value = getattr(row, column, None)
-        if not isinstance(stored_value, (int, float)):
-            # No stored value: the canonical is the only copy and is served as
-            # it is, which is what enriches a row that predates a metric.
-            continue
-        stated_fields = [field for field in family if field in restored.model_fields_set]
-        stated = sorted({value for field in stated_fields
-                         if isinstance(value := getattr(restored, field, None), (int, float))})
-        # Only a field the canonical actually states can disagree. The sync dumps
-        # every field, but a partial canonical may omit a metric entirely; that
-        # says nothing about the column, so the stored value is served as it is.
-        # A stated null is an explicit no-value and disagrees; an omitted metric
-        # says nothing and leaves the stored observation served.
-        disagrees = stated != [stored_value] if stated_fields else False
-        if disagrees:
-            for field in family:
-                cleared[field] = None
-                unavailable[field] = {
-                    **unavailable.get(field, {}),
-                    "unavailable_reason": "stored_statement_disagrees_with_lineage",
-                }
-            withheld[column] = stored_value
-        else:
-            # Stated-and-agreeing, or omitted: serve the stored observation under
-            # every spelling the canonical may be read by.
-            for field in family:
-                cleared[field] = stored_value
-    if cleared:
-        restored = restored.model_copy(update={**cleared, "unit_metadata": unavailable})
-    # The withheld column value is still a real stored observation; disclose it
-    # rather than dropping it from the response.
-    restored.raw_data = {**raw, **({"withheld_observations": withheld} if withheld else {})}
-    return restored
-
-
 async def _load_financial_statement_fallback(
     db: AsyncSession,
     symbol: str,
@@ -418,109 +335,14 @@ async def _load_financial_statement_fallback(
     result = await db.execute(stmt)
     rows = result.scalars().all()
 
+    # One shared projection + admission path, so a reader cannot invent a
+    # spelling the writer never persisted or admit a field the loader withholds.
     fallback_rows = [
-        FinancialStatementData(
-            symbol=row.symbol,
-            period=row.period,
-            statement_type=statement_type,
-            fiscal_year=row.fiscal_year,
-            fiscal_quarter=row.fiscal_quarter,
-            revenue=getattr(row, "revenue", None),
-            cost_of_revenue=getattr(row, "cost_of_revenue", None),
-            gross_profit=getattr(row, "gross_profit", None),
-            operating_income=getattr(row, "operating_income", None),
-            pre_tax_profit=getattr(
-                row,
-                "pre_tax_profit",
-                getattr(row, "income_before_tax", None),
-            ),
-            profit_before_tax=getattr(
-                row,
-                "pre_tax_profit",
-                getattr(row, "income_before_tax", None),
-            ),
-            tax_expense=getattr(row, "tax_expense", getattr(row, "income_tax", None)),
-            interest_expense=getattr(row, "interest_expense", None),
-            depreciation=getattr(row, "depreciation", None),
-            selling_general_admin=getattr(row, "selling_general_admin", None),
-            research_development=getattr(row, "research_development", None),
-            other_income=getattr(row, "other_income", None),
-            net_income=getattr(row, "net_income", None),
-            ebitda=getattr(row, "ebitda", None),
-            eps=getattr(row, "eps", None),
-            eps_diluted=getattr(row, "eps_diluted", None),
-            total_assets=getattr(row, "total_assets", None),
-            total_liabilities=getattr(row, "total_liabilities", None),
-            total_equity=getattr(row, "total_equity", None),
-            cash_and_equivalents=getattr(row, "cash_and_equivalents", None),
-            cash=getattr(row, "cash_and_equivalents", getattr(row, "cash", None)),
-            inventory=getattr(row, "inventory", None),
-            current_assets=getattr(row, "current_assets", None),
-            fixed_assets=getattr(row, "fixed_assets", None),
-            current_liabilities=getattr(row, "current_liabilities", None),
-            long_term_liabilities=getattr(
-                row,
-                "long_term_liabilities",
-                getattr(row, "non_current_liabilities", None),
-            ),
-            retained_earnings=getattr(row, "retained_earnings", None),
-            short_term_debt=getattr(row, "short_term_debt", None),
-            long_term_debt=getattr(row, "long_term_debt", None),
-            accounts_receivable=getattr(row, "accounts_receivable", None),
-            accounts_payable=getattr(row, "accounts_payable", None),
-            customer_deposits=getattr(row, "customer_deposits", None),
-            goodwill=getattr(row, "goodwill", None),
-            intangible_assets=getattr(row, "intangible_assets", None),
-            operating_cash_flow=getattr(row, "operating_cash_flow", None),
-            investing_cash_flow=getattr(row, "investing_cash_flow", None),
-            financing_cash_flow=getattr(row, "financing_cash_flow", None),
-            free_cash_flow=getattr(row, "free_cash_flow", None),
-            net_change_in_cash=getattr(row, "net_change_in_cash", None),
-            net_cash_flow=getattr(row, "net_change_in_cash", None),
-            capex=getattr(row, "capex", getattr(row, "capital_expenditure", None)),
-            capital_expenditure=getattr(
-                row,
-                "capital_expenditure",
-                getattr(row, "capex", None),
-            ),
-            dividends_paid=getattr(row, "dividends_paid", None),
-            stock_repurchased=getattr(row, "stock_repurchased", None),
-            debt_repayment=getattr(row, "debt_repayment", None),
-            raw_data=getattr(row, "raw_data", None),
+        _statement_admission.admit_persisted_statement(
+            row, statement_type, "quarter" if period_upper == "TTM" else period,
         )
         for row in rows
     ]
-    for index, (row, statement) in enumerate(zip(rows, fallback_rows, strict=True)):
-        raw = getattr(row, "raw_data", None) or {}
-        lineage = raw.get("_financial_lineage") or {}
-        canonical = lineage.get("canonical_data")
-        if isinstance(canonical, dict):
-            restored = FinancialStatementData.model_validate(canonical)
-            stored_identity = (statement.period, statement.fiscal_year, statement.fiscal_quarter)
-            restored_identity = (restored.period, restored.fiscal_year, restored.fiscal_quarter)
-            if _financial_statement_identity(statement) != _financial_statement_identity(restored):
-                restored = admit_statement_rows([restored.model_copy(update={
-                    "period": stored_identity[0], "fiscal_year": restored_identity[1],
-                    "fiscal_quarter": restored_identity[2],
-                })], period)[0]
-                restored.unavailable_reason = "conflicting_fiscal_identity"
-                for name in FinancialStatementData.model_fields:
-                    if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
-                        setattr(restored, name, None)
-            # A column value is served from `canonical_data` only when the
-            # lineage still describes the row that was stored. Adopting a
-            # disagreeing column while keeping the canonical's provenance would
-            # relabel a value the lineage does not back as admitted.
-            fallback_rows[index] = _restore_lineage_statement(row, raw, model, restored)
-            statement = fallback_rows[index]
-        else:
-            statement.source = getattr(row, "source", None)
-            # No accepted lineage: the row's basis is unconfirmed, so `currency`
-            # and `value_unit` stay unset here. This annotation is the row's
-            # contract; enrichment adds per-metric reasons beside it (#206).
-            statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
-        statement.updated_at = getattr(row, "updated_at", None)
-    fallback_rows = admit_statement_rows(fallback_rows, "quarter" if period_upper == "TTM" else period)
 
     if period_upper == "TTM":
         return _build_ttm_financial_statement_rows(fallback_rows, statement_type=statement_type)
@@ -5648,9 +5470,21 @@ async def get_growth_rates(
         .limit(8)
     )
 
-    annual_income = (await db.execute(annual_income_stmt)).scalars().all()
-    annual_balance = (await db.execute(annual_balance_stmt)).scalars().all()
-    quarterly_income = (await db.execute(quarterly_income_stmt)).scalars().all()
+    # Read every persisted row through the shared restoration + admission, so a
+    # disagreeing canonical, a rejected field or a conflicting fiscal identity is
+    # withheld here exactly as the statement endpoints withhold it (#246).
+    annual_income = [
+        _statement_admission.admit_persisted_statement(row, "income", "year")
+        for row in (await db.execute(annual_income_stmt)).scalars().all()
+    ]
+    annual_balance = [
+        _statement_admission.admit_persisted_statement(row, "balance", "year")
+        for row in (await db.execute(annual_balance_stmt)).scalars().all()
+    ]
+    quarterly_income = [
+        _statement_admission.admit_persisted_statement(row, "income", "quarter")
+        for row in (await db.execute(quarterly_income_stmt)).scalars().all()
+    ]
 
     current_annual = annual_income[0] if annual_income else None
     previous_annual = annual_income[1] if len(annual_income) > 1 else None
@@ -5671,7 +5505,11 @@ async def get_growth_rates(
             )
             .limit(1)
         )
-        same_quarter_prev_year = (await db.execute(comparison_stmt)).scalar_one_or_none()
+        previous_quarter_row = (await db.execute(comparison_stmt)).scalar_one_or_none()
+        same_quarter_prev_year = (
+            _statement_admission.admit_persisted_statement(previous_quarter_row, "income", "quarter")
+            if previous_quarter_row is not None else None
+        )
 
     yoy: dict[str, Optional[float]] = {
         "revenue_growth": None,

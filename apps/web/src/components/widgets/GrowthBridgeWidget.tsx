@@ -35,6 +35,11 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
     [query.data?.data]
   )
   const hasData = rows.some((row) => row.annual !== null || row.quarter !== null)
+  // A returned admission reason is content, not absence: a rejected basis or
+  // unit is a different state from missing history and must be stated (#246).
+  const withheldReasons = Array.from(new Set(
+    rows.flatMap((row) => [row.annualReason, row.quarterReason]).filter((reason): reason is string => Boolean(reason)),
+  ))
   const availableGrowthPoints = rows.reduce((count, row) => count + (row.annual !== null ? 1 : 0) + (row.quarter !== null ? 1 : 0), 0)
   const expectedGrowthPoints = 9
   const annualLabel = query.data?.data?.as_of?.annual || 'Annual'
@@ -104,6 +109,20 @@ export function GrowthBridgeWidget({ id, symbol, onRemove, onDataChange }: Growt
           <WidgetSkeleton lines={7} />
         ) : query.error && !hasData ? (
           <WidgetError error={query.error as Error} onRetry={() => void query.refetch()} />
+        ) : !hasData && withheldReasons.length > 0 ? (
+          <div className="space-y-2" data-testid="growth-withheld">
+            <div className="text-[11px] text-[var(--text-secondary)]">
+              Growth is unavailable for {upperSymbol}: the retained statements do not form an admitted comparison.
+            </div>
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+              <ul className="space-y-1 text-[11px] text-[var(--color-warning)]">
+                {rows.flatMap((row) => ([
+                  row.annualReason ? <li key={`${row.key}-annual`}>{row.label} (annual): {row.annualReason}</li> : null,
+                  row.quarterReason ? <li key={`${row.key}-quarter`}>{row.label} (quarter): {row.quarterReason}</li> : null,
+                ]))}
+              </ul>
+            </div>
+          </div>
         ) : !hasData ? (
           <WidgetEmpty
             message={`No growth bridge for ${upperSymbol}`}

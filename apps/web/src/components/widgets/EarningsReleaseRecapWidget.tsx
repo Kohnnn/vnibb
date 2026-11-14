@@ -106,6 +106,25 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             ?? withheldFieldReason(comparableIncome, field)
     );
 
+    // The per-metric admission results the tiles use, published verbatim to the
+    // widget context so an export cannot describe a withheld rate as growth (#258).
+    const metricReasons = useMemo(() => {
+        if (!latestIncome) return {};
+        const describe = (field: string, current: number | null | undefined, previous: number | null | undefined) => {
+            const result = yoyFor(field, current, previous);
+            return { value: result.value, unavailable_reason: result.reason };
+        };
+        return {
+            revenue: describe('revenue', latestIncome.revenue, comparableIncome?.revenue),
+            net_income: describe('net_income', latestIncome.net_income, comparableIncome?.net_income),
+            eps: describe('eps', latestIncome.eps, comparableIncome?.eps),
+        };
+    }, [comparableIncome, latestIncome, comparisonReason]);
+
+    const qualityReportedReason = earningsQualityQuery.data?.error
+        ?? earningsQualityQuery.data?.data?.coverage?.unavailable_reason
+        ?? null;
+
     const recapRows = useMemo(() => {
         if (!latestIncome) return [];
         const metric = (
@@ -193,7 +212,15 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
             : `earnings quality is unavailable${qualityReason ? ` (${qualityReason})` : ''}`;
 
         return `${revenueText}, ${earningsText}, and ${qualityText}.`;
-    }, [comparableIncome?.net_income, comparableIncome?.revenue, earningsQualityQuery.data?.data, earningsQualityQuery.data?.error, latestIncome]);
+        // The memo must observe the admission decision, not just the numbers:
+        // a refetch can withhold a rate while the amounts stay identical.
+    }, [
+        comparableIncome,
+        comparisonReason,
+        earningsQualityQuery.data?.data,
+        earningsQualityQuery.data?.error,
+        latestIncome,
+    ]);
 
     const hasData = Boolean(latestIncome || latestCash || earningsQualityQuery.data?.data || newsQuery.data?.data?.length || eventsQuery.data?.data?.length);
     const isLoading = incomeQuery.isLoading && cashFlowQuery.isLoading && newsQuery.isLoading && eventsQuery.isLoading;
@@ -225,12 +252,13 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                 comparison_period: comparableIncome?.period ?? null,
                 expected_comparison_period: comparisonKey,
                 comparison_unavailable_reason: comparisonReason,
+                metric_unavailable_reasons: metricReasons,
                 cash_period: latestCash?.period ?? null,
                 cash_mismatch_period: cashMismatchPeriod,
-                quality_unavailable_reason: earningsQualityQuery.data?.error ?? null,
+                quality_unavailable_reason: qualityReportedReason,
             },
         }));
-    }, [cashMismatchPeriod, combinedError, comparableIncome?.period, comparisonKey, comparisonReason, earningsQualityQuery.data?.error, fetchedAt, hasData, latestCash?.period, latestIncome?.period, onDataChange, symbol]);
+    }, [cashMismatchPeriod, combinedError, comparableIncome?.period, comparisonKey, comparisonReason, earningsQualityQuery.data?.error, fetchedAt, hasData, latestCash?.period, latestIncome?.period, metricReasons, onDataChange, qualityReportedReason, symbol]);
 
     return (
         <WidgetContainer

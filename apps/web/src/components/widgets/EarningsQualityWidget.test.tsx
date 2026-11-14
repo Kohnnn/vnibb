@@ -28,7 +28,7 @@ function reply(data: object | undefined, error: string | null = null) {
     refetch: jest.fn(),
     dataUpdatedAt: 1750000000000,
   } as never);
-  return render(<EarningsQualityWidget id="quality" symbol="HPG" />);
+  return render(<EarningsQualityWidget symbol="HPG" />);
 }
 
 describe('earnings quality unavailable coverage', () => {
@@ -41,7 +41,8 @@ describe('earnings quality unavailable coverage', () => {
     expect(screen.getByText(/Earnings quality unavailable/).textContent).toContain(
       'Insufficient admitted quarterly statement coverage',
     );
-    expect(screen.queryByText('Quality Grade')).toBeNull();
+    // The banner keeps its label but carries no ordinal grade letter.
+    expect(screen.queryByText(/^[A-D]$/)).toBeNull();
     expect(screen.queryByText(/Stable/)).toBeNull();
     expect(screen.queryByText(/^A$/)).toBeNull();
   });
@@ -58,5 +59,31 @@ describe('earnings quality unavailable coverage', () => {
     expect(screen.getByText('Quality Grade')).toBeInTheDocument();
     expect(screen.getByText('B')).toBeInTheDocument();
     expect(screen.getByText('Improving')).toBeInTheDocument();
+  });
+
+  it('shows admitted ratios without grading a partial scorecard', () => {
+    // #257: one usable ratio is an observation, not a grade and not "no data".
+    reply({
+      data: {
+        grade: null, quality_score: null, trend: null, checks: [],
+        accruals_ratio_pct: -3.25, revenue_quality_pct: null, earnings_persistence: null,
+        coverage: {
+          status: 'partial',
+          unavailable_reason: 'Incomplete admitted inputs for a full earnings-quality scorecard; individual admitted ratios are reported without a grade.',
+          required_components: { accruals: true, revenue_quality: false },
+        },
+      },
+    });
+
+    expect(screen.getByTestId('quality-partial')).toBeInTheDocument();
+    // Both the grade banner and the trend say so; neither invents a label.
+    expect(screen.getAllByText('Not graded').length).toBe(2);
+    expect(screen.getByText('-3.25%')).toBeInTheDocument();
+    // Unreported components stay blank, not zero.
+    expect(screen.getAllByText('n/a', { selector: 'div.font-mono' }).length).toBe(2);
+    // The banner keeps its label but carries no ordinal grade letter.
+    expect(screen.queryByText(/^[A-D]$/)).toBeNull();
+    expect(screen.queryByText(/Stable/)).toBeNull();
+    expect(screen.queryByText(/No quality conditions met/)).toBeNull();
   });
 });

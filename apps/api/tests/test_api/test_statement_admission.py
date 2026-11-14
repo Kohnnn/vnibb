@@ -145,7 +145,11 @@ def test_cross_statement_basis_rejects_mixed_units():
     balance = _row(statement_type="balance", total_assets=200.0, flow_basis=None,
                    unit_metadata={"total_assets": _evidence()})
     assert admission.cross_statement_basis([income, cash_y_td, balance]) == (
-        {"currency": "VND", "value_unit": "VND", "consolidation_basis": "consolidated"}, None,
+        {
+            "currency": "VND", "value_unit": "VND",
+            "consolidation_basis": "consolidated", "source": "vietcap",
+        },
+        None,
     )
     balance_separate = _row(statement_type="balance", total_assets=200.0,
                             consolidation_basis="separate")

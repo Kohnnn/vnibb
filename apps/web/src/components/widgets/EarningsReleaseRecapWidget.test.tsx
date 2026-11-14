@@ -51,7 +51,7 @@ const row = (period: string, values: Record<string, number | null>) => ({
   ...values,
 });
 
-function show(incomeRows: object[], cashRows: object[] = [], qualityData?: object, qualityError?: string) {
+function show(incomeRows: object[], cashRows: object[] = [], qualityData?: object, qualityError?: string, onDataChange?: (data: unknown) => void) {
   income.mockReturnValue({ data: { data: incomeRows }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
   cashFlow.mockReturnValue({ data: { data: cashRows }, error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000 } as never);
   quality.mockReturnValue(qualityData
@@ -59,7 +59,7 @@ function show(incomeRows: object[], cashRows: object[] = [], qualityData?: objec
     : idle());
   jest.mocked(useCompanyNews).mockReturnValue(idle());
   jest.mocked(useCompanyEvents).mockReturnValue(idle());
-  return render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" />);
+  return render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" onDataChange={onDataChange} />);
 }
 
 /** The value tile beside a label, e.g. "Net Income YoY". */
@@ -223,5 +223,44 @@ describe('earnings recap quality section', () => {
     expect(bridgeRow('Revenue')).toBeInTheDocument();
     expect(screen.getByText(/Earnings quality unavailable/).textContent).toContain('Insufficient admitted quarterly statement coverage');
     expect(screen.queryByText(/Stable trend/)).toBeNull();
+  });
+});
+
+describe('earnings recap admission changes on refetch', () => {
+  it('recomputes the narrative when only the comparison metadata is withheld', () => {
+    // F6: the amounts do not move, but the prior row stops being comparable.
+    const latest = row('2025-Q2', { revenue: 200, net_income: 40, eps: 4 });
+    const comparable = row('2024-Q2', { revenue: 100, net_income: 20, eps: 2 });
+    const { rerender } = show([latest, comparable]);
+    expect(tile('Revenue YoY').textContent).toContain('100.0%');
+    expect(screen.getByText(/revenue grew/)).toBeInTheDocument();
+
+    income.mockReturnValue({
+      data: { data: [latest, { ...comparable, consolidation_basis: 'separate' }] },
+      error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000001,
+    } as never);
+    rerender(<EarningsReleaseRecapWidget id="recap" symbol="FPT" />);
+
+    expect(tile('Revenue YoY').textContent).toContain('n/a');
+    expect(screen.queryByText(/revenue grew/)).toBeNull();
+    expect(screen.getByText(/revenue YoY is unavailable/)).toBeInTheDocument();
+  });
+});
+
+describe('earnings recap export context', () => {
+  it('forwards per-metric and quality admission reasons', () => {
+    // F7: a zero base or a rejected field must reach exports/copilot, not only
+    // the row-pair reason which is null for an admitted comparison.
+    const onDataChange = jest.fn();
+    show([
+      row('2025-Q2', { revenue: 200, net_income: 40, eps: 4 }),
+      row('2024-Q2', { revenue: 0, net_income: 20, eps: 2 }),
+    ], [], { grade: null, trend: null, checks: [], coverage: { status: 'unavailable', unavailable_reason: 'no admitted periods' } },
+      undefined, onDataChange);
+
+    const runtime = onDataChange.mock.calls.at(-1)?.[0];
+    expect(runtime.comparison_unavailable_reason ?? null).toBeNull();
+    expect(runtime.metric_unavailable_reasons.revenue.unavailable_reason).toContain('zero prior-period base');
+    expect(runtime.quality_unavailable_reason).toBe('no admitted periods');
   });
 });

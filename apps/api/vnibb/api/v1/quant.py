@@ -3230,8 +3230,14 @@ async def get_earnings_quality(
         # numerator without a supported conversion, so only a single-quarter
         # operating flow enters these ratios.
         ocf, ocf_reason = _admit(cash, "operating_cash_flow", "cashflow", "single_quarter")
-        if cross_reason and not (ocf_reason or net_income_reason):
-            ocf_reason = cross_reason
+        # Combining statements is arithmetic on one basis: when the rows do not
+        # share one, no ratio may be computed from the pair, whatever each field
+        # admitted on its own (issue #257).
+        combined = net_income if net_income is not None and ocf is not None and not cross_reason else None
+        if cross_reason:
+            ocf_for_ratio = None
+        else:
+            ocf_for_ratio = ocf
 
         component_availability[f"Q{fiscal_quarter}-{fiscal_year}"] = {
             "revenue": revenue_reason,
@@ -3254,14 +3260,23 @@ async def get_earnings_quality(
             "total_assets": _safe_float(total_assets, 2),
             "eps": _safe_float(eps, 4),
             "accruals_ratio_pct": _safe_divide(
-                (net_income - ocf) if net_income is not None and ocf is not None else None,
+                (combined - ocf) if combined is not None and ocf is not None else None,
                 total_assets, scale=100, decimals=2,
-            ),
-            "revenue_quality_pct": _safe_divide(ocf, revenue, scale=100, decimals=2),
+            ) if combined is not None else None,
+            "revenue_quality_pct": _safe_divide(ocf_for_ratio, revenue, scale=100, decimals=2),
+            "cross_statement_basis_reason": cross_reason,
         })
 
     latest = period_rows[0] if period_rows else None
     previous = period_rows[1] if len(period_rows) > 1 else None
+    # The scorecard's own inputs, not "any surviving ratio": accruals need net
+    # income + OCF + assets and cash conversion needs OCF + revenue. One usable
+    # ratio is a valid observation, not evidence for a complete grade (#257).
+    latest_required = {
+        "accruals": latest is not None and latest.get("accruals_ratio_pct") is not None,
+        "revenue_quality": latest is not None and latest.get("revenue_quality_pct") is not None,
+    }
+    scorecard_complete = all(latest_required.values())
     ratios_available = bool(
         latest and (latest.get("accruals_ratio_pct") is not None or latest.get("revenue_quality_pct") is not None)
     )
@@ -3323,7 +3338,10 @@ async def get_earnings_quality(
     component_scores = [
         item for item in (accrual_score, revenue_score, persistence_score) if item is not None
     ]
-    quality_score = _safe_float(float(np.mean(component_scores)), 2) if component_scores else None
+    quality_score = (
+        _safe_float(float(np.mean(component_scores)), 2)
+        if scorecard_complete and component_scores else None
+    )
     grade = _grade_from_quality_score(quality_score) if quality_score is not None else None
 
     def _blend_score(row: Dict[str, Any]) -> float | None:
@@ -3339,8 +3357,14 @@ async def get_earnings_quality(
     # Unknown trend stays unknown: one scored period says nothing about
     # direction, and a flat score is Stable rather than a missing label.
     trend = None
-    latest_blend = _blend_score(latest)
-    previous_blend = _blend_score(previous) if previous else None
+    latest_blend = _blend_score(latest) if scorecard_complete else None
+    previous_blend = (
+        _blend_score(previous)
+        if scorecard_complete and previous
+        and previous.get("accruals_ratio_pct") is not None
+        and previous.get("revenue_quality_pct") is not None
+        else None
+    )
     if latest_blend is not None and previous_blend is not None:
         delta = latest_blend - previous_blend
         trend = "Improving" if delta >= 5 else "Declining" if delta <= -5 else "Stable"
@@ -3369,8 +3393,12 @@ async def get_earnings_quality(
         },
         "checks": checks,
         "coverage": {
-            "status": "available",
-            "unavailable_reason": None,
+            "status": "available" if scorecard_complete else "partial",
+            "unavailable_reason": None if scorecard_complete else (
+                "Incomplete admitted inputs for a full earnings-quality scorecard; "
+                "individual admitted ratios are reported without a grade."
+            ),
+            "required_components": latest_required,
             "admitted_periods": len(period_rows),
             "component_availability": component_availability,
         },

@@ -176,3 +176,53 @@ async def test_earnings_quality_withholds_mixed_basis_ratios():
             assert availability["cross_statement_basis"] == "cross_statement_basis_mismatch"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_earnings_quality_reports_partial_ratios_without_a_grade():
+    """One admitted ratio is an observation, not a complete scorecard (#257)."""
+    engine = await _fresh_session()
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            for index, quarter in enumerate((1, 2)):
+                common = {
+                    "id": index + 1, "symbol": "QAZ", "period": f"Q{quarter}-2025",
+                    "period_type": "quarter", "fiscal_year": 2025, "fiscal_quarter": quarter,
+                    "source": "vietcap",
+                }
+                # Revenue and OCF are admitted, net income is not: cash
+                # conversion is computable, accruals are not.
+                session.add(IncomeStatement(
+                    **common, revenue=100, eps=2,
+                    raw_data=_lineage(unit_metadata={
+                        "revenue": {"source_unit": "VND", "value_unit": "VND"},
+                        "eps": {"source_unit": "VND", "value_unit": "VND/share"},
+                    }),
+                ))
+                session.add(CashFlow(
+                    **common, operating_cash_flow=120, raw_data=_lineage(),
+                ))
+                session.add(BalanceSheet(
+                    **common, total_assets=20_000,
+                    raw_data=_lineage(flow_basis=None),
+                ))
+            await session.commit()
+
+            async with _client(session) as client:
+                response = await client.get("/quant/QAZ/earnings-quality")
+
+            data = response.json()["data"]
+            assert data["grade"] is None
+            assert data["quality_score"] is None
+            assert data["trend"] is None
+            assert data["coverage"]["status"] == "partial"
+            assert data["coverage"]["required_components"] == {
+                "accruals": False, "revenue_quality": True,
+            }
+            # The admitted ratio is reported; the ungraded scorecard is named.
+            assert data["revenue_quality_pct"] == pytest.approx(120.0)
+            assert data["accruals_ratio_pct"] is None
+            assert data["coverage"]["unavailable_reason"]
+            assert data["series"][0]["cross_statement_basis_reason"] is None
+    finally:
+        await engine.dispose()

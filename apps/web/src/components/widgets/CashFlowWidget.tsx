@@ -76,7 +76,7 @@ const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
-const RAW_CASHFLOW_ALIASES: Record<string, string[]> = {
+export const RAW_CASHFLOW_ALIASES: Record<string, string[]> = {
     depreciation: ['depreciation', 'depreciation_and_amortisation', 'khau_hao_tscd'],
     taxes_paid: ['taxes_paid', 'income_tax_paid', 'cash_paid_for_taxes', 'chi_nop_thue_thu_nhap_doanh_nghiep'],
     interest_paid: ['interest_paid', 'interest_expense_paid', 'cash_paid_for_interest', 'lai_vay_da_tra'],
@@ -111,35 +111,42 @@ function toNumeric(value: unknown): number | null {
  * the raw provider alias (issue #245).
  */
 export function fieldWithheldReason(entry: CashFlowData, metricKey: string): string | null {
-    const record = entry as unknown as Record<string, unknown>;
-    const raw = entry.raw_data && typeof entry.raw_data === 'object'
-        ? (entry.raw_data as Record<string, unknown>)
-        : {};
-    const lineage = raw._financial_lineage && typeof raw._financial_lineage === 'object'
-        ? (raw._financial_lineage as Record<string, unknown>)
-        : {};
-    const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
-        ? (lineage.canonical_data as Record<string, unknown>)
-        : {};
-    const sources = [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata];
-    for (const source of sources) {
-        if (!source || typeof source !== 'object') continue;
-        const metadata = (source as Record<string, unknown>)[metricKey];
-        if (metadata && typeof metadata === 'object') {
-            const reason = (metadata as Record<string, unknown>).unavailable_reason;
-            if (typeof reason === 'string' && reason.trim()) return reason;
-        }
-    }
-    return null;
+    return unitReason(entry as unknown as Record<string, unknown>, metricKey)
 }
 
-/** A raw provider alias, only as the evidence it is: never a monetary value. */
+/** The rejection recorded for one key, in any evidence location. */
+function unitReason(record: Record<string, unknown>, key: string): string | null {
+    const raw = record.raw_data && typeof record.raw_data === 'object'
+        ? (record.raw_data as Record<string, unknown>)
+        : {}
+    const lineage = raw._financial_lineage && typeof raw._financial_lineage === 'object'
+        ? (raw._financial_lineage as Record<string, unknown>)
+        : {}
+    const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
+        ? (lineage.canonical_data as Record<string, unknown>)
+        : {}
+    for (const source of [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata]) {
+        if (!source || typeof source !== 'object') continue
+        const metadata = (source as Record<string, unknown>)[key]
+        if (metadata && typeof metadata === 'object') {
+            const reason = (metadata as Record<string, unknown>).unavailable_reason
+            if (typeof reason === 'string' && reason.trim()) return reason
+        }
+    }
+    return null
+}
+
+/**
+ * A raw provider alias, only as the evidence it is: never a monetary value.
+ *
+ * Raw evidence is promoted to the table's currency scale only when the API
+ * affirmatively admitted the metric. Absence of a recorded rejection is not
+ * admission: an unadmitted metric stays raw (#245).
+ */
 export function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
     const rawData = entry.raw_data;
     if (!rawData || typeof rawData !== 'object') return null;
-    // A field the unit admission withheld cannot be republished from its raw
-    // alias under the table's currency scale (#245).
-    if (fieldWithheldReason(entry, metricKey)) return null;
+    if (!isRawMetricAdmitted(entry, metricKey)) return null;
 
     for (const alias of RAW_CASHFLOW_ALIASES[metricKey] || []) {
         const direct = toNumeric((rawData as Record<string, unknown>)[alias]);
@@ -155,6 +162,61 @@ export function getRawMetric(entry: CashFlowData, metricKey: string): number | n
     }
 
     return null;
+}
+
+/**
+ * Whether the API admitted this metric under its own row basis and unit
+ * evidence. A per-field rejection, an explicit monetary rejection, or an
+ * unverified row basis all keep the raw alias out of the table.
+ */
+export function isRawMetricAdmitted(entry: CashFlowData, metricKey: string): boolean {
+    const record = entry as unknown as Record<string, unknown>;
+    const reason = (key: string) => unitReason(record, key);
+    if (reason(metricKey)) return false;
+    // A rejection may be recorded under an alias rather than the canonical key,
+    // so every spelling is scanned before any raw value is read.
+    if ((RAW_CASHFLOW_ALIASES[metricKey] || []).some((alias) => reason(alias))) return false;
+    // The row's own basis must be admitted; otherwise the raw number has no
+    // currency or scale that this table may apply.
+    const keys = [metricKey, ...(RAW_CASHFLOW_ALIASES[metricKey] || [])];
+    if (keys.map((key) => unitReason(record, key)).some((value) => Boolean(value))) return false;
+    if (unitReason(record, 'basis')) return false;
+    if (typeof record.unavailable_reason === 'string' && record.unavailable_reason) return false;
+    // Affirmative per-field evidence for this metric, under its own currency.
+    if (!keys.some((key) => hasUnitEvidence(record, key))) return false;
+    return declaredVndBasis(record);
+}
+
+/** The API recorded unit evidence for this metric: source and admitted unit. */
+function hasUnitEvidence(record: Record<string, unknown>, key: string): boolean {
+    const raw = record.raw_data && typeof record.raw_data === 'object'
+        ? (record.raw_data as Record<string, unknown>)
+        : {}
+    const lineage = raw._financial_lineage && typeof raw._financial_lineage === 'object'
+        ? (raw._financial_lineage as Record<string, unknown>)
+        : {}
+    const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
+        ? (lineage.canonical_data as Record<string, unknown>)
+        : {}
+    for (const source of [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata]) {
+        if (!source || typeof source !== 'object') continue
+        const metadata = (source as Record<string, unknown>)[key]
+        if (!metadata || typeof metadata !== 'object') continue
+        const entry = metadata as Record<string, unknown>
+        if (entry.unavailable_reason) continue
+        const unit = typeof entry.value_unit === 'string' ? entry.value_unit : null
+        const sourceUnit = typeof entry.source_unit === 'string' ? entry.source_unit : null
+        if (unit && sourceUnit) return true
+    }
+    return false
+}
+
+/** The row declares the VND basis the table would format under. */
+function declaredVndBasis(record: Record<string, unknown>): boolean {
+    const currency = typeof record.currency === 'string' ? record.currency : null;
+    const valueUnit = typeof record.value_unit === 'string' ? record.value_unit : null;
+    if (!currency || !valueUnit) return false;
+    return currency === 'VND' && valueUnit === 'VND';
 }
 
 function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: CashFlowWidgetProps) {

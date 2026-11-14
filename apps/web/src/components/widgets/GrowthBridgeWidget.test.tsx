@@ -74,6 +74,27 @@ describe('growth bridge withholds an unadmitted basis', () => {
     expect(screen.queryByText(/^\+?50\.0%$/)).toBeNull();
   });
 
+  it('names the reasons when every rate is withheld', () => {
+    // F5: an all-unavailable payload must not fall back to the generic
+    // history-coverage empty state and hide the admission reasons (#246).
+    reply({
+      as_of: { annual: '2025', quarter: 'Q4-2025' },
+      yoy: { revenue_growth: null, earnings_growth: null, eps_growth: null, ebitda_growth: null, asset_growth: null },
+      qoq: { revenue_growth: null, earnings_growth: null, eps_growth: null, ebitda_growth: null },
+      comparisons: {
+        yoy: Object.fromEntries(['revenue_growth', 'earnings_growth', 'eps_growth', 'ebitda_growth', 'asset_growth']
+          .map((key) => [key, detail(null, 'unverified_statement_currency_or_unit')])),
+        qoq: Object.fromEntries(['revenue_growth', 'earnings_growth', 'eps_growth', 'ebitda_growth']
+          .map((key) => [key, detail(null, 'incompatible_reporting_basis')])),
+      },
+    });
+
+    expect(screen.getByTestId('growth-withheld')).toBeInTheDocument();
+    expect(screen.getAllByText(/unverified statement currency or unit/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/reporting basis differs between periods/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/No growth bridge/)).toBeNull();
+  });
+
   it('renders a confirmed rate and keeps a zero base distinct', () => {
     reply({
       as_of: { annual: '2025', quarter: 'Q4-2025' },
