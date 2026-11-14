@@ -1260,6 +1260,10 @@ _FUNDAMENTAL_DOC_FIELD_MAP = {
     "snapshotDate": "fundamental_as_of",
 }
 
+# The three fields that state a price comparison. An admitted doc that still
+# reports an unavailable comparison basis must not publish them.
+_VALUATION_COMPARISON_ATTRS = frozenset({"intrinsic_value", "margin_of_safety", "valuation_method"})
+
 # The single declaration of what counts as a Fundamental Field. Everything that
 # needs to know -- the enrichment decision, the early-limit shortcut, the
 # metadata -- derives from here, so adding a field to the map above is enough.
@@ -1391,8 +1395,17 @@ async def _apply_fundamental_enrichment(
                     "unavailable_reason": valuation_reason,
                 })
             for doc_key, attr in _FUNDAMENTAL_DOC_FIELD_MAP.items():
-                if doc_key in doc:
-                    setattr(row, attr, doc.get(doc_key))
+                if doc_key not in doc:
+                    continue
+                # A current-schema doc still computes IV/MOS/method when the
+                # price unit or comparison basis is unverified; the screen must
+                # not publish a comparison the engine refuses to compare. Other
+                # present keys are still assigned so a withheld value (None)
+                # clears a stale row attribute.
+                if valuation_reason and attr in _VALUATION_COMPARISON_ATTRS:
+                    setattr(row, attr, None)
+                    continue
+                setattr(row, attr, doc.get(doc_key))
         return rows, "ok"
     except Exception as e:
         logger.warning(f"Fundamental enrichment failed: {e}")

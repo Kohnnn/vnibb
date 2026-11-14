@@ -1061,3 +1061,43 @@ async def test_live_path_cannot_shrink_shared_snapshot_to_one_request_limit(
         "a request-shaped fetch must not write to the shared screener snapshot: "
         f"got {len(writes)} write(s)"
     )
+
+
+@pytest.mark.parametrize("snapshot_inputs", [
+    {"unitQuality": "verified", "unitLineage": {"price": {"unit": "unknown"}}},
+    {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
+     "comparisonUnavailableReason": "Statement currency/scale is unknown."},
+])
+@pytest.mark.asyncio
+async def test_admitted_v4_doc_with_unavailable_comparison_publishes_no_valuation_fields(
+    monkeypatch, snapshot_inputs,
+):
+    """A current-schema doc can carry IV without a verified price basis.
+
+    The engine computes it; the screen must not compare it. The three
+    comparison fields are withheld while independent/other coverage survives.
+    """
+
+    doc = {
+        "symbol": "VNM", "snapshotDate": "2026-06-10", "schemaVersion": 4,
+        "intrinsicValue": 78200.0, "marginOfSafety": 16.9, "valuationMethod": "dcf",
+        "fcfPositive": True, "revenueCagr5y": 10.0, "moat": "narrow", "dividendYears": 9,
+        "inputs": {
+            **snapshot_inputs, "derivedCoverage": {"cagr": {}, "fcf": {}},
+        },
+    }
+    svc = _FakeMongoService(docs={"VNM": doc})
+    monkeypatch.setattr(screener_module, "get_mongo_market_data_service", lambda: svc)
+
+    row = _row("VNM", intrinsic_value=30.48, margin_of_safety=-64.02, valuation_method="dcf")
+    result, outcome = await _apply_fundamental_enrichment([row])
+
+    assert outcome == "ok"
+    enriched = result[0]
+    assert (enriched.intrinsic_value, enriched.margin_of_safety, enriched.valuation_method) == (None, None, None)
+    # Other present keys still flow: coverage is a separate lineage.
+    assert enriched.fcf_positive is True
+    assert enriched.moat == "narrow"
+    assert enriched.dividend_years == 9
+    assert enriched.fundamental_as_of == "2026-06-10"
+    assert enriched.provider_evidence[-1]["dataset"] == "market_fundamental_screener"
