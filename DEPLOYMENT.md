@@ -70,13 +70,23 @@ Migrations run through the `migrate` service with `ALEMBIC_STRICT=1`; never run
 ```bash
 bash scripts/oracle/healthcheck.sh
 bash scripts/oracle/runtime_verify.sh
-EXPECTED_REVISION=<reviewed commit> BASE_URL=http://127.0.0.1:8001 \
-  bash scripts/oracle/mcp_smoke_test.sh
 ```
 
-`EXPECTED_REVISION` must come from the reviewed/published release record, never
-from the running health response. Process health is not database, source,
-freshness or coverage acceptance — see `docs/VNIBB_MCP_DEPLOYMENT.md`.
+MCP smoke (host mode, from the repository root). Load the sidecar bearer from
+your private secret store without printing it, then pass it explicitly — a bearer
+that exists only in the container's env never reaches a host client, and auto
+mode would pick that host client when it is installed:
+
+```bash
+# set VNIBB_MCP_SHARED_BEARER_TOKEN in this shell from the private secret store
+EXPECTED_REVISION=<reviewed-40-char-sha> VNIBB_MCP_SHARED_BEARER_TOKEN="$VNIBB_MCP_SHARED_BEARER_TOKEN" PYTHON_MODE=host:python3 BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
+```
+
+`EXPECTED_REVISION` must come from the reviewed/published release record
+(`git rev-parse --verify '<published-tag>^{commit}'`, the build receipt, or
+`/app/.release-revision` in the pulled image), never from the running health
+response. Process health is not database, source, freshness or coverage
+acceptance — see `docs/VNIBB_MCP_DEPLOYMENT.md` for the container-mode variant.
 
 ## Troubleshooting
 

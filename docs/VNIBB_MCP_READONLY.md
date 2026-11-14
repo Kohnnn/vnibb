@@ -451,7 +451,7 @@ If these are ever added later, put them behind a separate admin MCP surface with
 
 Run from the repository root against an already running sidecar; this command does not start production.
 
-The wrapper reads `EXPECTED_REVISION` immediately and exits 1 before any network call when it is unset, so every invocation below supplies it. `EXPECTED_REVISION` must be the full 40-character SHA of the release you reviewed and published (build receipt, `/app/.release-revision` in the pulled image, or `git rev-parse --verify <published-tag>`), never a value read back from `/health` — that would defeat mismatch detection. Host mode also needs `mcp`, `httpx` and `jsonschema` installed in the selected Python.
+The wrapper reads `EXPECTED_REVISION` immediately and exits 1 before any network call when it is unset, so every invocation below supplies it. `EXPECTED_REVISION` must be the full 40-character commit SHA of the release you reviewed and published (build receipt, `/app/.release-revision` in the pulled image, or `git rev-parse --verify '<published-tag>^{commit}'` — the `^{commit}` suffix peels an annotated tag to its commit object), never a value read back from `/health`; that would defeat mismatch detection. Host mode also needs `mcp`, `httpx` and `jsonschema` installed in the selected Python.
 
 ```bash
 # One-time host client install

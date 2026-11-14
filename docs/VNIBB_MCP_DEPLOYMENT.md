@@ -134,7 +134,7 @@ Host prerequisites (all three modules, imported by the wrapper before it selects
 python3 -m pip install "mcp[cli]>=1.0.0,<2" httpx jsonschema
 ```
 
-Obtain `EXPECTED_REVISION` independently of the running service: use the full 40-character commit recorded for the release you reviewed and published (`IMAGE_RELEASE_REVISION` in the build receipt, `/app/.release-revision` inside the pulled immutable image digest, or `git rev-parse --verify <published-tag>`). Never copy the value from `/health` or `/mcp-health`: that would make the mismatch check compare the deployment against itself.
+Obtain `EXPECTED_REVISION` independently of the running service: use the full 40-character commit recorded for the release you reviewed and published (`IMAGE_RELEASE_REVISION` in the build receipt, `/app/.release-revision` inside the pulled immutable image digest, or `git rev-parse --verify '<published-tag>^{commit}'`). The `^{commit}` suffix peels an annotated tag to its commit object; without it `git rev-parse --verify` returns the tag object id and a correctly deployed release would report a revision mismatch. Never copy the value from `/health` or `/mcp-health`: that would make the mismatch check compare the deployment against itself.
 
 ```bash
 # Host mode: raw port on the OCI host
