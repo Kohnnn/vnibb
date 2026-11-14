@@ -8,6 +8,18 @@ import type { Dashboard, DashboardTab } from '@/types/dashboard';
 let mockWalkthroughEligible = false;
 let mockActiveDashboard: Dashboard | null = null;
 let mockActiveTab: DashboardTab | null = null;
+let mockDashboards: Dashboard[] = [];
+let mockCatalogueReady = true;
+const mockSetActiveDashboard = jest.fn();
+const mockSetActiveTab = jest.fn();
+const mockCreateDashboard = jest.fn((input: { name: string }) => ({
+  id: `created-${input.name}`, name: input.name, order: 0, isDefault: false,
+  isEditable: true, showGroupLabels: false, tabs: [], syncGroups: [],
+  createdAt: '2026-11-13T00:00:00.000Z', updatedAt: '2026-11-13T00:00:00.000Z',
+}));
+const mockCreateTab = jest.fn((dashboardId: string, name: string) => ({ id: `${dashboardId}-${name}`, name, order: 0, widgets: [] }));
+const mockAddWidget = jest.fn();
+const mockUpdateSyncGroupSymbol = jest.fn();
 
 jest.mock('next/dynamic', () => {
   const React = jest.requireActual('react');
@@ -24,11 +36,17 @@ jest.mock('@/components/ProtectedRoute', () => ({
 }));
 jest.mock('@/contexts/DashboardContext', () => ({
   useDashboard: () => ({
-    state: { dashboards: [] },
+    state: { dashboards: mockDashboards },
     localStateReady: true,
-    dashboardCatalogueReady: true,
+    dashboardCatalogueReady: mockCatalogueReady,
     activeDashboard: mockActiveDashboard,
     activeTab: mockActiveTab,
+    setActiveDashboard: mockSetActiveDashboard,
+    setActiveTab: mockSetActiveTab,
+    createDashboard: mockCreateDashboard,
+    createTab: mockCreateTab,
+    addWidget: mockAddWidget,
+    updateSyncGroupSymbol: mockUpdateSyncGroupSymbol,
     backendSync: { enabled: false, status: 'idle' },
   }),
 }));
@@ -84,7 +102,17 @@ jest.mock('@/components/modals', () => ({
   }) => open ? <button onClick={() => onStarterPromptRequest('analyze', { id: 'financial-summary', revision: 1 })}>Stage financial starter</button> : null,
 }));
 jest.mock('@/components/onboarding/OnboardingWalkthrough', () => ({
-  OnboardingWalkthrough: ({ open }: { open: boolean }) => open ? <section role="dialog" aria-label="Dashboard walkthrough" /> : null,
+  // The route regression drives the real `onGoalSelect` the page passes down;
+  // only the walkthrough's own presentation is stubbed.
+  OnboardingWalkthrough: ({ open, onGoalSelect }: {
+    open: boolean;
+    onGoalSelect: (goalId: string, symbol?: string) => boolean;
+  }) => open ? (
+    <section role="dialog" aria-label="Dashboard walkthrough">
+      <button onClick={() => onGoalSelect('evaluate_company', 'HPG')}>Open Financial review</button>
+      <button onClick={() => onGoalSelect('follow_ticker', 'HPG')}>Open Ticker workspace</button>
+    </section>
+  ) : null,
 }));
 jest.mock('@/components/modals/PromptsLibrary', () => ({ PromptsLibrary: () => null }));
 jest.mock('@/components/ui/CopilotArtifactPanel', () => ({ CopilotArtifactPanel: () => null }));
@@ -258,5 +286,85 @@ describe.each([
     expect(screen.queryByRole('button', { name: 'Remove Matrix selection' })).not.toBeInTheDocument();
     expect(openCopilotChatStream).not.toHaveBeenCalled();
     expect(consumeCopilotStream).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #253 Evaluate-a-company routing.
+ *
+ * The live defect: `handleOnboardingGoalSelect` resolved the financial tab with
+ * `tab.name === 'Financials'`, but the published Fundamental workspace names it
+ * "Fundamentals", so "Open Financial review" returned false and the walkthrough
+ * showed "This view is unavailable right now" without leaving Discovery.
+ *
+ * These drive the real handler through the real `useDashboard()` surface (not a
+ * mocked walkthrough), with both retained layout shapes.
+ */
+describe('onboarding goal routing across published and bundled layouts', () => {
+  const tab = (id: string, name: string): DashboardTab => ({ id, name, order: 0, widgets: [] });
+  const fundamentalDashboard = (tabs: DashboardTab[]): Dashboard => ({
+    id: 'default-fundamental',
+    name: 'Fundamental',
+    order: 0,
+    isDefault: true,
+    isEditable: false,
+    showGroupLabels: false,
+    tabs,
+    syncGroups: [],
+    createdAt: '2026-11-13T00:00:00.000Z',
+    updatedAt: '2026-11-13T00:00:00.000Z',
+  });
+
+  async function openWalkthroughWith(tabs: DashboardTab[], catalogueReady = true) {
+    jest.useFakeTimers();
+    setViewport(1440);
+    mockWalkthroughEligible = true;
+    mockCatalogueReady = catalogueReady;
+    mockDashboards = [fundamentalDashboard(tabs)];
+    mockActiveDashboard = mockDashboards[0];
+    mockActiveTab = tabs[0];
+    render(<DashboardPage />);
+    await act(async () => { jest.advanceTimersByTime(300); });
+    return screen.findByRole('dialog', { name: 'Dashboard walkthrough' });
+  }
+
+  afterEach(() => {
+    mockWalkthroughEligible = false;
+    mockCatalogueReady = true;
+    mockDashboards = [];
+    mockActiveDashboard = null;
+    mockActiveTab = null;
+    jest.clearAllMocks();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it.each([
+    ['published Fundamental layout', [
+      tab('tab-default-fundamental-discovery', 'Discovery'),
+      tab('tab-default-fundamental-fundamentals', 'Fundamentals'),
+    ], 'tab-default-fundamental-fundamentals'],
+    ['bundled fallback layout', [
+      tab('default-fundamental-tab-0', 'Overview'),
+      tab('default-fundamental-tab-1', 'Financials'),
+    ], 'default-fundamental-tab-1'],
+  ])('routes Open Financial review to the financial tab of the %s', async (_label, tabs, expectedTabId) => {
+    await openWalkthroughWith(tabs);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Financial review' }));
+
+    expect(mockSetActiveDashboard).toHaveBeenCalledWith('default-fundamental');
+    expect(mockSetActiveTab).toHaveBeenCalledWith(expectedTabId);
+    // The selected ticker survives the route instead of being dropped.
+    expect(mockUpdateSyncGroupSymbol).toHaveBeenCalledWith('default-fundamental', 1, 'HPG');
+  });
+
+  it('reports an unavailable financial view instead of routing before the catalogue settles', async () => {
+    await openWalkthroughWith([tab('tab-default-fundamental-fundamentals', 'Fundamentals')], false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Financial review' }));
+
+    expect(mockSetActiveTab).not.toHaveBeenCalled();
+    expect(mockSetActiveDashboard).not.toHaveBeenCalled();
   });
 });

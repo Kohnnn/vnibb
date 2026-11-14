@@ -1,6 +1,7 @@
 import {
   ONBOARDING_MEANINGFUL_ACTION_EVENT,
   dispatchOnboardingMeaningfulAction,
+  findRoleTab,
   readStoredUserPreferences,
   resetDashboardWalkthroughPreference,
   selectOnboardingGoal,
@@ -40,5 +41,47 @@ describe('userPreferences onboarding normalization', () => {
     resetDashboardWalkthroughPreference()
     expect(shouldShowDashboardWalkthrough()).toBe(true)
     window.removeEventListener(ONBOARDING_MEANINGFUL_ACTION_EVENT, actionListener)
+  })
+})
+
+describe('findRoleTab', () => {
+  // The two layout sources the app serves (#253): the published Fundamental
+  // workspace labels the tab "Fundamentals", the bundled fallback "Financials".
+  const publishedTabs = [
+    { id: 'tab-default-fundamental-discovery', name: 'Discovery' },
+    { id: 'tab-default-fundamental-fundamentals', name: 'Fundamentals' },
+    { id: 'tab-default-fundamental-overview', name: 'Overview' },
+  ]
+  const bundledTabs = [
+    { id: 'default-fundamental-tab-0', name: 'Overview' },
+    { id: 'default-fundamental-tab-1', name: 'Financials' },
+  ]
+
+  it('resolves the published Fundamentals tab as the financials role', () => {
+    expect(findRoleTab(publishedTabs, 'financials')).toEqual(publishedTabs[1])
+  })
+
+  it('resolves the bundled Financials tab as the financials role', () => {
+    expect(findRoleTab(bundledTabs, 'financials')).toEqual(bundledTabs[1])
+  })
+
+  it('keeps suffixed tab names in their role', () => {
+    expect(findRoleTab([{ id: 'x', name: 'Fundamentals 2' }], 'financials')).toEqual({ id: 'x', name: 'Fundamentals 2' })
+    expect(findRoleTab([{ id: 'y', name: 'Financials (HOSE)' }], 'financials')).toEqual({ id: 'y', name: 'Financials (HOSE)' })
+  })
+
+  it('never falls back to tab order when no tab carries the role', () => {
+    expect(findRoleTab([{ id: 'only', name: 'Discovery' }], 'financials')).toBeNull()
+    expect(findRoleTab([], 'financials')).toBeNull()
+  })
+
+  it('does not confuse the Technical or Quant tabs with financials', () => {
+    const tabs = [
+      { id: 'tech', name: 'Technical' },
+      { id: 'quant', name: 'Quant' },
+    ]
+    expect(findRoleTab(tabs, 'financials')).toBeNull()
+    expect(findRoleTab(tabs, 'technical')).toEqual(tabs[0])
+    expect(findRoleTab(tabs, 'quant')).toEqual(tabs[1])
   })
 })

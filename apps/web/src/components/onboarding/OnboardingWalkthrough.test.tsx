@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 
@@ -153,5 +153,49 @@ describe('OnboardingWalkthrough', () => {
     await waitFor(() => expect(opener).toHaveFocus())
     expect(onComplete).toHaveBeenCalledWith('follow_ticker', false)
     opener.remove()
+  })
+
+
+  /**
+   * #253 guide targets. Evaluate-a-company used to highlight exactly
+   * `unified_financials`; the published Fundamental layout has no such widget,
+   * so the guide had nothing to point at even once routing was fixed. The step
+   * now accepts whichever financial surface the routed layout really contains,
+   * and says so when a reduced layout contains none.
+   */
+  it.each([
+    ['published Fundamentals', 'financial_snapshot'],
+    ['bundled fallback', 'unified_financials'],
+    ['statement-only layout', 'income_statement'],
+  ])('highlights the financial surface present in the %s layout', async (_label, widgetType) => {
+    const user = userEvent.setup()
+    const surface = document.createElement('div')
+    surface.dataset.widgetType = widgetType
+    document.body.append(surface)
+
+    render(<OnboardingWalkthrough {...defaultProps} />)
+    await user.click(screen.getByRole('button', { name: /Evaluate a company/ }))
+    await user.click(screen.getByRole('button', { name: /^Open / }))
+
+    expect(screen.getByText('Read the statements together')).toBeInTheDocument()
+    expect(screen.queryByText(/does not include the widget for this step/)).not.toBeInTheDocument()
+    surface.remove()
+  })
+
+  it('says a step has nothing to highlight when the routed layout omits that widget', async () => {
+    jest.useFakeTimers()
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
+
+    render(<OnboardingWalkthrough {...defaultProps} />)
+    await user.click(screen.getByRole('button', { name: /Evaluate a company/ }))
+    await user.click(screen.getByRole('button', { name: /^Open / }))
+
+    expect(screen.queryByText(/does not include the widget for this step/)).not.toBeInTheDocument()
+    await act(async () => { jest.advanceTimersByTime(2600) })
+
+    expect(screen.getByRole('status')).toHaveTextContent('does not include the widget for this step')
+    // The tour stays usable: the notice is not a dead end.
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled()
+    jest.useRealTimers()
   })
 })

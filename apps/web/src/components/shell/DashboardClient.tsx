@@ -30,6 +30,7 @@ import { useUrlSync } from '@/hooks/useUrlSync';
 import {
     autoFitGridItems,
     findNextAvailableLayout,
+    fitTemplateWidgets,
     getWidgetDefaultLayout,
     hasLayoutCoordinatesChanged,
     layoutsOverlap
@@ -57,6 +58,7 @@ import {
     dismissDashboardWalkthrough,
     dispatchOnboardingMeaningfulAction,
     markDashboardWalkthroughCompleted,
+    findRoleTab,
     selectOnboardingGoal,
     normalizeTabKey,
     shouldShowDashboardWalkthrough,
@@ -985,12 +987,16 @@ function DashboardContent() {
     }, [activeDashboard?.id, activeTab]);
 
     const applyTemplateToDashboard = useCallback((template: DashboardTemplate, dashboardId: string, tabId: string) => {
-        template.widgets.forEach(w => {
+        // #252: one placement pass, shared with the template preview. Compliant
+        // templates pass through unchanged; an imported/custom template that
+        // under-sizes or overlaps a tile is corrected here instead of by the
+        // grid's static-item collision repair after mount.
+        fitTemplateWidgets(template.widgets).forEach((w, index) => {
             addWidget(dashboardId, tabId, {
                 type: w.type,
                 tabId,
                 layout: w.layout,
-                config: w.config || {}
+                config: template.widgets[index].config || {}
             });
         });
     }, [addWidget]);
@@ -1072,18 +1078,24 @@ function DashboardContent() {
             }
         }
 
+        // #253: resolve the financial surface by *role*, never by literal tab
+        // name. The published Fundamental layout labels it "Fundamentals" while
+        // the bundled fallback labels it "Financials"; matching one exact name
+        // made this goal return false against the other layout. Both resolve
+        // here, and the goal stays routable only once the catalog has settled so
+        // it cannot race the post-hydration APPLY_SYSTEM_TEMPLATES dispatch.
+        if (!dashboardCatalogueReady) return false;
         const dashboard = state.dashboards.find((item) => item.id === MAIN_FUNDAMENTAL_DASHBOARD_ID);
-        const tabName = goalId === 'follow_ticker' ? 'Overview' : 'Financials';
-        const tab = dashboard?.tabs.find((item) => item.name === tabName);
+        const tab = dashboard ? findRoleTab(dashboard.tabs, goalId === 'follow_ticker' ? 'overview' : 'financials') : null;
         if (!dashboard || !tab || !symbol) return false;
 
         setActiveDashboard(dashboard.id);
         setActiveTab(tab.id);
         applySelectedSymbol(symbol, { domain: 'vn', dashboardId: dashboard.id, completeOnboarding: false });
-        setTemplateApplyStatus({ message: `Opened ${symbol} ${tabName}.`, tone: 'success' });
+        setTemplateApplyStatus({ message: `Opened ${symbol} ${tab.name}.`, tone: 'success' });
         selectOnboardingGoal(goalId);
         return true;
-    }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab, state.dashboards]);
+    }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, dashboardCatalogueReady, setActiveDashboard, setActiveTab, state.dashboards]);
 
     const handleOnboardingComplete = useCallback((goalId: OnboardingGoalId, openVniAgent = false) => {
         completeWalkthrough(goalId);
@@ -1125,12 +1137,12 @@ function DashboardContent() {
             return;
         }
 
-        template.widgets.forEach((widget) => {
+        fitTemplateWidgets(template.widgets).forEach((widget, index) => {
             addWidget(activeDashboard.id, activeTab.id, {
                 type: widget.type,
                 tabId: activeTab.id,
                 layout: widget.layout,
-                config: widget.config || {},
+                config: template.widgets[index].config || {},
             });
         });
         // A starter-bound layout primes VniAgent the moment it lands, so the

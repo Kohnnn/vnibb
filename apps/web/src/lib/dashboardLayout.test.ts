@@ -3,9 +3,12 @@ import {
   getWidgetDefaultLayout,
   getWidgetSizeContract,
   autoFitGridItems,
+  fitTemplateWidgets,
   hasLayoutCoordinatesChanged,
+  layoutsOverlap,
   type CompactableLayoutItem,
 } from '@/lib/dashboardLayout';
+import { DASHBOARD_TEMPLATES } from '@/types/dashboard-templates';
 import { widgetDefinitions } from '@/data/widgetDefinitions';
 import { tradingViewWidgetDefaultLayouts } from '@/lib/tradingViewWidgets';
 import type { Dashboard, WidgetType } from '@/types/dashboard';
@@ -245,5 +248,75 @@ describe('hasLayoutCoordinatesChanged', () => {
     ['h', { x: 0, y: 2, w: 8, h: 8 }],
   ])('returns true when %s changes', (_field, next) => {
     expect(hasLayoutCoordinatesChanged(stored, next)).toBe(true);
+  });
+});
+
+/**
+ * #252 template insertion contract.
+ *
+ * The fresh-apply path used to pass raw authored rectangles straight to the
+ * reducer, so a template could under-size a widget below its contract or
+ * overlap two tiles. Overlap is the visible defect: static items get
+ * `correctBounds`'d before `noCompactor` runs, which pushed Market Heatmap from
+ * row 0 to row 15. These assert the authored catalog and the shared placement
+ * pass agree, so the grid has no collision to repair.
+ */
+describe('fitTemplateWidgets', () => {
+  it('keeps every catalog template non-overlapping, in bounds, and at or above its widget size contract', () => {
+    const violations: string[] = [];
+    for (const template of DASHBOARD_TEMPLATES) {
+      const placed = fitTemplateWidgets(template.widgets);
+      const authored = template.widgets;
+
+      placed.forEach((widget, index) => {
+        const { x, y, w, h } = widget.layout;
+        const contract = getWidgetSizeContract(widget.type);
+        if (w !== authored[index].layout.w || h !== authored[index].layout.h || x !== authored[index].layout.x || y !== authored[index].layout.y) {
+          violations.push(`${template.id}/${widget.type}: moved from ${JSON.stringify(authored[index].layout)} to ${JSON.stringify(widget.layout)}`);
+        }
+        if (w < contract.minW || h < contract.minH) {
+          violations.push(`${template.id}/${widget.type}: ${w}x${h} below ${contract.minW}x${contract.minH}`);
+        }
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x + w > 24) {
+          violations.push(`${template.id}/${widget.type}: out of bounds ${JSON.stringify(widget.layout)}`);
+        }
+      });
+
+      for (let i = 0; i < placed.length; i += 1) {
+        for (let j = i + 1; j < placed.length; j += 1) {
+          if (layoutsOverlap(placed[i].layout, placed[j].layout)) {
+            violations.push(`${template.id}: ${placed[i].type} overlaps ${placed[j].type}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('re-homes only the colliding tile and never repacks the others', () => {
+    const placed = fitTemplateWidgets([
+      { type: 'market_overview', layout: { x: 0, y: 0, w: 12, h: 6 } },
+      // Authored on top of the tile above: only this one may move.
+      { type: 'top_movers', layout: { x: 6, y: 0, w: 8, h: 6 } },
+      // Clear of both the authored and the repaired placement.
+      { type: 'news_feed', layout: { x: 0, y: 20, w: 10, h: 8 } },
+    ]);
+
+    expect(placed[0].layout).toMatchObject({ x: 0, y: 0, w: 12, h: 6 });
+    expect(placed[1].layout).toMatchObject({ x: 12, y: 0, w: 8, h: 6 });
+    expect(placed[2].layout).toMatchObject({ x: 0, y: 20, w: 10, h: 8 });
+    expect(layoutsOverlap(placed[0].layout, placed[1].layout)).toBe(false);
+  });
+
+  it('lifts an under-sized placement to its contract minimum', () => {
+    const [placed] = fitTemplateWidgets([
+      { type: 'market_heatmap', layout: { x: 0, y: 0, w: 4, h: 3 } },
+    ]);
+    const contract = getWidgetSizeContract('market_heatmap');
+
+    expect(placed.layout.w).toBe(contract.minW);
+    expect(placed.layout.h).toBe(contract.minH);
+    expect(placed.layout.minW).toBe(contract.minW);
+    expect(placed.layout.minH).toBe(contract.minH);
   });
 });

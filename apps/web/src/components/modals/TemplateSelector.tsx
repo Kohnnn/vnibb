@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Activity, BarChart3, Layout, TrendingUp, Search, ChevronRight, Globe2, Sigma, Newspaper, Save, Trash2, Download, Upload, Star } from 'lucide-react';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
+import { fitTemplateWidgets } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { DASHBOARD_TEMPLATES, DASHBOARD_TEMPLATE_CATEGORIES, type DashboardTemplate, type DashboardTemplateCategory } from '@/types/dashboard-templates';
 import {
@@ -118,8 +119,12 @@ function getStarterDisclosure(
 }
 
 function TemplateLayoutPreview({ template }: { template: DashboardTemplate }) {
-  const maxY = Math.max(...template.widgets.map((widget) => widget.layout.y + widget.layout.h), 1);
-  const visibleWidgets = template.widgets.slice(0, 12);
+  // #252: draw the same rectangles `applyTemplateToDashboard` inserts. A custom
+  // or imported template can under-size or overlap; previewing the fitted
+  // placement is what keeps "what the preview shows" == "what lands on the grid".
+  const placedWidgets = useMemo(() => fitTemplateWidgets(template.widgets), [template]);
+  const maxY = Math.max(...placedWidgets.map((widget) => widget.layout.y + widget.layout.h), 1);
+  const visibleWidgets = placedWidgets.slice(0, 12);
 
   return (
     <div className={cn(
