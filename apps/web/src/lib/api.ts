@@ -3901,12 +3901,21 @@ export async function getIndustryBubble(options: {
 
 // ============ RS Rating API ============
 
+export type RSPriceUnit = 'VND' | 'index_points' | 'unknown';
+
 export interface RSStockItem {
     symbol: string;
     company_name?: string | null;
     rs_rating: number;
     rs_rank?: number | null;
     price?: number | null;
+    /** The stored price's own unit evidence; never inferred from magnitude. */
+    price_unit?: RSPriceUnit | null;
+    price_source?: string | null;
+    /** Observation date of `price`, never the request or fetch time. */
+    price_asof?: string | null;
+    /** Date the RS score was calculated. */
+    rating_asof?: string | null;
     industry?: string | null;
 }
 
