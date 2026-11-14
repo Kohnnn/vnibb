@@ -105,16 +105,29 @@ export function resolveDividendActionDay(raw: string | null | undefined): string
   const day = Number(match[3])
   if (!isRealCalendarDay(year, month, day)) return null
 
+  // Every supplied clock component is validated before either branch returns:
+  // `2026-12-01T99:99:99` is impossible even though its date part is fine, so
+  // it must not become an event. Same policy for an impossible offset.
   const hasClock = match[4] !== undefined
+  if (hasClock) {
+    const hour = Number(match[4])
+    const minute = Number(match[5])
+    const second = match[6] === undefined ? 0 : Number(match[6])
+    if (hour > 23 || minute > 59 || second > 59) return null
+  }
+
   const offset = match[7]
+  if (offset !== undefined && offset !== 'Z') {
+    const offsetDigits = offset.replace(':', '')
+    // Real-world UTC offsets span -12:00..+14:00; anything wilder is corrupt.
+    const offsetHours = Number(offsetDigits.slice(1, 3))
+    const offsetMinutes = Number(offsetDigits.slice(3, 5))
+    if (offsetHours > 14 || offsetMinutes > 59) return null
+  }
 
   if (!hasClock || !offset) {
     return `${match[1]}-${match[2]}-${match[3]}`
   }
-
-  const hour = Number(match[4])
-  const minute = Number(match[5])
-  if (hour > 23 || minute > 59) return null
 
   const instant = new Date(text)
   if (Number.isNaN(instant.getTime())) return null

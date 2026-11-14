@@ -112,4 +112,19 @@ describe('DividendLadderWidget range and order (#259)', () => {
 
     expect(renderedDays()).toEqual(['2026-12-01'])
   })
+
+  it('does not promote a valid future date carrying an impossible clock', () => {
+    // #259 review H3: 2026-12-01T99:99:99 has a good date part but no sane
+    // time, so it must not appear as Upcoming; the valid future row must.
+    mockDividends([
+      { ex_date: '2026-12-01T99:99:99' },
+      { record_date: '2026-12-01T10:30:60' },
+      { payment_date: '2026-12-05' },
+    ])
+
+    render(<DividendLadderWidget id="dividend-ladder" symbol="HPG" />)
+
+    expect(screen.getByText('Upcoming events')).toBeInTheDocument()
+    expect(renderedDays()).toEqual(['2026-12-05'])
+  })
 })

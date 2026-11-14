@@ -38,6 +38,20 @@ describe('resolveDividendActionDay', () => {
     },
   )
 
+  it.each([
+    '2026-12-01T99:99:99',
+    '2026-12-01T25:00:00',
+    '2026-12-01T10:60:00',
+    '2026-12-01T10:30:60',
+    '2026-12-01T24:00:00',
+    '2026-12-01T10:30:00+99:00',
+    '2026-12-01T10:30:00+07:99',
+  ])('returns null for an impossible clock component in %p', (raw) => {
+    // A valid date part must not rescue an impossible clock: such a row would
+    // otherwise surface as a real Upcoming event.
+    expect(resolveDividendActionDay(raw)).toBeNull()
+  })
+
   it('returns null for absent values', () => {
     expect(resolveDividendActionDay(null)).toBeNull()
     expect(resolveDividendActionDay(undefined)).toBeNull()
