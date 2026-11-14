@@ -213,6 +213,42 @@ def test_unpunctuated_source_summary_does_not_consume_the_content_field():
     ]
 
 
+def test_newline_separated_footer_does_not_become_evidence():
+    """#250 review: a newline footer must not turn into a direct claim."""
+
+    context = {"symbol": "HPG", "peer_symbols": [], "company_keywords": []}
+    row = _score_news_row(
+        {
+            "title": "Thị trường điều chỉnh nhẹ",
+            "content": "Market digest\nNguồn: HPG",
+        },
+        context,
+    )
+
+    assert row["association_class"] == "none"
+    assert row["relevance_score"] == 0.0
+    assert row["matched_symbols"] == []
+
+
+def test_newline_footer_does_not_discard_the_legitimate_line_below():
+    """#250 review: only the footer line is dropped, not its neighbour."""
+
+    context = {"symbol": "HPG", "peer_symbols": [], "company_keywords": []}
+    row = _score_news_row(
+        {
+            "title": "Thị trường điều chỉnh nhẹ",
+            "content": "Nguồn: CafeF\nHPG công bố kế hoạch mới.",
+        },
+        context,
+    )
+
+    assert row["association_class"] == "direct_company"
+    assert row["relevance_score"] == 0.94
+    assert row["match_evidence"]["matched_terms"] == [
+        {"term": "HPG", "field": "body", "kind": "symbol"}
+    ]
+
+
 def test_verified_sector_overlap_is_labelled_but_carries_no_score():
     """A shared industry is an association class, not a relevance number."""
 

@@ -548,12 +548,14 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
     # it let a legal form or sector phrase in boilerplate admit any article.
     # Each field is stripped on its own: an unprefixed join would let an
     # unpunctuated "Nguồn: CafeF" summary swallow the real content field.
+    # Raw text reaches the stripper because `_normalize_text` collapses newlines,
+    # which are the only boundary a newline-separated footer has.
     body = _normalize_text(
         " ".join(
             filter(
                 None,
                 (
-                    _strip_boilerplate(_normalize_text(row.get(field)))
+                    _strip_boilerplate(str(row.get(field) or ""))
                     for field in ("summary", "content", "category")
                 ),
             )
