@@ -64,16 +64,8 @@ jobs:
           body="$(curl -sS --max-time "${TIMEOUT}" "${base}/api/v1/health/detailed" || echo '{}')"
           status="$(printf '%s' "${body}" | jq -r '.status // "unknown"')"
           revision="$(printf '%s' "${body}" | jq -r '.revision // "unknown"')"
-          # A bare `degraded` cannot distinguish a missing verified universe from a
-          # broken store. Publish the database component's own read-only evidence so
-          # the alert states which it is instead of only that something is wrong.
-          database_status="$(printf '%s' "${body}" | jq -r '.components.database.status // "unknown"')"
-          reason="$(printf '%s' "${body}" | jq -r '.components.database.screener_freshness_reason // "none"')"
-          verified_count="$(printf '%s' "${body}" | jq -r '.components.database.screener_verified_count // "unknown"')"
-          expected_session="$(printf '%s' "${body}" | jq -r '.components.database.screener_expected_session // "unknown"')"
           echo "detailed status: ${status}"
           echo "running revision: ${revision}"
-          echo "database: ${database_status}; freshness reason: ${reason}"
 
           if [ "${status}" != "healthy" ]; then
             failures="${failures}detailed_status=${status}; "
@@ -83,10 +75,6 @@ jobs:
             echo "failures=${failures}"
             echo "status=${status}"
             echo "revision=${revision}"
-            echo "database_status=${database_status}"
-            echo "reason=${reason}"
-            echo "verified_count=${verified_count}"
-            echo "expected_session=${expected_session}"
           } >> "$GITHUB_OUTPUT"
 
           if [ -n "${failures}" ]; then
@@ -100,10 +88,6 @@ jobs:
           FAILURES: ${{ steps.probe.outputs.failures }}
           STATUS: ${{ steps.probe.outputs.status }}
           REVISION: ${{ steps.probe.outputs.revision }}
-          DATABASE_STATUS: ${{ steps.probe.outputs.database_status }}
-          REASON: ${{ steps.probe.outputs.reason }}
-          VERIFIED_COUNT: ${{ steps.probe.outputs.verified_count }}
-          EXPECTED_SESSION: ${{ steps.probe.outputs.expected_session }}
         run: |
           set -euo pipefail
           title="Production health watch failing"
@@ -118,9 +102,6 @@ jobs:
             "- Base URL: \`${BASE_URL}\`" \
             "- Reported status: \`${STATUS:-unknown}\`" \
             "- Running revision: \`${REVISION:-unknown}\`" \
-            "- Database component: \`${DATABASE_STATUS:-unknown}\`" \
-            "- Screener freshness reason: \`${REASON:-unknown}\`" \
-            "- Verified universe count: \`${VERIFIED_COUNT:-unknown}\` (expected session \`${EXPECTED_SESSION:-unknown}\`)" \
             "- Failed checks: \`${FAILURES:-see job log}\`" \
             "- Job: ${run_url}" \
             "" \
