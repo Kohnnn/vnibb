@@ -443,18 +443,23 @@ If these are ever added later, put them behind a separate admin MCP surface with
 
 ## OCI smoke checks
 
-Run from `vnibb/` against an already running sidecar; this command does not start production:
+Run from the repository root against an already running sidecar; this command does not start production.
+
+The wrapper reads `EXPECTED_REVISION` immediately and exits 1 before any network call when it is unset, so every invocation below supplies it. `EXPECTED_REVISION` must be the full 40-character SHA of the release you reviewed and published (build receipt, `/app/.release-revision` in the pulled image, or `git rev-parse --verify <published-tag>`), never a value read back from `/health` — that would defeat mismatch detection. Host mode also needs `mcp`, `httpx` and `jsonschema` installed in the selected Python.
 
 ```bash
-VNIBB_MCP_SHARED_BEARER_TOKEN=... SYMBOL=FPT PERIOD_TYPE=year PYTHON_MODE=host:python3 BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
-VNIBB_MCP_SHARED_BEARER_TOKEN=... SYMBOL=FPT PERIOD_TYPE=quarter PYTHON_MODE=host:python3 BASE_URL=https://api.example.com bash scripts/oracle/mcp_smoke_test.sh
+# One-time host client install
+python3 -m pip install "mcp[cli]>=1.0.0,<2" httpx jsonschema
+
+EXPECTED_REVISION=<reviewed-40-char-sha> VNIBB_MCP_SHARED_BEARER_TOKEN=... SYMBOL=FPT PERIOD_TYPE=year PYTHON_MODE=host:python3 BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
+EXPECTED_REVISION=<reviewed-40-char-sha> VNIBB_MCP_SHARED_BEARER_TOKEN=... SYMBOL=FPT PERIOD_TYPE=quarter PYTHON_MODE=host:python3 BASE_URL=https://api.example.com bash scripts/oracle/mcp_smoke_test.sh
 # Uses the running container's bearer env when not explicitly supplied:
-ENV_FILE=deployment/env.oracle COMPOSE_FILE=docker-compose.oracle.yml PYTHON_MODE=container SYMBOL=FPT bash scripts/oracle/mcp_smoke_test.sh
+EXPECTED_REVISION=<reviewed-40-char-sha> ENV_FILE=deployment/env.oracle COMPOSE_FILE=docker-compose.oracle.yml PYTHON_MODE=container SYMBOL=FPT bash scripts/oracle/mcp_smoke_test.sh
 ```
 
-The protocol smoke initializes MCP, lists required tools, checks both database statuses, and reads symbol-scoped PostgreSQL prices plus all three structured statements and matching Mongo IQ envelopes. It validates source, explicit units, fiscal scope, numeric financial values, raw payload, descriptors, and company type. Disconnected/unconfigured databases and connected-but-empty IQ data fail with different messages. Health alone is never connectivity proof.
+The protocol smoke initializes MCP, lists required tools, checks both database statuses, and reads symbol-scoped PostgreSQL prices plus all three structured statements and matching Mongo IQ envelopes. It compares the health `revision` against `EXPECTED_REVISION` and validates source, explicit units, fiscal scope, numeric financial values, raw payload, descriptors, and company type. Disconnected/unconfigured databases and connected-but-empty IQ data fail with different messages. Health alone is never connectivity proof.
 
-TLS verification is always enabled. For a private CA, set `SSL_CERT_FILE` to the trusted CA bundle (the path must exist in the selected container when using container mode). No TLS bypass is provided. Auto mode chooses a host Python with `mcp`/`httpx`, otherwise a running compose MCP container; compose interpolation always uses `--env-file "$ENV_FILE"`. `MCP_URL`/`HEALTH_URL` override routing; container loopback points to that container, not the caller's host.
+TLS verification is always enabled. For a private CA, set `SSL_CERT_FILE` to the trusted CA bundle (the path must exist in the selected container when using container mode). No TLS bypass is provided. Auto mode chooses a host Python importing `mcp`/`httpx`/`jsonschema`, otherwise a running compose MCP container; compose interpolation always uses `--env-file "$ENV_FILE"`. `MCP_URL`/`HEALTH_URL` override routing; container loopback points to that container, not the caller's host.
 
 Limitations: this is persisted-data acceptance for one symbol and one fiscal basis, not live provider reachability, all-symbol coverage, freshness, ratio completeness, or unit equivalence across datasets. The ratio dataset is probed and reports availability, but completeness is not asserted. IQ may legitimately omit units or a decoded fiscal basis: the writer preserves `unknown` and raw evidence, and smoke fails acceptance for that dataset rather than fabricating scale or labeling cumulative values quarterly. Source-date absence also fails; receipt time cannot substitute. Run both fiscal periods and each target symbol as needed. Focused regressions (not run during edits):
 

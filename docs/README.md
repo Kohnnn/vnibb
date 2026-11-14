@@ -62,8 +62,8 @@ Current source of truth:
 - `oracle_runbook.md`
 - `admin_global_system_layouts.md`
 
-## Note On Root Docs
+## Note On This Docs Tree
 
-The root `docs/` folder is now a lighter project-level overview set.
+This `docs/` tree is the canonical maintainer-facing documentation set for this repository. Older notes written in a parent checkout may refer to `vnibb/docs/` or a lighter root `docs/` overview set; in a standalone clone of `Kohnnn/vnibb` that parent directory does not exist, so read every `docs/` path here as repository-relative.
 
-For backend, scheduler, database, and maintainer-operational references, prefer `vnibb/docs/` first.
+For backend, scheduler, database, and maintainer-operational references, start here rather than expecting a second docs tree.

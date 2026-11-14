@@ -135,7 +135,7 @@ pnpm build
 
 ## 📜 License
 
-MIT License - see [LICENSE](LICENSE)
+MIT License - see the repository [`LICENSE`](../../LICENSE).
 
 ---
 

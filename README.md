@@ -53,11 +53,11 @@ The goal is not to be just another screener or charting page. VniBB is meant to 
 - **VniAgent**: database-first context, validated source citations, evidence panels, and reasoning/status events
 - **Bank-aware analytics**: banks are treated as a distinct analytical class, not forced into industrial-company ratios
 - **Fallback-first backend**: provider instability, missing values, and schema quirks are handled in the backend instead of leaking directly into the UI
-- **Agent-friendly repo**: phased planning, ops notes, AGENTS guidance, and docs make handoff to other coding agents much easier
+- **Agent-friendly repo**: phased planning, ops notes, and a tracked docs hub make handoff to other coding agents practical
 
 ## Quick Start
 
-Run from `vnibb/`.
+Run from the repository root. The backend env comes from `apps/api/.env` (template: `apps/api/.env.example`); copy it and fill placeholders locally rather than committing real values.
 
 Start PostgreSQL and MongoDB before the API: [`Database recovery and local startup`](docs/oracle_runbook.md#database-recovery-and-local-startup) provides authenticated loopback-only Docker services and migrations. Vietnamese ingestion is Vietcap IQ/Trading primary with explicitly sourced `vnstock` VCI as a supplement; KBS, TCBS and separate sponsor packages are not execution fallbacks. Use the bounded [IQ ingestion CLI](apps/api/scripts/vietcap/README.md) only when acquisition is authorized, then run the [MCP database smoke](docs/VNIBB_MCP_DEPLOYMENT.md). A healthy process alone does not prove populated or fresh data.
 
@@ -95,15 +95,17 @@ VNIBB_MCP_URL=http://127.0.0.1:8001/mcp
 
 # For AI coding agents
 
+This repository is self-contained: clone `Kohnnn/vnibb` and everything below exists. Repository instructions are tracked in this file and [the docs hub](docs/README.md). An `AGENTS.md` is deliberately untracked (`.gitignore`), so a local checkout or hosting environment may supply extra local rules; this repository alone ships none, and nothing here depends on one.
+
 ## Quick handoff prompt
 
 ```
 You are working on VniBB, a Vietnam-first financial analytics monorepo.
 
 Start here:
-1. Read `AGENTS.md`
-2. Read `docs/README.md` (docs hub)
-3. Work from `vnibb/`
+1. Read `docs/README.md` (docs hub)
+2. Read `README.md` (this file) — architecture reference further down
+3. Work from the repository root
 
 Install:
 - `pnpm install --frozen-lockfile`
@@ -121,8 +123,8 @@ Validate:
 - `pnpm run ci:gate`
 
 Key context:
-- Active product code lives in `vnibb/`
-- Docs and planning live in `docs/`, `../docs/`, and `.agent/`
+- Active product code lives in `apps/` and `packages/` in this repository
+- Docs and planning live in `docs/` here; dated historical evidence stays as written
 - Backend is FastAPI, frontend is Next.js 16 + React 19
 - Primary configs: `package.json`, `scripts/ci-gate.mjs`, `apps/api/pyproject.toml`
 - Never commit secrets, tokens, keys, or `.env*` files
@@ -191,8 +193,9 @@ pnpm run gate:no502     # Widget health probe (5 repeats, 10s timeout)
 - database schema: `docs/DATABASE_SCHEMA.md`
 - read-only MCP server: `docs/VNIBB_MCP_READONLY.md`
 - development journal: `docs/DEVELOPMENT_JOURNAL.md`
-- project-level overview docs: `../docs/README.md`
-- agent instructions: `AGENTS.md`
+- MCP deployment: `docs/VNIBB_MCP_DEPLOYMENT.md`
+- historical integration evidence: `docs/CONTINUING_WORK_EVIDENCE_2026-11-10.md`
+- agent instructions: this file and `docs/README.md`; local `AGENTS.md` is git-ignored and may add environment rules not shipped here
 
 ## License
 

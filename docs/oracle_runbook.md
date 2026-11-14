@@ -537,19 +537,21 @@ Load `VNIBB_MCP_SHARED_BEARER_TOKEN` from the private secret store without print
 bash scripts/oracle/healthcheck.sh
 bash scripts/oracle/smoke_test.sh
 bash scripts/oracle/runtime_verify.sh
-EXPECTED_REVISION="$EXPECTED_REVISION" BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
+EXPECTED_REVISION="$EXPECTED_REVISION" VNIBB_MCP_SHARED_BEARER_TOKEN="$VNIBB_MCP_SHARED_BEARER_TOKEN" BASE_URL=http://127.0.0.1:8001 bash scripts/oracle/mcp_smoke_test.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/healthcheck.sh
 CORS_TEST_ORIGIN=https://vnibb.vercel.app BASE_URL=https://oracle-api.example.com bash scripts/oracle/smoke_test.sh
 BASE_URL=https://oracle-api.example.com bash scripts/oracle/runtime_verify.sh
-EXPECTED_REVISION="$EXPECTED_REVISION" BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
+EXPECTED_REVISION="$EXPECTED_REVISION" VNIBB_MCP_SHARED_BEARER_TOKEN="$VNIBB_MCP_SHARED_BEARER_TOKEN" BASE_URL=https://oracle-api.example.com bash scripts/oracle/mcp_smoke_test.sh
 ```
 
 Notes:
 
 - The scripts default to `http://127.0.0.1:8000`, which is useful for local VM rehearsal before DNS is live.
-- The MCP smoke script now defaults to `http://127.0.0.1:8001`, which matches the host-published `vnibb-mcp` port on OCI.
+- The MCP smoke script defaults to `http://127.0.0.1:8001`, which matches the host-published `vnibb-mcp` port on OCI.
 - Override `CORS_TEST_ORIGIN` when validating a non-default frontend origin.
 - Set `VNIBB_MCP_SHARED_BEARER_TOKEN` in the shell before running the MCP smoke script against a protected deployment.
+- `EXPECTED_REVISION` must be the full 40-character SHA of the reviewed/published release (build receipt, `/app/.release-revision` in the pulled image, or `git rev-parse --verify <published-tag>`), never a value read back from `/health`. The wrapper exits before any network call when it is unset, and a value copied from the running service cannot detect a mismatch.
+- Host mode needs `mcp`, `httpx` and `jsonschema` in the selected Python: `python3 -m pip install "mcp[cli]>=1.0.0,<2" httpx jsonschema`. A missing module fails before connecting. TLS verification stays on; use `SSL_CERT_FILE` for a private CA, never a bypass.
 
 ### Read-only MCP acceptance gates
 

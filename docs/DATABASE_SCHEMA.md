@@ -5,7 +5,7 @@
 
 > PostgreSQL owns app state and admitted structured observations. MongoDB retains provider envelopes, descriptor evidence and analytical records. Vietcap IQ/Trading is the primary Vietnamese ingestion source; free `vnstock` VCI is supplementary and shares the same upstream. Never infer financial units, fiscal basis or publication dates from value magnitude or receipt time. Unknown fields remain unavailable rather than being certified by storage.
 >
-> The provider contract is documented at [`../../docs/VIETCAP_DATA_SOURCE.md`](../../docs/VIETCAP_DATA_SOURCE.md). The legacy collection names and n6v sections below describe compatibility/history, not proof of current provider execution or host placement. Local startup and safe production recovery are in [`oracle_runbook.md`](oracle_runbook.md#database-recovery-and-local-startup).
+> The provider contract is documented in the tracked [Vietcap ingestion CLI reference](../apps/api/scripts/vietcap/README.md). External source note `VIETCAP_DATA_SOURCE.md` is not shipped in this repository: older references to `../../docs/VIETCAP_DATA_SOURCE.md` point at an external/private document owned by the data-source maintainers, not a file in this clone. The legacy collection names and n6v sections below describe compatibility/history, not proof of current provider execution or host placement. Local startup and safe production recovery are in [`oracle_runbook.md`](oracle_runbook.md#database-recovery-and-local-startup).
 
 ---
 
@@ -997,8 +997,8 @@ Market rows carry a `source` field. Precedence is **`vietcap` > `vnstock-data`**
 The EOD read path filters only on `(symbol, tradeDate)` and ignores `source`,
 so exactly one bar per trading day must exist. The Vietcap backfill enforces this
 by deleting overlapping `vnstock-data` bars whenever a `vietcap` bar exists for
-the same `(symbol, tradeDate)` (the `--reconcile` step). See
-`VIETCAP_DATA_SOURCE.md`.
+the same `(symbol, tradeDate)` (the `--reconcile` step). See the
+[Vietcap ingestion CLI reference](../apps/api/scripts/vietcap/README.md).
 
 ### `market_prices_eod`
 Canonical daily OHLCV for stocks, ETFs, and indices.
