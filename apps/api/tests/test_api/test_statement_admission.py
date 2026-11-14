@@ -195,3 +195,32 @@ def test_valuation_span_requires_consecutive_complete_years():
     assert admission.admit_valuation_span(unprovenanced, "revenue", count=2)[1] == (
         "declared_scale_unknown_for_revenue_2022"
     )
+
+
+def test_declared_statement_unit_is_the_scale_of_last_resort():
+    """A caller that admitted the whole statement as VND needs no field scale.
+
+    Without the declaration the same row is withheld; the reason vocabulary is
+    shared with the valuation loader's own copy.
+    """
+    bare = {"revenue": 1_000}
+    assert admission.admit_valuation_field(bare, "revenue") == (None, "declared_scale_unknown")
+    assert admission.admit_valuation_field(bare, "revenue", declared_statement_unit="VND") == (
+        1_000.0, None,
+    )
+    # The declaration excuses a missing scale, never a missing value. A unit
+    # that names VND without a readable multiplier is a scale gap, not a
+    # foreign currency: the statement declaration may stand in for it.
+    assert admission.admit_valuation_field({}, "revenue", declared_statement_unit="VND") == (None, "missing")
+    assert admission.admit_valuation_field({"revenue": 1_000, "unit": "VND (thousands)"}, "revenue") == (
+        None, "declared_scale_unknown",
+    )
+    assert admission.admit_valuation_field(
+        {"revenue": 1_000, "unit": "VND (thousands)"}, "revenue", declared_statement_unit="VND",
+    ) == (1_000.0, None)
+    assert admission.admit_valuation_field(
+        {"revenue": 1_000, "unit": "USD"}, "revenue", declared_statement_unit="VND",
+    ) == (None, "unknown_currency")
+    assert admission.admit_valuation_field(
+        {"revenue": 1_000, "unit": "million VND"}, "revenue", declared_statement_unit="VND",
+    ) == (1_000_000_000.0, None)

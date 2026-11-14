@@ -315,6 +315,11 @@ def _declared_scale(row: Mapping[str, Any], alias: str) -> tuple[float | None, A
     return _DECLARED_SCALES.get(str(declared).strip().lower().replace("_", " ")), declared
 
 
+def _names_vnd(declared: Any) -> bool:
+    label = str(declared).strip().lower().replace("_", " ")
+    return any(token in label for token in ("vnd", "vnđ", "đồng", "dong"))
+
+
 def _valuation_lineage_scale(row: Mapping[str, Any], alias: str) -> float | None:
     lineage = row.get("_valuation_unit_lineage")
     if not isinstance(lineage, Mapping):
@@ -326,8 +331,17 @@ def _valuation_lineage_scale(row: Mapping[str, Any], alias: str) -> float | None
     return float(scale) if isinstance(scale, (int, float)) else None
 
 
-def admit_valuation_field(row: Mapping[str, Any], field: str) -> tuple[float | None, str | None]:
+def admit_valuation_field(
+    row: Mapping[str, Any],
+    field: str,
+    *,
+    declared_statement_unit: str | None = None,
+) -> tuple[float | None, str | None]:
     """Admit one raw annual valuation-row field as VND.
+
+    `declared_statement_unit` is the statement's own declared unit: when the
+    row carries no per-field scale, a caller that already admitted the whole
+    statement as VND may supply it instead of withholding the field.
 
     Reasons: `missing`, `blank`, `nonfinite`, `rejected:<reason>`,
     `declared_scale_unknown`, `unknown_currency`.
@@ -362,7 +376,12 @@ def admit_valuation_field(row: Mapping[str, Any], field: str) -> tuple[float | N
         return value, None
     scale, declared = _declared_scale(row, alias)
     if scale is None:
-        return None, "declared_scale_unknown" if declared is None else "unknown_currency"
+        vnd_labelled = declared is None or _names_vnd(declared)
+        # The statement-level declaration only stands in for a *VND* scale gap.
+        # A field that names another currency is still not VND and is withheld.
+        if declared_statement_unit == "VND" and vnd_labelled:
+            return value, None
+        return None, "declared_scale_unknown" if vnd_labelled else "unknown_currency"
     return value * scale, None
 
 
