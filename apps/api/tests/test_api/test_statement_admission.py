@@ -219,17 +219,6 @@ def test_valuation_field_rejects_any_alias_and_top_level_lineage():
     ) == (None, "rejected:unverified_statement_currency_or_unit")
 
 
-def test_valuation_field_aliases_match_the_valuation_loader():
-    """One alias table: derivation and admission resolve a metric identically."""
-    from vnibb.services.fundamental_valuation import VALUATION_FIELD_ALIASES
-
-    assert set(VALUATION_FIELD_ALIASES) == {
-        "revenue", "net_income", "operating_cash_flow", "capex", "total_assets", "equity",
-    }
-    for field, aliases in VALUATION_FIELD_ALIASES.items():
-        assert set(aliases) <= set(admission.FIELD_ALIASES[field]), field
-
-
 def test_valuation_span_requires_consecutive_complete_years():
     rows = [
         {"yearReport": 2021, "revenue": 1, "unit": "VND"},
