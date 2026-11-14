@@ -1,6 +1,7 @@
 'use client';
 
 import React, { ReactNode, useState, useCallback, useContext } from 'react';
+import { RefreshCw } from 'lucide-react';
 import { WidgetHeader } from './WidgetHeader';
 import { cn } from '@/lib/utils';
 
@@ -91,8 +92,20 @@ export function WidgetContainer({
           showLinkToggle={showLinkToggle}
         />
       )}
-      {shouldHideHeader && headerActions && (
+      {shouldHideHeader && (headerActions || onRefresh) && (
         <div className="flex shrink-0 items-center justify-end gap-2 overflow-x-auto border-b border-[var(--border-color)] px-2 py-1" aria-label={`${title} controls`}>
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={isLoading}
+              aria-label="Refresh"
+              title="Refresh"
+              className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/80 rounded transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
           {headerActions}
         </div>
       )}

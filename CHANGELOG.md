@@ -14,6 +14,7 @@ live in `docs/`.
 ## [Unreleased]
 
 - Apply admitted fiscal, unit and source evidence before cash-flow aliases, growth comparisons, Earnings Quality grades and earnings-recap context; preserve measured zero and explicit unavailable reasons. Use the same case-preserving field admission for valuation inputs and refuse incomparable margin exports (#245–#248, #257, #258).
+- Preserve each widget's existing Refresh action when the dashboard hides its internal header; keep the widget's own query/refetch boundary and loading guard rather than refreshing unrelated widgets (#245).
 - Withhold FCF and DCF when the newest required capex observations are incomplete; calculate CAGR from comparable fiscal endpoints and clear obsolete formula-derived screener values while preserving independent facts (#247, #248).
 - Disclose foreign-flow session coverage and normal source overlap separately; preserve requested long windows and cap unwindowed merged results once. Keep coverage warnings, rows and Refresh reachable in compact mobile tiles using native scrolling. Keep RS price units and observation dates distinct from rating dates (#249, #251).
 - Separate direct-company, verified-peer, industry-only and general-market news evidence; strip source footers per field before normalization and retain available fallback rows when company context is unavailable (#250).

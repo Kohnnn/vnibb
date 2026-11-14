@@ -1,5 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { useCashFlow } from '@/lib/queries';
+import { WidgetHeaderVisibilityProvider } from '@/components/ui/WidgetContainer';
 import {
   CashFlowWidget,
   RAW_CASHFLOW_ALIASES,
@@ -254,5 +256,54 @@ describe('cash flow table rendering', () => {
     // formatted under the statement's currency scale.
     expect(screen.queryByText('Depreciation')).toBeNull();
     expect(screen.queryByText(/8,470\.68/)).toBeNull();
+  });
+});
+
+describe('cash flow refresh on a header-suppressed dashboard', () => {
+  it('refetches through the shell’s compact controls and renders the new payload', () => {
+    // `refetch` is what actually swaps the provider payload, exactly as the real
+    // hook's refetch would: if the button loses its callback, the click changes
+    // nothing and the assertion below fails.
+    const withheld: object = {
+      ...admittedRow,
+      period: '2025',
+      unit_metadata: { ...admittedRow.unit_metadata, depreciation: { unavailable_reason: 'unverified_statement_currency_or_unit' } },
+    };
+    const admittedZero: object = {
+      ...admittedRow,
+      period: '2026',
+      unit_metadata: {
+        operating_cash_flow: { source_unit: 'VND', value_unit: 'VND' },
+        depreciation: { source_unit: 'VND', value_unit: 'VND' },
+      },
+      raw_data: { depreciation: 0 },
+    };
+    cashFlow.mockImplementation(() => {
+      const [row, setRow] = useState(withheld);
+      return {
+        data: { data: [row] },
+        error: null,
+        isLoading: false,
+        isFetching: false,
+        refetch: jest.fn(() => setRow(admittedZero)),
+        dataUpdatedAt: 1750000000000,
+      } as never;
+    });
+
+    render(
+      <WidgetHeaderVisibilityProvider hideHeader>
+        <CashFlowWidget id="cash_flow" symbol="HPG" />
+      </WidgetHeaderVisibilityProvider>,
+    );
+    expect(screen.getByText('2025')).toBeInTheDocument();
+    expect(screen.queryByText('Depreciation')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    // The click alone moved the widget onto the admitted 2026 row: the period
+    // column changed and the previously withheld metric is now admitted.
+    expect(screen.getByText('2026')).toBeInTheDocument();
+    expect(screen.queryByText('2025')).toBeNull();
+    expect(screen.getByText('Depreciation')).toBeInTheDocument();
   });
 });
