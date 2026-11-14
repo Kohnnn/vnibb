@@ -88,11 +88,12 @@ function ResearchNotebookWidgetComponent({ id, widgetId, onRemove, onDataChange,
       noPadding
       headerActions={
         <div className="flex items-center gap-1">
+          {/* Export is an action, not a gain: neutral surface, accent text. */}
           <button
             type="button"
             onClick={handleExport}
             disabled={!items.length}
-            className="inline-flex min-h-11 items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-3 text-[10px] font-semibold text-[var(--color-positive)] transition-colors hover:bg-[var(--color-positive-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-40"
+            className="inline-flex min-h-11 items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-3 text-[10px] font-semibold text-[var(--color-accent-primary)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] disabled:opacity-40"
             title="Export notebook as markdown"
           >
             <Download size={11} />

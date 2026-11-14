@@ -102,9 +102,9 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
 
     return (
         <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${bg} ${text} ${border}`}>
-            <Icon size={10} />
-            <span className="text-[10px] font-medium">{label}</span>
-            {score && <span className="text-[9px] opacity-70">({score}%)</span>}
+            <Icon size={11} />
+            <span className="text-[length:var(--font-size-sm)] font-medium">{label}</span>
+            {score && <span className="text-[length:var(--font-size-sm)] opacity-80">({score}%)</span>}
         </div>
     );
 }
