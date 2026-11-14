@@ -229,6 +229,95 @@ async def test_endpoint_discloses_the_row_cap_for_long_windows(client, monkeypat
     assert "caps" in (payload["error"] or "")
 
 
+@pytest.mark.asyncio
+async def test_empty_live_feed_serving_retained_rows_stays_degraded(
+    client, monkeypatch, test_db
+):
+    sessions_ = requested_session_dates(2)
+    test_db.add_all(
+        [
+            ForeignTrading(
+                id=930 + index,
+                symbol="VNM",
+                trade_date=day,
+                buy_volume=1_000,
+                sell_volume=400,
+            )
+            for index, day in enumerate(sessions_)
+        ]
+    )
+    await test_db.commit()
+
+    async def empty_fetch(params):
+        return []
+
+    monkeypatch.setattr(
+        equity_module.VnstockForeignTradingFetcher, "fetch", empty_fetch, raising=True
+    )
+
+    response = await client.get("/api/v1/equity/VNM/foreign-trading?sessions=2")
+
+    payload = response.json()
+    # A complete cache window does not make an empty live answer healthy.
+    assert payload["meta"]["coverage_status"] == "complete"
+    assert payload["meta"]["count"] == 2
+    message = "Live foreign trading feed returned no rows; using cached database fallback."
+    assert payload["error"] == message
+    assert message in payload["meta"]["warnings"]
+    # The retained sessions keep their own dates rather than "today".
+    assert payload["meta"]["last_validated_session"] == sessions_[-1].isoformat()
+    assert [row["date"] for row in payload["data"]] == [
+        day.isoformat() for day in sorted(sessions_, reverse=True)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_disjoint_sources_return_exactly_the_latest_unwindowed_rows(
+    client, monkeypatch, test_db
+):
+    recent = requested_session_dates(3)
+    older = requested_session_dates(6)[:3]
+    test_db.add_all(
+        [
+            ForeignTrading(
+                id=940 + index,
+                symbol="HPG",
+                trade_date=day,
+                buy_volume=1_000,
+                sell_volume=400,
+            )
+            for index, day in enumerate(recent)
+        ]
+    )
+    await test_db.commit()
+
+    async def older_fetch(params):
+        return [
+            ForeignTradingData(
+                symbol="HPG",
+                date=day.isoformat(),
+                buy_volume=1_000.0,
+                sell_volume=400.0,
+            )
+            for day in sorted(older, reverse=True)
+        ]
+
+    monkeypatch.setattr(
+        equity_module.VnstockForeignTradingFetcher, "fetch", older_fetch, raising=True
+    )
+
+    response = await client.get("/api/v1/equity/HPG/foreign-trading?limit=3")
+
+    payload = response.json()
+    # Provider and cache dates are disjoint, so a per-source cap would return 6.
+    assert payload["meta"]["count"] == 3
+    assert payload["meta"]["window_contract"] == "latest_retained_rows"
+    assert [row["date"] for row in payload["data"]] == [
+        day.isoformat() for day in sorted(recent, reverse=True)
+    ]
+    assert payload["meta"]["last_validated_session"] == max(recent).isoformat()
+
+
 def test_calendar_metadata_is_disclosed_for_unverified_years(monkeypatch):
     monkeypatch.setattr(coverage_module, "market_calendar_metadata", lambda anchor: {"verified": False})
 

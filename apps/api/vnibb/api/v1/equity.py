@@ -6694,10 +6694,12 @@ async def get_foreign_trading(
         if requested_days:
             window_start, window_end = requested_days[0], requested_days[-1]
 
+    # Both sources are read at the requested size; the limit is applied once,
+    # after merging and deduping, so disjoint sources cannot return 2×limit.
     retained = await _load_foreign_trading_fallback(
         db,
         symbol_upper,
-        max(limit, sessions or 0),
+        limit,
         start_date=window_start,
         end_date=window_end,
     )
@@ -6706,13 +6708,22 @@ async def get_foreign_trading(
         requested_sessions=sessions,
         start_date=window_start,
         end_date=window_end,
+        row_limit=limit,
     )
 
+    live_feed_empty = provider_error is None and not provider_rows
     warnings: list[str] = list(coverage.warnings)
     if provider_error:
         warnings.insert(
             0,
             provider_error + ("; using cached database fallback" if retained else ""),
+        )
+    elif live_feed_empty and retained:
+        # A live feed that answers with no rows is degradation, not evidence
+        # that the retained sessions are live (#249).
+        warnings.insert(
+            0,
+            "Live foreign trading feed returned no rows; using cached database fallback.",
         )
     if sessions and sessions > PROVIDER_ROW_CAP:
         warnings.append(

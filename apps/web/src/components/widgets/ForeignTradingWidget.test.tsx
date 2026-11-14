@@ -236,4 +236,37 @@ describe('ForeignTradingWidget volumes', () => {
     expect(await screen.findByText(/1\/250 sessions/)).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('caps 100 rows');
   });
+
+  it('shows the retained-fallback envelope warning instead of a live window', async () => {
+    jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    const message = 'Live foreign trading feed returned no rows; using cached database fallback.';
+    mockUseForeignTrading.mockReturnValue({
+      data: {
+        symbol: 'VNM', count: 2,
+        data: [
+          { symbol: 'VNM', date: '2026-10-27', buy_volume: 1500, sell_volume: 500 },
+          { symbol: 'VNM', date: '2026-10-26', buy_volume: 500, sell_volume: 1500 },
+        ],
+        meta: {
+          count: 2,
+          requested_session_count: 2,
+          observed_session_count: 2,
+          observed_start_date: '2026-10-26',
+          observed_end_date: '2026-10-27',
+          gap_session_count: 0,
+          window_net_volume: 0,
+          coverage_status: 'complete',
+          warnings: [message],
+        },
+        error: message,
+      },
+      isLoading: false, isFetching: false, error: null, refetch: jest.fn(), dataUpdatedAt: 0,
+    } as unknown as UseQueryResult<ForeignTradingResponse, Error>);
+
+    render(<ForeignTradingWidget id="foreign-fallback" symbol="VNM" />);
+
+    expect(await screen.findByRole('status')).toHaveTextContent(message);
+    // The retained sample keeps its own coverage range, not a live label.
+    expect(screen.getByText(/2\/2 sessions/)).toHaveTextContent('2026-10-27');
+  });
 });

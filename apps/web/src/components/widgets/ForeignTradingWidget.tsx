@@ -96,6 +96,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     });
 
     const coverage = data?.meta;
+    const responseWarning = data?.error || null;
     // Rows are already admitted to the session window server-side; sorting is
     // presentation only and never re-derives a window total from a row count.
     const trades = useMemo(() => {
@@ -134,6 +135,12 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
 
     const coverageWarning = useMemo(() => {
         const parts: string[] = [];
+        // The response-level degradation record travels with the rows: a
+        // retained fallback sample must not read as live data (#249).
+        if (responseWarning) parts.push(responseWarning.replace(/^; |; $/g, ''));
+        for (const warning of coverage?.warnings ?? []) {
+            if (!responseWarning?.includes(warning)) parts.push(warning);
+        }
         if (coverage?.provider_row_cap_applied) {
             parts.push(`Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`);
         }
@@ -146,8 +153,8 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         if (coverage?.calendar_verified === false) {
             parts.push('Exchange calendar unverified for this range; closures may appear as gaps.');
         }
-        return parts.join(' ');
-    }, [coverage]);
+        return [...new Set(parts)].join(' ');
+    }, [coverage, responseWarning]);
 
     const columns = useMemo((): VirtualizedColumn<any>[] => [
         {
@@ -199,7 +206,6 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     ], []);
 
     const hasData = trades.length > 0;
-    const responseWarning = data?.error || null;
     const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 

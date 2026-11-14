@@ -137,6 +137,7 @@ def build_foreign_flow_coverage(
     requested_sessions: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    row_limit: int | None = None,
 ) -> ForeignFlowCoverage:
     """Admit `rows` into the requested session window.
 
@@ -144,6 +145,12 @@ def build_foreign_flow_coverage(
     so a caller that passes provider rows before retained rows prefers the
     live feed for the same session. Weekend/holiday rows are excluded rather
     than summed: no exchange session exists on those dates.
+
+    `row_limit` truncates the merged result, never the inputs: a caller that
+    unions the live feed with retained rows must still return exactly the
+    latest N *distinct* sessions, not 2N when the two sources are disjoint. A
+    session window is instead bounded by its own sessions, so the limit does
+    not apply there.
     """
     coverage = ForeignFlowCoverage()
     ordered = [row for row in (rows or []) if row is not None]
@@ -178,6 +185,7 @@ def build_foreign_flow_coverage(
     else:
         expected_days = []
 
+
     expected_set = set(expected_days)
     holidays = _market_holidays()
     seen: dict[date, Any] = {}
@@ -202,6 +210,8 @@ def build_foreign_flow_coverage(
         seen[session] = row
 
     admitted = sorted(seen.items(), key=lambda item: item[0], reverse=True)
+    if row_limit is not None and not coverage.windowed:
+        admitted = admitted[: max(0, int(row_limit))]
     coverage.rows = [row for _, row in admitted]
     coverage.observed_sessions = len(admitted)
     if admitted:
