@@ -535,6 +535,7 @@ def compute_cagr_over_years(points: Sequence[tuple[int, float]]) -> float | None
         return None
 
 
+
 def _row_year(row: Any) -> int | None:
     return _report_year(row) if isinstance(row, dict) else None
 

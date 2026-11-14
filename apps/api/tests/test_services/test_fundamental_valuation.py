@@ -17,6 +17,7 @@ from vnibb.services.fundamental_valuation import (
     ValuationConfig,
     _normalize_statement_rows,
     admit_fundamental_snapshot,
+
     assess_cagr_coverage,
     assess_fcf_coverage,
     compute_cagr_over_years,
@@ -318,7 +319,6 @@ class TestCagrCoverage:
         assert coverage["published"] is None
         assert {"year": 2022, "field": "revenue", "reason": reason} in coverage["excluded"]
 
-
 # --- field admission ------------------------------------------------------------
 
 
@@ -413,7 +413,6 @@ class TestFcfCoverage:
         assert coverage["baseFcf"] == 200.0
         assert coverage["positive"] is True
         assert coverage["excluded"] == []
-
     def test_explicit_zero_capex_is_a_valid_complete_row(self) -> None:
         coverage = assess_fcf_coverage([
             _cash_year(2022, 300.0, 0.0),

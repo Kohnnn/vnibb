@@ -523,9 +523,27 @@ async def test_get_financials_with_ttm_filters_specific_quarter_after_normalizat
 def test_growth_absolute_prior_denominator(current, previous, expected, transition):
     result = _growth_rate(current, previous)
     assert result == pytest.approx(expected) if expected is not None else result is None
-    detail = _growth_detail(current, previous)
+    # The rate convention above is per-metric arithmetic; the published detail
+    # only exists for a pair of admitted rows, so it is checked separately.
+    detail = _growth_detail(_admitted_row(2025, current), _admitted_row(2024, previous), "revenue",
+                            period_kind="annual", statement_type="income")
     assert detail["transition"] == transition
     assert detail["negative_base"] == (previous is not None and previous < 0)
+
+
+def _admitted_row(fiscal_year: int, revenue: float | None):
+    from types import SimpleNamespace
+    lineage = {
+        "source": "vietcap", "currency": "VND", "value_unit": "VND",
+        "consolidation_basis": "consolidated", "flow_basis": "annual",
+    }
+    return SimpleNamespace(
+        period=str(fiscal_year), fiscal_year=fiscal_year, revenue=revenue,
+        source="vietcap", currency="VND", value_unit="VND",
+        consolidation_basis="consolidated", flow_basis="annual",
+        raw_data={"_financial_lineage": lineage},
+        unit_metadata={"revenue": {"source_unit": "VND", "value_unit": "VND"}},
+    )
 
 
 def test_ttm_latest_balance_snapshot_preserves_missing_inventory():
@@ -723,7 +741,7 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     """
     from types import SimpleNamespace
 
-    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
 
@@ -738,7 +756,7 @@ def test_lineage_alias_agreement_matches_between_readers(column_value, canonical
     })
     row = SimpleNamespace(income_before_tax=column_value)
     restored = _restore_lineage_statement(
-        row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
+        row, {"_financial_lineage": {"canonical_data": canonical}},
         FinancialStatementData(**canonical),
     )
 
@@ -775,7 +793,7 @@ def test_lineage_serves_what_the_canonical_proves(stored, canonical_state, expec
     """
     from types import SimpleNamespace
 
-    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
 
@@ -794,7 +812,7 @@ def test_lineage_serves_what_the_canonical_proves(stored, canonical_state, expec
 
     row = SimpleNamespace(revenue=stored)
     restored = _restore_lineage_statement(
-        row, {"_financial_lineage": {"canonical_data": canonical}}, IncomeStatement,
+        row, {"_financial_lineage": {"canonical_data": canonical}},
         FinancialStatementData(**canonical),
     )
     payload = {column.name: None for column in IncomeStatement.__table__.columns}
@@ -815,7 +833,7 @@ def test_lineage_serves_a_metric_that_has_no_sql_column():
     """
     from types import SimpleNamespace
 
-    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import IncomeStatement
 
@@ -830,7 +848,7 @@ def test_lineage_serves_a_metric_that_has_no_sql_column():
 
     restored = _restore_lineage_statement(
         SimpleNamespace(), {"_financial_lineage": {"canonical_data": canonical}},
-        IncomeStatement, FinancialStatementData(**canonical),
+        FinancialStatementData(**canonical),
     )
     payload = {column.name: None for column in IncomeStatement.__table__.columns}
     payload.update(symbol="HPG", period="2025", fiscal_year=2025, source="VCI",
@@ -862,7 +880,7 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(
     """
     from types import SimpleNamespace
 
-    from vnibb.api.v1.equity import _restore_lineage_statement
+    from vnibb.services.statement_admission import restore_lineage_statement as _restore_lineage_statement
     from vnibb.mcp.server import _admit_statement_row
     from vnibb.models.financials import CashFlow
 
@@ -879,7 +897,7 @@ def test_lineage_withholds_both_spellings_of_an_aliased_metric(
         for column in CashFlow.__table__.columns
     })
     restored = _restore_lineage_statement(
-        row, {"_financial_lineage": {"canonical_data": canonical}}, CashFlow,
+        row, {"_financial_lineage": {"canonical_data": canonical}},
         FinancialStatementData(**canonical),
     )
 

@@ -46,7 +46,15 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
   )
 
   const payload = data?.data
-  const hasData = Boolean(payload)
+  // No admitted coverage means no grade, score or trend. That is not a truthy
+  // scorecard and not evidence of stable quality (issue #257).
+  const unavailableReason = data?.error || payload?.coverage?.unavailable_reason || null
+  // An admitted ratio without a complete scorecard is still an observation:
+  // it is shown under the missing-grade reason rather than discarded (#257).
+  const hasRatios = [payload?.accruals_ratio_pct, payload?.revenue_quality_pct, payload?.earnings_persistence]
+    .some((value) => value !== null && value !== undefined && !Number.isNaN(value))
+  const hasGrade = Boolean(payload?.grade)
+  const hasData = hasGrade || hasRatios
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -59,9 +67,14 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       fetchedAt: payload?.computed_at || dataUpdatedAt || null,
       derived: true,
       stale: Boolean(error && hasData),
-      extra: { grade: payload?.grade || 'n/a' },
+      extra: {
+        grade: payload?.grade || 'n/a',
+        trend: payload?.trend ?? null,
+        coverage_status: payload?.coverage?.status ?? 'unavailable',
+        unavailable_reason: unavailableReason,
+      },
     }))
-  }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, upperSymbol])
+  }, [dataUpdatedAt, error, hasData, onDataChange, payload?.computed_at, payload?.grade, payload?.trend, payload?.coverage?.status, unavailableReason, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view earnings quality" icon={<ShieldCheck size={18} />} />
@@ -88,14 +101,27 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
       ) : error && !hasData ? (
         <WidgetError error={error as Error} onRetry={() => refetch()} />
       ) : !hasData ? (
-        <WidgetEmpty message="No quality data available" icon={<ShieldCheck size={18} />} />
+        <WidgetEmpty
+          message={unavailableReason ? `Earnings quality unavailable: ${unavailableReason}` : 'No quality data available'}
+          icon={<ShieldCheck size={18} />}
+        />
       ) : (
         <>
-          <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
-            <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Quality Grade</div>
-            <div className={`text-lg font-semibold ${gradeTone(payload?.grade || 'n/a')}`}>{payload?.grade || 'n/a'}</div>
-            <div className="text-[10px] text-[var(--text-secondary)]">Quality Score: {score(payload?.quality_score)} / 100</div>
-          </div>
+          {hasGrade ? (
+            <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 mb-2">
+              <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Quality Grade</div>
+              <div className={`text-lg font-semibold ${gradeTone(payload?.grade || 'n/a')}`}>{payload?.grade || 'n/a'}</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">Quality Score: {score(payload?.quality_score)} / 100</div>
+            </div>
+          ) : (
+            <div className="rounded-md border border-[var(--color-warning)]/40 bg-[var(--bg-secondary)] px-3 py-2 mb-2" data-testid="quality-partial">
+              <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Quality Grade</div>
+              <div className="text-xs font-semibold text-[var(--text-primary)]">Not graded</div>
+              <div className="text-[10px] text-[var(--text-secondary)]">
+                {unavailableReason || 'Incomplete admitted inputs for a full earnings-quality scorecard.'}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2 text-[10px] mb-2">
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -111,8 +137,8 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
               <div className="font-mono text-[var(--text-primary)]">{persistence(payload?.earnings_persistence)}</div>
             </div>
             <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
-              <div className="uppercase tracking-widest text-[var(--text-muted)]">Trend</div>
-              <div className="font-mono text-[var(--text-primary)]">{payload?.trend || 'Stable'}</div>
+                <div className="uppercase tracking-widest text-[var(--text-muted)]">Trend</div>
+              <div className="font-mono text-[var(--text-primary)]">{hasGrade ? payload?.trend ?? 'Unknown' : 'Not graded'}</div>
             </div>
           </div>
 
@@ -127,7 +153,10 @@ export function EarningsQualityWidget({ symbol, onDataChange }: EarningsQualityW
                 ))}
               </div>
             ) : (
-              <div className="text-[var(--text-secondary)]">No quality conditions met.</div>
+              <div className="text-[var(--text-secondary)]">
+                {/* A missing grade is a coverage gap, never "checks passed". */}
+                {hasGrade ? 'No quality conditions met.' : 'No condition can be evaluated without a grade.'}
+              </div>
             )}
           </div>
         </>

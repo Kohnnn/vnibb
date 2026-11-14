@@ -28,6 +28,46 @@ from vnibb.providers.vnstock.stock_quote import StockQuoteData
 from vnibb.providers.vnstock.trading_stats import TradingStatsData
 from vnibb.services.sector_service import SectorPerformance, StockBrief
 
+
+def annual_lineage(period: str, statement_type: str, fiscal_year: int, **metrics) -> dict:
+    """A real persisted canonical envelope, as the writer stores it.
+
+    Growth (and every other column reader) serves a row from `canonical_data`
+    only, so a bare basis dictionary is not evidence: this helper builds the
+    complete envelope the sync actually persists.
+    """
+    numeric = {"int", "float", "Optional[int]", "Optional[float]"}
+    envelope = {
+        name: 0.0
+        for name, info in FinancialStatementData.model_fields.items()
+        if str(info.annotation) in numeric or info.annotation in (int, float)
+    }
+    envelope.update(
+        symbol="VNM",
+        period=period,
+        period_type="quarter" if "Q" in period else "year",
+        statement_type=statement_type,
+        fiscal_year=fiscal_year,
+        fiscal_quarter=int(period[1]) if "Q" in period else None,
+        source="vietcap",
+        currency="VND",
+        value_unit="VND",
+        consolidation_basis="consolidated",
+        flow_basis="annual",
+        source_periods=[],
+        unit_metadata={
+            field: {
+                "source_unit": "VND",
+                "value_unit": "VND/share" if field in {"eps", "eps_diluted"} else "VND",
+            }
+            for field in metrics
+        },
+        **metrics,
+    )
+    envelope["raw_data"] = {}
+    return {"_financial_lineage": {"canonical_data": envelope}}
+
+
 @pytest.fixture
 def quote_database(test_engine, monkeypatch):
     monkeypatch.setattr("vnibb.api.v1.equity.async_session_factory", async_sessionmaker(
@@ -1848,6 +1888,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 net_income=200,
                 eps=2.0,
                 ebitda=300,
+                raw_data=annual_lineage("2024", "income", 2024, revenue=1000, net_income=200, eps=2.0, ebitda=300),
             ),
             IncomeStatement(
                 id=2,
@@ -1859,6 +1900,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 net_income=160,
                 eps=1.6,
                 ebitda=240,
+                raw_data=annual_lineage("2023", "income", 2023, revenue=800, net_income=160, eps=1.6, ebitda=240),
             ),
             BalanceSheet(
                 id=1,
@@ -1867,6 +1909,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 period_type="year",
                 fiscal_year=2024,
                 total_assets=5000,
+                raw_data=annual_lineage("2024", "balance", 2024, total_assets=5000),
             ),
             BalanceSheet(
                 id=2,
@@ -1875,6 +1918,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
                 period_type="year",
                 fiscal_year=2023,
                 total_assets=4000,
+                raw_data=annual_lineage("2023", "balance", 2023, total_assets=4000),
             ),
         ]
     )
@@ -1885,6 +1929,7 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
     payload = response.json()
     assert payload["data"]["symbol"] == "VNM"
     assert payload["data"]["yoy"]["revenue_growth"] == pytest.approx(25.0)
+    assert payload["data"]["yoy"]["eps_growth"] == pytest.approx(25.0)
     assert payload["data"]["yoy"]["asset_growth"] == pytest.approx(25.0)
     assert payload["data"]["growth_convention"] == "absolute_prior_denominator"
     assert payload["data"]["quarter_comparison"] == "same_quarter_previous_year"
@@ -1894,9 +1939,11 @@ async def test_growth_endpoint_returns_yoy_metrics(client, test_db):
 async def test_growth_endpoint_msr_negative_base_keeps_reported_earnings(client, test_db):
     test_db.add_all([
         IncomeStatement(id=91, symbol="MSR", period="2024", period_type="year", fiscal_year=2024,
-                        net_income=-1_638_456_685_000),
+                        net_income=-1_638_456_685_000,
+                        raw_data=annual_lineage("2024", "income", 2024, net_income=-1_638_456_685_000)),
         IncomeStatement(id=92, symbol="MSR", period="2025", period_type="year", fiscal_year=2025,
-                        net_income=11_292_963_000),
+                        net_income=11_292_963_000,
+                        raw_data=annual_lineage("2025", "income", 2025, net_income=11_292_963_000)),
     ])
     await test_db.commit()
     response = await client.get("/api/v1/equity/MSR/growth")
@@ -1908,7 +1955,7 @@ async def test_growth_endpoint_msr_negative_base_keeps_reported_earnings(client,
     assert detail["current"] == 11_292_963_000
     assert detail["negative_base"] is True
     assert detail["transition"] == "loss_to_profit"
-    assert detail["basis_status"] == "legacy_basis_unconfirmed"
+    assert detail["basis_status"] == "confirmed"
 
 
 @pytest.mark.asyncio

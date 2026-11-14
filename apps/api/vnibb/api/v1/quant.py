@@ -42,6 +42,7 @@ from vnibb.providers.vnstock.equity_historical import (
     VnstockEquityHistoricalFetcher,
 )
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
+from vnibb.services import statement_admission
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
@@ -3167,15 +3168,8 @@ async def get_earnings_quality(
     symbol_upper = symbol.upper().strip()
     if not symbol_upper:
         raise HTTPException(status_code=400, detail="Symbol is required")
-
     income_result = await db.execute(
-        select(
-            IncomeStatement.fiscal_year,
-            IncomeStatement.fiscal_quarter,
-            IncomeStatement.revenue,
-            IncomeStatement.net_income,
-            IncomeStatement.eps,
-        )
+        select(IncomeStatement)
         .where(
             IncomeStatement.symbol == symbol_upper,
             IncomeStatement.fiscal_quarter.isnot(None),
@@ -3185,11 +3179,7 @@ async def get_earnings_quality(
         .limit(12)
     )
     cash_result = await db.execute(
-        select(
-            CashFlow.fiscal_year,
-            CashFlow.fiscal_quarter,
-            CashFlow.operating_cash_flow,
-        )
+        select(CashFlow)
         .where(
             CashFlow.symbol == symbol_upper,
             CashFlow.fiscal_quarter.isnot(None),
@@ -3199,11 +3189,7 @@ async def get_earnings_quality(
         .limit(12)
     )
     balance_result = await db.execute(
-        select(
-            BalanceSheet.fiscal_year,
-            BalanceSheet.fiscal_quarter,
-            BalanceSheet.total_assets,
-        )
+        select(BalanceSheet)
         .where(
             BalanceSheet.symbol == symbol_upper,
             BalanceSheet.fiscal_quarter.isnot(None),
@@ -3213,73 +3199,129 @@ async def get_earnings_quality(
         .limit(12)
     )
 
-    income_rows = income_result.all()
-    cash_map = {
-        (row[0], row[1]): row[2]
-        for row in cash_result.all()
-        if row[0] is not None and row[1] is not None
-    }
-    asset_map = {
-        (row[0], row[1]): row[2]
-        for row in balance_result.all()
-        if row[0] is not None and row[1] is not None
-    }
+    def _by_period(rows: Any) -> Dict[tuple, Any]:
+        return {(row.fiscal_year, row.fiscal_quarter): row for row in rows if row.fiscal_quarter}
+
+    # Every row goes through the statement loader's own restoration and
+    # admission first: a stored column is not evidence, and the statement
+    # endpoints withhold exactly what this scorecard must not grade (#257).
+    income_by_period = _by_period(
+        statement_admission.admit_persisted_statement(row, "income", "quarter")
+        for row in income_result.scalars().all()
+    )
+    cash_by_period = _by_period(
+        statement_admission.admit_persisted_statement(row, "cashflow", "quarter")
+        for row in cash_result.scalars().all()
+    )
+    balance_by_period = _by_period(
+        statement_admission.admit_persisted_statement(row, "balance", "quarter")
+        for row in balance_result.scalars().all()
+    )
 
     period_rows: List[Dict[str, Any]] = []
-    for fiscal_year, fiscal_quarter, revenue, net_income, eps in income_rows:
-        if fiscal_year is None or fiscal_quarter is None:
+    component_availability: Dict[str, Any] = {}
+    for key in sorted(income_by_period, reverse=True):
+        fiscal_year, fiscal_quarter = key
+        income = income_by_period[key]
+        cash = cash_by_period.get(key)
+        balance = balance_by_period.get(key)
+        cross_basis, cross_reason = statement_admission.cross_statement_basis([income, cash, balance])
+
+        def _admit(row: Any, field: str, statement_type: str, period_kind: str):
+            if row is None:
+                return None, "missing_statement_period"
+            return statement_admission.admit_statement_field(
+                row, field, statement_type=statement_type, period_kind=period_kind,
+            )
+
+        revenue, revenue_reason = _admit(income, "revenue", "income", "single_quarter")
+        net_income, net_income_reason = _admit(income, "net_income", "income", "single_quarter")
+        eps, eps_reason = _admit(income, "eps", "income", "single_quarter")
+        total_assets, assets_reason = _admit(balance, "total_assets", "balance", "instant")
+        # A cumulative YTD cash figure cannot be paired with a single-quarter
+        # numerator without a supported conversion, so only a single-quarter
+        # operating flow enters these ratios.
+        ocf, ocf_reason = _admit(cash, "operating_cash_flow", "cashflow", "single_quarter")
+        # Combining statements is arithmetic on one basis: when the rows do not
+        # share one, no ratio may be computed from the pair, whatever each field
+        # admitted on its own (issue #257).
+        combined = net_income if net_income is not None and ocf is not None and not cross_reason else None
+        if cross_reason:
+            ocf_for_ratio = None
+        else:
+            ocf_for_ratio = ocf
+
+        component_availability[f"Q{fiscal_quarter}-{fiscal_year}"] = {
+            "revenue": revenue_reason,
+            "net_income": net_income_reason,
+            "eps": eps_reason,
+            "operating_cash_flow": ocf_reason,
+            "total_assets": assets_reason,
+            "operating_cash_flow_basis": statement_admission.basis_of(cash, "flow_basis"),
+            "cross_statement_basis": cross_reason,
+        }
+        if all(value is None for value in (revenue, net_income, eps, ocf, total_assets)):
             continue
+        period_rows.append({
+            "period": f"Q{fiscal_quarter}-{fiscal_year}",
+            "fiscal_year": fiscal_year,
+            "fiscal_quarter": fiscal_quarter,
+            "revenue": _safe_float(revenue, 2),
+            "net_income": _safe_float(net_income, 2),
+            "operating_cash_flow": _safe_float(ocf, 2),
+            "total_assets": _safe_float(total_assets, 2),
+            "eps": _safe_float(eps, 4),
+            "accruals_ratio_pct": _safe_divide(
+                (combined - ocf) if combined is not None and ocf is not None else None,
+                total_assets, scale=100, decimals=2,
+            ) if combined is not None else None,
+            "revenue_quality_pct": _safe_divide(ocf_for_ratio, revenue, scale=100, decimals=2),
+            "cross_statement_basis_reason": cross_reason,
+        })
 
-        key = (fiscal_year, fiscal_quarter)
-        if key not in cash_map or key not in asset_map:
-            continue
-
-        operating_cash_flow = cash_map.get(key)
-        total_assets = asset_map.get(key)
-        accruals_ratio = _safe_divide(
-            (net_income - operating_cash_flow)
-            if net_income is not None and operating_cash_flow is not None
-            else None,
-            total_assets,
-            scale=100,
-            decimals=2,
+    latest = period_rows[0] if period_rows else None
+    previous = period_rows[1] if len(period_rows) > 1 else None
+    # The scorecard's own inputs, not "any surviving ratio": accruals need net
+    # income + OCF + assets and cash conversion needs OCF + revenue. One usable
+    # ratio is a valid observation, not evidence for a complete grade (#257).
+    latest_required = {
+        "accruals": latest is not None and latest.get("accruals_ratio_pct") is not None,
+        "revenue_quality": latest is not None and latest.get("revenue_quality_pct") is not None,
+    }
+    scorecard_complete = all(latest_required.values())
+    ratios_available = bool(
+        latest and (latest.get("accruals_ratio_pct") is not None or latest.get("revenue_quality_pct") is not None)
+    )
+    if not ratios_available:
+        # Insufficient coverage is its own state. It is not a Stable trend and
+        # not a set of failed checks, so grade/score/trend stay absent and the
+        # reason reaches both consumers (issue #257).
+        coverage_reason = (
+            "Insufficient admitted quarterly statement coverage for earnings quality."
         )
-        revenue_quality = _safe_divide(
-            operating_cash_flow,
-            revenue,
-            scale=100,
-            decimals=2,
-        )
-
-        period_rows.append(
-            {
-                "period": f"Q{fiscal_quarter}-{fiscal_year}",
-                "fiscal_year": fiscal_year,
-                "fiscal_quarter": fiscal_quarter,
-                "revenue": _safe_float(revenue, 2),
-                "net_income": _safe_float(net_income, 2),
-                "operating_cash_flow": _safe_float(operating_cash_flow, 2),
-                "total_assets": _safe_float(total_assets, 2),
-                "eps": _safe_float(eps, 4),
-                "accruals_ratio_pct": accruals_ratio,
-                "revenue_quality_pct": revenue_quality,
-            }
-        )
-
-    if not period_rows:
         return StandardResponse(
             data={
                 "symbol": symbol_upper,
                 "computed_at": datetime.utcnow(),
-                "series": [],
+                "grade": None,
+                "quality_score": None,
+                "trend": None,
+                "accruals_ratio_pct": None,
+                "revenue_quality_pct": None,
+                "earnings_persistence": None,
+                "component_scores": {},
                 "checks": [],
+                "coverage": {
+                    "status": "unavailable",
+                    "unavailable_reason": coverage_reason,
+                    "admitted_periods": len(period_rows),
+                    "component_availability": component_availability,
+                },
+                "series": period_rows[:8],
             },
             meta=MetaData(count=0),
-            error="Insufficient quarterly statement coverage for earnings quality.",
+            error=coverage_reason,
         )
-
-    latest = period_rows[0]
-    previous = period_rows[1] if len(period_rows) > 1 else None
 
     eps_values = [row["eps"] for row in reversed(period_rows) if row.get("eps") is not None]
     earnings_persistence = None
@@ -3308,8 +3350,11 @@ async def get_earnings_quality(
     component_scores = [
         item for item in (accrual_score, revenue_score, persistence_score) if item is not None
     ]
-    quality_score = _safe_float(float(np.mean(component_scores)), 2) if component_scores else None
-    grade = _grade_from_quality_score(quality_score)
+    quality_score = (
+        _safe_float(float(np.mean(component_scores)), 2)
+        if scorecard_complete and component_scores else None
+    )
+    grade = _grade_from_quality_score(quality_score) if quality_score is not None else None
 
     def _blend_score(row: Dict[str, Any]) -> float | None:
         parts: List[float] = []
@@ -3321,15 +3366,20 @@ async def get_earnings_quality(
             parts.append(max(0.0, min(float(revenue_value), 120) / 1.2))
         return float(np.mean(parts)) if parts else None
 
-    trend = "Stable"
-    latest_blend = _blend_score(latest)
-    previous_blend = _blend_score(previous) if previous else None
+    # Unknown trend stays unknown: one scored period says nothing about
+    # direction, and a flat score is Stable rather than a missing label.
+    trend = None
+    latest_blend = _blend_score(latest) if scorecard_complete else None
+    previous_blend = (
+        _blend_score(previous)
+        if scorecard_complete and previous
+        and previous.get("accruals_ratio_pct") is not None
+        and previous.get("revenue_quality_pct") is not None
+        else None
+    )
     if latest_blend is not None and previous_blend is not None:
         delta = latest_blend - previous_blend
-        if delta >= 5:
-            trend = "Improving"
-        elif delta <= -5:
-            trend = "Declining"
+        trend = "Improving" if delta >= 5 else "Declining" if delta <= -5 else "Stable"
 
     checks: List[str] = []
     if latest.get("accruals_ratio_pct") is not None and abs(latest["accruals_ratio_pct"]) <= 5:
@@ -3354,6 +3404,16 @@ async def get_earnings_quality(
             "persistence": persistence_score,
         },
         "checks": checks,
+        "coverage": {
+            "status": "available" if scorecard_complete else "partial",
+            "unavailable_reason": None if scorecard_complete else (
+                "Incomplete admitted inputs for a full earnings-quality scorecard; "
+                "individual admitted ratios are reported without a grade."
+            ),
+            "required_components": latest_required,
+            "admitted_periods": len(period_rows),
+            "component_availability": component_availability,
+        },
         "series": period_rows[:8],
     }
     return StandardResponse(data=payload, meta=MetaData(count=len(period_rows[:8])))

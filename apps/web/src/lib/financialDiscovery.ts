@@ -82,6 +82,7 @@ export function buildTTMSnapshotCards(
 interface GrowthComparisonLabel {
   negative_base?: boolean
   transition?: 'loss_to_profit' | 'profit_to_loss' | null
+  unavailable_reason?: string | null
 }
 
 export function growthComparisonLabel(detail?: GrowthComparisonLabel): string | null {
@@ -90,11 +91,33 @@ export function growthComparisonLabel(detail?: GrowthComparisonLabel): string | 
   return detail?.negative_base ? 'negative base' : null
 }
 
+/**
+ * Why a growth figure is withheld, in the reader's words. The API names a
+ * machine reason; an unavailable rate must never read as "no change"
+ * (issue #246).
+ */
+export function growthUnavailableReason(detail?: GrowthComparisonLabel): string | null {
+  if (!detail?.unavailable_reason) return null
+  const reason = detail.unavailable_reason
+  if (reason === 'missing_base_or_value') return 'prior or current period not reported'
+  if (reason === 'missing_comparison_period') return 'comparison period not reported'
+  if (reason === 'zero_base') return 'prior period was zero, so no rate is defined'
+  if (reason === 'non_comparable_periods') return 'periods are not one fiscal year apart'
+  if (reason === 'incompatible_reporting_basis') return 'reporting basis differs between periods'
+  if (reason === 'unverified_comparison_basis') return 'reporting basis is not confirmed'
+  if (reason === 'rejected_field') return 'a statement field was withheld by unit admission'
+  return reason.replace(/_/g, ' ')
+}
+
 export interface GrowthBridgeRow {
   key: string
   label: string
   annual: number | null
   quarter: number | null
+  annualLabel: string | null
+  quarterLabel: string | null
+  annualReason: string | null
+  quarterReason: string | null
 }
 
 export function buildGrowthBridgeRows(payload: {
@@ -115,5 +138,7 @@ export function buildGrowthBridgeRows(payload: {
     ...row,
     annualLabel: growthComparisonLabel(payload.comparisons?.yoy?.[row.key]),
     quarterLabel: growthComparisonLabel(payload.comparisons?.qoq?.[row.key]),
-  })) satisfies Array<GrowthBridgeRow & { annualLabel: string | null; quarterLabel: string | null }>
+    annualReason: growthUnavailableReason(payload.comparisons?.yoy?.[row.key]),
+    quarterReason: growthUnavailableReason(payload.comparisons?.qoq?.[row.key]),
+  })) satisfies Array<GrowthBridgeRow>
 }
