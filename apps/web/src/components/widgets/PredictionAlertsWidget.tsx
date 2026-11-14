@@ -29,20 +29,77 @@ type AlertRow = {
     readonly previousYesPrice: number;
     readonly absoluteMovement: number;
     readonly direction: 'up' | 'down';
-    readonly capturedAt: string | null;
+    /** Source observation clock for both legs; null when the API omitted them. */
+    readonly observedAt: string | null;
+    readonly baselineAt: string | null;
+    readonly elapsedSeconds: number | null;
+};
+
+/**
+ * Why the alert list looks the way it does. Only `evaluated_zero` licenses a
+ * "nothing moved" conclusion; every other status means the comparison did not
+ * actually cover the requested window.
+ */
+type AlertStatus =
+    | 'unavailable_storage'
+    | 'empty'
+    | 'no_baseline'
+    | 'stale_insufficient'
+    | 'evaluated_zero'
+    | 'evaluated'
+    | 'unknown';
+
+type AlertCoverage = {
+    readonly eligibleMarkets: number;
+    readonly observedMarkets: number;
+    readonly currentMarkets: number;
+    readonly evaluatedMarkets: number;
+    readonly excludedStaleMarkets: number;
+    readonly excludedNoBaselineMarkets: number;
+};
+
+type AlertsPayload = {
+    readonly alerts: AlertRow[];
+    readonly windowHours: number;
+    readonly status: AlertStatus;
+    readonly coverage: AlertCoverage | null;
+    readonly latestObservationAt: string | null;
+    readonly baselineToleranceSeconds: number | null;
 };
 
 type LoadState =
     | { readonly kind: 'loading' }
     | { readonly kind: 'error'; readonly error: Error }
-    | { readonly kind: 'ready'; readonly alerts: readonly AlertRow[]; readonly windowHours: number; readonly stale: boolean; readonly error?: Error };
+    | ({ readonly kind: 'ready'; readonly stale: boolean; readonly error?: Error } & AlertsPayload);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseAlerts(value: unknown): { alerts: AlertRow[]; windowHours: number } {
-    if (!isRecord(value)) return { alerts: [], windowHours: 1 };
+const ALERT_STATUSES: readonly AlertStatus[] = [
+    'unavailable_storage', 'empty', 'no_baseline', 'stale_insufficient', 'evaluated_zero', 'evaluated',
+];
+
+function parseCoverage(value: unknown): AlertCoverage | null {
+    if (!isRecord(value)) return null;
+    const num = (key: string) => (typeof value[key] === 'number' ? (value[key] as number) : 0);
+    return {
+        eligibleMarkets: num('eligible_markets'),
+        observedMarkets: num('observed_markets'),
+        currentMarkets: num('current_markets'),
+        evaluatedMarkets: num('evaluated_markets'),
+        excludedStaleMarkets: num('excluded_stale_markets'),
+        excludedNoBaselineMarkets: num('excluded_no_baseline_markets'),
+    };
+}
+
+function parseAlerts(value: unknown): AlertsPayload {
+    if (!isRecord(value)) {
+        return {
+            alerts: [], windowHours: 1, status: 'unknown', coverage: null,
+            latestObservationAt: null, baselineToleranceSeconds: null,
+        };
+    }
     const list: unknown[] = Array.isArray(value.alerts)
         ? value.alerts
         : Array.isArray(value.data)
@@ -51,8 +108,7 @@ function parseAlerts(value: unknown): { alerts: AlertRow[]; windowHours: number 
     const alerts: AlertRow[] = [];
     for (const row of list) {
         if (!isRecord(row) || typeof row.question !== 'string') continue;
-        const directionRaw = row.direction;
-        const direction: 'up' | 'down' = directionRaw === 'down' ? 'down' : 'up';
+        const direction: 'up' | 'down' = row.direction === 'down' ? 'down' : 'up';
         const absoluteMovement =
             typeof row.movement === 'number'
                 ? row.movement
@@ -77,17 +133,34 @@ function parseAlerts(value: unknown): { alerts: AlertRow[]; windowHours: number 
                 typeof row.previous_yes_price === 'number' ? row.previous_yes_price : 0,
             absoluteMovement,
             direction,
-            capturedAt:
-                typeof row.captured_at === 'string'
-                    ? row.captured_at
-                    : typeof row.capturedAt === 'string'
-                        ? row.capturedAt
+            observedAt:
+                typeof row.observed_at === 'string'
+                    ? row.observed_at
+                    : typeof row.captured_at === 'string'
+                        ? row.captured_at
                         : null,
+            baselineAt: typeof row.baseline_at === 'string' ? row.baseline_at : null,
+            elapsedSeconds: typeof row.elapsed_seconds === 'number' ? row.elapsed_seconds : null,
         });
     }
+    const rawStatus = value.status;
+    // A response without a status cannot license a no-movement claim.
+    const status = ALERT_STATUSES.includes(rawStatus as AlertStatus)
+        ? (rawStatus as AlertStatus)
+        : alerts.length > 0
+            ? 'evaluated'
+            : 'unknown';
     return {
         alerts,
         windowHours: typeof value.window_hours === 'number' ? value.window_hours : 1,
+        status,
+        coverage: parseCoverage(value.coverage),
+        latestObservationAt:
+            typeof value.latest_observation_at === 'string' ? value.latest_observation_at : null,
+        baselineToleranceSeconds:
+            typeof value.baseline_tolerance_seconds === 'number'
+                ? value.baseline_tolerance_seconds
+                : null,
     };
 }
 
@@ -96,6 +169,60 @@ const BUCKETS: ReadonlyArray<{ readonly key: '1h' | '4h' | '24h'; readonly hours
     { key: '4h', hours: 4, label: 'Last 4h' },
     { key: '24h', hours: 24, label: 'Last 24h' },
 ];
+
+/** What the widget may claim: only `loaded` on a genuinely evaluated window. */
+function alertFeedState(state: LoadState): 'unavailable' | 'loading' | 'stale' | 'partial' | 'loaded' {
+    if (state.kind === 'error') return 'unavailable';
+    if (state.kind !== 'ready') return 'loading';
+    if (state.stale) return 'stale';
+    if (state.status === 'unavailable_storage') return 'unavailable';
+    if (state.status === 'evaluated' || state.status === 'evaluated_zero') return 'loaded';
+    return 'partial';
+}
+
+/** Honest empty-state copy: never assert "nothing moved" without evaluation. */
+function alertEmptyCopy(state: Extract<LoadState, { kind: 'ready' }>): { message: string; detail: string } {
+    const window = `${state.windowHours}h`;
+    const coverage = state.coverage;
+    switch (state.status) {
+        case 'unavailable_storage':
+            return {
+                message: 'Alert storage unavailable',
+                detail: 'Intraday snapshots cannot be read, so no movement was measured.',
+            };
+        case 'empty':
+            return {
+                message: 'No observations yet',
+                detail: `No intraday snapshot has been recorded, so the ${window} window was not evaluated.`,
+            };
+        case 'no_baseline':
+            return {
+                message: 'Baseline missing',
+                detail: coverage
+                    ? `${coverage.observedMarkets} market(s) observed but none has a snapshot ${window} back.`
+                    : `No snapshot exists ${window} back to compare against.`,
+            };
+        case 'stale_insufficient':
+            return {
+                message: 'Coverage too sparse',
+                detail: coverage
+                    ? `${coverage.excludedStaleMarkets} market(s) lacked a baseline within the ${state.baselineToleranceSeconds ?? 0}s sampling tolerance of the ${window} cutoff.`
+                    : `Nearest baselines fall outside the sampling tolerance of the ${window} cutoff.`,
+            };
+        case 'evaluated_zero':
+            return {
+                message: 'No alerts',
+                detail: coverage
+                    ? `No market moved more than 2pp in the last ${window} (${coverage.evaluatedMarkets} of ${coverage.eligibleMarkets} markets evaluated).`
+                    : `No market moved more than 2pp in the last ${window}.`,
+            };
+        default:
+            return {
+                message: 'Alert status unknown',
+                detail: 'The alerts response did not report whether the window was evaluated.',
+            };
+    }
+}
 
 export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
@@ -118,10 +245,10 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
         fetch(url.toString(), { cache: 'no-store' })
             .then(async (response) => {
                 if (!response.ok) throw new Error(`alerts API returned ${response.status}`);
-                const body = await response.json();
-                const { alerts, windowHours } = parseAlerts(body);
+                const body: unknown = await response.json();
+                const payload = parseAlerts(body);
                 if (requestId !== requestIdRef.current) return;
-                setState({ kind: 'ready', alerts, windowHours, stale: false });
+                setState({ kind: 'ready', ...payload, stale: false });
             })
             .catch((error: unknown) => {
                 const resolvedError = error instanceof Error ? error : new Error('alerts request failed');
@@ -138,26 +265,51 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
-            empty: state.kind === 'ready' && state.alerts.length === 0,
+            // Partial or absent coverage is not an empty result: only a genuinely
+            // evaluated zero-alert window may compact the tile.
+            empty: state.kind === 'ready' && state.alerts.length === 0 && state.status === 'evaluated_zero',
             apiGroup: '/prediction-markets',
             endpoint: '/api/v1/prediction-markets/alerts',
             sourceLabel: 'Prediction market alerts',
-            stale: state.kind === 'error' || (state.kind === 'ready' && state.stale),
-            extra: { feedState: state.kind === 'error' ? 'unavailable' : state.kind === 'loading' ? 'loading' : state.stale ? 'stale' : 'loaded', alertCount: state.kind === 'ready' ? state.alerts.length : 0 },
+            lastDataDate: state.kind === 'ready' ? state.latestObservationAt : null,
+            coverage: state.kind === 'ready' && state.coverage
+                ? state.coverage.evaluatedMarkets > 0
+                    && state.coverage.evaluatedMarkets === state.coverage.eligibleMarkets
+                    ? 'complete'
+                    : state.coverage.evaluatedMarkets === 0
+                        ? 'unknown'
+                        : 'partial'
+                : undefined,
+            stale: state.kind === 'error'
+                || (state.kind === 'ready' && (state.stale || state.status === 'stale_insufficient')),
+            extra: {
+                feedState: alertFeedState(state),
+                alertCount: state.kind === 'ready' ? state.alerts.length : 0,
+                alertStatus: state.kind === 'ready' ? state.status : undefined,
+                alertCoverage: state.kind === 'ready' ? state.coverage : null,
+                windowHours: state.kind === 'ready' ? state.windowHours : undefined,
+                latestObservationAt: state.kind === 'ready' ? state.latestObservationAt : null,
+            },
         }));
     }, [onDataChange, state]);
 
     useEffect(() => {
         if (state.kind !== 'ready') return;
         for (const alert of state.alerts) {
+            // Activity records keep the actual comparison span so a later reader
+            // cannot mistake a wide interval for the requested window.
+            const span = alert.elapsedSeconds === null
+                ? `${state.windowHours}h`
+                : `${(alert.elapsedSeconds / 3600).toFixed(alert.elapsedSeconds % 3600 === 0 ? 0 : 1)}h`;
             recordAlertActivity({
-                id: `prediction:${alert.source}:${alert.sourceId}:${alert.capturedAt || state.windowHours}:${alert.absoluteMovement}`,
+                id: `prediction:${alert.source}:${alert.sourceId}:${alert.observedAt || state.windowHours}:${alert.absoluteMovement}`,
                 source: 'prediction_market',
-                triggerTime: alert.capturedAt || new Date().toISOString(),
+                triggerTime: alert.observedAt || new Date().toISOString(),
                 deliveryClass: 'polled',
                 serverBacked: true,
                 title: `${alert.source} probability movement`,
-                detail: `${alert.question} · ${(Math.abs(alert.absoluteMovement) * 100).toFixed(1)}pp`,
+                detail: `${alert.question} · ${(Math.abs(alert.absoluteMovement) * 100).toFixed(1)}pp over ${span}`
+                    + (alert.observedAt && alert.baselineAt ? ` (${alert.baselineAt} → ${alert.observedAt})` : ''),
             });
         }
     }, [state]);
@@ -240,11 +392,19 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
                 </span>
             </div>
             <PredictionMarketSourceHealthStrip />
-            <div className="px-1 text-[10px] text-[var(--text-muted)]">Feed {state.stale ? 'stale' : 'loaded'} · {state.windowHours}h window</div>
+            <div className="px-1 text-[10px] text-[var(--text-muted)]">
+                Feed {alertFeedState(state)}
+                {' · '}{state.windowHours}h window
+                {state.coverage
+                    ? ` · ${state.coverage.evaluatedMarkets}/${state.coverage.eligibleMarkets} evaluated`
+                    : ''}
+                {state.latestObservationAt
+                    ? ` · last observation ${new Date(state.latestObservationAt).toLocaleString()}`
+                    : ''}
+            </div>
             {state.alerts.length === 0 ? (
                 <WidgetEmpty
-                    message="No alerts"
-                    detail={`No market moved more than 2pp in the last ${state.windowHours}h.`}
+                    {...alertEmptyCopy(state)}
                     icon={<BellRing size={18} />}
                 />
             ) : (
@@ -298,6 +458,11 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
                                         <span className="text-[10px] text-[var(--text-muted)]">
                                             {Math.round(alert.previousYesPrice * 100)}% →{' '}
                                             {Math.round(alert.yesPrice * 100)}%
+                                            {alert.elapsedSeconds !== null && (
+                                                <span className="ml-1 text-[var(--text-muted)]">
+                                                    over {(alert.elapsedSeconds / 3600).toFixed(1)}h
+                                                </span>
+                                            )}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2">

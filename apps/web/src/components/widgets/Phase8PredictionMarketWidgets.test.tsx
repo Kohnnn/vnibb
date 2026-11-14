@@ -266,9 +266,24 @@ describe('PredictionAlertsWidget', () => {
         expect(screen.queryByText('Old bucket alert')).not.toBeInTheDocument();
     });
 
-    it('renders the empty state when no alerts', async () => {
+    it('claims no movement only for an evaluated zero-alert window', async () => {
         (global.fetch as jest.Mock).mockResolvedValueOnce(
-            new JsonTestResponse(JSON.stringify({ window_hours: 1, min_movement_bps: 200, count: 0, alerts: [] })),
+            new JsonTestResponse(JSON.stringify({
+                window_hours: 1,
+                min_movement_bps: 200,
+                count: 0,
+                alerts: [],
+                status: 'evaluated_zero',
+                coverage: {
+                    eligible_markets: 4,
+                    observed_markets: 4,
+                    current_markets: 4,
+                    evaluated_markets: 4,
+                    excluded_stale_markets: 0,
+                    excluded_no_baseline_markets: 0,
+                },
+                latest_observation_at: '2026-11-14T10:00:00+00:00',
+            })),
         );
         (global.fetch as jest.Mock).mockResolvedValue(
             new JsonTestResponse(JSON.stringify({ sources: [] })),
@@ -277,6 +292,86 @@ describe('PredictionAlertsWidget', () => {
         render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
         await waitFor(() => {
             expect(screen.getByText(/No alerts/i)).toBeInTheDocument();
+        });
+        expect(screen.getByText(/No market moved more than 2pp/i)).toBeInTheDocument();
+        expect(screen.getByText(/4\/4 evaluated/i)).toBeInTheDocument();
+        expect(screen.getByText(/Feed loaded/i)).toBeInTheDocument();
+    });
+
+    it('reports unavailable storage instead of an empty feed', async () => {
+        (global.fetch as jest.Mock).mockResolvedValueOnce(
+            new JsonTestResponse(JSON.stringify({
+                window_hours: 1,
+                min_movement_bps: 200,
+                count: 0,
+                alerts: [],
+                status: 'unavailable_storage',
+                storage_available: false,
+                coverage: null,
+                latest_observation_at: null,
+            })),
+        );
+        (global.fetch as jest.Mock).mockResolvedValue(
+            new JsonTestResponse(JSON.stringify({ sources: [] })),
+        );
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
+        await waitFor(() => {
+            expect(screen.getByText(/Alert storage unavailable/i)).toBeInTheDocument();
+        });
+        expect(screen.queryByText(/No market moved more than/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/No alerts/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/Feed unavailable/i)).toBeInTheDocument();
+    });
+
+    it('labels sparse coverage and shows the actual comparison interval', async () => {
+        (global.fetch as jest.Mock).mockResolvedValueOnce(
+            new JsonTestResponse(JSON.stringify({
+                window_hours: 1,
+                min_movement_bps: 200,
+                count: 1,
+                status: 'evaluated',
+                baseline_tolerance_seconds: 1800,
+                latest_observation_at: '2026-11-14T10:05:00+00:00',
+                coverage: {
+                    eligible_markets: 3,
+                    observed_markets: 3,
+                    current_markets: 2,
+                    evaluated_markets: 2,
+                    excluded_stale_markets: 1,
+                    excluded_no_baseline_markets: 0,
+                },
+                alerts: [{
+                    source: 'polymarket',
+                    source_id: 'p-1',
+                    question: 'Will CPI print above 3%?',
+                    category: 'economic',
+                    url: null,
+                    yes_price: 0.6,
+                    previous_yes_price: 0.55,
+                    movement: 0.05,
+                    absolute_movement: 0.05,
+                    direction: 'up',
+                    observed_at: '2026-11-14T10:05:00+00:00',
+                    baseline_at: '2026-11-14T09:00:00+00:00',
+                    elapsed_seconds: 3900,
+                }],
+            })),
+        );
+        (global.fetch as jest.Mock).mockResolvedValue(
+            new JsonTestResponse(JSON.stringify({ sources: [] })),
+        );
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        render(<QueryClientProvider client={client}><PredictionAlertsWidget /></QueryClientProvider>);
+        await waitFor(() => {
+            expect(screen.getByText(/CPI print above/i)).toBeInTheDocument();
+            expect(screen.getByText(/2\/3 evaluated/i)).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            const stored: Array<{ detail?: string }> = JSON.parse(
+                localStorage.getItem('vnibb-alert-activity-v1') || '[]',
+            );
+            expect(stored[0]?.detail).toMatch(/over 1\.1h/);
         });
     });
 });

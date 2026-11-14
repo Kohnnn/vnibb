@@ -13,7 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, text
+
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import (
@@ -122,9 +123,11 @@ async def test_multichoice_zero_price_counts_but_malformed_vectors_do_not(client
 @pytest.mark.asyncio
 async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, test_db):
     now = datetime.now(UTC)
+    # Both legs sit inside the sampling tolerance of a 1h window; the 3h row is
+    # a decoy that must lose to the nearer baseline for p-1.
     for source_id, price, previous in (("p-1", 0.6, 0.5), ("p-2", 0.9, 0.3), ("p-3", 0.51, 0.5)):
         test_db.add(_market(source="polymarket", source_id=source_id, question="CPI?", yes_price=price))
-        for captured_at, yes_price in ((now, price), (now - timedelta(hours=2), previous)):
+        for captured_at, yes_price in ((now, price), (now - timedelta(minutes=60), previous)):
             test_db.add(PredictionMarketIntradaySnapshot(
                 source="polymarket", source_id=source_id, question="CPI?", category="economic",
                 yes_price=yes_price, captured_at=captured_at,
@@ -138,9 +141,12 @@ async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, t
         "window_hours": 1, "min_movement_bps": 200, "limit": 1,
     })
     assert response.status_code == 200
-    assert response.json()["count"] == 1
-    assert response.json()["alerts"][0]["source_id"] == "p-2"
-    assert response.json()["alerts"][0]["movement"] == pytest.approx(0.6)
+    body = response.json()
+    assert body["status"] == "evaluated"
+    assert body["count"] == 1
+    assert body["alerts"][0]["source_id"] == "p-2"
+    assert body["alerts"][0]["movement"] == pytest.approx(0.6)
+    assert body["alerts"][0]["elapsed_seconds"] == 3600
 
 
 @pytest.mark.asyncio
@@ -492,3 +498,133 @@ async def test_consensus_observed_zero_volume_remains_zero(client, test_db):
     assert response["consensus_yes_price"] == 0
     assert response["sources"][0]["yes_price"] == 0
     assert response["sources"][0]["volume"] == 0
+
+
+async def _drop_intraday_table(test_db):
+    await test_db.execute(text("DROP TABLE prediction_market_intraday_snapshots"))
+    await test_db.commit()
+
+
+@pytest.mark.asyncio
+async def test_alerts_distinguish_missing_storage_from_evaluated_empty(client, test_db):
+    await _drop_intraday_table(test_db)
+    response = await client.get("/api/v1/prediction-markets/alerts", params={"window_hours": 1})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unavailable_storage"
+    assert body["storage_available"] is False
+    assert body["count"] == 0
+    assert body["alerts"] == []
+    assert body["coverage"] is None
+    assert body["baseline_tolerance_seconds"] == 1800
+    assert body["intraday_cadence_minutes"] == 15
+
+
+@pytest.mark.asyncio
+async def test_alerts_report_empty_universe_without_claiming_no_movement(client, test_db):
+    response = await client.get("/api/v1/prediction-markets/alerts", params={"window_hours": 1})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "empty"
+    assert body["storage_available"] is True
+    assert body["coverage"] == {
+        "eligible_markets": 0,
+        "observed_markets": 0,
+        "current_markets": 0,
+        "evaluated_markets": 0,
+        "excluded_stale_markets": 0,
+        "excluded_no_baseline_markets": 0,
+    }
+    assert body["latest_observation_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_alerts_withhold_a_49_hour_baseline_from_a_one_hour_window(client, test_db):
+    now = datetime.now(UTC)
+    test_db.add(_market(source="polymarket", source_id="p-long", question="CPI?", yes_price=0.6))
+    for captured_at, yes_price in ((now, 0.6), (now - timedelta(hours=49), 0.4)):
+        test_db.add(PredictionMarketIntradaySnapshot(
+            source="polymarket", source_id="p-long", question="CPI?", category="economic",
+            yes_price=yes_price, captured_at=captured_at,
+        ))
+    await test_db.commit()
+
+    body = (await client.get(
+        "/api/v1/prediction-markets/alerts", params={"window_hours": 1},
+    )).json()
+    assert body["status"] == "stale_insufficient"
+    assert body["count"] == 0
+    latest = datetime.fromisoformat(body["latest_observation_at"]).replace(tzinfo=UTC)
+    assert abs(latest - now) <= timedelta(seconds=5)
+    # The observation exists and is disclosed, but its baseline is too old.
+    assert body["coverage"]["excluded_stale_markets"] == 1
+
+
+@pytest.mark.asyncio
+async def test_alerts_rank_only_qualified_movements_and_return_actual_interval(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    for source_id, current, _baseline in (("p-a", 0.7, 0.5), ("p-b", 0.9, 0.5), ("p-stale", 0.95, 0.5)):
+        test_db.add(_market(source="kalshi", source_id=source_id, question="CPI?", yes_price=current))
+    for source_id, current, baseline in (("p-a", 0.7, 0.5), ("p-b", 0.9, 0.5)):
+        test_db.add(PredictionMarketIntradaySnapshot(
+            source="kalshi", source_id=source_id, question="CPI?", category="economic",
+            yes_price=baseline, captured_at=now - timedelta(minutes=60),
+        ))
+        test_db.add(PredictionMarketIntradaySnapshot(
+            source="kalshi", source_id=source_id, question="CPI?", category="economic",
+            yes_price=current, captured_at=now - timedelta(minutes=5),
+        ))
+    # Largest movement in the table, but its baseline predates the tolerance band.
+    test_db.add(PredictionMarketIntradaySnapshot(
+        source="kalshi", source_id="p-stale", question="CPI?", category="economic",
+        yes_price=0.5, captured_at=now - timedelta(hours=2),
+    ))
+    test_db.add(PredictionMarketIntradaySnapshot(
+        source="kalshi", source_id="p-stale", question="CPI?", category="economic",
+        yes_price=0.95, captured_at=now - timedelta(minutes=5),
+    ))
+    await test_db.commit()
+
+    body = (await client.get(
+        "/api/v1/prediction-markets/alerts",
+        params={"window_hours": 1, "min_movement_bps": 200, "limit": 1},
+    )).json()
+    assert body["status"] == "evaluated"
+    assert body["count"] == 1
+    assert body["coverage"]["eligible_markets"] == 3
+    assert body["coverage"]["evaluated_markets"] == 2
+    assert body["coverage"]["excluded_stale_markets"] == 1
+    # Ranking across the qualified set keeps the largest eligible move, not the
+    # largest raw jump from the disqualified stale baseline.
+    assert [row["source_id"] for row in body["alerts"]] == ["p-b"]
+    row = body["alerts"][0]
+    assert row["movement"] == pytest.approx(0.4)
+    assert row["elapsed_seconds"] == 3300
+    assert datetime.fromisoformat(row["baseline_at"]).replace(tzinfo=UTC) == now - timedelta(minutes=60)
+    assert datetime.fromisoformat(row["observed_at"]).replace(tzinfo=UTC) == now - timedelta(minutes=5)
+
+
+@pytest.mark.asyncio
+async def test_alerts_evaluated_zero_requires_complete_pairs(client, test_db):
+    now = datetime.now(UTC)
+    test_db.add(_market(source="polymarket", source_id="flat", question="CPI?", yes_price=0.5))
+    for captured_at in (now - timedelta(minutes=60), now):
+        test_db.add(PredictionMarketIntradaySnapshot(
+            source="polymarket", source_id="flat", question="CPI?", category="economic",
+            yes_price=0.5, captured_at=captured_at,
+        ))
+    test_db.add(_market(source="polymarket", source_id="first-seen", question="CPI?", yes_price=0.9))
+    test_db.add(PredictionMarketIntradaySnapshot(
+        source="polymarket", source_id="first-seen", question="CPI?", category="economic",
+        yes_price=0.9, captured_at=now,
+    ))
+    await test_db.commit()
+
+    body = (await client.get(
+        "/api/v1/prediction-markets/alerts", params={"window_hours": 1},
+    )).json()
+    assert body["status"] == "evaluated_zero"
+    assert body["count"] == 0
+    assert body["coverage"]["observed_markets"] == 2
+    assert body["coverage"]["evaluated_markets"] == 1
+    assert body["coverage"]["excluded_no_baseline_markets"] == 1
