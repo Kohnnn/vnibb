@@ -315,13 +315,18 @@ class _FakeMongoService:
 _CANNED_DOC = {
     "symbol": "VNM",
     "snapshotDate": "2026-06-10",
+    "schemaVersion": 4,
     "intrinsicValue": 78200.0,
     "marginOfSafety": 16.9,
     "moat": "narrow",
     "dividendYears": 9,
     "fcfPositive": True,
     "valuationMethod": "dcf",
-    "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    "inputs": {
+        "unitQuality": "verified",
+        "unitLineage": {"price": {"unit": "VND"}},
+        "derivedCoverage": {},
+    },
 }
 
 

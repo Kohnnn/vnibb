@@ -30,7 +30,12 @@ def fundamental_app(monkeypatch):
         equity, "_load_latest_fundamental_snapshot",
         AsyncMock(return_value={
             "snapshotDate": "2024-12-31", "intrinsicValue": None,
-            "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+            "schemaVersion": 4,
+            "inputs": {
+                "unitQuality": "verified",
+                "unitLineage": {"price": {"unit": "VND"}},
+                "derivedCoverage": {},
+            },
         }),
     )
     return app

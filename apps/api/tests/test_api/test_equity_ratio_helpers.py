@@ -344,11 +344,14 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
         return {
             "symbol": symbol,
             "snapshotDate": "2026-06-14",
+            "schemaVersion": 4,
             "intrinsicValue": 120000,
             "marginOfSafety": 25.0,
             "valuationMethod": "dcf",
             "price": 90000,
-            "inputs": snapshot_inputs,
+            # The real v4 document always carries the coverage block; admission
+            # requires it, so the fixture must model it too.
+            "inputs": {**snapshot_inputs, "derivedCoverage": {"cagr": {}, "fcf": {}}},
             "moat": "wide",
             "roe": 22.5,
             "netMargin": 15.0,
@@ -379,7 +382,9 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
         assert response.data["valuation"] is None
         assert response.data["section_errors"].pop("valuation")
     assert response.data["fundamental_snapshot"]["intrinsicValue"] == 120000
-    assert response.data["fundamental_snapshot"]["inputs"] == snapshot_inputs
+    assert response.data["fundamental_snapshot"]["inputs"] == {
+        **snapshot_inputs, "derivedCoverage": {"cagr": {}, "fcf": {}},
+    }
     assert response.data["latest_fundamental_snapshot"]["derived"] == (
         response.data["fundamental_snapshot"] if valuation_available else None
     )

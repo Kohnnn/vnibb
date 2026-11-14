@@ -16,7 +16,11 @@ from vnibb.services.fundamental_valuation import (
     FundamentalInputs,
     ValuationConfig,
     _normalize_statement_rows,
-    compute_cagr,
+    admit_fundamental_snapshot,
+    admit_valuation_field,
+    assess_cagr_coverage,
+    assess_fcf_coverage,
+    compute_cagr_over_years,
     compute_dividend_years,
     compute_fcf_positive,
     compute_fundamental_snapshot,
@@ -26,13 +30,19 @@ from vnibb.services.fundamental_valuation import (
     compute_moat,
     compute_moat_factors,
     compute_valuation_verdict,
+    fundamental_valuation_unavailable_reason,
     load_fundamental_inputs,
     to_document,
 )
 
 
 def _income_row(year: int, revenue: float | None, npat: float | None) -> dict[str, Any]:
-    return {"yearReport": year, "revenue": revenue, "net_profit_after_tax": npat}
+    return {
+        "yearReport": year,
+        "revenue": revenue,
+        "net_profit_after_tax": npat,
+        "currency_unit": "VND",
+    }
 
 
 def _balance_row(
@@ -43,6 +53,7 @@ def _balance_row(
         "owners_equity": equity,
         "total_assets": assets,
         "total_liabilities": liabilities,
+        "currency_unit": "VND",
     }
 
 
@@ -57,6 +68,7 @@ def _cash_row(
         "net_cash_flows_from_operating_activities": ocf,
         "purchase_of_fixed_assets": capex,
         "dividends_paid": dividends,
+        "currency_unit": "VND",
     }
 
 
@@ -163,25 +175,212 @@ class TestRim:
 # --- CAGR ---------------------------------------------------------------------
 
 
-class TestCagr:
-    def test_happy_path(self) -> None:
-        # 100 -> 144 over 2 periods: sqrt(1.44) - 1 = 20%.
-        assert compute_cagr([100.0, 120.0, 144.0]) == pytest.approx(20.0, rel=1e-9)
+class TestCagrOverYears:
+    def test_elapsed_years_not_point_count(self) -> None:
+        # 2020 -> 2024 is four years regardless of how many rows exist.
+        assert compute_cagr_over_years([(2020, 100.0), (2024, 146.41)]) == pytest.approx(
+            10.0, rel=1e-9
+        )
 
-    def test_two_periods_returns_none(self) -> None:
-        assert compute_cagr([100.0, 144.0]) is None
+    def test_missing_intermediate_year_does_not_shorten_span(self) -> None:
+        points = [(2020, 100.0), (2022, 121.0), (2024, 146.41)]
+        assert compute_cagr_over_years(points) == pytest.approx(10.0, rel=1e-9)
 
-    def test_sign_flip_returns_none(self) -> None:
-        assert compute_cagr([100.0, 50.0, -25.0]) is None
+    def test_single_point_or_zero_span_is_none(self) -> None:
+        assert compute_cagr_over_years([(2024, 100.0)]) is None
+        assert compute_cagr_over_years([(2024, 100.0), (2024, 121.0)]) is None
 
-    def test_negative_base_returns_none(self) -> None:
-        assert compute_cagr([-100.0, 50.0, 80.0]) is None
+    def test_nonpositive_endpoints_are_none(self) -> None:
+        assert compute_cagr_over_years([(2020, 0.0), (2024, 100.0)]) is None
+        assert compute_cagr_over_years([(2020, 100.0), (2024, -1.0)]) is None
 
-    def test_zero_base_returns_none(self) -> None:
-        assert compute_cagr([0.0, 50.0, 80.0]) is None
 
-    def test_none_values_filtered(self) -> None:
-        assert compute_cagr([100.0, None, 144.0]) is None  # only 2 usable points
+def _revenue_years(mapping: dict[int, float | None]) -> list[dict[str, Any]]:
+    return [_income_row(year, value, 1.0) for year, value in sorted(mapping.items())]
+
+
+class TestCagrCoverage:
+    def test_sparse_three_points_are_not_labelled_five_year(self) -> None:
+        coverage = assess_cagr_coverage(
+            _revenue_years({2020: 100.0, 2022: 121.0, 2024: 146.41}), "revenue"
+        )
+
+        assert coverage["value"] == pytest.approx(10.0, rel=1e-9)
+        assert coverage["published"] is None
+        assert coverage["spanYears"] == 4
+        assert coverage["coverage"] == "gapped"
+        assert coverage["reason"] == "insufficient_span:4y"
+
+    def test_complete_five_year_span_publishes(self) -> None:
+        values = {2020: 100.0, 2021: 110.0, 2022: 121.0, 2023: 133.1, 2024: 146.41, 2025: 161.051}
+        coverage = assess_cagr_coverage(_revenue_years(values), "revenue")
+
+        assert coverage["status"] == "complete"
+        assert coverage["coverage"] == "complete"
+        assert coverage["spanYears"] == 5
+        assert coverage["published"] == pytest.approx(10.0, rel=1e-9)
+
+    def test_five_rows_four_intervals_do_not_publish_five_year(self) -> None:
+        values = {2020: 100.0, 2021: 110.0, 2022: 121.0, 2023: 133.1, 2024: 146.41}
+        coverage = assess_cagr_coverage(_revenue_years(values), "revenue")
+
+        assert coverage["published"] is None
+        assert coverage["value"] == pytest.approx(10.0, rel=1e-9)
+        assert coverage["reason"] == "insufficient_span:4y"
+
+    def test_gap_inside_five_year_span_does_not_publish(self) -> None:
+        values = {2020: 100.0, 2021: 110.0, 2023: 133.1, 2024: 146.41, 2025: 161.051}
+        coverage = assess_cagr_coverage(_revenue_years(values), "revenue")
+
+        assert coverage["published"] is None
+        assert coverage["coverage"] == "gapped"
+        assert coverage["reason"] == "incomplete_intermediate_coverage"
+        assert coverage["value"] == pytest.approx(((161.051 / 100.0) ** 0.2 - 1) * 100)
+
+    def test_null_intermediate_value_is_excluded_and_disclosed(self) -> None:
+        values = {2020: 100.0, 2021: None, 2022: 121.0, 2023: 133.1, 2024: 146.41, 2025: 161.051}
+        coverage = assess_cagr_coverage(_revenue_years(values), "revenue")
+
+        assert coverage["published"] is None
+        assert {"year": 2021, "field": "revenue", "reason": "missing"} in coverage["excluded"]
+        assert coverage["spanYears"] == 5
+
+    def test_restated_duplicate_fiscal_year_withholds_that_year(self) -> None:
+        rows = [
+            _income_row(2020, 100.0, 1.0),
+            _income_row(2021, 110.0, 1.0),
+            _income_row(2022, 121.0, 1.0),
+            _income_row(2023, 133.1, 1.0),
+            _income_row(2024, 146.41, 1.0),
+            _income_row(2025, 161.051, 1.0),
+            _income_row(2025, 999.0, 1.0),
+        ]
+        coverage = assess_cagr_coverage(rows, "revenue")
+
+        assert coverage["published"] is None
+        assert coverage["excluded"][-1] == {
+            "year": 2025, "field": "revenue", "reason": "ambiguous_restatement",
+        }
+        assert coverage["endYear"] == 2024
+
+    def test_nonpositive_endpoint_withholds_value(self) -> None:
+        values = {2020: 0.0, 2021: 10.0, 2022: 20.0, 2023: 30.0, 2024: 40.0, 2025: 50.0}
+        coverage = assess_cagr_coverage(_revenue_years(values), "revenue")
+
+        assert coverage["published"] is None
+        assert coverage["value"] is None
+        assert coverage["reason"] == "nonpositive_endpoint"
+
+    def test_unadmitted_scale_is_excluded_not_coerced(self) -> None:
+        rows = [{"yearReport": year, "revenue": value} for year, value in
+                {2020: 100.0, 2021: 110.0, 2022: 121.0, 2023: 133.1, 2024: 146.41, 2025: 161.051}.items()]
+        coverage = assess_cagr_coverage(rows, "revenue")
+
+        assert coverage["published"] is None
+        assert {item["reason"] for item in coverage["excluded"]} == {"declared_scale_unknown"}
+
+    def test_declared_unit_alone_admits_values(self) -> None:
+        rows = [{"yearReport": year, "revenue": value} for year, value in
+                {2020: 100.0, 2021: 110.0, 2022: 121.0, 2023: 133.1, 2024: 146.41, 2025: 161.051}.items()]
+        coverage = assess_cagr_coverage(rows, "revenue", declared_statement_unit="VND")
+
+        assert coverage["published"] == pytest.approx(10.0, rel=1e-9)
+
+
+# --- field admission ------------------------------------------------------------
+
+
+class TestAdmitValuationField:
+    def test_absent_capex_is_missing_not_zero(self) -> None:
+        assert admit_valuation_field({"yearReport": 2024, "operating_cash_flow": 300.0}, "capex") == (
+            None, "missing",
+        )
+
+    def test_blank_capex_is_blank_not_zero(self) -> None:
+        assert admit_valuation_field({"yearReport": 2024, "capex": "   "}, "capex") == (
+            None, "blank",
+        )
+
+    def test_reported_zero_capex_is_admitted(self) -> None:
+        assert admit_valuation_field(
+            {"yearReport": 2024, "capex": 0.0, "currency_unit": "VND"}, "capex"
+        ) == (0.0, None)
+
+    def test_rejected_field_never_returns_through_alias(self) -> None:
+        row = {
+            "yearReport": 2024,
+            "capex": 100.0,
+            "currency_unit": "VND",
+            "unit_metadata": {"capex": {"unavailable_reason": "unit_mismatch"}},
+        }
+        assert admit_valuation_field(row, "capex") == (None, "rejected:unit_mismatch")
+
+    def test_unknown_currency_is_not_assumed(self) -> None:
+        row = {"yearReport": 2024, "capex": 100.0, "currency_unit": "USD"}
+        assert admit_valuation_field(row, "capex") == (None, "unknown_currency")
+
+    def test_declared_thousand_scale_is_converted_once(self) -> None:
+        row = {"yearReport": 2024, "capex": 1.5, "units": {"capex": "thousand VND"}}
+        assert admit_valuation_field(row, "capex") == (1500.0, None)
+
+    def test_normalized_row_scale_is_not_applied_twice(self) -> None:
+        normalized = _normalize_statement_rows(
+            [{"raw": {"yearReport": 2024, "purchase_of_fixed_assets": 2, "currency_unit": "million VND"}}]
+        )
+        assert admit_valuation_field(normalized[0], "capex") == (2_000_000.0, None)
+
+
+def _cash_year(year: int, ocf: float | None, capex: float | None) -> dict[str, Any]:
+    return _cash_row(year, ocf=ocf, capex=capex)
+
+
+class TestFcfCoverage:
+    def test_missing_capex_makes_fcf_unknown_and_blocks_dcf_base(self) -> None:
+        coverage = assess_fcf_coverage([_cash_year(2024, 300.0, None)])
+
+        assert coverage["positive"] is None
+        assert coverage["baseFcf"] is None
+        assert coverage["status"] == "partial"
+        assert coverage["excluded"] == [{
+            "year": 2024,
+            "incomplete": [{"component": "capex", "reason": "missing"}],
+        }]
+        assert coverage["reason"].startswith("insufficient_complete_cash_flow_years")
+
+    def test_latest_incomplete_year_does_not_inherit_older_fcf(self) -> None:
+        coverage = assess_fcf_coverage([
+            _cash_year(2022, 300.0, -100.0),
+            _cash_year(2023, 300.0, -100.0),
+            _cash_year(2024, 300.0, None),
+        ])
+
+        assert coverage["positive"] is None
+        assert coverage["positiveReason"].startswith("latest_year_incomplete:capex=missing")
+        assert coverage["baseFcf"] is None
+        assert coverage["status"] == "partial"
+
+    def test_complete_three_rows_provide_base_fcf(self) -> None:
+        coverage = assess_fcf_coverage([
+            _cash_year(2022, 300.0, -100.0),
+            _cash_year(2023, 320.0, -120.0),
+            _cash_year(2024, 340.0, -140.0),
+        ])
+
+        assert coverage["status"] == "complete"
+        assert coverage["positive"] is True
+        assert coverage["baseFcf"] == pytest.approx((200.0 + 200.0 + 200.0) / 3)
+        assert coverage["baseYears"] == [2022, 2023, 2024]
+
+    def test_explicit_zero_capex_is_a_valid_complete_row(self) -> None:
+        coverage = assess_fcf_coverage([
+            _cash_year(2022, 300.0, 0.0),
+            _cash_year(2023, 300.0, 0.0),
+            _cash_year(2024, 300.0, 0.0),
+        ])
+
+        assert coverage["status"] == "complete"
+        assert coverage["positive"] is True
+        assert coverage["baseFcf"] == pytest.approx(300.0)
 
 
 # --- dividend streak -----------------------------------------------------------
@@ -214,15 +413,18 @@ class TestDividendYears:
         assert compute_dividend_years([]) is None
 
 
-# --- FCF flag -------------------------------------------------------------------
-
-
 class TestFcfPositive:
     def test_true_when_ocf_exceeds_capex(self) -> None:
         assert compute_fcf_positive([_cash_row(2024, ocf=100.0, capex=-40.0)]) is True
 
     def test_false_when_capex_exceeds_ocf(self) -> None:
         assert compute_fcf_positive([_cash_row(2024, ocf=100.0, capex=-150.0)]) is False
+
+    def test_none_when_capex_missing(self) -> None:
+        assert compute_fcf_positive([_cash_row(2024, ocf=300.0, capex=None)]) is None
+
+    def test_true_with_reported_zero_capex(self) -> None:
+        assert compute_fcf_positive([_cash_row(2024, ocf=300.0, capex=0.0)]) is True
 
     def test_none_when_ocf_missing(self) -> None:
         assert compute_fcf_positive([_cash_row(2024, ocf=None, capex=-150.0)]) is None
@@ -415,9 +617,11 @@ class TestMarginOfSafety:
 
 
 def _happy_inputs() -> FundamentalInputs:
-    years = [2020, 2021, 2022, 2023, 2024]
-    revenues = [1000.0, 1100.0, 1210.0, 1331.0, 1464.1]  # +10%/y
-    npats = [200.0, 220.0, 242.0, 266.2, 292.82]
+    # Six annual rows: a full five-year span (2020 -> 2025) with all six
+    # intermediate observations, so the 5Y fields and DCF growth are admissible.
+    years = [2020, 2021, 2022, 2023, 2024, 2025]
+    revenues = [1000.0, 1100.0, 1210.0, 1331.0, 1464.1, 1610.51]  # +10%/y
+    npats = [200.0, 220.0, 242.0, 266.2, 292.82, 322.102]
     income = [_income_row(y, r, n) for y, r, n in zip(years, revenues, npats, strict=True)]
     balance = [_balance_row(y, 1000.0 + 50 * i, 2000.0 + 50 * i, 600.0) for i, y in enumerate(years)]
     cash = [_cash_row(y, ocf=300.0, capex=-100.0, dividends=-50.0) for y in years]
@@ -428,7 +632,7 @@ def _happy_inputs() -> FundamentalInputs:
         price=50.0,
         shares_outstanding=100.0,
         market_cap=5000.0,
-        ratios={"yearReport": 2024, "pe": 15.0, "pb": 3.0, "ps": 2.5, "ev_ebitda": 9.0},
+        ratios={"yearReport": 2025, "pe": 15.0, "pb": 3.0, "ps": 2.5, "ev_ebitda": 9.0},
         income_statements=income,
         balance_sheets=balance,
         cash_flows=cash,
@@ -451,12 +655,12 @@ class TestComputeFundamentalSnapshot:
         assert snapshot.valuation_verdict is not None
         assert snapshot.roe is not None and snapshot.roe > 0
         assert snapshot.roa is not None
-        assert snapshot.net_margin == pytest.approx(292.82 / 1464.1 * 100.0)
-        assert snapshot.debt_to_equity == pytest.approx(600.0 / 1200.0)
+        assert snapshot.net_margin == pytest.approx(322.102 / 1610.51 * 100.0)
+        assert snapshot.debt_to_equity == pytest.approx(600.0 / 1250.0)
         assert snapshot.revenue_cagr_5y == pytest.approx(10.0, rel=1e-6)
         assert snapshot.profit_cagr_5y == pytest.approx(10.0, rel=1e-6)
         assert snapshot.dividend_yield == pytest.approx(50.0 / 5000.0 * 100.0)
-        assert snapshot.dividend_years == 5
+        assert snapshot.dividend_years == 6
         assert snapshot.fcf_positive is True
         assert snapshot.moat == "wide"
         assert snapshot.moat_score is not None
@@ -465,11 +669,74 @@ class TestComputeFundamentalSnapshot:
         assert snapshot.pb == 3.0
         assert snapshot.ps == 2.5
         assert snapshot.ev_ebitda == 9.0
-        assert snapshot.inputs["periods_used"] == [2020, 2021, 2022, 2023, 2024]
+        assert snapshot.inputs["periods_used"] == [2020, 2021, 2022, 2023, 2024, 2025]
         assert snapshot.inputs["discount_rate"] == 0.12
         assert snapshot.inputs["base_fcf"] == pytest.approx(200.0)
-        # growth clamped to max_growth even though CAGR is 10% (< 15%, unchanged)
         assert snapshot.inputs["growth_rate"] == pytest.approx(0.10, rel=1e-6)
+        coverage = snapshot.inputs["derived_coverage"]
+        assert coverage["cagr"]["revenue"]["status"] == "complete"
+        assert coverage["cagr"]["revenue"]["startYear"] == 2020
+        assert coverage["cagr"]["revenue"]["endYear"] == 2025
+        assert coverage["cagr"]["revenue"]["spanYears"] == 5
+        assert coverage["fcf"]["status"] == "complete"
+        assert coverage["fcf"]["baseYears"] == [2023, 2024, 2025]
+        assert coverage["growth"]["source"] == "net_income_cagr"
+        assert snapshot.inputs["derived_unavailable_reason"] is None
+        assert "roe" in snapshot.computed_fields
+        assert "intrinsic_value" in snapshot.computed_fields
+
+    def test_missing_capex_withholds_fcf_valuation_and_margin(self) -> None:
+        inputs = FundamentalInputs(
+            symbol="QAZ",
+            price=50.0,
+            shares_outstanding=100.0,
+            market_cap=5000.0,
+            price_unit="VND",
+            shares_unit="shares",
+            statement_unit="VND",
+            cash_flows=[{"yearReport": 2024, "operating_cash_flow": 300.0, "currency_unit": "VND"}],
+        )
+        snapshot = compute_fundamental_snapshot(inputs)
+
+        assert snapshot.fcf_positive is None
+        assert snapshot.inputs["base_fcf"] is None
+        assert snapshot.intrinsic_value is None
+        assert snapshot.margin_of_safety is None
+        assert snapshot.valuation_method is None
+        assert snapshot.valuation_verdict is None
+        assert "Free cash flow is unavailable" in snapshot.inputs["derived_unavailable_reason"]
+        assert snapshot.inputs["derived_coverage"]["fcf"]["excluded"] == [{
+            "year": 2024,
+            "incomplete": [{"component": "capex", "reason": "missing"}],
+        }]
+        assert snapshot.inputs["unit_quality"] == "verified"
+        assert snapshot.inputs["comparison_unavailable_reason"] is None
+
+    def test_reported_zero_capex_still_values(self) -> None:
+        inputs = _happy_inputs()
+        inputs.cash_flows = [_cash_row(y, ocf=300.0, capex=0.0) for y in (2020, 2021, 2022, 2023, 2024, 2025)]
+        snapshot = compute_fundamental_snapshot(inputs)
+
+        assert snapshot.fcf_positive is True
+        assert snapshot.inputs["base_fcf"] == pytest.approx(300.0)
+        assert snapshot.intrinsic_value is not None
+
+    def test_four_year_span_does_not_publish_five_year_or_seed_dcf(self) -> None:
+        inputs = _happy_inputs()
+        inputs.income_statements = inputs.income_statements[1:]
+        inputs.cash_flows = inputs.cash_flows[:5]
+        snapshot = compute_fundamental_snapshot(inputs)
+
+        assert snapshot.revenue_cagr_5y is None
+        assert snapshot.profit_cagr_5y is None
+        revenue_block = snapshot.inputs["derived_coverage"]["cagr"]["revenue"]
+        assert revenue_block["value"] == pytest.approx(10.0, rel=1e-6)
+        assert revenue_block["spanYears"] == 4
+        assert revenue_block["reason"] == "insufficient_span:4y"
+        assert snapshot.inputs["derived_coverage"]["growth"]["source"] == "none"
+        assert snapshot.inputs["growth_rate"] == 0.0
+        assert snapshot.valuation_method == "dcf"
+
         assert "roe" in snapshot.computed_fields
         assert "intrinsic_value" in snapshot.computed_fields
 
@@ -529,7 +796,7 @@ class TestToDocument:
         assert doc["symbol"] == "AAA"
         assert doc["snapshotDate"] == "2026-06-10"
         assert doc["source"] == "vnibb-fundamental-engine"
-        assert doc["schemaVersion"] == 3
+        assert doc["schemaVersion"] == 4
         assert doc["observedAt"] is not None
         assert doc["updatedAt"] is not None
         for key in (
@@ -561,18 +828,106 @@ class TestToDocument:
             "computedFields",
         ):
             assert key in doc, f"missing {key}"
-        assert doc["inputs"] == {
-            "periodsUsed": [2020, 2021, 2022, 2023, 2024],
-            "discountRate": 0.12,
-            "terminalGrowth": 0.03,
-            "baseFcf": pytest.approx(200.0),
-            "growthRate": pytest.approx(0.10, rel=1e-6),
-            "horizonYears": 10,
-            "unitQuality": "verified",
-            "comparisonUnavailableReason": None,
-            "unitLineage": {"price": {"unit": "VND"}, "shares": {"unit": "shares"}, "statements": {"unit": "VND"}},
+        inputs = doc["inputs"]
+        assert inputs["periodsUsed"] == [2020, 2021, 2022, 2023, 2024, 2025]
+        assert inputs["discountRate"] == 0.12
+        assert inputs["terminalGrowth"] == 0.03
+        assert inputs["baseFcf"] == pytest.approx(200.0)
+        assert inputs["growthRate"] == pytest.approx(0.10, rel=1e-6)
+        assert inputs["horizonYears"] == 10
+        assert inputs["unitQuality"] == "verified"
+        assert inputs["comparisonUnavailableReason"] is None
+        assert inputs["derivedUnavailableReason"] is None
+        assert inputs["unitLineage"] == {
+            "price": {"unit": "VND"}, "shares": {"unit": "shares"}, "statements": {"unit": "VND"},
         }
+        coverage = inputs["derivedCoverage"]
+        assert coverage["fcf"]["status"] == "complete"
+        assert coverage["cagr"]["revenue"]["published"] == pytest.approx(10.0, rel=1e-6)
         assert doc["valuationMethod"] == "dcf"
+
+
+# --- retained snapshot admission ------------------------------------------------
+
+
+def _v3_doc() -> dict[str, Any]:
+    return {
+        "symbol": "AAA",
+        "snapshotDate": "2026-06-10",
+        "schemaVersion": 3,
+        "moat": "wide",
+        "moatScore": 71.0,
+        "dividendYears": 5,
+        "intrinsicValue": 30.482968633288355,
+        "marginOfSafety": -64.02601925521924,
+        "valuationMethod": "dcf",
+        "valuationVerdict": "stretched",
+        "revenueCagr5y": 21.0,
+        "profitCagr5y": 21.0,
+        "fcfPositive": True,
+        "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    }
+
+
+class TestAdmitFundamentalSnapshot:
+    def test_old_formula_derived_values_are_withheld_with_reason(self) -> None:
+        admitted = admit_fundamental_snapshot(_v3_doc())
+
+        for field in (
+            "intrinsicValue",
+            "marginOfSafety",
+            "valuationMethod",
+            "valuationVerdict",
+            "revenueCagr5y",
+            "profitCagr5y",
+            "fcfPositive",
+        ):
+            assert admitted[field] is None, field
+        assert admitted["symbol"] == "AAA"
+        assert admitted["moat"] == "wide"
+        assert admitted["moatScore"] == 71.0
+        assert admitted["dividendYears"] == 5
+        assert "schema" in admitted["inputs"]["derivedUnavailableReason"]
+        assert admitted["inputs"]["derivedWithheldFields"]
+
+    def test_withheld_snapshot_reports_valuation_unavailable(self) -> None:
+        reason = fundamental_valuation_unavailable_reason(admit_fundamental_snapshot(_v3_doc()))
+
+        assert reason is not None
+        assert "schema" in reason
+
+    def test_current_schema_document_is_returned_unchanged(self) -> None:
+        doc = to_document(compute_fundamental_snapshot(_happy_inputs()), date(2026, 6, 10))
+        assert admit_fundamental_snapshot(doc) is doc
+        assert fundamental_valuation_unavailable_reason(doc) is None
+
+    def test_v4_schema_without_coverage_block_is_still_withheld(self) -> None:
+        doc = _v3_doc()
+        doc["schemaVersion"] = 4
+        admitted = admit_fundamental_snapshot(doc)
+
+        assert admitted["intrinsicValue"] is None
+        assert admitted["revenueCagr5y"] is None
+
+    def test_admission_is_idempotent(self) -> None:
+        once = admit_fundamental_snapshot(_v3_doc())
+        twice = admit_fundamental_snapshot(once)
+
+        assert twice == once
+
+    def test_missing_capex_snapshot_never_republishes_a_value(self) -> None:
+        inputs = FundamentalInputs(
+            symbol="QAZ", price=50.0, shares_outstanding=100.0, market_cap=5000.0,
+            price_unit="VND", shares_unit="shares", statement_unit="VND",
+            cash_flows=[{"yearReport": 2024, "operating_cash_flow": 300.0, "currency_unit": "VND"}],
+        )
+        doc = to_document(compute_fundamental_snapshot(inputs), date(2026, 6, 10))
+
+        assert doc["intrinsicValue"] is None
+        assert doc["marginOfSafety"] is None
+        assert doc["fcfPositive"] is None
+        assert admit_fundamental_snapshot(doc) is doc
+        assert fundamental_valuation_unavailable_reason(doc)
 
 
 class _PriceCorpus:
