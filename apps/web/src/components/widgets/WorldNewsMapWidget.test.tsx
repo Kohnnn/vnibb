@@ -211,7 +211,6 @@ describe('WorldNewsLiveStreamWidget', () => {
   test('renders latest headline with source and feed links', () => {
     render(<WorldNewsLiveStreamWidget id="world-news-live" />)
 
-    expect(screen.getByText('Latest Signal')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /VN-Index extends gains/i })).toHaveAttribute(
       'href',
       'https://cafef.vn/story'

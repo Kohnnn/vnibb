@@ -144,11 +144,13 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         if (coverage?.provider_row_cap_applied) {
             parts.push(`Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`);
         }
-        if ((coverage?.non_session_dates?.length ?? 0) > 0) {
-            parts.push(`${coverage.non_session_dates!.length} row(s) dated on a non-session were excluded.`);
+        const nonSessionDates = coverage?.non_session_dates ?? [];
+        if (nonSessionDates.length > 0) {
+            parts.push(`${nonSessionDates.length} row(s) dated on a non-session were excluded.`);
         }
-        if ((coverage?.duplicate_session_dates?.length ?? 0) > 0) {
-            parts.push(`${coverage.duplicate_session_dates!.length} duplicated session date(s) collapsed.`);
+        const duplicateDates = coverage?.duplicate_session_dates ?? [];
+        if (duplicateDates.length > 0) {
+            parts.push(`${duplicateDates.length} duplicated session date(s) collapsed.`);
         }
         if (coverage?.calendar_verified === false) {
             parts.push('Exchange calendar unverified for this range; closures may appear as gaps.');
@@ -327,9 +329,9 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             exportData={trades}
             exportFilename={`foreign_${symbol}`}
         >
-            <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
-                <div className="px-3 py-2 border-b border-[var(--border-color)]/70 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
+            <div className="flex min-h-full flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+                <div className="shrink-0 px-3 py-2 border-b border-[var(--border-color)]/70 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                    <div className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
                         {WINDOW_OPTIONS.map((option) => (
                             <button
                                 key={option}
@@ -353,6 +355,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         health={healthState}
                         note={coverageLabel}
                         align="right"
+                        className="min-w-[10rem] flex-1"
                     />
                     {/* Co-located refresh button: makes the cached-snapshot recovery affordance discoverable next to the badge instead of relying on the toolbar icon. */}
                     <button
@@ -367,14 +370,14 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     </button>
                 </div>
 
-                <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex items-center justify-between">
+                <div className="shrink-0 px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                     <div className="flex items-center gap-2">
                         <Globe size={12} className="text-[var(--color-accent-primary)]" />
                         <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Net Position</span>
                     </div>
                     <div
                         className={cn(
-                            'text-xs font-black px-2 py-0.5 rounded',
+                            'shrink-0 text-xs font-black px-2 py-0.5 rounded',
                             windowNet !== null && windowNet > 0
                                 ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
                                 : windowNet !== null && windowNet < 0
@@ -386,12 +389,14 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     </div>
                 </div>
                 {coverageWarning && (
-                    <p role="status" className="px-3 py-1.5 border-b border-[var(--border-color)] text-[10px] text-[var(--text-secondary)]">
+                    <p role="status" className="shrink-0 px-3 py-1.5 border-b border-[var(--border-color)] text-[10px] text-[var(--text-secondary)]">
                         {coverageWarning}
                     </p>
                 )}
 
-                <div className="flex-1 overflow-hidden">
+                {/* min-h floor: when the header/warning stack grows the table keeps
+                    a scrollable body instead of collapsing to zero painted rows. */}
+                <div className="flex-1 min-h-[160px] overflow-hidden">
                     {timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"

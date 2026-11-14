@@ -78,7 +78,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
     return inputs.flatMap(([name, query, usable]) => query.error
       ? [`${name}: ${usable ? 'refresh failed; retained data may be stale' : 'unavailable (request failed)'}.`]
       : !usable ? [`${name}: ${query.isLoading ? 'loading' : 'no usable observations'}.`] : [])
-      .concat(coverageNote)
+      .concat(coverageNote ?? [])
       .concat(coverage.warning && coverage.status !== 'partial' ? [`Foreign flow: ${coverage.warning}.`] : [])
       .concat(summary.holderCount && summary.ownershipUnitStatus !== 'explicit' ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [])
       .concat(summary.score === null ? ['Composite withheld until all three inputs and ownership percentage units are usable.'] : [])

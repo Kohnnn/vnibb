@@ -1,5 +1,5 @@
 import { buildOwnershipSummary, FOREIGN_WINDOW_SESSIONS } from './ownershipAnalytics'
-import type { ForeignTradingMeta, ShareholderData } from '@/types/equity'
+import type { ForeignTradingData, ForeignTradingMeta, ShareholderData } from '@/types/equity'
 
 const holder = { symbol: 'FPT', ownership_pct: 40, ownership_unit: 'percent', ownership_unit_status: 'explicit' } as unknown as ShareholderData
 
@@ -13,7 +13,9 @@ function sessions(count: number): string[] {
   return days
 }
 
-function rows(dates: string[], buy = 100, sell = 40) {
+type ForeignRowFixture = Pick<ForeignTradingData, 'date' | 'buy_volume' | 'sell_volume'>
+
+function rows(dates: string[], buy = 100, sell = 40): ForeignRowFixture[] {
   return dates.map((date) => ({ date, buy_volume: buy, sell_volume: sell }))
 }
 

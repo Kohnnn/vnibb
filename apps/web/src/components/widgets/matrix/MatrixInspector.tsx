@@ -31,7 +31,12 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
   const [evidence, setEvidence] = useState<MatrixEvidence[] | null>(null);
   const [error, setError] = useState('');
   const [narrow, setNarrow] = useState(false);
-  const panel = useDialogFocusTrap<HTMLElement>({ enabled: narrow, onClose, returnFocusTo });
+  // Narrow is modal; `aria-modal` alone leaves the maximized Matrix and the
+  // workspace keyboard- and AT-reachable. The shared trap inerts every body
+  // branch except the topmost active dialog's and restores exact prior
+  // attributes, so concurrent narrow inspectors and nested dialogs coordinate
+  // through one stack instead of racing per-instance DOM writes.
+  const panel = useDialogFocusTrap<HTMLElement>({ enabled: narrow, onClose, returnFocusTo, inertBackground: narrow });
   useEffect(() => {
     const media = window.matchMedia('(max-width: 767px)');
     const update = () => setNarrow(media.matches);
@@ -95,5 +100,7 @@ export function MatrixInspector({ snapshot, cell, dimension, canReview, busy, on
       </div>
     </> : <div className="matrix-inspector-body"><h4>Source scope</h4><p>{dimension.source_scope}</p><p>Column visibility, width, and selection only change this view. They do not execute research or fetch provider data.</p></div>}
   </aside>;
-  return narrow ? createPortal(<div className={styles.root} style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'transparent', padding: 0 }}>{content}</div>, document.body) : content;
+  // Above Sonner's fixed toaster (999999999) so a background hint such as
+  // "Customize this dashboard" never paints over the modal.
+  return narrow ? createPortal(<div data-matrix-inspector-portal className={styles.root} style={{ position: 'fixed', inset: 0, zIndex: 1000000000, background: 'transparent', padding: 0 }}>{content}</div>, document.body) : content;
 }
