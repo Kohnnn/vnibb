@@ -421,6 +421,7 @@ def admit_valuation_field(
         lineage_block = row.get("_financial_lineage")
     lineage_block = lineage_block if isinstance(lineage_block, Mapping) else {}
     canonical = lineage_block.get("canonical_data")
+    wanted = {_normalized_key(name) for name in names}
     for evidence in (
         row.get("unit_metadata") or {},
         canonical.get("unit_metadata") if isinstance(canonical, Mapping) else {},
@@ -428,9 +429,15 @@ def admit_valuation_field(
     ):
         if not isinstance(evidence, Mapping):
             continue
-        entry = _evidence_entry(evidence, names)
-        if entry is not None and entry.get("unavailable_reason"):
-            return None, f"rejected:{entry['unavailable_reason']}"
+        # Every matching entry is scanned, not the first: an accepted canonical
+        # spelling must not hide a rejection recorded under another alias.
+        for key, entry in evidence.items():
+            if not isinstance(entry, Mapping):
+                continue
+            if _normalized_key(key) not in wanted:
+                continue
+            if entry.get("unavailable_reason"):
+                return None, f"rejected:{entry['unavailable_reason']}"
 
     normalized_scale = _valuation_lineage_scale(row, alias)
     if normalized_scale is not None:

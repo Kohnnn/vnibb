@@ -225,6 +225,42 @@ def test_valuation_field_matches_provider_key_spellings():
     ) == (None, "rejected:unverified_statement_basis")
 
 
+def test_valuation_field_scans_every_alias_entry_for_a_rejection():
+    """An accepted canonical spelling must not hide a rejected alias.
+
+    Dict order decides which entry a first-match scan sees, so both orders and
+    a case variant are asserted: the metric is withheld whenever *any* spelling
+    of it was rejected.
+    """
+    accepted = {"value_unit": "VND"}
+    rejected = {"unavailable_reason": "unit_mismatch"}
+    orders = (
+        {"revenue": accepted, "net_sales": rejected},
+        {"Net_Sales": rejected, "revenue": accepted},
+        {"net_sales": rejected, "Revenue": accepted},
+    )
+    for metadata in orders:
+        assert admission.admit_valuation_field(
+            {"Revenue": 5, "unit": "VND", "unit_metadata": metadata}, "revenue",
+        ) == (None, "rejected:unit_mismatch")
+    # A rejection inside the canonical copy is found while the row-level
+    # spelling is accepted.
+    assert admission.admit_valuation_field(
+        {
+            "Revenue": 5, "unit": "VND",
+            "unit_metadata": {"revenue": accepted},
+            "raw_data": {"_financial_lineage": {"canonical_data": {
+                "unit_metadata": {"net_sales": rejected},
+            }}},
+        },
+        "revenue",
+    ) == (None, "rejected:unit_mismatch")
+    # Evidence with no rejection still admits the metric.
+    assert admission.admit_valuation_field(
+        {"Revenue": 5, "unit": "VND", "unit_metadata": {"revenue": accepted}}, "revenue",
+    ) == (5.0, None)
+
+
 def test_valuation_field_rejects_any_alias_and_top_level_lineage():
     """A rejection under another spelling, or in the row's own lineage, wins.
 
