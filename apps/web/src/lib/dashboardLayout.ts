@@ -463,13 +463,17 @@ export function fitTemplateWidgets<T extends CompactableLayoutItem>(
   const placed: Array<PlacedWidget<T>> = []
 
   const takeSlot = (w: number, h: number, preferredY: number) => {
-    for (let y = Math.max(0, preferredY); y <= preferredY + h + 48; y += 1) {
+    // `bottom` is the first row guaranteed free: every placed tile ends at or
+    // above it. Scanning only to there is complete for this pass, because a
+    // candidate at `bottom` never overlaps anything already placed.
+    const bottom = placed.reduce((max, item) => Math.max(max, item.layout.y + item.layout.h), 0)
+    for (let y = Math.max(0, preferredY); y <= bottom; y += 1) {
       for (let x = 0; x <= cols - w; x += 1) {
         const candidate = { x, y, w, h }
         if (!placed.some((item) => layoutsOverlap(candidate, item.layout))) return candidate
       }
     }
-    return { x: 0, y: Math.max(0, preferredY) }
+    return { x: 0, y: Math.max(bottom, 0) }
   }
 
   items.forEach((item) => {

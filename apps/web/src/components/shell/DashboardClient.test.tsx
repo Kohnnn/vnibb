@@ -359,12 +359,31 @@ describe('onboarding goal routing across published and bundled layouts', () => {
     expect(mockUpdateSyncGroupSymbol).toHaveBeenCalledWith('default-fundamental', 1, 'HPG');
   });
 
-  it('reports an unavailable financial view instead of routing before the catalogue settles', async () => {
-    await openWalkthroughWith([tab('tab-default-fundamental-fundamentals', 'Fundamentals')], false);
+  it('holds a goal requested before the catalogue settles and routes it once settled', async () => {
+    jest.useFakeTimers();
+    setViewport(1440);
+    mockWalkthroughEligible = true;
+    mockCatalogueReady = false;
+    const tabs = [tab('tab-default-fundamental-fundamentals', 'Fundamentals')];
+    mockDashboards = [fundamentalDashboard(tabs)];
+    mockActiveDashboard = mockDashboards[0];
+    mockActiveTab = tabs[0];
 
+    const view = render(<DashboardPage />);
+    await act(async () => { jest.advanceTimersByTime(300); });
+    await screen.findByRole('dialog', { name: 'Dashboard walkthrough' });
+
+    // Not routed yet, and - the #253 regression - not reported as unavailable
+    // during a normal slow catalog load.
     fireEvent.click(screen.getByRole('button', { name: 'Open Financial review' }));
-
     expect(mockSetActiveTab).not.toHaveBeenCalled();
-    expect(mockSetActiveDashboard).not.toHaveBeenCalled();
+    expect(screen.queryByText(/unavailable/i)).not.toBeInTheDocument();
+
+    // The catalog settles; the replay effect must run the held goal exactly once.
+    mockCatalogueReady = true;
+    view.rerender(<DashboardPage />);
+
+    expect(mockSetActiveDashboard).toHaveBeenCalledWith('default-fundamental');
+    expect(mockSetActiveTab).toHaveBeenCalledWith('tab-default-fundamental-fundamentals');
   });
 });

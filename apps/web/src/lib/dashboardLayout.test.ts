@@ -319,4 +319,24 @@ describe('fitTemplateWidgets', () => {
     expect(placed.layout.minW).toBe(contract.minW);
     expect(placed.layout.minH).toBe(contract.minH);
   });
+
+  // #252 review: three full-width 24x100 imported rectangles all authored at y=0
+  // exhaust any fixed-height search window and then piled onto y=0, so the grid
+  // had to repair the overlap at runtime and the preview disagreed with the
+  // result. The fallback must use the real placed bottom instead.
+  it('stacks large imported rectangles without overlapping, so preview matches insertion', () => {
+    const big = () => ({ x: 0, y: 0, w: 24, h: 100 });
+    const placed = fitTemplateWidgets([
+      { type: 'market_overview', layout: big() },
+      { type: 'market_overview', layout: big() },
+      { type: 'market_overview', layout: big() },
+    ]);
+
+    expect(placed.map((item) => item.layout.y)).toEqual([0, 100, 200]);
+    for (let i = 0; i < placed.length; i += 1) {
+      for (let j = i + 1; j < placed.length; j += 1) {
+        expect(layoutsOverlap(placed[i].layout, placed[j].layout)).toBe(false);
+      }
+    }
+  });
 });

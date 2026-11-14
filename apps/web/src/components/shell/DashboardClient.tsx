@@ -212,6 +212,8 @@ function DashboardContent() {
         tabId: string;
     } | null>(null);
     const autoWalkthroughQueuedRef = useRef(false);
+    // #253: a walkthrough goal asked for before the catalog settled.
+    const pendingGoalRef = useRef<{ goalId: OnboardingGoalId; symbol?: string } | null>(null);
     const dragStateRef = useRef<{ pane: 'left' | 'right' | null; startX: number; startWidth: number }>({
         pane: null,
         startX: 0,
@@ -1081,10 +1083,19 @@ function DashboardContent() {
         // #253: resolve the financial surface by *role*, never by literal tab
         // name. The published Fundamental layout labels it "Fundamentals" while
         // the bundled fallback labels it "Financials"; matching one exact name
-        // made this goal return false against the other layout. Both resolve
-        // here, and the goal stays routable only once the catalog has settled so
-        // it cannot race the post-hydration APPLY_SYSTEM_TEMPLATES dispatch.
-        if (!dashboardCatalogueReady) return false;
+        // made this goal return false against the other layout.
+        //
+        // The catalogue settles asynchronously (published system templates are
+        // fetched after first paint, and the walkthrough auto-opens on first
+        // visit). Returning false before it settles is wrong: the walkthrough
+        // turns that into "This view is unavailable right now" during a normal
+        // slow catalog load, for a view that is about to exist. Hold the intent
+        // and route it the moment the catalogue is ready instead.
+        if (!dashboardCatalogueReady) {
+            pendingGoalRef.current = { goalId, symbol };
+            return true;
+        }
+
         const dashboard = state.dashboards.find((item) => item.id === MAIN_FUNDAMENTAL_DASHBOARD_ID);
         const tab = dashboard ? findRoleTab(dashboard.tabs, goalId === 'follow_ticker' ? 'overview' : 'financials') : null;
         if (!dashboard || !tab || !symbol) return false;
@@ -1096,6 +1107,15 @@ function DashboardContent() {
         selectOnboardingGoal(goalId);
         return true;
     }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, dashboardCatalogueReady, setActiveDashboard, setActiveTab, state.dashboards]);
+
+    // #253: replay a goal that arrived before the catalog settled, exactly once,
+    // through the same handler so the published/fallback resolution is shared.
+    useEffect(() => {
+        if (!dashboardCatalogueReady || !pendingGoalRef.current) return;
+        const pending = pendingGoalRef.current;
+        pendingGoalRef.current = null;
+        handleOnboardingGoalSelect(pending.goalId, pending.symbol);
+    }, [dashboardCatalogueReady, handleOnboardingGoalSelect]);
 
     const handleOnboardingComplete = useCallback((goalId: OnboardingGoalId, openVniAgent = false) => {
         completeWalkthrough(goalId);
