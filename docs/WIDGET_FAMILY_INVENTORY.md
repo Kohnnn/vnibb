@@ -104,9 +104,10 @@ Worker-reported Run B conditions: no horizontal widget overflow at widths
 1440/1024/390/320 in light and dark, no blank or crashed widget, and sentiment
 labels measuring 12 px.
 
-**Run-specific DOM artifacts were not preserved/provided for independent
-review; these observations are unverified reports, not independent
-browser/visual acceptance.**
+**Run-specific DOM logs are preserved but were not provided for independent
+review:** these are exercised worker reports - 29 IDs exercised, not 29 IDs
+proven, since 8 of them are heuristic-only. They are not independent
+browser/visual acceptance.
 
 Brand surfaces checked in Run B: direction colour confined to sentiment
 surfaces; notebook Export moved off the gain surface; sentiment labels measure
