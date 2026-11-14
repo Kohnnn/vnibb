@@ -444,8 +444,9 @@ async def test_mcp_price_wrappers_warn_about_unknown_series(mock_price_sql, gene
     assert result["unknown_price_unit_count"] == 1
     assert result["prices_comparable"] is False
     assert result["warnings"]
-    assert result["items"][1]["price_unit"] == "unknown"
-    assert result["items"][1]["close"] == 65.0
+    unknown = [item for item in result["items"] if item["price_unit"] == "unknown"]
+    assert len(unknown) == 1
+    assert unknown[0]["close"] == 65.0
 
 
 @pytest.mark.asyncio

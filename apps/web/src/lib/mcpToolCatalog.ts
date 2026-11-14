@@ -98,7 +98,8 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
   },
   {
     name: 'get_symbol_prices',
-    description: 'Read recent price rows for a symbol from the curated app collection.',
+    description:
+      'Read the latest retained price rows for a symbol (latest-N selection, chronological by default).',
     source: 'app_collections',
     permission: 'read_only',
     sampleInput: { symbol: 'VCB', limit: 30 },
