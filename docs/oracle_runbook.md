@@ -471,14 +471,20 @@ These commands are for a separately authorized release only: complete the prereq
 ```bash
 test -n "${EXPECTED_REVISION:-}" &&
 test "$(git rev-parse --verify HEAD)" = "$EXPECTED_REVISION" &&
+test -n "${APPROVED_ALEMBIC_HEAD:-}" && test -n "${APPROVED_ALEMBIC_FROM:-}" &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml config >/dev/null &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml pull api mcp migrate &&
+bash scripts/oracle/verify-migration-head.sh &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate -c /app/alembic.ini current &&
-read -r -p 'After confirming current matches the approved migration head, enter the release SHA: ' accepted_revision &&
+read -r -p 'After confirming the guard reported the approved migration head, enter the release SHA: ' accepted_revision &&
 test "$accepted_revision" = "$EXPECTED_REVISION" &&
 docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build --no-deps --force-recreate api mcp caddy
 ```
+
+`scripts/oracle/verify-migration-head.sh` runs **before** `upgrade head` and is the migration gate, not a report. It asserts one approved transition: the candidate image's own `alembic heads` (no database write) must be exactly `APPROVED_ALEMBIC_HEAD`, and the database's actual applied revision must be exactly `APPROVED_ALEMBIC_FROM` (`none` for a fresh database). It refuses multiple heads, refuses an unreadable `heads`/`current`, and refuses any database revision other than the approved starting one. Both values must be set, so a release cannot claim a head without naming where it starts. A parser that accepts only "<rev> (head)" would read a genuine applied ancestor — Alembic prints that revision bare — as an empty database and let the upgrade through; every applied revision is parsed instead. Checking `alembic current` only after `upgrade head` cannot stop an unreviewed migration from having already run.
+
+`APPROVED_ALEMBIC_FROM` may equal `APPROVED_ALEMBIC_HEAD` for an ordinary code-only release that ships no new migration. That case is a verified no-op, not a bypass: the gate still requires the candidate image's head to be that revision and the database to already be at it, and reports "no-op release". A database anywhere else is still refused.
 
 ### Scheduler cutover and rollback
 
@@ -1036,3 +1042,37 @@ Detailed per-symbol JSON, raw envelopes, receipt decisions, query plan, command-
 hash and unchanged before/after API/PostgreSQL/Mongo/Redis identities are retained
 privately under the implementation evidence directory's `census-167/`. No credentials
 or per-symbol raw records belong in this runbook.
+
+## Fault-injection plan for the recovery and provider contracts (#24)
+
+Each contract below is proven by inducing its failure, not by observing a green
+health code. Every fault is injected offline against disposable stores or with a
+stub; none of these steps contacts a provider, writes a production store or starts
+a scheduler.
+
+| Contract | Fault to inject | Failure that must be visible | Passing condition |
+|---|---|---|---|
+| Restore truth (#29) | `pg_restore` exits nonzero after the table count and `stocks` check would match | `VERIFY OK` must never print; the drill exits nonzero | Nonzero exit, no `VERIFY OK`, cleanup still reported |
+| Worker outcome truth (#27) | Force one worker job to fail, then skip, then time out | `/sync/status` states the failure with timestamps, or 503 | No healthy-looking empty job list |
+| Prediction read bound (#33) | Production-scale fixture corpus | Request exceeds its budget | Bounded SQL, transferred rows recorded, p95 measured |
+| Partial universe (#26) | Scheduled-day write with one cohort removed | Whole-universe heatmap/breadth mark it incomplete | Symbol reads still serve; complete day stays usable |
+| Null quote (#30) | Provider failure with no stored fallback | The response carries `price: null` or a non-200 | No fabricated `0` price or current timestamp |
+| Screener outage (#25) | Provider outage with no cache | `unavailable`/retry state | Genuine zero-match still says "no matches" |
+| Heatmap freshness (#28) | Current prices over stale constituents | Constituent age and price freshness separate | `cached` is visible when the response is cached |
+| Migration gate (#171) | Candidate image whose head differs from the approved head | The guard refuses **before** `upgrade head` | Database untouched; nonzero exit names both revisions |
+| Daily owner (#172) | `SCHEDULER_ROLE=api` with `SKIP_SCHEDULER_STARTUP=false` in production | Configuration refuses to start | Exactly one producer; no second session writer |
+| Storage-only grant (#168, #232) | Operator holds a grant that permits storage but not public serving | No acquisition or write starts: the grant is retained evidence, not authorization | Acquisition, storage writes and consumers stay blocked until #168 coverage and #171/#172 gates are met |
+
+The backup drill's own regression suite is the executable form of the first row;
+`apps/api/tests/test_scripts/test_verify_migration_head_script.py` is the gate for
+the migration row, and `apps/api/tests/test_core/test_scheduler_single_owner.py`
+covers the daily-owner row. A row is only closed by an observed run, never by this
+table.
+
+## Direct-source stop gate (#231, #232)
+
+The gate that runs today is existing code, not a new module: the cold-start refusal
+in `apps/api/scripts/import_dnse_daily.py` stops DNSE before it imports or reads a
+credential, and FHSC remains supplied payloads only with no client. SSI is excluded
+by its own terms. Enabling any direct source requires that source's own written
+grant and the #168 coverage acceptance; nothing in this runbook enables one.
