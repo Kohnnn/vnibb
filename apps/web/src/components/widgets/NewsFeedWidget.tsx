@@ -25,6 +25,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { normalizeNewsItemTimestamp, newsObservationProvenance } from '@/lib/newsTime';
+import { getSentimentProvenance } from '@/components/widgets/news/NewsCard';
 
 interface NewsArticle {
     id: number | string;
@@ -42,6 +43,7 @@ interface NewsArticle {
     sectors: string[];
     sentiment?: 'bullish' | 'neutral' | 'bearish';
     sentiment_score?: number;
+    sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
     ai_summary?: string;
     read_count: number;
     bookmarked: boolean;
@@ -76,8 +78,16 @@ interface NewsFeedWidgetProps {
 }
 
 // Sentiment badge component
-function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: number }) {
-    if (!sentiment) return null;
+function SentimentBadge({
+    sentiment,
+    score,
+    source,
+}: {
+    sentiment?: string;
+    score?: number;
+    source?: 'provider' | 'heuristic' | 'unavailable' | null;
+}) {
+    if (!sentiment && source !== 'unavailable') return null;
 
     const config = {
         bullish: {
@@ -104,12 +114,36 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
     };
 
     const { icon: Icon, bg, text, border, label } = config[sentiment as keyof typeof config] || config.neutral;
+    const provenance = getSentimentProvenance(source);
+
+    // #250: no recorded label means no direction is shown, never a fake Neutral.
+    if (source === 'unavailable') {
+        return (
+            <span
+                className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--text-muted)]"
+                role="note"
+                title={provenance.detail}
+                aria-label={`Article sentiment: Sentiment unavailable. ${provenance.detail}`}
+            >
+                <span className="text-[length:var(--font-size-sm)] font-medium">{provenance.label}</span>
+            </span>
+        );
+    }
 
     return (
-        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${bg} ${text} ${border}`}>
+        <div
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${bg} ${text} ${border}`}
+            role="note"
+            title={provenance.detail}
+            aria-label={`Article sentiment: ${label} (${provenance.label}). ${provenance.detail}`}
+        >
             <Icon size={11} />
             <span className="text-[length:var(--font-size-sm)] font-medium">{label}</span>
-            {score && <span className="text-[length:var(--font-size-sm)] opacity-80">({score}%)</span>}
+            <span className="text-[length:var(--font-size-sm)] opacity-80">{provenance.label}</span>
+            {/* A reported 0 confidence is a real value; absent is not zero. */}
+            {typeof score === 'number' && (
+                <span className="text-[length:var(--font-size-sm)] opacity-80">({score}%)</span>
+            )}
         </div>
     );
 }
@@ -437,10 +471,11 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                         {item.source}
                                                     </span>
                                                 )}
-                                                {item.sentiment && (
+                                                {(item.sentiment || item.sentiment_source === 'unavailable') && (
                                                     <SentimentBadge
                                                         sentiment={item.sentiment}
                                                         score={item.sentiment_score}
+                                                        source={item.sentiment_source}
                                                     />
                                                 )}
                                                 {symbol && <NewsAssociation article={item} symbol={symbol} />}

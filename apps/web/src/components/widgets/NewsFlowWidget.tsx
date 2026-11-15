@@ -42,6 +42,7 @@ type NewsFlowItem = {
   is_market_wide_fallback?: boolean;
   match_reason?: string | null;
   association_class?: string | null;
+  sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
 };
 type NewsFlowPage = {
   items: NewsFlowItem[];

@@ -26,6 +26,8 @@ interface NewsCardProps {
     match_reason?: string | null;
     is_market_wide_fallback?: boolean;
     association_class?: string | null;
+    // #250: declared only; absent means the origin was never recorded.
+    sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
   };
 }
 
@@ -42,6 +44,32 @@ const SENTIMENT_CONFIG = {
 export function getSentimentBadgeTone(sentiment: string | null | undefined) {
   const key = (sentiment || 'neutral').toLowerCase() as keyof typeof SENTIMENT_CONFIG;
   return SENTIMENT_CONFIG[key] || SENTIMENT_CONFIG.neutral;
+}
+
+/** #250: where a direction word came from; unrecorded stays unknown. */
+export function getSentimentProvenance(source: 'provider' | 'heuristic' | 'unavailable' | null | undefined) {
+  if (source === 'provider') {
+    return {
+      label: 'provider',
+      detail: 'Sentiment class as published by the news provider. Not an estimate of stock-price impact.',
+    };
+  }
+  if (source === 'heuristic') {
+    return {
+      label: 'heuristic',
+      detail: 'Sentiment computed locally from the article text (keyword rules or AI model). Not a provider classification and not an estimate of stock-price impact.',
+    };
+  }
+  if (source === 'unavailable') {
+    return {
+      label: 'Sentiment unavailable',
+      detail: 'No sentiment label is recorded for this article. Not an estimate of stock-price impact.',
+    };
+  }
+  return {
+    label: 'source unknown',
+    detail: 'Where this sentiment label came from is not recorded. Not an estimate of stock-price impact.',
+  };
 }
 
 function NewsCardComponent({ news }: NewsCardProps) {
@@ -70,6 +98,9 @@ function NewsCardComponent({ news }: NewsCardProps) {
           ? 'Broad market article, not an association with this issuer.'
           : 'Association metadata unavailable; no company evidence.';
   const SentimentIcon = sentiment.icon;
+  const provenance = getSentimentProvenance(news.sentiment_source);
+  // #250: "unavailable" means no label exists; a direction would fabricate one.
+  const hasSentiment = news.sentiment_source !== 'unavailable';
   // A missing source publication date is unknown, never "now" (brand §22).
   const publishedLabel = formatTimestamp(
     normalizeNewsItemTimestamp(news as unknown as Record<string, unknown>),
@@ -86,9 +117,11 @@ function NewsCardComponent({ news }: NewsCardProps) {
         {/* The glyph carries the direction visually; the word is set in the meta
             row at the approved compact size. An 8 px caption was below the
             readable minimum (brand §13). */}
-        <div className={cn('mt-1 shrink-0 rounded p-1.5', sentiment.bg)}>
-          <SentimentIcon className={cn('w-4 h-4', sentiment.color)} />
-        </div>
+        {hasSentiment && (
+          <div className={cn('mt-1 shrink-0 rounded p-1.5', sentiment.bg)}>
+            <SentimentIcon className={cn('w-4 h-4', sentiment.color)} />
+          </div>
+        )}
 
         <div className="flex-1 min-w-0">
           {/* Title */}
@@ -128,10 +161,31 @@ function NewsCardComponent({ news }: NewsCardProps) {
           {/* Meta */}
           <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-tighter">
             <span className="px-1.5 py-0.5 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded text-[var(--text-secondary)]">{news.source}</span>
-            <span className={cn('flex items-center gap-1 rounded border border-[var(--color-state-border)] px-1.5 py-0.5 text-[length:var(--font-size-sm)] font-bold normal-case', sentiment.color)}>
-              <SentimentIcon className="w-3 h-3" aria-hidden />
-              {sentiment.label}
-            </span>
+            {hasSentiment ? (
+              <>
+                <span className={cn('flex items-center gap-1 rounded border border-[var(--color-state-border)] px-1.5 py-0.5 text-[length:var(--font-size-sm)] font-bold normal-case', sentiment.color)}>
+                  <SentimentIcon className="w-3 h-3" aria-hidden />
+                  {sentiment.label}
+                </span>
+                <span
+                  role="note"
+                  title={provenance.detail}
+                  aria-label={`Article sentiment: ${sentiment.label} (${provenance.label}). ${provenance.detail}`}
+                  className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[length:var(--font-size-sm)] font-bold normal-case"
+                >
+                  {provenance.label}
+                </span>
+              </>
+            ) : (
+              <span
+                role="note"
+                title={provenance.detail}
+                aria-label={`Article sentiment: Sentiment unavailable. ${provenance.detail}`}
+                className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[length:var(--font-size-sm)] font-bold normal-case"
+              >
+                Sentiment unavailable
+              </span>
+            )}
             <span>•</span>
             <span className="flex items-center gap-1">
                 {publishedLabel === '-' ? (

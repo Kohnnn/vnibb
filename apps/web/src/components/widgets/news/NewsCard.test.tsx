@@ -72,3 +72,39 @@ test('dispatches association label by class, not by score or symbol count', () =
   // Missing class defaults to unverified, not to a sector claim.
   expect(screen.getByText('Association unverified')).toBeInTheDocument();
 });
+
+test('states article sentiment provenance without implying stock impact', () => {
+  render(
+    <>
+      <NewsCard
+        news={{ ...base, id: 'provider', title: 'HPG provider class', sentiment: 'positive', sentiment_source: 'provider' }}
+      />
+      <NewsCard
+        news={{ ...base, id: 'heuristic', title: 'HPG local estimate', sentiment: 'bullish', sentiment_source: 'heuristic' }}
+      />
+      {/* A delivered label with no recorded origin stays unknown, not provider. */}
+      <NewsCard news={{ ...base, id: 'unknown', title: 'HPG unknown origin', sentiment: 'neutral' }} />
+    </>,
+  );
+
+  expect(screen.getByText('provider')).toBeInTheDocument();
+  expect(screen.getByText('heuristic')).toBeInTheDocument();
+  expect(screen.getByText('source unknown')).toBeInTheDocument();
+  expect(screen.queryByText(/stock impact expected/i)).not.toBeInTheDocument();
+  expect(
+    screen.getByLabelText(/Article sentiment: Bullish \(heuristic\)\. Sentiment computed locally/),
+  ).toBeInTheDocument();
+});
+
+test('renders no direction at all for an explicitly unavailable sentiment', () => {
+  render(
+    <NewsCard
+      news={{ ...base, id: 'none', title: 'HPG undated sentiment', sentiment: 'neutral', sentiment_source: 'unavailable' }}
+    />,
+  );
+
+  // "Neutral" here would be fabricated: nothing recorded this article's class.
+  expect(screen.queryByText('Neutral')).not.toBeInTheDocument();
+  expect(screen.getByText('Sentiment unavailable')).toBeInTheDocument();
+  expect(screen.getByLabelText(/Article sentiment: Sentiment unavailable/)).toBeInTheDocument();
+});

@@ -101,6 +101,30 @@ test('shows no ranking number for a sector overlap but keeps direct-company rank
   expect(screen.queryByText(/industry overlap · no company evidence · rank/)).not.toBeInTheDocument()
 })
 
+test('states where a news sentiment label came from instead of implying impact', () => {
+  mockUseCompanyNews.mockReturnValue(queryResult<CompanyNewsResponse>({
+    symbol: 'HPG',
+    count: 3,
+    data: [
+      { symbol: 'HPG', title: 'HPG local estimate', source: 'cafef', sentiment: 'bullish', sentiment_score: 0, sentiment_source: 'heuristic' },
+      { symbol: 'HPG', title: 'HPG provider class', source: 'issuer', sentiment: 'positive', sentiment_source: 'provider' },
+      { symbol: 'HPG', title: 'HPG no label', source: 'cafef', sentiment_source: 'unavailable' },
+    ],
+  }))
+  mockUseInsiderDeals.mockReturnValue(queryResult([]))
+  mockUseDividends.mockReturnValue(queryResult<DividendsResponse>({ data: [] }))
+
+  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
+
+  const heuristicBadge = screen.getByLabelText(/Article sentiment: bullish \(heuristic\)/)
+  // A reported zero confidence survives; it is not treated as absent.
+  expect(heuristicBadge).toHaveTextContent(/bullish 0/)
+  expect(screen.getByLabelText(/Article sentiment: positive \(provider\)/)).toBeInTheDocument()
+  // No recorded label: no direction word, never a fabricated "neutral".
+  expect(screen.getByText('Sentiment unavailable')).toBeInTheDocument()
+  expect(screen.queryByText(/stock impact/i)).not.toBeInTheDocument()
+})
+
 test.each(['dividend', 'insider'] as const)('top-level retry recovers terminal %s errors', (failedSection) => {
   const refetchNews = jest.fn()
   const terminalError = new Error('Request failed')

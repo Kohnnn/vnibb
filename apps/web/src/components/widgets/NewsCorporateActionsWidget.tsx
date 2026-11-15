@@ -14,6 +14,7 @@ import { normalizeInsiderAction } from '@/lib/insiderActions';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { addNotebookItem } from '@/lib/researchNotebook';
 import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
+import { getSentimentProvenance } from '@/components/widgets/news/NewsCard';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE } from '@/lib/units';
 
@@ -246,6 +247,10 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                   {news.map((item, idx) => {
                     const key = `news-${idx}`;
                     const canPin = Boolean(item.url && item.source);
+                    const provenance = getSentimentProvenance(item.sentiment_source);
+                    // #250: an absent or unavailable label keeps no direction word.
+                    const showDirection =
+                      Boolean(item.sentiment) && item.sentiment_source !== 'unavailable';
                     return (
                     <div
                       key={`${item.title}-${idx}`}
@@ -260,9 +265,25 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                         )}
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">
-                        <span className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${getSentimentClasses(item.sentiment)}`}>
-                          {item.sentiment || 'neutral'}
-                          {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
+                        <span
+                          role="note"
+                          title={provenance.detail}
+                          aria-label={
+                            showDirection
+                              ? `Article sentiment: ${item.sentiment} (${provenance.label}). ${provenance.detail}`
+                              : `Article sentiment: ${provenance.label}. ${provenance.detail}`
+                          }
+                          className={`rounded border px-1.5 py-0.5 font-semibold ${showDirection ? 'uppercase' : 'normal-case'} ${getSentimentClasses(item.sentiment)}`}
+                        >
+                          {showDirection ? (
+                            <>
+                              {item.sentiment}
+                              {typeof item.sentiment_score === 'number' ? ` ${Math.round(item.sentiment_score)}` : ''}
+                              <span className="ml-1 font-normal lowercase opacity-80">{provenance.label}</span>
+                            </>
+                          ) : (
+                            provenance.label
+                          )}
                         </span>
                         {(item.match_reason || item.association_class) && (
                           <span

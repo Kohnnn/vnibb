@@ -89,6 +89,8 @@ export interface CompanyNewsData {
   category?: string;
   sentiment?: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
   sentiment_score?: number | null;
+  /** #250: who produced the label. Absent means the origin is unknown. */
+  sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
   ai_summary?: string | null;
   relevance_score?: number | null;
   matched_symbols?: string[];
