@@ -34,7 +34,7 @@ class NewsItem(BaseModel):
     url: str
     symbols: list[str] = []
     sector: str | None = None
-    sentiment: str = "neutral"
+    sentiment: str | None = None
     sentiment_score: float | None = None
     # #250: declared only; None means the origin was never recorded.
     sentiment_source: Literal["provider", "heuristic", "unavailable"] | None = None
@@ -350,7 +350,7 @@ def _to_news_item(row: dict[str, Any]) -> NewsItem:
         published_at=_parse_published_at(row.get("published_date") or row.get("published_at")),
         url=row.get("url", ""),
         symbols=_parse_symbols(row.get("related_symbols")),
-        sentiment=row.get("sentiment", "neutral"),
+        sentiment=row.get("sentiment"),
         sentiment_score=row.get("sentiment_score"),
         ai_summary=row.get("ai_summary"),
         sector=row.get("sector"),

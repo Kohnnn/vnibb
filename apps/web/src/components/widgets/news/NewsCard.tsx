@@ -20,7 +20,7 @@ interface NewsCardProps {
     timestamp?: string | number | null;
     url: string;
     symbols: string[];
-    sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
+    sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish' | null;
     matched_symbols?: string[];
     relevance_score?: number | null;
     match_reason?: string | null;

@@ -41,7 +41,7 @@ interface NewsArticle {
     published_date?: string | null;
     related_symbols: string[];
     sectors: string[];
-    sentiment?: 'bullish' | 'neutral' | 'bearish';
+    sentiment?: 'bullish' | 'neutral' | 'bearish' | null;
     sentiment_score?: number;
     sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
     ai_summary?: string;
@@ -83,7 +83,7 @@ function SentimentBadge({
     score,
     source,
 }: {
-    sentiment?: string;
+    sentiment?: string | null;
     score?: number;
     source?: 'provider' | 'heuristic' | 'unavailable' | null;
 }) {

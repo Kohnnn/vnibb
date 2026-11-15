@@ -36,7 +36,7 @@ type NewsFlowItem = {
   source: string;
   url: string;
   symbols: string[];
-  sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish';
+  sentiment: 'positive' | 'negative' | 'neutral' | 'bullish' | 'bearish' | null;
   matched_symbols?: string[];
   relevance_score?: number | null;
   is_market_wide_fallback?: boolean;

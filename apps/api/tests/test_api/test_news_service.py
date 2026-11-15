@@ -22,6 +22,7 @@ from vnibb.services.news_service import (
     _sanitize_sector_taxonomy,
     _score_news_row,
     _strip_boilerplate,
+    _to_news_item,
     get_company_news_rows,
     get_news_flow,
 )
@@ -1311,6 +1312,27 @@ def test_news_item_sentiment_source_defaults_to_unknown():
     item = NewsItem(id="n", title="No label", source="cafef", url="https://example.com/n")
 
     assert item.model_dump(mode="json")["sentiment_source"] is None
+
+
+@pytest.mark.parametrize(
+    "sentiment_row",
+    [{}, {"sentiment": None}],
+    ids=["missing-key", "explicit-none"],
+)
+def test_to_news_item_leaves_missing_sentiment_null(sentiment_row):
+    """#250: a row without a label stays null and declares its origin unavailable."""
+    row = {
+        "id": "no-label",
+        "title": "HPG công bố kế hoạch mở rộng",
+        "source": "cafef",
+        "url": "https://example.com/no-label",
+        **sentiment_row,
+    }
+
+    payload = _to_news_item(row).model_dump(mode="json")
+
+    assert payload["sentiment"] is None
+    assert payload["sentiment_source"] == "unavailable"
 
 
 @pytest.mark.asyncio
