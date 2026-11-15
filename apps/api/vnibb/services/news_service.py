@@ -3,7 +3,7 @@ import re
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -36,6 +36,8 @@ class NewsItem(BaseModel):
     sector: str | None = None
     sentiment: str = "neutral"
     sentiment_score: float | None = None
+    # #250: declared only; None means the origin was never recorded.
+    sentiment_source: Literal["provider", "heuristic", "unavailable"] | None = None
     ai_summary: str | None = None
     relevance_score: float | None = None
     matched_symbols: list[str] = []
@@ -358,7 +360,20 @@ def _to_news_item(row: dict[str, Any]) -> NewsItem:
         is_market_wide_fallback=bool(row.get("is_market_wide_fallback", False)),
         association_class=row.get("association_class"),
         match_evidence=row.get("match_evidence") or {},
+        sentiment_source=resolve_sentiment_source(row),
     )
+
+
+def resolve_sentiment_source(row: dict[str, Any]) -> str | None:
+    """Declared sentiment provenance; a legacy bare label stays unknown.
+
+    `heuristic` is only ever set by the local analyzer path; an existing label
+    with no declared origin keeps `None` (not recorded) rather than guessing.
+    """
+    declared = str(row.get("sentiment_source") or "").strip().lower()
+    if declared in {"provider", "heuristic", "unavailable"}:
+        return declared
+    return None if str(row.get("sentiment") or "").strip() else "unavailable"
 
 
 def _needs_runtime_sentiment(row: dict[str, Any]) -> bool:
@@ -402,6 +417,9 @@ async def _enrich_sentiment_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
         row = normalized_rows[index]
         row["sentiment"] = sentiment.get("sentiment", row.get("sentiment") or "neutral")
         row["sentiment_score"] = sentiment.get("confidence", row.get("sentiment_score"))
+
+        # #250: computed here from the article text, so it is not a provider class.
+        row["sentiment_source"] = "heuristic"
 
         if sentiment.get("ai_summary") and not row.get("ai_summary"):
             row["ai_summary"] = sentiment["ai_summary"]
@@ -762,9 +780,8 @@ async def _hydrate_company_news_fallback(symbol: str | None, limit: int) -> list
                     # The request symbol is not article evidence: passing it as
                     # relation data would let the fallback verify itself.
                     "related_symbols": [],
-                    "sentiment": "neutral",
-                    "sentiment_score": None,
-                    "ai_summary": None,
+                    # #250: no label yet; a "neutral" default would fabricate one.
+                    "sentiment_source": "unavailable",
                 },
                 {**context, "symbol": fallback_symbol if symbol else None},
             )

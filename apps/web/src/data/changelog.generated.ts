@@ -16,6 +16,8 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- Carry article-sentiment provenance through news routes and widgets: distinguish locally computed heuristics, explicit provider classifications and unrecorded origins; unavailable sentiment no longer invents Neutral or implies stock-price impact (#250).
+- Validate reviewed image references before retention-config updates and atomically replace the private file at mode0600; missing inputs and failed writes preserve the previous configuration.
 - Apply admitted fiscal, unit and source evidence before cash-flow aliases, growth comparisons, Earnings Quality grades and earnings-recap context; preserve measured zero and explicit unavailable reasons. Use the same case-preserving field admission for valuation inputs and refuse incomparable margin exports (#245–#248, #257, #258).
 - Preserve each widget's existing Refresh action when the dashboard hides its internal header; keep the widget's own query/refetch boundary and loading guard rather than refreshing unrelated widgets (#245).
 - Include the API's partial earnings-quality coverage state in the frontend response type; partial admitted ratios remain distinct from a complete scorecard or unavailable inputs (#257).

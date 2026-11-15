@@ -1256,3 +1256,91 @@ async def test_installed_paid_news_is_never_selected(monkeypatch):
     assert await crawler.analyze_trending() == {
         "available": False, "reason": "trending_analysis_unavailable",
     }
+
+
+@pytest.mark.asyncio
+async def test_news_flow_marks_locally_computed_sentiment_as_heuristic(monkeypatch):
+    """#250: a label this service computes is heuristic, and its zero survives."""
+
+    async def fake_latest_news(**_kwargs):
+        return [
+            {
+                "id": "computed",
+                "title": "HPG lợi nhuận tăng mạnh",
+                "source": "cafef",
+                "published_date": datetime(2026, 3, 2, 9, 0),
+                "url": "https://example.com/computed",
+                "related_symbols": ["HPG"],
+                "sentiment": "neutral",
+                "sentiment_score": 0,
+            }
+        ]
+
+    async def fake_analyze_batch(_articles, max_concurrent=5):
+        assert max_concurrent >= 1
+        return [
+            {"sentiment": "bullish", "confidence": 0, "symbols": [], "sectors": [], "ai_summary": ""}
+        ]
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.news_crawler.get_latest_news", fake_latest_news
+    )
+    monkeypatch.setattr(
+        "vnibb.services.news_service.sentiment_analyzer.analyze_batch", fake_analyze_batch
+    )
+
+    response = await get_news_flow(mode="all", limit=5)
+
+    item = response.items[0]
+    assert item.sentiment_source == "heuristic"
+    # A reported zero confidence survives the enrichment untouched.
+    assert item.sentiment_score == 0
+
+
+def test_resolve_sentiment_source_never_guesses_provider_provenance():
+    """#250: a legacy bare label keeps an unknown origin; no label is unavailable."""
+    from vnibb.services.news_service import resolve_sentiment_source
+
+    assert resolve_sentiment_source({"sentiment": "bullish"}) is None
+    assert resolve_sentiment_source({"sentiment": "bullish", "sentiment_source": "provider"}) == "provider"
+    assert resolve_sentiment_source({}) == "unavailable"
+
+
+def test_news_item_sentiment_source_defaults_to_unknown():
+    """#250: an item with no label never claims a provider classification."""
+    item = NewsItem(id="n", title="No label", source="cafef", url="https://example.com/n")
+
+    assert item.model_dump(mode="json")["sentiment_source"] is None
+
+
+@pytest.mark.asyncio
+async def test_hydrated_fallback_rows_do_not_invent_a_sentiment_label(monkeypatch):
+    """#250: a row with no computed label declares unavailable, not neutral."""
+    from vnibb.services.news_service import _hydrate_company_news_fallback
+
+    async def fake_company_news(_query):
+        return [
+            SimpleNamespace(
+                title="HPG công bố kế hoạch mở rộng",
+                summary="HPG expands capacity.",
+                source="cafef",
+                published_at=datetime(2026, 3, 4, 9, 0),
+                url="https://example.com/hpg-plan-250",
+                category=None,
+            )
+        ]
+
+    async def fake_context(_symbol):
+        return {"symbol": "HPG", "peer_symbols": [], "sector_keywords": [], "company_keywords": []}
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.VnstockCompanyNewsFetcher.fetch", fake_company_news
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", fake_context)
+
+    rows = await _hydrate_company_news_fallback("HPG", 5)
+
+    assert rows[0]["sentiment_source"] == "unavailable"
+    # The analyzer has not run: there is no score to report, and 0 would be a
+    # real confidence value.
+    assert rows[0].get("sentiment_score") is None
