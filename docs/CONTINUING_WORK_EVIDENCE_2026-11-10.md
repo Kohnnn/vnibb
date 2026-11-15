@@ -42,6 +42,8 @@ Built predecessor `EOfAt6LtAr0LytLzsYx84`: all-engine smoke initially5pass/1WebK
 
 News harness limits: initial264/275 and corrected307/309 runs both exited1 and remain separately retained. The worker's correction still checked an unset installation flag although the real constructor probe worked; the final descriptor-based check observes the actual immutable constructor. This exceeded the intended single-correction bound; final observed assertions are not clean-bounded-process acceptance, exact-final artifact acceptance, real article lineage or whole-product acceptance. The runtime predates type-only/null-serialization successor `330bdc6ec2`; backend contract tests and successor typecheck carry that separate delta.
 
+Final registry census did **not** establish any widget-surface acceptance: `/tmp/vnibb-widget-family-20261115/runs/final-e479-conservative-20261115/` timed out at the configured1500s bound (`HARNESS_EXIT=124`); wrapper exited1 after the checker raised `KeyError: shotBytes`. Saved350 records are exception placeholders:82case exceptions and268group exceptions, zero settlements, zero screenshot-byte fields and zero screenshot files. The reported observed/completed350 counters are bookkeeping, not measured coverage; no350-widget product-failure claim is valid. Selectors never became visible; the underlying DOM/boot cause remains unproven. Source/runtime manifests stayed unchanged, but candidate-proof manifests were absent. No broad rerun or fabricated populated verdict; #194/#202 per-ID final acceptance remains open.
+
 
 | Issue | Criterion / completion evidence | Owner | Current disposition |
 | --- | --- | --- | --- |
