@@ -442,12 +442,16 @@ After the plan above has been reviewed, confirm the reviewed checkout/helper is 
 ```bash
 # ROLLBACK_IMAGE and PREPARED_IMAGE must be the reviewed local immutable images above.
 # PREPARED_IMAGE is the image selected by deployment/env.oracle, pulled before enabling.
+# Refuse before any file mutation when either value is missing or empty; the live
+# configuration is only replaced by a 0600 atomic rename, so a rerun or a failed write
+# never truncates or widens it.
+: "${ROLLBACK_IMAGE:?Set the verified rollback image}"
+: "${PREPARED_IMAGE:?Set the pulled deployment image}"
 sudo install -d -m 0700 /etc/vnibb
-sudo install -m 0600 /dev/null /etc/vnibb/image-retention.env
-printf 'VNIBB_ROLLBACK_IMAGE=%s\nVNIBB_PREPARED_IMAGE=%s\n' \
-  "${ROLLBACK_IMAGE:?Set the verified rollback image}" \
-  "${PREPARED_IMAGE:?Set the pulled deployment image}" | \
-  sudo tee /etc/vnibb/image-retention.env >/dev/null
+sudo sh -c 'umask 077; touch /etc/vnibb/image-retention.env'
+sudo chown root:root /etc/vnibb/image-retention.env
+sudo chmod 0600 /etc/vnibb/image-retention.env
+sudo sh -c 'umask 077; printf "VNIBB_ROLLBACK_IMAGE=%s\nVNIBB_PREPARED_IMAGE=%s\n" "$1" "$2" > /etc/vnibb/.image-retention.env.new && chmod 0600 /etc/vnibb/.image-retention.env.new && mv /etc/vnibb/.image-retention.env.new /etc/vnibb/image-retention.env' sh "$ROLLBACK_IMAGE" "$PREPARED_IMAGE"
 sudo install -m 0644 deployment/vnibb-image-retention.service deployment/vnibb-image-retention.timer /etc/systemd/system/
 sudo systemd-analyze verify /etc/systemd/system/vnibb-image-retention.service /etc/systemd/system/vnibb-image-retention.timer
 sudo systemctl daemon-reload
