@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 const screenerRows = [
   {
@@ -78,11 +78,20 @@ async function installNetworkGuard(context: BrowserContext, baseURL?: string) {
   });
 }
 
+// The delayed walkthrough overlays What's new; dismiss the topmost dialog first.
+async function openDashboard(page: Page) {
+  await page.goto('/dashboard');
+  const walkthrough = page.getByRole('dialog', { name: 'VniBB walkthrough' });
+  await expect(walkthrough).toBeVisible();
+  await walkthrough.getByRole('button', { name: 'Close walkthrough' }).click();
+  await expect(walkthrough).toBeHidden();
+  const whatsNew = page.getByRole('dialog', { name: "What's new" });
+  await whatsNew.getByRole('button', { name: "Dismiss what's new" }).click();
+  await expect(whatsNew).toBeHidden();
+}
+
 test.beforeEach(async ({ context, page, baseURL }) => {
   await installNetworkGuard(context, baseURL);
-  await page.addLocatorHandler(page.getByRole('dialog', { name: 'VniBB walkthrough' }), async (dialog) => {
-    await dialog.getByRole('button', { name: 'Close walkthrough' }).click();
-  });
 
   await page.addInitScript(() => {
     localStorage.setItem('vnibb-dashboard-version', 'v74');
@@ -147,8 +156,7 @@ test('renders the dashboard and searches a ticker', async ({ page }) => {
   expect(liveness.ok()).toBeTruthy();
   expect(readiness.ok()).toBeTruthy();
 
-  await page.goto('/dashboard');
-  await page.getByRole('dialog', { name: "What's new" }).getByRole('button', { name: "Dismiss what's new" }).click();
+  await openDashboard(page);
 
   await expect(page.getByText('Start with a suggested layout')).toBeVisible();
   await page.getByRole('button', { name: 'Open symbol search and command palette' }).click();
@@ -157,8 +165,7 @@ test('renders the dashboard and searches a ticker', async ({ page }) => {
 });
 
 test('filters screener results', async ({ page }) => {
-  await page.goto('/dashboard');
-  await page.getByRole('dialog', { name: "What's new" }).getByRole('button', { name: "Dismiss what's new" }).click();
+  await openDashboard(page);
   await page.getByRole('button', { name: 'VniBB Screener' }).click();
 
   await expect(page.getByRole('button', { name: 'View VCB' })).toBeVisible();
