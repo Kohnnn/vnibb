@@ -8,13 +8,21 @@ const PopoverContext = createContext<{
     rootRef: React.RefObject<HTMLDivElement | null>;
 } | null>(null);
 
-export const Popover = ({ children }: { children: React.ReactNode }) => {
+export const Popover = ({ children, className }: { children: React.ReactNode; className?: string }) => {
     const [isOpen, setIsOpen] = useState(false);
     const rootRef = useRef<HTMLDivElement>(null);
 
+    // Consume Escape before a wrapping dialog's document listener.
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (!isOpen || event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        setIsOpen(false);
+    };
+
     return (
         <PopoverContext.Provider value={{ isOpen, setIsOpen, rootRef }}>
-            <div ref={rootRef} className="relative inline-block">
+            <div ref={rootRef} onKeyDown={handleKeyDown} data-popover-open={isOpen || undefined} className={cn('relative inline-block', className)}>
                 {children}
             </div>
         </PopoverContext.Provider>
@@ -44,12 +52,6 @@ export const PopoverContent = ({ children, className = '', align = 'center' }: a
     const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                context?.setIsOpen(false);
-            }
-        };
-
         const handleClickOutside = (event: MouseEvent) => {
             if (context?.rootRef.current && !context.rootRef.current.contains(event.target as Node)) {
                 context?.setIsOpen(false);
@@ -58,11 +60,9 @@ export const PopoverContent = ({ children, className = '', align = 'center' }: a
 
         if (context?.isOpen) {
             document.addEventListener('mousedown', handleClickOutside);
-            document.addEventListener('keydown', handleKeyDown);
         }
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
-            document.removeEventListener('keydown', handleKeyDown);
         };
     }, [context]);
 

@@ -111,3 +111,47 @@ it('includes an embedded frame when wrapping dialog keyboard focus', async () =>
         visibleElements.mockRestore();
     }
 });
+
+it('closes the top layer on Escape delivered outside the dialog subtree', async () => {
+    const visibleElements = jest.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(() => ({ length: 1 }) as DOMRectList);
+    const user = userEvent.setup();
+    try {
+        render(<NavigationLauncher />);
+        const opener = screen.getByRole('button', { name: 'Open navigation' });
+        await user.click(opener);
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Close navigation' })).toHaveFocus());
+
+        // The reported failure: focus stranded outside every dialog subtree, so a
+        // listener scoped to the dialog node never traversed the key at all.
+        const stranded = document.createElement('button');
+        document.body.append(stranded);
+        stranded.focus();
+        fireEvent.keyDown(stranded, { key: 'Escape' });
+        expect(screen.queryByRole('dialog', { name: 'Navigation' })).not.toBeInTheDocument();
+        await waitFor(() => expect(opener).toHaveFocus());
+        stranded.remove();
+
+        // A nested dialog (trapped or not) owns its own Escape: the outer stays.
+        await user.click(opener);
+        const outer = screen.getByRole('dialog', { name: 'Navigation' });
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Close navigation' })).toHaveFocus());
+        const inner = document.createElement('div');
+        inner.setAttribute('role', 'dialog');
+        const innerButton = document.createElement('button');
+        innerButton.type = 'button';
+        inner.append(innerButton);
+        outer.append(inner);
+        fireEvent.keyDown(innerButton, { key: 'Escape' });
+        expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
+        inner.remove();
+
+        const overlay = screen.getByRole('button', { name: 'Transfer research' });
+        const consumeEscape = (event: KeyboardEvent) => event.stopPropagation();
+        overlay.addEventListener('keydown', consumeEscape);
+        fireEvent.keyDown(overlay, { key: 'Escape' });
+        overlay.removeEventListener('keydown', consumeEscape);
+        expect(screen.getByRole('dialog', { name: 'Navigation' })).toBeInTheDocument();
+    } finally {
+        visibleElements.mockRestore();
+    }
+});

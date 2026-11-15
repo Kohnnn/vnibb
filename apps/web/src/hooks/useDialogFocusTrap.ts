@@ -163,24 +163,23 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       }, 0)
     }
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!isTopDialog()) return
-      // A nested dialog may not be trapped itself (the inline Matrix inspector
-      // only traps when narrow) and its React onKeyDown runs after this native
-      // listener. Escape inside a descendant dialog belongs to that dialog, so
-      // one Escape closes one layer; the next reaches this one.
+    // Escape must not depend on where focus ended up: a modal whose focus was
+    // stranded outside its subtree (focus timeout, reparent, opener restore) is
+    // still the topmost dialog and must close. Document bubble keeps every inner
+    // overlay's precedence — one that stops propagation above us wins — and a
+    // descendant dialog owns its own Escape, so one Escape closes one layer.
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !onCloseRef.current || !isTopDialog()) return
       const target = event.target
       const nestedDialog = target instanceof Element ? target.closest('[role="dialog"]') : null
-      if (event.key === 'Escape' && onCloseRef.current && !(nestedDialog && nestedDialog !== dialog)) {
-        event.preventDefault()
-        event.stopPropagation()
-        onCloseRef.current()
-        return
-      }
+      if (nestedDialog && nestedDialog !== dialog) return
+      event.preventDefault()
+      event.stopPropagation()
+      onCloseRef.current()
+    }
 
-      if (event.key !== 'Tab') {
-        return
-      }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isTopDialog() || event.key !== 'Tab') return
 
       const focusableElements = getFocusableElements(dialog)
       if (focusableElements.length === 0) {
@@ -221,12 +220,14 @@ export function useDialogFocusTrap<T extends HTMLElement>({
       focusDialog()
     }
 
+    document.addEventListener('keydown', handleEscape)
     dialog.addEventListener('keydown', handleKeyDown)
     document.addEventListener('focusin', handleFocusIn)
 
     return () => {
       window.clearTimeout(focusTimeout)
       window.clearTimeout(frameRetry)
+      document.removeEventListener('keydown', handleEscape)
       dialog.removeEventListener('keydown', handleKeyDown)
       document.removeEventListener('focusin', handleFocusIn)
       const wasTopDialog = isTopDialog()

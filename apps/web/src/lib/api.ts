@@ -2528,7 +2528,7 @@ export interface EarningsQualitySeriesPoint {
 }
 
 export interface EarningsQualityAvailability {
-    status: 'available' | 'unavailable';
+    status: 'available' | 'partial' | 'unavailable';
     unavailable_reason: string | null;
     admitted_periods?: number;
     component_availability?: Record<string, Record<string, string | null>>;
