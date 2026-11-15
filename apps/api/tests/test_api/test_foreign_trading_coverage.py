@@ -5,7 +5,7 @@ count must never stand in for a calendar window, and a weekend date must never
 be summed as a session.
 """
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from vnibb.api.v1 import equity as equity_module
@@ -386,3 +386,80 @@ def test_calendar_metadata_is_disclosed_for_unverified_years(monkeypatch):
     assert coverage.calendar_verified is False
     assert coverage.meta()["calendar_verified"] is False
     assert any("calendar not verified" in warning for warning in coverage.warnings)
+
+
+@pytest.mark.asyncio
+async def test_endpoint_admits_only_sessions_and_discloses_each_exclusion(
+    client, monkeypatch, test_db
+):
+    window = requested_session_dates(3)
+    out_of_window = requested_session_dates(4)[0]
+    weekend = window[-1] + timedelta(days=(5 - window[-1].weekday()) % 7 or 7)
+    test_db.add(
+        ForeignTrading(
+            id=950,
+            symbol="GAS",
+            trade_date=window[0],
+            buy_volume=2_000,
+            sell_volume=500,
+        )
+    )
+    await test_db.commit()
+
+    async def mixed_fetch(params):
+        return [
+            ForeignTradingData(
+                symbol="GAS",
+                date=window[2].isoformat(),
+                buy_volume=1_000.0,
+                sell_volume=400.0,
+            ),
+            ForeignTradingData(
+                symbol="GAS",
+                date=window[1].isoformat(),
+                buy_volume=500.0,
+                sell_volume=200.0,
+            ),
+            # A repeated session must collapse to one row, not double the total.
+            ForeignTradingData(
+                symbol="GAS",
+                date=window[2].isoformat(),
+                buy_volume=9_999.0,
+                sell_volume=9_999.0,
+            ),
+            # No exchange session exists on this date, so it is never summed.
+            ForeignTradingData(
+                symbol="GAS",
+                date=weekend.isoformat(),
+                buy_volume=5_000.0,
+                sell_volume=0.0,
+            ),
+            # A real earlier session outside the requested window.
+            ForeignTradingData(
+                symbol="GAS",
+                date=out_of_window.isoformat(),
+                buy_volume=7_000.0,
+                sell_volume=0.0,
+            ),
+        ]
+
+    monkeypatch.setattr(
+        equity_module.VnstockForeignTradingFetcher, "fetch", mixed_fetch, raising=True
+    )
+
+    response = await client.get("/api/v1/equity/GAS/foreign-trading?sessions=3")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["meta"]["count"] == 3
+    assert payload["meta"]["observed_session_count"] == 3
+    assert payload["meta"]["coverage_status"] == "complete"
+    assert payload["meta"]["window_net_volume"] == 2_400.0
+    assert [row["date"] for row in payload["data"]] == [
+        day.isoformat() for day in sorted(window, reverse=True)
+    ]
+    assert payload["meta"]["non_session_dates"] == [weekend.isoformat()]
+    assert payload["meta"]["duplicate_session_dates"] == [window[2].isoformat()]
+    assert payload["meta"]["out_of_window_row_count"] == 1
+    assert any("no exchange session" in warning for warning in payload["meta"]["warnings"])
+    assert any("duplicated session date" in warning for warning in payload["meta"]["warnings"])
