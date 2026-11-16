@@ -166,11 +166,26 @@ function alertFeedState(state: LoadState): 'unavailable' | 'loading' | 'stale' |
     return state.status === 'complete' ? 'loaded' : 'partial';
 }
 
-/** Honest empty-state copy: never assert "nothing moved" without evaluation. */
-function alertEmptyCopy(state: Extract<LoadState, { kind: 'ready' }>): { message: string; detail: string } {
+/**
+ * Honest empty-state copy: never assert "nothing moved" without evaluation.
+ *
+ * A cached window whose revalidation failed is stale whatever its stored
+ * status says: the previous evaluation described an earlier read of the store,
+ * so its conclusion and its coverage are withdrawn rather than restated.
+ */
+function alertEmptyCopy(
+    state: Extract<LoadState, { kind: 'ready' }>,
+    wantedHours: number,
+): { message: string; detail: string } {
     const window = `${state.windowHours}h`;
     const coverage = state.coverage;
     const toleranceMinutes = Math.round((state.baselineToleranceSeconds ?? 0) / 60);
+    if (state.stale && state.alerts.length === 0) {
+        return {
+            message: 'Coverage unverified',
+            detail: `The last ${wantedHours}h could not be evaluated; the retained ${window} result is not current, so no movement claim is made.`,
+        };
+    }
     switch (state.status) {
         case 'unavailable':
             return {
@@ -209,6 +224,11 @@ function alertEmptyCopy(state: Extract<LoadState, { kind: 'ready' }>): { message
     }
 }
 
+/** The bucket the user is looking at, whether or not its fetch succeeded. */
+function requestedHours(config: { bucket: '1h' | '4h' | '24h' }): number {
+    return BUCKETS.find((bucket) => bucket.key === config.bucket)?.hours ?? 1;
+}
+
 export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data: WidgetDataPayload) => void }) {
     const [state, setState] = useState<LoadState>({ kind: 'loading' });
     const requestIdRef = useRef(0);
@@ -223,7 +243,7 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
         const requestId = ++requestIdRef.current;
         setState((current) => current.kind === 'ready' ? current : { kind: 'loading' });
         const url = new URL(`${API_BASE_URL}/prediction-markets/alerts`);
-        const hours = BUCKETS.find((bucket) => bucket.key === config.bucket)?.hours ?? 1;
+        const hours = requestedHours(config);
         url.searchParams.set('window_hours', String(hours));
         url.searchParams.set('min_movement_bps', '200');
         url.searchParams.set('limit', '12');
@@ -251,15 +271,16 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
             // Only a complete evaluated zero-alert window may compact the tile, so
-            // derived summaries never propagate "empty" for an unaudited window.
-            empty: state.kind === 'ready' && state.status === 'complete' && state.alerts.length === 0
-                && (state.coverage?.evaluatedMarkets ?? 0) > 0,
+            // derived summaries never propagate "empty" for an unaudited window —
+            // including one whose clean result failed revalidation.
+            empty: state.kind === 'ready' && !state.stale && state.status === 'complete'
+                && state.alerts.length === 0 && (state.coverage?.evaluatedMarkets ?? 0) > 0,
             apiGroup: '/prediction-markets',
             endpoint: '/api/v1/prediction-markets/alerts',
             sourceLabel: 'Prediction market alerts',
             lastDataDate: state.kind === 'ready' ? state.dataObservedThrough : null,
             coverage: state.kind === 'ready'
-                ? (state.coverage?.evaluatedMarkets ?? 0) === 0
+                ? state.stale || (state.coverage?.evaluatedMarkets ?? 0) === 0
                     ? 'unknown'
                     : state.status === 'complete'
                         ? 'complete'
@@ -281,6 +302,9 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
         if (state.kind !== 'ready') return;
         // A partial window keeps honest rows, so every record carries the subset
         // qualifier: the bell must not present one as full coverage.
+        // `recordAlertActivity` keeps the first record for an ID, so this
+        // describes the evaluation that produced the row, not a later failed
+        // revalidation of it.
         const qualifier = state.status === 'complete' || !state.coverage
             ? ''
             : ` — coverage incomplete (${state.coverage.evaluatedMarkets} of ${state.coverage.comparableMarkets} markets evaluated, status ${state.status})`;
@@ -386,6 +410,12 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
             <div className="px-1 text-[10px] text-[var(--text-muted)]">
                 Feed {alertFeedState(state)}
                 {' · '}{state.windowHours}h window
+                {/* A failed revalidation keeps the previous payload: when the
+                    selected bucket has moved on, the header names both windows
+                    rather than presenting the retained one as the requested one. */}
+                {state.windowHours === requestedHours(config)
+                    ? ''
+                    : ` (requested ${requestedHours(config)}h; retaining last ${state.windowHours}h evaluation)`}
                 {state.coverage
                     ? ` · ${state.coverage.evaluatedMarkets}/${state.coverage.comparableMarkets} markets evaluated`
                     : ''}
@@ -395,7 +425,7 @@ export function PredictionAlertsWidget({ onDataChange }: { onDataChange?: (data:
             </div>
             {state.alerts.length === 0 ? (
                 <WidgetEmpty
-                    {...alertEmptyCopy(state)}
+                    {...alertEmptyCopy(state, requestedHours(config))}
                     icon={<BellRing size={18} />}
                 />
             ) : (
