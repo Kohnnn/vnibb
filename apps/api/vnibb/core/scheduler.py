@@ -24,6 +24,9 @@ from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory
 from vnibb.core.scheduler_lock import DistributedJobLock
 from vnibb.models.scheduler_state import SchedulerJobState, SchedulerWorkerState
+from vnibb.services.prediction_market_policy import (
+    PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES as prediction_market_intraday_cadence_minutes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +186,10 @@ MONGO_EOD_SYNC_TIMEOUT_SECONDS = 90 * 60
 PREDICTION_MARKET_INGEST_TIMEOUT_SECONDS = 5 * 60
 PREDICTION_MARKET_SNAPSHOT_TIMEOUT_SECONDS = 20 * 60
 PREDICTION_MARKET_INTRADAY_SNAPSHOT_TIMEOUT_SECONDS = 5 * 60
-PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = 15
+# Re-exported from the policy module (single source of truth) so the alert
+# endpoints derive their comparison tolerance from the same cadence the cron
+# trigger uses.
+PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = prediction_market_intraday_cadence_minutes
 # Retention prune of ``prediction_market_intraday_snapshots``: its own job and
 # its own timeout so a stalled 13 M-market ingest can never make pruning
 # unreachable. Independent of ingestion, which is exactly why it gets a

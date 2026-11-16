@@ -132,21 +132,24 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ### Deploy to Oracle Cloud
 
-Follow [docs/oracle_runbook.md](../../docs/oracle_runbook.md) for the Oracle VM deploy, verify, cutover, and rollback sequence.
+The canonical guide is [docs/oracle_runbook.md](../../docs/oracle_runbook.md). It supersedes older deployment notes (`DEPLOYMENT.md.example`, archived Zeabur material).
+
+Every command below runs from the **repository root**, the only directory where `docker-compose.oracle.yml`, `deployment/env.oracle` and `scripts/oracle/` all resolve. The `../../` prefixes in earlier drafts worked only from `apps/api`; from the root they are wrong.
 
 Build the immutable image outside OCI, publish it, resolve its digest, and set `VNIBB_API_IMAGE_REPOSITORY=registry.example.com/vnibb/api` plus `VNIBB_API_IMAGE_DIGEST=sha256:<digest>` in `deployment/env.oracle`. The image stores its build revision in `/app/.release-revision`; stale `RELEASE_REVISION` runtime keys cannot override health, logs, or Sentry. The same image serves free and Golden tiers; do not supply credentials at build time or install packages at container startup.
 
 ```bash
+# Repository root; IMAGE_RELEASE_REVISION must be the reviewed commit, not a value read back from health.
 export IMAGE_RELEASE_REVISION="$(git rev-parse --verify HEAD)"
-bash ../../scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
-docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml run --rm migrate
-docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml up -d --no-build api mcp caddy
+bash scripts/oracle/build_release_image.sh registry.example.com/vnibb/api:<release-tag>
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml run --rm migrate
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml up -d --no-build api mcp caddy
 ```
 
 The API must retain `API_SKIP_SCHEDULER_STARTUP=true`. Start the isolated scheduler only when Redis coordination is available:
 
 ```bash
-docker compose --env-file deployment/env.oracle -f ../../docker-compose.oracle.yml --profile scheduler up -d --no-build scheduler
+docker compose --env-file deployment/env.oracle -f docker-compose.oracle.yml --profile scheduler up -d --no-build scheduler
 ```
 
 ### Environment Variables
@@ -166,7 +169,14 @@ VNSTOCK_REINFORCEMENT_RPS=0.03333333333333333  # 2 calls/minute
 VNSTOCK_CALLS_PER_MINUTE=20
 ALEMBIC_STRICT=1  # Recommended for Oracle cutover so failed migrations do not boot a partial runtime
 CORS_ORIGINS=["https://vnibb.vercel.app"]
-CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://[a-z0-9-]+\\.vercel\\.app$
+# Scoped to localhost + this project's own Vercel deployments; a bare *.vercel.app
+# regex would let any third-party Vercel app send credentialed requests.
+CORS_ORIGIN_REGEX=^https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?$|^https://vnibb[a-z0-9-]*\\.vercel\\.app$|^https://script\\.google\\.com$|^https://[a-z0-9-]*\\.googleapis\\.com$
+```
+
+The defaults above come from `vnibb/core/config.py`; keep an explicit `CORS_ORIGINS` list for known hosts and never replace the regex with a wildcard. Production must not run with `CORS_ORIGINS=*`.
+
+```env
 ENVIRONMENT=production
 OPENROUTER_API_KEY=your_openrouter_api_key
 LLM_PROVIDER=openrouter
@@ -289,7 +299,7 @@ ruff check .
 
 ## � License
 
-MIT License - see [LICENSE](LICENSE)
+MIT License - see the repository [`LICENSE`](../../LICENSE).
 
 ---
 

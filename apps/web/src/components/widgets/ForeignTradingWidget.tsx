@@ -19,11 +19,15 @@ type WindowOption = '1M' | '3M' | '6M' | '1Y';
 
 const WINDOW_OPTIONS: WindowOption[] = ['1M', '3M', '6M', '1Y'];
 
-const WINDOW_LIMITS: Record<WindowOption, number> = {
-    '1M': 22,
-    '3M': 66,
-    '6M': 132,
-    '1Y': 264,
+// #249 — a window is a number of market sessions, not a row count: retained
+// history can be sparse, so a row cap silently spans a longer period. The API
+// counts sessions back from the latest expected exchange session and reports
+// the requested/observed ranges, gaps and the last validated session.
+const WINDOW_SESSIONS: Record<WindowOption, number> = {
+    '1M': 20,
+    '3M': 60,
+    '6M': 120,
+    '1Y': 250,
 };
 
 interface ForeignTradingWidgetProps {
@@ -87,19 +91,27 @@ function getNetFlowClass(net: number | null): string {
 
 function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: ForeignTradingWidgetProps) {
     const [flowWindow, setFlowWindow] = useState<WindowOption>('3M');
-    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, { limit: WINDOW_LIMITS[flowWindow] });
+    const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, {
+        sessions: WINDOW_SESSIONS[flowWindow],
+    });
 
+    const coverage = data?.meta;
+    const responseWarning = data?.error || null;
+    // Rows are already admitted to the session window server-side; sorting is
+    // presentation only and never re-derives a window total from a row count.
     const trades = useMemo(() => {
         const raw = data?.data || [];
-        return [...raw].sort((a, b) => {
-            const dateA = String(a.date || '');
-            const dateB = String(b.date || '');
-            return dateB.localeCompare(dateA);
-        });
+        return [...raw].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
     }, [data]);
 
     const windowNet = useMemo(() => {
         if (trades.length === 0) return null;
+        // A partial window is a partial disclosure: the admitted rows sum, but
+        // they may not be presented as the selected window's net.
+        if (coverage?.coverage_status !== undefined && coverage.coverage_status !== 'complete') {
+            return null;
+        }
+        if (coverage?.window_net_volume !== undefined) return coverage.window_net_volume;
         let total = 0;
         for (const trade of trades) {
             const net = getNetVolume(trade.buy_volume, trade.sell_volume);
@@ -107,7 +119,44 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             total += net;
         }
         return total;
-    }, [trades]);
+    }, [coverage?.coverage_status, coverage?.window_net_volume, trades]);
+
+    const coverageLabel = useMemo(() => {
+        const requested = coverage?.requested_session_count ?? WINDOW_SESSIONS[flowWindow];
+        const observed = coverage?.observed_session_count ?? null;
+        if (observed === null) return `${requested} sessions requested`;
+        const range = [coverage?.observed_start_date, coverage?.observed_end_date]
+            .filter((value): value is string => Boolean(value))
+            .map((value) => formatDate(value))
+            .join(' – ');
+        const gaps = coverage?.gap_session_count ?? 0;
+        return `${observed}/${requested} sessions${range ? ` · ${range}` : ''}${gaps ? ` · ${gaps} gap${gaps === 1 ? '' : 's'}` : ''}`;
+    }, [coverage, flowWindow]);
+
+    const coverageWarning = useMemo(() => {
+        const parts: string[] = [];
+        // The response-level degradation record travels with the rows: a
+        // retained fallback sample must not read as live data (#249).
+        if (responseWarning) parts.push(responseWarning.replace(/^; |; $/g, ''));
+        for (const warning of coverage?.warnings ?? []) {
+            if (!responseWarning?.includes(warning)) parts.push(warning);
+        }
+        if (coverage?.provider_row_cap_applied) {
+            parts.push(`Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`);
+        }
+        const nonSessionDates = coverage?.non_session_dates ?? [];
+        if (nonSessionDates.length > 0) {
+            parts.push(`${nonSessionDates.length} row(s) dated on a non-session were excluded.`);
+        }
+        const duplicateDates = coverage?.duplicate_session_dates ?? [];
+        if (duplicateDates.length > 0) {
+            parts.push(`${duplicateDates.length} duplicated session date(s) collapsed.`);
+        }
+        if (coverage?.calendar_verified === false) {
+            parts.push('Exchange calendar unverified for this range; closures may appear as gaps.');
+        }
+        return [...new Set(parts)].join(' ');
+    }, [coverage, responseWarning]);
 
     const columns = useMemo((): VirtualizedColumn<any>[] => [
         {
@@ -159,7 +208,6 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     ], []);
 
     const hasData = trades.length > 0;
-    const responseWarning = data?.error || null;
     const isFallback = Boolean((error || responseWarning) && hasData);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
@@ -281,9 +329,9 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             exportData={trades}
             exportFilename={`foreign_${symbol}`}
         >
-            <div className="h-full flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
-                <div className="px-3 py-2 border-b border-[var(--border-color)]/70 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
+            <div className="flex min-h-full flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+                <div className="shrink-0 px-3 py-2 border-b border-[var(--border-color)]/70 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                    <div className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
                         {WINDOW_OPTIONS.map((option) => (
                             <button
                                 key={option}
@@ -305,8 +353,9 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         health={healthState}
-                        note={`${flowWindow} net position`}
+                        note={coverageLabel}
                         align="right"
+                        className="min-w-[10rem] flex-1"
                     />
                     {/* Co-located refresh button: makes the cached-snapshot recovery affordance discoverable next to the badge instead of relying on the toolbar icon. */}
                     <button
@@ -321,14 +370,14 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                     </button>
                 </div>
 
-                <div className="px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex items-center justify-between">
+                <div className="shrink-0 px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]/50 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                     <div className="flex items-center gap-2">
                         <Globe size={12} className="text-[var(--color-accent-primary)]" />
                         <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Net Position</span>
                     </div>
                     <div
                         className={cn(
-                            'text-xs font-black px-2 py-0.5 rounded',
+                            'shrink-0 text-xs font-black px-2 py-0.5 rounded',
                             windowNet !== null && windowNet > 0
                                 ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)]'
                                 : windowNet !== null && windowNet < 0
@@ -339,8 +388,15 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         {getNetFlowLabel(windowNet)}{windowNet !== null ? ` ${formatNetVolume(windowNet, true)}` : ''}
                     </div>
                 </div>
+                {coverageWarning && (
+                    <p role="status" className="shrink-0 px-3 py-1.5 border-b border-[var(--border-color)] text-[10px] text-[var(--text-secondary)]">
+                        {coverageWarning}
+                    </p>
+                )}
 
-                <div className="flex-1 overflow-hidden">
+                {/* min-h floor: when the header/warning stack grows the table keeps
+                    a scrollable body instead of collapsing to zero painted rows. */}
+                <div className="flex-1 min-h-[160px] overflow-hidden">
                     {timedOut && isLoading && !hasData ? (
                         <WidgetError
                             title="Loading timed out"

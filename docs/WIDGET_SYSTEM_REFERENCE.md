@@ -27,7 +27,7 @@ Use these related docs for specialized areas:
 - Runtime registry: `apps/web/src/components/widgets/WidgetRegistry.ts`
 - Size contracts and autofit: `apps/web/src/lib/dashboardLayout.ts`
 - Dashboard templates: `apps/web/src/types/dashboard-templates.ts`
-- Dashboard persistence/runtime state: `apps/web/src/contexts/DashboardContext.tsx`
+- Dashboard persistence/runtime state: `apps/web/src/contexts/DashboardContext/` (barrel `index.tsx`; system-dashboard factories live in `systemDashboards.ts`)
 
 Layout note:
 
@@ -457,7 +457,7 @@ Browser-only storage should stay limited to device-local behavior such as notifi
 
 System dashboard layouts have two sources, and both must be updated together when shipping a layout change for existing/global users:
 
-1. Built-in fallback factories in `apps/web/src/contexts/DashboardContext.tsx` (`createMainSystemDashboard`, `createTechnicalSystemDashboard`, `createQuantSystemDashboard`, `createGlobalMarketsDashboard`). These are applied locally via `refreshSystemDashboardTemplates` during a `CURRENT_MIGRATION_VERSION` bump.
+1. Built-in fallback factories in `apps/web/src/contexts/DashboardContext/systemDashboards.ts` (`createMainSystemDashboard`, `createTechnicalSystemDashboard`, `createQuantSystemDashboard`, `createGlobalMarketsDashboard`), exported through the `DashboardContext/` barrel. These are applied locally via `refreshSystemDashboardTemplates` during a `CURRENT_MIGRATION_VERSION` bump.
 2. Database-published templates served by `GET /api/v1/dashboard/system-layouts/published`. On load the frontend applies these via the `APPLY_SYSTEM_TEMPLATES` action **after** local migration, so a published template overrides the code fallback for that dashboard.
 
 Implications:

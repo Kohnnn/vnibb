@@ -179,7 +179,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     clearUsdVndRates,
     applyAdminUsdRuntimeConfig,
   } = useUnit();
-  const { globalSymbol, setGlobalSymbol } = useSymbolLink();
+  const { setGlobalSymbol } = useSymbolLink();
   const { setGlobalSymbol: setWidgetGroupGlobalSymbol } = useWidgetGroups();
   const { state, activeDashboard, setActiveDashboard, setActiveTab: setDashboardActiveTab } = useDashboard();
 
@@ -275,7 +275,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (isOpen) {
       const preferences = readStoredUserPreferences();
-      setDefaultTickerInput(globalSymbol || preferences.defaultTicker || DEFAULT_TICKER);
+      setDefaultTickerInput(preferences.defaultTicker);
       setDefaultTab(preferences.defaultTab);
       setDefaultTickerError(null);
       setPreferenceStatus(null);
@@ -294,7 +294,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setUsdRateInputs(toRateInputs(localUsdVndRatesByYear))
       setAdminUsdRateInputs(toRateInputs(adminUsdVndRatesByYear))
     }
-  }, [adminUsdVndRatesByYear, globalSymbol, isOpen, localUsdVndRatesByYear]);
+  }, [adminUsdVndRatesByYear, isOpen, localUsdVndRatesByYear]);
 
   useEffect(() => {
     if (!isOpen) return;

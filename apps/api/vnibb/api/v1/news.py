@@ -8,7 +8,7 @@ Uses public Vietnamese financial RSS feeds.
 import logging
 import math
 from collections import defaultdict
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
@@ -29,6 +29,7 @@ from vnibb.services.news_service import (
     NewsResponse,
     get_news_flow,
     get_ranked_news_rows,
+    resolve_sentiment_source,
 )
 from vnibb.services.sentiment_analyzer import sentiment_analyzer
 from vnibb.services.world_news_service import (
@@ -79,6 +80,9 @@ class NewsArticle(BaseModel):
     sectors: list[str] = []
     sentiment: str | None = None
     sentiment_score: float | None = None
+    # #250: who produced the direction label. A legacy bare label keeps an
+    # unrecorded origin; nothing here is ever inferred as a provider class.
+    sentiment_source: Literal["provider", "heuristic", "unavailable"] | None = None
     ai_summary: str | None = None
     read_count: int = 0
     bookmarked: bool = False
@@ -86,6 +90,9 @@ class NewsArticle(BaseModel):
     matched_symbols: list[str] = []
     match_reason: str | None = None
     is_market_wide_fallback: bool = False
+    # #250: which association the row actually has, and the evidence for it.
+    association_class: str | None = None
+    match_evidence: dict[str, Any] = {}
 
 
 class NewsFeed(BaseModel):
@@ -146,6 +153,9 @@ async def get_news_feed(
                 sectors=sectors,
                 sentiment=item.get("sentiment"),
                 sentiment_score=item.get("sentiment_score"),
+                # #250: only an explicitly declared origin is carried; a legacy
+                # stored label keeps an unrecorded origin rather than a guess.
+                sentiment_source=resolve_sentiment_source(item),
                 ai_summary=item.get("ai_summary"),
                 read_count=item.get("read_count", 0),
                 bookmarked=item.get("bookmarked", False),
@@ -153,6 +163,8 @@ async def get_news_feed(
                 matched_symbols=item.get("matched_symbols", []),
                 match_reason=item.get("match_reason"),
                 is_market_wide_fallback=bool(item.get("is_market_wide_fallback", False)),
+                association_class=item.get("association_class"),
+                match_evidence=item.get("match_evidence") or {},
             )
         )
 
@@ -467,7 +479,10 @@ async def search_news_by_symbol(
         articles = await news_crawler.search_news(symbol=symbol.upper(), limit=limit)
 
         return NewsFeed(
-            articles=[NewsArticle(**a) for a in articles],
+            articles=[
+                NewsArticle(**{**a, "sentiment_source": resolve_sentiment_source(a)})
+                for a in articles
+            ],
             total=len(articles),
         )
     except Exception as e:

@@ -3,7 +3,7 @@ import re
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -34,13 +34,19 @@ class NewsItem(BaseModel):
     url: str
     symbols: list[str] = []
     sector: str | None = None
-    sentiment: str = "neutral"
+    sentiment: str | None = None
     sentiment_score: float | None = None
+    # #250: declared only; None means the origin was never recorded.
+    sentiment_source: Literal["provider", "heuristic", "unavailable"] | None = None
     ai_summary: str | None = None
     relevance_score: float | None = None
     matched_symbols: list[str] = []
     match_reason: str | None = None
     is_market_wide_fallback: bool = False
+    # #250: class + evidence keep a direct mention distinguishable from an
+    # indirect industry overlap on the wire.
+    association_class: str | None = None
+    match_evidence: dict[str, Any] = {}
 
 
 class NewsResponse(BaseModel):
@@ -81,6 +87,140 @@ GENERIC_KEYWORDS = {
 }
 
 
+# #250: a taxonomy value answers "which industry", never "what kind of legal
+# entity" and never a placeholder. A legal form ("Công ty cổ phần") or a
+# missing/unknown value used to reach `_extract_keywords` as a sector keyword
+# and scored every article whose footer mentioned the same phrase.
+LEGAL_FORM_TOKENS = {
+    "cong",
+    "ty",
+    "co",
+    "phan",
+    "cp",
+    "ctcp",
+    "tnhh",
+    "trach",
+    "nhiem",
+    "huu",
+    "han",
+    "hop",
+    "danh",
+    "doanh",
+    "nghiep",
+    "tu",
+    "nhan",
+    "joint",
+    "stock",
+    "company",
+    "corporation",
+    "limited",
+    "liability",
+    "llc",
+    "jsc",
+    "inc",
+    "corp",
+    "ltd",
+}
+
+PLACEHOLDER_TAXONOMY = {
+    "unknown",
+    "unclassified",
+    "undefined",
+    "none",
+    "null",
+    "na",
+    "not available",
+    "not applicable",
+    "other",
+    "khong xac dinh",
+    "chua xac dinh",
+    "khong ro",
+}
+
+GENERIC_TAXONOMY_TOKENS = LEGAL_FORM_TOKENS | PLACEHOLDER_TAXONOMY | {
+    "sector",
+    "nghe",
+    "industry",
+    "nganh",
+    "linh",
+    "vuc",
+    "group",
+    "holding",
+}
+
+# Leading text that marks a publisher/footer/navigation segment rather than
+# article evidence (#250). "Nguồn" ("source/supply") and "Chia sẻ" ("share")
+# open ordinary reporting sentences -- "Nguồn cung của HPG tăng", "Chia sẻ tại
+# đại hội, HPG công bố" -- so they only count as metadata with a delimiter.
+BOILERPLATE_SEGMENT_PATTERN = re.compile(
+    r"^(?:nguon\s*[:\-–|]|source\s*[:\-–|]|nguon tin\s*[:\-–|]"
+    r"|tin lien quan|bai viet lien quan|noi dung lien quan|tin cung chu de"
+    r"|related (?:articles|news|stories)\s*[:\-–|]?"
+    r"|doc them|doc tiep|xem them|see more|read more"
+    r"|chia se bai viet|chia se\s*[:\-–|]|share this (?:article|story)"
+    r"|ban quyen|copyright|all rights reserved"
+    r"|tu khoa\s*[:\-–|]|tags\s*[:\-–|]"
+    r"|subscribe|dang ky nhan tin|lien he\s*[:\-–|]"
+    r"|quang cao|advertisement)"
+)
+
+# This set is the association classes a row may carry on the wire.
+ASSOCIATION_CLASSES = frozenset(
+    {"direct_company", "verified_peer", "verified_sector", "general_market"}
+)
+
+# Classes that prove an association with this issuer and may carry a rank.
+# A verified sector hit shares an industry, so it is labelled but never scored.
+RANKED_ASSOCIATIONS = frozenset({"direct_company", "verified_peer"})
+
+
+def _taxonomy_tokens(value: Any) -> list[str]:
+    folded = _fold_diacritics(_normalize_text(value))
+    return [token for token in re.split(r"[^a-z0-9]+", folded) if token]
+
+
+def _is_generic_taxonomy(value: Any) -> bool:
+    """True when `value` cannot name an industry: legal form, placeholder, blank."""
+    normalized = _fold_diacritics(_normalize_text(value))
+    if not normalized:
+        return True
+    # "N/A", "n.a." and "không xác định" name nothing once punctuation is gone.
+    compact = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+    if compact in PLACEHOLDER_TAXONOMY or re.sub(r"[^a-z0-9]+", "", normalized) in {
+        "na",
+        "none",
+        "null",
+    }:
+        return True
+    tokens = _taxonomy_tokens(value)
+    if not tokens:
+        return True
+    return all(token in GENERIC_TAXONOMY_TOKENS for token in tokens)
+
+
+def _sanitize_sector_taxonomy(value: Any) -> str | None:
+    """The sourced classification, or None when it only names a legal form."""
+    if _is_generic_taxonomy(value):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _strip_boilerplate(text: str) -> str:
+    """Drop publisher/footer/navigation segments before relevance matching."""
+    if not text:
+        return ""
+    kept = [
+        segment.strip()
+        for segment in re.split(r"(?<=[.!?;])\s+|[\n\r]+", text)
+        if segment.strip()
+        and not BOILERPLATE_SEGMENT_PATTERN.match(
+            _fold_diacritics(_normalize_text(segment))
+        )
+    ]
+    return " ".join(kept)
+
+
 def _parse_symbols(raw_symbols: Any) -> list[str]:
     if isinstance(raw_symbols, list):
         return [str(symbol).strip().upper() for symbol in raw_symbols if str(symbol).strip()]
@@ -112,6 +252,10 @@ def _extract_keywords(*values: Any, whole_names: bool = False) -> list[str]:
     seen: set[str] = set()
 
     for value in values:
+        if _is_generic_taxonomy(value):
+            # A whole sector/company name that is only a legal form, a
+            # placeholder or blank names no entity (#250).
+            continue
         normalized = _normalize_text(value)
         if whole_names:
             normalized = re.sub(
@@ -206,7 +350,7 @@ def _to_news_item(row: dict[str, Any]) -> NewsItem:
         published_at=_parse_published_at(row.get("published_date") or row.get("published_at")),
         url=row.get("url", ""),
         symbols=_parse_symbols(row.get("related_symbols")),
-        sentiment=row.get("sentiment", "neutral"),
+        sentiment=row.get("sentiment"),
         sentiment_score=row.get("sentiment_score"),
         ai_summary=row.get("ai_summary"),
         sector=row.get("sector"),
@@ -214,7 +358,22 @@ def _to_news_item(row: dict[str, Any]) -> NewsItem:
         matched_symbols=_parse_symbols(row.get("matched_symbols")),
         match_reason=row.get("match_reason"),
         is_market_wide_fallback=bool(row.get("is_market_wide_fallback", False)),
+        association_class=row.get("association_class"),
+        match_evidence=row.get("match_evidence") or {},
+        sentiment_source=resolve_sentiment_source(row),
     )
+
+
+def resolve_sentiment_source(row: dict[str, Any]) -> str | None:
+    """Declared sentiment provenance; a legacy bare label stays unknown.
+
+    `heuristic` is only ever set by the local analyzer path; an existing label
+    with no declared origin keeps `None` (not recorded) rather than guessing.
+    """
+    declared = str(row.get("sentiment_source") or "").strip().lower()
+    if declared in {"provider", "heuristic", "unavailable"}:
+        return declared
+    return None if str(row.get("sentiment") or "").strip() else "unavailable"
 
 
 def _needs_runtime_sentiment(row: dict[str, Any]) -> bool:
@@ -258,6 +417,9 @@ async def _enrich_sentiment_rows(rows: list[dict[str, Any]]) -> list[dict[str, A
         row = normalized_rows[index]
         row["sentiment"] = sentiment.get("sentiment", row.get("sentiment") or "neutral")
         row["sentiment_score"] = sentiment.get("confidence", row.get("sentiment_score"))
+
+        # #250: computed here from the article text, so it is not a provider class.
+        row["sentiment_source"] = "heuristic"
 
         if sentiment.get("ai_summary") and not row.get("ai_summary"):
             row["ai_summary"] = sentiment["ai_summary"]
@@ -344,30 +506,53 @@ async def _load_symbol_context(symbol: str) -> dict[str, Any]:
                 "peer_symbols": [],
                 "sector_keywords": [],
                 "company_keywords": [],
+                "classification_provenance": {},
             }
 
-        peer_query = select(Stock.symbol).where(Stock.symbol != upper_symbol)
-        if stock.industry:
-            peer_query = peer_query.where(Stock.industry == stock.industry)
-        elif stock.sector:
-            peer_query = peer_query.where(Stock.sector == stock.sector)
-        else:
-            peer_query = peer_query.where(Stock.exchange == stock.exchange)
+        # #250: the peer bucket and the sector vocabulary must both come from a
+        # classification, never from a legal form or placeholder. When neither
+        # survives there is no peer set at all -- an exchange is not an industry,
+        # so same-exchange symbols are NOT verified peers.
+        industry = _sanitize_sector_taxonomy(stock.industry)
+        sector = _sanitize_sector_taxonomy(stock.sector)
 
-        peer_query = peer_query.order_by(Stock.symbol.asc()).limit(6)
-        peer_rows = await session.execute(peer_query)
-        peer_symbols = [
-            str(item).upper() for item in peer_rows.scalars().all() if str(item).strip()
-        ]
+        peer_symbols: list[str] = []
+        peer_basis: str | None = None
+        if industry or sector:
+            peer_query = select(Stock.symbol).where(Stock.symbol != upper_symbol)
+            if industry:
+                peer_query = peer_query.where(Stock.industry == stock.industry)
+                peer_basis = "industry"
+            else:
+                peer_query = peer_query.where(Stock.sector == stock.sector)
+                peer_basis = "sector"
+            peer_query = peer_query.order_by(Stock.symbol.asc()).limit(6)
+            peer_rows = await session.execute(peer_query)
+            peer_symbols = [
+                str(item).upper() for item in peer_rows.scalars().all() if str(item).strip()
+            ]
 
         return {
             "symbol": upper_symbol,
             "peer_symbols": peer_symbols,
-            "sector_keywords": _extract_keywords(stock.sector, stock.industry),
+            "peer_classification_basis": peer_basis,
+            "sector_keywords": _extract_keywords(sector, industry),
             "company_keywords": _extract_keywords(
                 stock.short_name, stock.company_name, whole_names=True
             ),
+            "classification_provenance": {
+                "sector": sector,
+                "industry": industry,
+                "sector_source": "stock.sector" if sector else None,
+                "industry_source": "stock.industry" if industry else None,
+                "rejected": [
+                    name
+                    for name, value in (("sector", stock.sector), ("industry", stock.industry))
+                    if value and _is_generic_taxonomy(value)
+                ],
+            },
         }
+
 
 
 def _contains_symbol(text: str, symbol: str) -> bool:
@@ -377,8 +562,22 @@ def _contains_symbol(text: str, symbol: str) -> bool:
 def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     symbol = context.get("symbol")
     title = _normalize_text(row.get("title"))
+    # #250: publisher/footer/navigation text is not article evidence. Matching
+    # it let a legal form or sector phrase in boilerplate admit any article.
+    # Each field is stripped on its own: an unprefixed join would let an
+    # unpunctuated "Nguồn: CafeF" summary swallow the real content field.
+    # Raw text reaches the stripper because `_normalize_text` collapses newlines,
+    # which are the only boundary a newline-separated footer has.
     body = _normalize_text(
-        " ".join(filter(None, [row.get("summary"), row.get("content"), row.get("category")]))
+        " ".join(
+            filter(
+                None,
+                (
+                    _strip_boilerplate(str(row.get(field) or ""))
+                    for field in ("summary", "content", "category")
+                ),
+            )
+        )
     )
     related_symbols = _parse_symbols(row.get("related_symbols"))
     related_set = {item.upper() for item in related_symbols}
@@ -386,55 +585,137 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
     score = 0.0
     reason = None
 
+    # #250: evidence records what actually matched, in which field, so a
+    # consumer can re-derive the claim instead of trusting a rule label.
+    matched_terms: list[dict[str, str]] = []
+
     if symbol:
         if _contains_symbol(title, symbol):
             score = 1.0
             reason = "exact_symbol_title"
             matched_symbols.append(symbol)
+            matched_terms.append({"term": symbol, "field": "title", "kind": "symbol"})
         elif symbol in related_set:
             score = 0.97
             reason = "exact_symbol_related"
             matched_symbols.append(symbol)
+            matched_terms.append({"term": symbol, "field": "related_symbols", "kind": "symbol"})
         elif _contains_symbol(body, symbol):
             score = 0.94
             reason = "exact_symbol_body"
             matched_symbols.append(symbol)
+            matched_terms.append({"term": symbol, "field": "body", "kind": "symbol"})
 
     if score < 0.9:
         for keyword in context.get("company_keywords", []):
-            if keyword and (_contains_symbol(title, keyword) or _contains_symbol(body, keyword)):
-                score = max(score, 0.84)
-                reason = reason or "company_keyword"
-                if symbol and symbol not in matched_symbols:
-                    matched_symbols.append(symbol)
-                break
+            if not keyword:
+                continue
+            field = None
+            if _contains_symbol(title, keyword):
+                field = "title"
+            elif _contains_symbol(body, keyword):
+                field = "body"
+            if field is None:
+                continue
+            score = max(score, 0.84)
+            reason = reason or "company_keyword"
+            if symbol and symbol not in matched_symbols:
+                matched_symbols.append(symbol)
+            matched_terms.append({"term": keyword, "field": field, "kind": "company_name"})
+            break
 
     peer_hits = 0
+    peer_evidence: list[str] = []
     for peer_symbol in context.get("peer_symbols", []):
-        if (
-            peer_symbol in related_set
-            or _contains_symbol(title, peer_symbol)
-            or _contains_symbol(body, peer_symbol)
-        ):
-            peer_hits += 1
-            if peer_symbol not in matched_symbols:
-                matched_symbols.append(peer_symbol)
+        if peer_symbol in related_set:
+            peer_evidence.append(peer_symbol)
+            matched_terms.append(
+                {"term": peer_symbol, "field": "related_symbols", "kind": "peer_symbol"}
+            )
+        elif _contains_symbol(title, peer_symbol):
+            peer_evidence.append(peer_symbol)
+            matched_terms.append({"term": peer_symbol, "field": "title", "kind": "peer_symbol"})
+        elif _contains_symbol(body, peer_symbol):
+            peer_evidence.append(peer_symbol)
+            matched_terms.append({"term": peer_symbol, "field": "body", "kind": "peer_symbol"})
+        else:
+            continue
+        peer_hits += 1
+        if peer_symbol not in matched_symbols:
+            matched_symbols.append(peer_symbol)
     if peer_hits:
         score = max(score, min(0.78, 0.62 + (peer_hits * 0.06)))
         reason = reason or "peer_mentions"
 
     sector_hits = 0
+    sector_evidence: list[str] = []
     for keyword in context.get("sector_keywords", []):
-        if keyword and (_contains_symbol(title, keyword) or _contains_symbol(body, keyword)):
-            sector_hits += 1
+        if _is_generic_taxonomy(keyword):
+            # Defense in depth: a context built before #250 could still carry a
+            # legal form or placeholder as a keyword.
+            continue
+        if not keyword:
+            continue
+        field = None
+        if _contains_symbol(title, keyword):
+            field = "title"
+        elif _contains_symbol(body, keyword):
+            field = "body"
+        if field is None:
+            continue
+        sector_hits += 1
+        sector_evidence.append(keyword)
+        matched_terms.append({"term": keyword, "field": field, "kind": "sector_keyword"})
     if sector_hits:
         score = max(score, min(0.58, 0.42 + (sector_hits * 0.06)))
         reason = reason or "sector_keyword"
 
+    # #250: the association class and its evidence travel with the row so a
+    # consumer can tell a direct mention from an indirect industry overlap.
+    if reason in {"exact_symbol_title", "exact_symbol_related", "exact_symbol_body", "company_keyword"}:
+        association_class = "direct_company"
+    elif reason == "peer_mentions":
+        association_class = "verified_peer"
+    elif reason == "sector_keyword":
+        association_class = "verified_sector"
+    else:
+        association_class = "none"
+
+    evidence: dict[str, Any] = {}
+    if matched_terms:
+        evidence["matched_terms"] = matched_terms
+    if peer_evidence:
+        evidence["peer_symbols"] = peer_evidence
+    if sector_evidence:
+        evidence["sector_keywords"] = sector_evidence
+    provenance = context.get("classification_provenance") or {}
+    # Peer verification rests on the same classification, so it is attached for
+    # peer and sector matches alike -- not only when a sector keyword matched.
+    if sector_evidence or peer_evidence:
+        basis = {
+            key: provenance.get(key)
+            for key in ("sector", "industry", "sector_source", "industry_source")
+            if provenance.get(key)
+        }
+        if peer_evidence and context.get("peer_classification_basis"):
+            basis["peer_basis"] = context["peer_classification_basis"]
+        if basis:
+            evidence["classification"] = basis
+
     enriched = dict(row)
-    enriched["relevance_score"] = round(score, 3) if score > 0 else 0.0
+    # Only a direct or verified-peer association carries a ranking number. A
+    # verified sector overlap keeps its class and evidence but no score; a row
+    # with no association keeps the pre-existing 0.0 "no evidence" value.
+    if association_class in RANKED_ASSOCIATIONS:
+        enriched["relevance_score"] = round(score, 3)
+    elif association_class == "verified_sector":
+        enriched["relevance_score"] = None
+    else:
+        enriched["relevance_score"] = 0.0
     enriched["matched_symbols"] = matched_symbols
     enriched["match_reason"] = reason
+    enriched["association_class"] = association_class
+    enriched["match_evidence"] = evidence
     return enriched
 
 
@@ -459,29 +740,76 @@ async def _hydrate_company_news_fallback(symbol: str | None, limit: int) -> list
             )
             continue
 
+        # #250: the requested symbol is association metadata, not article
+        # evidence. Each provider row is scored like any other row; an article
+        # that fails every check stays association-unverified with no rank
+        # instead of being promoted to a direct-company claim.
+        #
+        # The context lookup is local to these rows: a DB outage must degrade
+        # the scoring, not discard provider rows that are already in hand.
+        context_available = True
+        try:
+            context = await _load_symbol_context(fallback_symbol)
+        except Exception as error:
+            logger.warning(
+                "Company news fallback context unavailable",
+                extra={"symbol": fallback_symbol, "error": str(error)},
+            )
+            context_available = False
+            context = {
+                "symbol": None,
+                "peer_symbols": [],
+                "sector_keywords": [],
+                "company_keywords": [],
+            }
         for idx, item in enumerate(company_news):
             if item.url in used_urls:
                 continue
 
             used_urls.add(item.url)
-            hydrated.append(
+            row = _score_news_row(
                 {
                     "id": f"{fallback_symbol}-{idx}",
                     "title": item.title,
                     "summary": item.summary,
+                    "content": item.summary,
+                    "category": getattr(item, "category", None),
                     "source": item.source or "vnstock",
                     "published_date": item.published_at,
                     "url": item.url,
-                    "related_symbols": [fallback_symbol],
-                    "sentiment": "neutral",
-                    "sentiment_score": None,
-                    "ai_summary": None,
-                    "relevance_score": 1.0 if symbol else 0.0,
-                    "matched_symbols": [fallback_symbol],
-                    "match_reason": "company_news_fallback" if symbol else None,
-                    "is_market_wide_fallback": False,
-                }
+                    # The request symbol is not article evidence: passing it as
+                    # relation data would let the fallback verify itself.
+                    "related_symbols": [],
+                    # #250: no label yet; a "neutral" default would fabricate one.
+                    "sentiment_source": "unavailable",
+                },
+                {**context, "symbol": fallback_symbol if symbol else None},
             )
+            if not context_available:
+                row["match_evidence"] = {
+                    **(row.get("match_evidence") or {}),
+                    "context_available": False,
+                }
+            # The provider's own tag is kept for display, but only after
+            # scoring, so it can never serve as its own evidence (#250).
+            row["related_symbols"] = [fallback_symbol] if symbol else []
+            if row["association_class"] == "none":
+                row["relevance_score"] = 0.0
+                row["matched_symbols"] = []
+                row["match_reason"] = None
+                row["is_market_wide_fallback"] = not symbol
+                row["match_evidence"] = {
+                    **(row.get("match_evidence") or {}),
+                    "provider": "company_news",
+                    "request_symbol": fallback_symbol,
+                    "provider_validated_text": False,
+                }
+            elif not symbol:
+                # A market-only listing cannot claim a company association.
+                row["association_class"] = "general_market"
+                row["relevance_score"] = 0.0
+                row["is_market_wide_fallback"] = True
+            hydrated.append(row)
 
             if len(hydrated) >= limit:
                 break
@@ -528,10 +856,12 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
         offset=0,
         mode="related",
     )
+    # Company news is issuer news: a verified sector overlap belongs on the
+    # related feed as an industry-only row, not in a company's own news list.
     ranked_rows = [
         {**row, "symbol": upper_symbol}
         for row in ranked_rows
-        if not row.get("is_market_wide_fallback")
+        if row.get("association_class") in RANKED_ASSOCIATIONS
     ]
 
     merged_rows: list[dict[str, Any]] = []
@@ -598,8 +928,13 @@ async def get_ranked_news_rows(
             )
             context = await _load_symbol_context(upper_symbol)
             scored_rows = [_score_news_row(row, context) for row in results]
+            # #250: every proven association is admitted by class -- direct,
+            # verified peer, and verified sector. A sector row keeps a null score
+            # and an industry-only label, so the legitimate steel/sector case is
+            # retained instead of being silently dropped. Rows with no
+            # association (class "none") never enter the feed.
             relevant_rows = [
-                row for row in scored_rows if float(row.get("relevance_score") or 0) > 0
+                row for row in scored_rows if row.get("association_class") in ASSOCIATION_CLASSES
             ]
             relevant_rows.sort(
                 key=lambda row: (
@@ -625,6 +960,8 @@ async def get_ranked_news_rows(
                 enriched["relevance_score"] = 0.0
                 enriched["matched_symbols"] = []
                 enriched["match_reason"] = None
+                enriched["association_class"] = "general_market"
+                enriched["match_evidence"] = {}
                 enriched["is_market_wide_fallback"] = True
                 fallback_rows.append(enriched)
             if fallback_rows:

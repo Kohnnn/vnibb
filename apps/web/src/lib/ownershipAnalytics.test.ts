@@ -1,6 +1,16 @@
 import { buildOwnershipSummary } from './ownershipAnalytics'
 import type { ShareholderData } from '@/types/equity'
 
+/** 20 qualifying weekday sessions ending 2026-05-29 (#249). */
+function zeroFlowWindow() {
+  const days: string[] = []
+  for (const day = new Date(Date.UTC(2026, 4, 29)); days.length < 20; day.setUTCDate(day.getUTCDate() - 1)) {
+    const weekday = day.getUTCDay()
+    if (weekday !== 0 && weekday !== 6) days.push(day.toISOString().slice(0, 10))
+  }
+  return days.map((date) => ({ date, buy_volume: 0, sell_volume: 0 }))
+}
+
 describe('ownershipAnalytics', () => {
   it('withholds ambiguous aliases rather than inferring their scale from magnitude', () => {
     const shareholders = [
@@ -33,7 +43,7 @@ describe('ownershipAnalytics', () => {
   })
 
   it('preserves explicitly admitted zero ownership', () => {
-    const summary = buildOwnershipSummary([{ symbol: 'VCI', ownership_pct: 0, ownership_unit: 'percent', ownership_unit_status: 'explicit' }], [{ buy_volume: 0, sell_volume: 0 }], {
+    const summary = buildOwnershipSummary([{ symbol: 'VCI', ownership_pct: 0, ownership_unit: 'percent', ownership_unit_status: 'explicit' }], zeroFlowWindow(), {
       symbol: 'VCI', period_days: 90, buy_count: 0, sell_count: 0, buy_value: 0, sell_value: 0,
       net_value: 0, sentiment_score: 0, total_deals: 0, value_unit: 'VND',
     })
@@ -49,10 +59,11 @@ describe('ownershipAnalytics', () => {
   })
 
   it('does not fabricate a net flow when either side is absent or non-finite', () => {
-    for (const row of [{ buy_volume: 10 }, { sell_volume: 10 }, { buy_volume: NaN, sell_volume: 0 }]) {
+    for (const row of [{ date: '2026-05-29', buy_volume: 10 }, { date: '2026-05-29', sell_volume: 10 }, { date: '2026-05-29', buy_volume: NaN, sell_volume: 0 }]) {
       expect(buildOwnershipSummary(null, [row], null).foreignNetVolume).toBeNull()
     }
-    expect(buildOwnershipSummary(null, [{ buy_volume: 0, sell_volume: 0 }], null).foreignNetVolume).toBe(0)
+    // An undated row cannot qualify as a session, so it is never summed.
+    expect(buildOwnershipSummary(null, [{ buy_volume: 0, sell_volume: 0 }], null).foreignNetVolume).toBeNull()
   })
 
   it('distinguishes an unanswered shareholder source from a successful empty sample', () => {

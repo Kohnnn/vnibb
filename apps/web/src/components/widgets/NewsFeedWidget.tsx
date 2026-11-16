@@ -25,6 +25,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { normalizeNewsItemTimestamp, newsObservationProvenance } from '@/lib/newsTime';
+import { getSentimentProvenance } from '@/components/widgets/news/NewsCard';
 
 interface NewsArticle {
     id: number | string;
@@ -40,8 +41,9 @@ interface NewsArticle {
     published_date?: string | null;
     related_symbols: string[];
     sectors: string[];
-    sentiment?: 'bullish' | 'neutral' | 'bearish';
+    sentiment?: 'bullish' | 'neutral' | 'bearish' | null;
     sentiment_score?: number;
+    sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
     ai_summary?: string;
     read_count: number;
     bookmarked: boolean;
@@ -49,16 +51,21 @@ interface NewsArticle {
     matched_symbols?: string[];
     match_reason?: string | null;
     is_market_wide_fallback?: boolean;
+    association_class?: string | null;
 }
 
 function NewsAssociation({ article, symbol }: { article: NewsArticle; symbol: string }) {
     const matched = article.matched_symbols ?? [];
     const exact = matched.some(value => value.toUpperCase() === symbol.toUpperCase())
         && ['exact_symbol_title', 'exact_symbol_body', 'exact_symbol_related'].includes(article.match_reason ?? '');
-    const label = article.is_market_wide_fallback
+    const label = article.is_market_wide_fallback || article.association_class === 'general_market'
         ? 'Market-wide fallback'
-        : exact ? `Symbol mention: ${symbol}` : 'Association unverified';
-    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}.`;
+        : article.association_class === 'verified_sector'
+            ? 'Industry overlap · no company evidence'
+            : article.association_class === 'direct_company' || article.association_class === 'verified_peer'
+                ? (exact ? `Symbol mention: ${symbol}` : 'Association unverified')
+                : 'Association unverified';
+    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}; class: ${article.association_class ?? 'unavailable'}.`;
     return <span title={detail} className="text-[10px] text-[var(--text-muted)]">{label}</span>;
 }
 
@@ -71,8 +78,16 @@ interface NewsFeedWidgetProps {
 }
 
 // Sentiment badge component
-function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: number }) {
-    if (!sentiment) return null;
+function SentimentBadge({
+    sentiment,
+    score,
+    source,
+}: {
+    sentiment?: string | null;
+    score?: number;
+    source?: 'provider' | 'heuristic' | 'unavailable' | null;
+}) {
+    if (!sentiment && source !== 'unavailable') return null;
 
     const config = {
         bullish: {
@@ -99,12 +114,36 @@ function SentimentBadge({ sentiment, score }: { sentiment?: string; score?: numb
     };
 
     const { icon: Icon, bg, text, border, label } = config[sentiment as keyof typeof config] || config.neutral;
+    const provenance = getSentimentProvenance(source);
+
+    // #250: no recorded label means no direction is shown, never a fake Neutral.
+    if (source === 'unavailable') {
+        return (
+            <span
+                className="inline-flex items-center gap-1 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2 py-0.5 text-[var(--text-muted)]"
+                role="note"
+                title={provenance.detail}
+                aria-label={`Article sentiment: Sentiment unavailable. ${provenance.detail}`}
+            >
+                <span className="text-[length:var(--font-size-sm)] font-medium">{provenance.label}</span>
+            </span>
+        );
+    }
 
     return (
-        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${bg} ${text} ${border}`}>
-            <Icon size={10} />
-            <span className="text-[10px] font-medium">{label}</span>
-            {score && <span className="text-[9px] opacity-70">({score}%)</span>}
+        <div
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${bg} ${text} ${border}`}
+            role="note"
+            title={provenance.detail}
+            aria-label={`Article sentiment: ${label} (${provenance.label}). ${provenance.detail}`}
+        >
+            <Icon size={11} />
+            <span className="text-[length:var(--font-size-sm)] font-medium">{label}</span>
+            <span className="text-[length:var(--font-size-sm)] opacity-80">{provenance.label}</span>
+            {/* A reported 0 confidence is a real value; absent is not zero. */}
+            {typeof score === 'number' && (
+                <span className="text-[length:var(--font-size-sm)] opacity-80">({score}%)</span>
+            )}
         </div>
     );
 }
@@ -432,10 +471,11 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                         {item.source}
                                                     </span>
                                                 )}
-                                                {item.sentiment && (
+                                                {(item.sentiment || item.sentiment_source === 'unavailable') && (
                                                     <SentimentBadge
                                                         sentiment={item.sentiment}
                                                         score={item.sentiment_score}
+                                                        source={item.sentiment_source}
                                                     />
                                                 )}
                                                 {symbol && <NewsAssociation article={item} symbol={symbol} />}

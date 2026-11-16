@@ -12,7 +12,14 @@ type WalkthroughStep = {
   id: string
   title: string
   description: string
-  selector?: string
+  /**
+   * Preference-ordered targets; the first one present in the routed view is
+   * highlighted. A fallback chain (not one fixed selector) is what lets the
+   * same guide work against both layouts the app can serve: the published
+   * Fundamental tab splits financials into separate widgets, while the bundled
+   * fallback keeps the single `unified_financials` surface (#253).
+   */
+  targets: readonly string[]
 }
 
 type GoalPresentation = {
@@ -32,6 +39,12 @@ interface OnboardingWalkthroughProps {
   onSkip: () => void
   onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean
   onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void
+  /**
+   * #253: the workspace catalog has settled, so a goal can be routed for real.
+   * Until then goals are shown disabled: `onGoalSelect` answers only "did this
+   * route now", and the guide must never open on an unrouted goal.
+   */
+  workspaceReady: boolean
 }
 
 const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
@@ -45,13 +58,13 @@ const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
         id: 'price-trend',
         title: 'Start with the trend',
         description: 'Use the price chart to frame direction, momentum, and the time horizon before checking individual signals.',
-        selector: '[data-widget-type="price_chart"]',
+        targets: ['[data-widget-type="price_chart"]'],
       },
       {
         id: 'key-metrics',
         title: 'Check the essentials',
         description: 'Key metrics keep valuation and operating context beside the chart so the price move is not read in isolation.',
-        selector: '[data-widget-type="key_metrics"]',
+        targets: ['[data-widget-type="key_metrics"]'],
       },
     ],
     finalTitle: 'Your ticker view is ready',
@@ -68,13 +81,21 @@ const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
         id: 'financial-statements',
         title: 'Read the statements together',
         description: 'Revenue, profitability, balance-sheet strength, and cash flow share one working surface for faster comparison.',
-        selector: '[data-widget-type="unified_financials"]',
+        // Published Fundamentals splits the statements across separate widgets;
+        // the bundled fallback keeps `unified_financials`. First match wins, and
+        // an absent target (neither layout has one) is reported, not faked.
+        targets: [
+          '[data-widget-type="financial_snapshot"]',
+          '[data-widget-type="unified_financials"]',
+          '[data-widget-type="income_statement"]',
+          '[data-widget-type="financial_ratios"]',
+        ],
       },
       {
         id: 'financial-tabs',
         title: 'Keep the company in context',
         description: 'Move between Financials, Overview, Ownership, and Technical views without losing the selected symbol.',
-        selector: '[data-tour="tab-bar"]',
+        targets: ['[data-tour="tab-bar"]'],
       },
     ],
     finalTitle: 'Your company review is ready',
@@ -91,19 +112,19 @@ const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
         id: 'market-pulse',
         title: 'Read the market pulse',
         description: 'The overview summarizes index direction and participation before you narrow the scan.',
-        selector: '[data-widget-type="market_overview"]',
+        targets: ['[data-widget-type="market_overview"]'],
       },
       {
         id: 'market-heatmap',
         title: 'Find concentrated strength',
         description: 'The heatmap makes sector leadership and broad risk-off pressure visible at a glance.',
-        selector: '[data-widget-type="market_heatmap"]',
+        targets: ['[data-widget-type="market_heatmap"]'],
       },
       {
         id: 'market-movers',
         title: 'Open the shortlist',
         description: 'Top movers turns the broad scan into concrete symbols for the next company or ticker review.',
-        selector: '[data-widget-type="top_movers"]',
+        targets: ['[data-widget-type="top_movers"]'],
       },
     ],
     finalTitle: 'Your market scan is ready',
@@ -122,7 +143,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
-export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelect, onComplete }: OnboardingWalkthroughProps) {
+export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelect, onComplete, workspaceReady }: OnboardingWalkthroughProps) {
   const [isMounted, setIsMounted] = useState(false)
   const [stage, setStage] = useState<'goal' | 'ticker' | 'guide'>('goal')
   const [selectedGoal, setSelectedGoal] = useState<OnboardingGoalId | null>(null)
@@ -130,6 +151,7 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
   const [tickerInput, setTickerInput] = useState('')
   const [routeError, setRouteError] = useState('')
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null)
+  const [targetMissing, setTargetMissing] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
   const currentSymbolRef = useRef(currentSymbol)
@@ -163,6 +185,9 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
   const suggestions = useMemo(() => searchStocks(tickerInput, 6), [tickerInput])
 
   const routeGoal = (goalId: OnboardingGoalId, symbol?: string) => {
+    // Belt and braces: the buttons are disabled until ready, but routing must
+    // never be attempted against a catalog that has not settled.
+    if (!workspaceReady) return
     const routed = onGoalSelect(goalId, symbol)
     if (!routed) {
       setRouteError('This view is unavailable right now. Close the walkthrough and try again.')
@@ -209,9 +234,12 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
     })
   }, [currentStep?.id, isFinalStep, open, selectedGoal, stage, stepIndex])
 
+  const targetKey = currentStep?.targets.join('|') ?? ''
+
   useEffect(() => {
-    if (!open || !currentStep?.selector || typeof window === 'undefined') {
+    if (!open || !targetKey || typeof window === 'undefined') {
       setTargetRect(null)
+      setTargetMissing(false)
       return
     }
 
@@ -219,6 +247,7 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
     let animationFrame = 0
     let resizeObserver: ResizeObserver | null = null
     let mutationObserver: MutationObserver | null = null
+    let giveUpTimer: number | undefined
 
     const updateRect = () => {
       if (target) setTargetRect(target.getBoundingClientRect())
@@ -229,8 +258,17 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
     }
     const bindTarget = () => {
       if (target) return true
-      target = document.querySelector<HTMLElement>(currentStep.selector as string)
+      const selectors = targetKey.split('|')
+      for (const selector of selectors) {
+        const match = document.querySelector<HTMLElement>(selector)
+        if (match) {
+          target = match
+          break
+        }
+      }
       if (!target) return false
+      window.clearTimeout(giveUpTimer)
+      setTargetMissing(false)
       target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
       resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleUpdate)
       resizeObserver?.observe(target)
@@ -240,21 +278,32 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
     }
 
     setTargetRect(null)
+    setTargetMissing(false)
     if (!bindTarget()) {
       mutationObserver = new MutationObserver(bindTarget)
       mutationObserver.observe(document.body, { childList: true, subtree: true })
+      // A guide step whose widgets are absent from this layout (a reduced
+      // custom template, or a widget that failed to mount) must say so instead
+      // of silently showing an unanchored panel. The walkthrough stays usable:
+      // this is a notice, not a dead end.
+      giveUpTimer = window.setTimeout(() => {
+        if (target) return
+        mutationObserver?.disconnect()
+        setTargetMissing(true)
+      }, 2500)
     }
     window.addEventListener('resize', scheduleUpdate)
     window.addEventListener('scroll', scheduleUpdate, true)
 
     return () => {
+      window.clearTimeout(giveUpTimer)
       if (animationFrame) window.cancelAnimationFrame(animationFrame)
       window.removeEventListener('resize', scheduleUpdate)
       window.removeEventListener('scroll', scheduleUpdate, true)
       resizeObserver?.disconnect()
       mutationObserver?.disconnect()
     }
-  }, [currentStep?.selector, open])
+  }, [open, targetKey])
 
   const closeAndRestoreFocus = () => {
     onSkip()
@@ -374,14 +423,24 @@ export function OnboardingWalkthrough({ open, currentSymbol, onSkip, onGoalSelec
           </button>
         </div>
         <p className="mt-3 max-w-[48ch] text-sm leading-6 text-[var(--text-secondary)]">{description}</p>
+        {stage === 'guide' && !isFinalStep && targetMissing ? (
+          <p role="status" className="mt-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] px-3 py-2 text-xs leading-5 text-[var(--text-muted)]">
+            This layout does not include the widget for this step, so there is nothing to highlight. Continue to keep the tour going.
+          </p>
+        ) : null}
 
         {stage === 'goal' ? (
           <div className="mt-5 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
+            {!workspaceReady ? (
+              <p role="status" className="py-3 text-xs font-medium text-[var(--text-muted)]">
+                Preparing your workspace…
+              </p>
+            ) : null}
             {ONBOARDING_GOALS.map((goal, index) => {
               const goalPresentation = GOAL_PRESENTATION[goal.id]
               const Icon = goalPresentation.icon
               return (
-                <button key={goal.id} type="button" data-walkthrough-initial-focus={index === 0 ? 'true' : undefined} onClick={() => chooseGoal(goal.id)} className="group grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 py-4 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]">
+                <button key={goal.id} type="button" disabled={!workspaceReady} data-walkthrough-initial-focus={index === 0 ? 'true' : undefined} onClick={() => chooseGoal(goal.id)} className="group grid w-full grid-cols-[40px_1fr_auto] items-center gap-3 py-4 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent">
                   <span className="grid h-10 w-10 place-items-center rounded-md border border-[var(--border-subtle)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors group-hover:border-[var(--border-strong)] group-hover:text-[var(--text-primary)]"><Icon size={18} /></span>
                   <span>
                     <span className="block text-sm font-semibold text-[var(--text-primary)]">{goal.label}</span>

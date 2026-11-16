@@ -15,8 +15,16 @@ from typing import Any
 
 from vnibb.core.config import settings
 from vnibb.core.price_units import normalize_price_record
+from vnibb.services.fundamental_valuation import (
+    SCHEMA_VERSION,
+    admit_fundamental_snapshot,
+)
 
 logger = logging.getLogger(__name__)
+
+# Fundamental-snapshot schemas whose moat score came from verified interest
+# coverage. The current derived-value schema (4) supersets schema 3.
+_MOAT_SCHEMA_VERSIONS = frozenset({3, SCHEMA_VERSION})
 
 
 class MongoReadRows(list[dict[str, Any]]):
@@ -1069,11 +1077,15 @@ class MongoMarketDataService:
         self,
         symbols: list[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Return the latest fundamental-screener snapshot per symbol.
+        """Return the latest fundamental-screener snapshot per symbol, admitted.
 
         Reads ``market_fundamental_screener`` (written by the fundamental
-        valuation backfill). Missing collection or any Mongo failure degrades
-        to an empty mapping so screener responses simply carry null fields.
+        valuation backfill). Every document passes through
+        :func:`admit_fundamental_snapshot` here, at the single reader seam, so
+        no consumer can see derived valuation/CAGR/FCF values produced under a
+        superseded formula (#247, #248). Missing collection or any Mongo
+        failure degrades to an empty mapping so screener responses simply
+        carry null fields.
         """
 
         symbol_filter = sorted({s.upper() for s in symbols if s}) if symbols else None
@@ -1096,7 +1108,11 @@ class MongoMarketDataService:
                     continue
                 doc = dict(doc)
                 doc.pop("_id", None)
-                if doc.get("schemaVersion") != 3:
+                doc = admit_fundamental_snapshot(doc)
+                # Moat scoring is valid from schema 3 onward, and the current
+                # derived-value schema is a superset, so both keep it. Older
+                # documents never had verified interest coverage.
+                if doc.get("schemaVersion") not in _MOAT_SCHEMA_VERSIONS:
                     doc = {**doc, "moatScore": None, "moat": None}
                     factors = doc.get("moatFactors")
                     if isinstance(factors, dict):

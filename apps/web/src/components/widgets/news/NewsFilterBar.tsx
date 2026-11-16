@@ -14,10 +14,13 @@ interface NewsFilterBarProps {
   onFiltersChange: (filters: NewsFilters) => void;
 }
 
+// The filter selects a provider sentiment class. The arrow glyph carries the
+// class and the active state is interaction blue, never a gain/loss colour:
+// selecting a filter is not a signed financial value (brand §13).
 const SENTIMENTS = [
-  { id: 'bullish', label: 'Bullish', icon: TrendingUp, color: 'text-[var(--color-positive)]' },
-  { id: 'neutral', label: 'Neutral', icon: Minus, color: 'text-[var(--text-secondary)]' },
-  { id: 'bearish', label: 'Bearish', icon: TrendingDown, color: 'text-[var(--color-negative)]' },
+  { id: 'bullish', label: 'Bullish', icon: TrendingUp },
+  { id: 'neutral', label: 'Neutral', icon: Minus },
+  { id: 'bearish', label: 'Bearish', icon: TrendingDown },
 ];
 
 function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps) {
@@ -58,10 +61,11 @@ function NewsFilterBarComponent({ filters, onFiltersChange }: NewsFilterBarProps
               ...filters,
               sentiment: filters.sentiment === s.id ? null : s.id,
             })}
+            aria-pressed={filters.sentiment === s.id}
             className={cn(
-                "flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase transition-all",
+                "flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase transition-colors",
                 filters.sentiment === s.id
-                    ? "bg-[var(--bg-tertiary)] " + s.color
+                    ? "bg-[var(--color-state-bg)] text-[var(--color-accent-primary)]"
                     : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             )}
           >

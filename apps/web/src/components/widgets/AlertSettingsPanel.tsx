@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Settings, Save, Bell, Mail, Volume2 } from 'lucide-react';
+import { Settings, Save, Bell, Mail, Volume2, AlertTriangle } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAlertSettings, updateAlertSettings } from '@/lib/api';
 import type { AlertSettings } from '@/types/insider';
@@ -246,8 +246,9 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
               Preference: {formData.enable_browser_notifications ? 'on' : 'off'} · Delivery: {hasEffectiveBrowserNotifications(Boolean(formData.enable_browser_notifications), notificationPermission) ? 'available' : 'unavailable'} · Permission: {notificationPermission === 'unsupported' ? 'not supported' : notificationPermission}
             </p>
             {notificationPermission === 'denied' && (
-              <p className="text-xs text-[var(--color-negative)] mt-1">
-                Browser notifications are blocked. Enable in browser settings.
+              <p role="status" className="mt-1 flex items-start gap-1 text-xs text-[var(--text-secondary)]">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
+                Browser notifications are blocked. Enable them in browser settings.
               </p>
             )}
             {notificationPermission === 'default' && (
@@ -304,17 +305,17 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
         </div>
       </div>
 
-      {/* Success Message */}
+      {/* Saved and failed are system states: neutral text plus the accent rule,
+          never the gain/loss tokens (#197, brand §13). */}
       {updateMutation.isSuccess && (
-        <div className="mt-3 p-2 bg-[var(--color-state-bg)] border border-[var(--color-state-border)] rounded text-xs text-[var(--color-accent-primary)]">
-          Settings saved successfully!
+        <div role="status" className="mt-3 rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] p-2 text-xs text-[var(--text-primary)]">
+          Settings saved.
         </div>
       )}
 
-      {/* Error Message */}
       {updateMutation.isError && (
-        <div className="mt-3 p-2 bg-[var(--color-negative-bg)] border border-[var(--color-state-border)] rounded text-xs text-[var(--color-negative)]">
-          Failed to save settings. Please try again.
+        <div role="alert" className="mt-3 rounded border border-[var(--border-default)] bg-[var(--bg-tertiary)] p-2 text-xs text-[var(--text-primary)]">
+          Settings were not saved. Your saved values are unchanged; retry when the connection recovers.
         </div>
       )}
     </div>

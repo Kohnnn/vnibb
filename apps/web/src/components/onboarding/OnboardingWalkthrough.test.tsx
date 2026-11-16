@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 
@@ -16,6 +16,7 @@ const defaultProps = {
   onSkip: jest.fn(),
   onGoalSelect: jest.fn(() => true),
   onComplete: jest.fn(),
+  workspaceReady: true,
 }
 
 describe('OnboardingWalkthrough', () => {
@@ -153,5 +154,101 @@ describe('OnboardingWalkthrough', () => {
     await waitFor(() => expect(opener).toHaveFocus())
     expect(onComplete).toHaveBeenCalledWith('follow_ticker', false)
     opener.remove()
+  })
+
+
+  /**
+   * #253 guide targets. Evaluate-a-company used to highlight exactly
+   * `unified_financials`; the published Fundamental layout has no such widget,
+   * so the guide had nothing to point at even once routing was fixed. The step
+   * now accepts whichever financial surface the routed layout really contains,
+   * and says so when a reduced layout contains none.
+   */
+  it.each([
+    ['published Fundamentals', 'financial_snapshot'],
+    ['bundled fallback', 'unified_financials'],
+    ['statement-only layout', 'income_statement'],
+  ])('highlights the financial surface present in the %s layout', async (_label, widgetType) => {
+    const user = userEvent.setup()
+    const surface = document.createElement('div')
+    surface.dataset.widgetType = widgetType
+    document.body.append(surface)
+
+    render(<OnboardingWalkthrough {...defaultProps} />)
+    await user.click(screen.getByRole('button', { name: /Evaluate a company/ }))
+    await user.click(screen.getByRole('button', { name: /^Open / }))
+
+    expect(screen.getByText('Read the statements together')).toBeInTheDocument()
+    expect(screen.queryByText(/does not include the widget for this step/)).not.toBeInTheDocument()
+    surface.remove()
+  })
+
+  it('says a step has nothing to highlight when the routed layout omits that widget', async () => {
+    jest.useFakeTimers()
+    const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime })
+
+    render(<OnboardingWalkthrough {...defaultProps} />)
+    await user.click(screen.getByRole('button', { name: /Evaluate a company/ }))
+    await user.click(screen.getByRole('button', { name: /^Open / }))
+
+    expect(screen.queryByText(/does not include the widget for this step/)).not.toBeInTheDocument()
+    await act(async () => { jest.advanceTimersByTime(2600) })
+
+    expect(screen.getByRole('status')).toHaveTextContent('does not include the widget for this step')
+    // The tour stays usable: the notice is not a dead end.
+    expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled()
+    jest.useRealTimers()
+  })
+
+  // #253 review: the guide must never open on a goal that did not actually
+  // route, and the walkthrough must not offer a goal until the workspace
+  // catalog has settled.
+  describe('workspace readiness', () => {
+    it('shows a pending state and disabled goals until the workspace is ready', () => {
+      const onGoalSelect = jest.fn(() => true)
+      render(<OnboardingWalkthrough {...defaultProps} workspaceReady={false} onGoalSelect={onGoalSelect} />)
+
+      expect(screen.getByRole('status')).toHaveTextContent('Preparing your workspace')
+      const evaluate = screen.getByRole('button', { name: /Evaluate a company/ })
+      expect(evaluate).toBeDisabled()
+      fireEvent.click(evaluate)
+      expect(onGoalSelect).not.toHaveBeenCalled()
+    })
+
+    it('enables the goals and routes once the workspace is ready', async () => {
+      const user = userEvent.setup()
+      const onGoalSelect = jest.fn(() => true)
+      const { rerender } = render(<OnboardingWalkthrough {...defaultProps} workspaceReady={false} onGoalSelect={onGoalSelect} />)
+
+      rerender(<OnboardingWalkthrough {...defaultProps} workspaceReady onGoalSelect={onGoalSelect} />)
+
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: /Evaluate a company/ }))
+      await user.click(screen.getByRole('button', { name: /^Open / }))
+      expect(onGoalSelect).toHaveBeenCalledWith('evaluate_company', 'VCI')
+    })
+
+    it('does not open the guide when the workspace is ready but the view is missing', async () => {
+      const user = userEvent.setup()
+      const onGoalSelect = jest.fn(() => false)
+      render(<OnboardingWalkthrough {...defaultProps} onGoalSelect={onGoalSelect} />)
+
+      await user.click(screen.getByRole('button', { name: /Evaluate a company/ }))
+      await user.click(screen.getByRole('button', { name: /^Open / }))
+
+      expect(screen.getByRole('alert')).toHaveTextContent('This view is unavailable right now')
+      // Failed routing must not advance to the guide.
+      expect(screen.queryByRole('button', { name: 'Next' })).not.toBeInTheDocument()
+    })
+
+    it('does not route a goal the user skipped before the workspace loaded', async () => {
+      const user = userEvent.setup()
+      const onGoalSelect = jest.fn(() => true)
+      render(<OnboardingWalkthrough {...defaultProps} workspaceReady={false} onGoalSelect={onGoalSelect} />)
+
+      await user.click(screen.getByRole('button', { name: /Skip/ }))
+      expect(defaultProps.onSkip).toHaveBeenCalled()
+      expect(onGoalSelect).not.toHaveBeenCalled()
+    })
   })
 })

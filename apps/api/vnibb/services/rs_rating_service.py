@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.core.database import get_db_context
 from vnibb.models.stock import Stock, StockIndex
 from vnibb.models.stock import StockPrice
-from vnibb.core.price_units import is_index_symbol, persisted_price_record, screener_price_record
+from vnibb.core.price_units import persisted_price_record, screener_price_record
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.equity_historical import (
@@ -552,7 +552,14 @@ class RSRatingService:
             ],
         }
 
-    async def _get_latest_price_map(self, db: AsyncSession, symbols: List[str]) -> Dict[str, float]:
+    async def _get_latest_price_evidence(
+        self, db: AsyncSession, symbols: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Latest persisted daily close per symbol with its own unit, source and date.
+
+        The price's unit, provenance and observation date travel with the number so
+        consumers never inherit a unit from the ranking request or its fetch time.
+        """
         if not symbols:
             return {}
 
@@ -578,15 +585,52 @@ class RSRatingService:
             .join(ranked_prices, StockPrice.id == ranked_prices.c.id)
             .where(ranked_prices.c.row_num == 1)
         )
-        prices = {}
+        evidence: Dict[str, Dict[str, Any]] = {}
         for row in result.scalars():
             normalized = persisted_price_record(row)
             if normalized["price_unit"] == "unknown":
                 logger.warning("Excluding latest RS price with unknown unit: %s", row.symbol)
                 continue
-            if row.symbol and normalized["close"] is not None:
-                prices[row.symbol] = float(normalized["close"])
-        return prices
+            if not row.symbol or normalized.get("close") is None:
+                continue
+            observed = getattr(row, "time", None)
+            # The row's own `source` column is stored provenance too; a row that
+            # declares `vnstock_vnd:VCI` must not be reported as source-less just
+            # because it needed no unit inference.
+            stored_source = getattr(row, "source", None)
+            evidence[row.symbol] = {
+                "price": float(normalized["close"]),
+                "price_unit": normalized["price_unit"],
+                "price_source": normalized.get("price_source") or (stored_source or None),
+                "price_asof": observed.isoformat()[:10] if observed is not None else None,
+            }
+        return evidence
+
+    @staticmethod
+    def _stored_rank_item(snapshot: Any) -> Dict[str, Any]:
+        """One stored ranking row with the price's own unit, source and observation date.
+
+        `price_asof` is the price's own trade date and nothing else. A row's
+        `snapshot_date` is when the ranking was calculated, so substituting it
+        for an undated price would present a carried-forward value (the writer
+        above copies `seed.price` with a possibly null `seed.trade_date` into
+        the new calculation day) as a fresh observation of that day.
+        """
+        price = screener_price_record(snapshot)
+        price_asof = getattr(snapshot, "trade_date", None)
+        rating_asof = getattr(snapshot, "snapshot_date", None)
+        return {
+            "symbol": snapshot.symbol,
+            "company_name": snapshot.company_name,
+            "rs_rating": snapshot.rs_rating,
+            "rs_rank": snapshot.rs_rank,
+            "price": price.get("price"),
+            "price_unit": price["price_unit"],
+            "price_source": price.get("price_source"),
+            "price_asof": price_asof.isoformat()[:10] if price_asof is not None else None,
+            "rating_asof": rating_asof.isoformat()[:10] if rating_asof is not None else None,
+            "industry": snapshot.industry,
+        }
 
     def _filter_ranked_stocks(
         self, ranked_stocks: List[Dict[str, Any]], sector: Optional[str]
@@ -628,6 +672,9 @@ class RSRatingService:
                 "rs_rank": item.get("rs_rank"),
                 "price": item.get("price"),
                 "price_unit": item.get("price_unit", "unknown"),
+                "price_source": item.get("price_source"),
+                "price_asof": item.get("price_asof"),
+                "rating_asof": item.get("rating_asof"),
                 "industry": item.get("industry"),
             }
             for item in ordered[:limit]
@@ -659,14 +706,16 @@ class RSRatingService:
 
         ranked_stocks = self._percentile_rank_all(stock_ratings)
         ranked_stocks = self._calculate_sector_rankings(ranked_stocks)
-        latest_price_map = await self._get_latest_price_map(
+        evidence = await self._get_latest_price_evidence(
             db, [item["symbol"] for item in ranked_stocks]
         )
         for item in ranked_stocks:
-            item["price"] = latest_price_map.get(item["symbol"])
-            item["price_unit"] = (
-                "index_points" if is_index_symbol(item["symbol"]) else "VND"
-            ) if item["price"] is not None else "unknown"
+            admitted = evidence.get(item["symbol"])
+            item["price"] = admitted["price"] if admitted else None
+            item["price_unit"] = admitted["price_unit"] if admitted else "unknown"
+            item["price_source"] = admitted.get("price_source") if admitted else None
+            item["price_asof"] = admitted.get("price_asof") if admitted else None
+            item["rating_asof"] = effective_date.isoformat()
 
         return ranked_stocks
 
@@ -762,18 +811,7 @@ class RSRatingService:
                     reverse=True,
                 )
 
-            return [
-                {
-                    "symbol": s.symbol,
-                    "company_name": s.company_name,
-                    "rs_rating": s.rs_rating,
-                    "rs_rank": s.rs_rank,
-                    "price": (price_record := screener_price_record(s)).get("price"),
-                    "price_unit": price_record["price_unit"],
-                    "industry": s.industry,
-                }
-                for s in snapshots
-            ]
+            return [self._stored_rank_item(s) for s in snapshots]
 
     async def get_rs_laggards(self, limit: int = 50, sector: Optional[str] = None) -> List[Dict]:
         """
@@ -826,18 +864,7 @@ class RSRatingService:
                     reverse=False,
                 )
 
-            return [
-                {
-                    "symbol": s.symbol,
-                    "company_name": s.company_name,
-                    "rs_rating": s.rs_rating,
-                    "rs_rank": s.rs_rank,
-                    "price": (price_record := screener_price_record(s)).get("price"),
-                    "price_unit": price_record["price_unit"],
-                    "industry": s.industry,
-                }
-                for s in snapshots
-            ]
+            return [self._stored_rank_item(s) for s in snapshots]
 
     async def get_rs_gainers(self, limit: int = 50, lookback_days: int = 7) -> List[Dict]:
         """
@@ -901,14 +928,9 @@ class RSRatingService:
 
                     gainers.append(
                         {
-                            "symbol": symbol,
-                            "company_name": current.company_name,
-                            "rs_rating": current.rs_rating,
+                            **self._stored_rank_item(current),
                             "rs_rating_prev": previous.rs_rating,
                             "rs_rating_change": change,
-                            "price": (price_record := screener_price_record(current)).get("price"),
-                            "price_unit": price_record["price_unit"],
-                            "industry": current.industry,
                         }
                     )
 

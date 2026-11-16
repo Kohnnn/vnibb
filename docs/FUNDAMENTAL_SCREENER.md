@@ -42,7 +42,7 @@ One doc per `{symbol, snapshotDate}` (upsert, idempotent). Flat fields for query
   "symbol": "VNM",
   "snapshotDate": "2026-06-10",          // YYYY-MM-DD string
   "source": "vnibb-fundamental-engine",
-  "schemaVersion": 2,
+  "schemaVersion": 4,                       // v4 = admission-gated derived fields (#247, #248)
   "observedAt": ISODate, "updatedAt": ISODate,
 
   // read-through fields
@@ -68,6 +68,13 @@ One doc per `{symbol, snapshotDate}` (upsert, idempotent). Flat fields for query
     "baseFcf": 1.0e13, "growthRate": 0.05, "horizonYears": 10,
     "unitQuality": "verified",
     "comparisonUnavailableReason": null,
+    "derivedUnavailableReason": null,        // why IV/MOS/FCF/CAGR are withheld
+    "derivedCoverage": {                     // v4: per-field evidence, never a bare number
+      "cagr": {"revenue": {}, "profit": {}}, // status/published/value/startYear/endYear/spanYears/coverage/reason/points/excluded
+      "fcf": {},                             // status/positive/positiveReason/latestYear/baseFcf/baseYears/excluded/reason
+      "growth": {},                          // source/value/valuePct/clampedToMax (+years when CAGR-seeded)
+      "cagrRule": {}                         // requiredSpanYears/requiredAnnualPoints/gapPolicy
+    },
     "unitLineage": { /* retained source units, values and normalization */ }
   },
   "computedFields": ["roe", "roa", "..."]
@@ -76,18 +83,38 @@ One doc per `{symbol, snapshotDate}` (upsert, idempotent). Flat fields for query
 
 Index: `{symbol: 1, snapshotDate: -1}` unique. Created by the backfill script.
 
-Serving valuation comparisons requires `inputs.unitQuality == "verified"`, no
-`inputs.comparisonUnavailableReason`, and `inputs.unitLineage.price.unit == "VND"`.
-These are the engine's existing statement/share-unit and price-unit attestations;
-neither snapshot age nor price magnitude certifies a legacy record. Retained
-snapshots without this evidence are not converted or silently recertified.
+Serving valuation comparisons requires a current-schema (`schemaVersion == 4`)
+snapshot with `derivedCoverage`, `inputs.unitQuality == "verified"`, no
+`inputs.comparisonUnavailableReason` / `inputs.derivedUnavailableReason`, and
+`inputs.unitLineage.price.unit == "VND"`. These are the engine's existing
+statement/share-unit and price-unit attestations; neither snapshot age nor price
+magnitude certifies a legacy record. Retained snapshots without this evidence
+are not converted or silently recertified.
+
+`admit_fundamental_snapshot(doc)` is the single reader-side gate: a pre-v4 doc
+(old formulas treated missing capex as 0 and counted non-null rows as periods)
+has `intrinsicValue`, `marginOfSafety`, `valuationMethod`, `valuationVerdict`,
+`revenueCagr5y`, `profitCagr5y` and `fcfPositive` nulled, with
+`inputs.derivedUnavailableReason` + `inputs.derivedWithheldFields` recording
+why, and every unrelated field preserved. It is idempotent and returns a v4 doc
+unchanged, so a stale derived snapshot/cache can never republish a value.
+
+`MongoMarketDataService.get_latest_fundamental_snapshots` calls
+`admit_fundamental_snapshot` on every returned document, so no consumer has to
+remember the gate. Moat scoring is a separate lineage: `moat`/`moatScore`/
+`moatFactors.interest_coverage` are kept for schema 3 onward (the interest
+coverage evidence exists there) and withheld only for older documents, so a
+current v4 document no longer loses its quality fields.
+Recompute is an explicit backfill over the affected symbols
+(`build_fundamental_screener.py --symbols …`, dry-run first); no automatic
+production recompute is implied by this change.
 
 The fundamental-analysis API preserves `fundamental_snapshot` as raw evidence,
 but returns `valuation` and `latest_fundamental_snapshot.derived` as null with a
-`section_errors.valuation` reason when admission fails. Screener enrichment leaves
-`intrinsic_value`, `margin_of_safety`, and `valuation_method` null and records the
-same reason in `provider_evidence` for `market_fundamental_screener`. Independent
-quality fields remain available.
+`section_errors.valuation` reason when admission fails. Screener enrichment
+leaves `intrinsic_value`, `margin_of_safety`, `valuation_method` and
+`fcf_positive` null and records the same reason in `provider_evidence` for
+`market_fundamental_screener`. Independent quality fields remain available.
 
 
 ## Valuation engine contract (`fundamental_valuation.py`)
@@ -126,15 +153,16 @@ Derivations (annual statements, latest year as TTM proxy):
 
 - `roe` = NPAT / avg(equity_t, equity_t-1); `roa` = NPAT / avg total assets — percent.
 - `netMargin` = NPAT / revenue (percent); `debtToEquity` = total liabilities / owners' equity (ratio).
-- `revenueCagr5y` / `profitCagr5y` = CAGR over up to 5 most recent annual periods (need >= 3 periods, else null; guard sign flips: null if endpoint values have opposite signs or base <= 0).
+- `revenueCagr5y` / `profitCagr5y` = calendar-true CAGR over the newest window of exactly five fiscal-year intervals (six annual observations). The exponent is elapsed years, never the count of non-null rows. A shorter history, an interior missing year, or a nonpositive endpoint publishes **null** and records a machine reason; the actual-interval value is disclosed under `inputs.derivedCoverage.cagr` but is not labelled 5Y. Restated duplicate fiscal years are withheld. (#248)
 - `dividendYield` = abs(dividends_paid from cash flow) / market_cap * 100, fallback to ratio row's dividend field.
 - `dividendYears` = consecutive most-recent years with dividends_paid < 0 (cash outflow convention).
-- `fcfPositive` = (operating CF − |capex|) > 0 for latest year.
+- `fcfPositive` = (operating CF − |capex|) > 0 for the newest annual cash-flow row, where **capex is required**: absent, blank or unit-rejected capex makes that year's FCF null (unknown), never equal to operating CF. A reported `0` is a valid admitted observation. Unit quality and data completeness stay separate fields.
+- Admitted monetary inputs require evidenced VND scale (`admit_valuation_field`); a missing currency/scale is a reason, never a magnitude guess, and a provider-rejected field cannot re-enter through an alias.
 
 Intrinsic value:
 
 - Financials (bank/insurance/securities, detected from sector/industry strings, e.g. "Ngân hàng", "Bảo hiểm", "Chứng khoán", "Bank", "Insurance", "Financial Services") → **RIM**: IV/share = BVPS + Σ_{t=1..H} BVPS·(ROE − r)·(1+g)^{t-1}/(1+r)^t, ROE faded toward r over horizon.
-- Everyone else → **FCFE DCF**: base FCF = avg of last up-to-3 years of (OCF − |capex|); growth = clamp(historical profit/revenue CAGR, [0, 0.15]) fading linearly to terminal 3% over 10y; Gordon terminal value; equity value / shares = IV per share.
+- Everyone else → **FCFE DCF**: the newest three *dated annual* (OCF − |capex|) rows form the base window before completeness is known, so a newest year whose OCF or capex is missing, blank, rejected or conflicting makes IV/MOS null with `inputs.derivedUnavailableReason` and `derivedCoverage.fcf.incompleteWindowYears` naming it — older complete years never backfill the gap. Growth seed = the published 5Y profit CAGR (else revenue CAGR), which requires the same six-observation coverage as the 5Y fields, so short or gapped history seeds 0% rather than an annualised sparse series; growth clamped to [0, 0.15] and faded linearly to terminal 3% over 10y; Gordon terminal value; equity value / shares = IV per share. `inputs.derivedCoverage.growth` records the source, raw value and clamp.
 - Discount rates from `ValuationConfig` (dataclass, documented defaults): base 12%, financials 13%, tunable per sector. No magic numbers inline.
 - `marginOfSafety` = (IV − price) / IV × 100, clamped to [−100, 100]; null if IV or price missing/<= 0.
 

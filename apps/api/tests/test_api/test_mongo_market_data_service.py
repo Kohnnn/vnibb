@@ -677,3 +677,65 @@ async def test_fundamental_reader_withholds_legacy_interest_score_preserving_ind
     assert documents[0]["moatFactors"]["interest_coverage"] == 8.0
     assert documents[0]["moatScore"] == 95.0
     assert documents[0]["moat"] == "wide"
+
+
+@pytest.mark.asyncio
+async def test_fundamental_reader_admits_current_schema_and_withholds_stale_derived_values(monkeypatch):
+    """The shared reader is the admission seam for every consumer."""
+
+    stale = {
+        "symbol": "STALE", "schemaVersion": 3, "snapshotDate": "2026-06-10",
+        "intrinsicValue": 30.48, "marginOfSafety": -64.02, "valuationMethod": "dcf",
+        "revenueCagr5y": 21.0, "profitCagr5y": 21.0, "fcfPositive": True,
+        "moat": "narrow", "moatScore": 60.0, "dividendYears": 9, "roe": 18.0,
+        "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    }
+    current = {
+        "symbol": "CUR", "schemaVersion": 4, "snapshotDate": "2026-06-10",
+        "intrinsicValue": 78200.0, "marginOfSafety": 16.9, "valuationMethod": "dcf",
+        "revenueCagr5y": 10.0, "profitCagr5y": 10.0, "fcfPositive": True,
+        "moat": "wide", "moatScore": 95.0,
+        "moatFactors": {"interest_coverage": 8.0, "gross_margin_avg": 42.0},
+        "dividendYears": 9, "roe": 22.5,
+        "inputs": {
+            "unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
+            "derivedCoverage": {"cagr": {}, "fcf": {}},
+        },
+    }
+    documents = [stale, current]
+
+    class FundamentalCollection:
+        def aggregate(self, _pipeline):
+            return [{"doc": dict(document)} for document in documents]
+
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: FundamentalCollection())
+
+    snapshots = await service.get_latest_fundamental_snapshots(["STALE", "CUR"])
+
+    withheld = snapshots["STALE"]
+    for field in ("intrinsicValue", "marginOfSafety", "valuationMethod",
+                  "revenueCagr5y", "profitCagr5y", "fcfPositive"):
+        assert withheld[field] is None, field
+    assert "schema" in withheld["inputs"]["derivedUnavailableReason"]
+    # Independent facts on the stale document survive.
+    assert withheld["dividendYears"] == 9
+    assert withheld["roe"] == 18.0
+    # Schema 3 keeps its moat score: only pre-3 scoring is unverified.
+    assert withheld["moat"] == "narrow"
+    assert withheld["moatScore"] == 60.0
+
+    admitted = snapshots["CUR"]
+    assert admitted["intrinsicValue"] == 78200.0
+    assert admitted["marginOfSafety"] == 16.9
+    assert admitted["fcfPositive"] is True
+    assert admitted["revenueCagr5y"] == 10.0
+    # Current schema is not damaged by the legacy moat gate.
+    assert admitted["moat"] == "wide"
+    assert admitted["moatScore"] == 95.0
+    assert admitted["moatFactors"]["interest_coverage"] == 8.0
+
+    # The reader never mutates retained corpus documents.
+    assert documents[0]["fcfPositive"] is True
+    assert documents[0]["moat"] == "narrow"
+    assert documents[1]["moat"] == "wide"

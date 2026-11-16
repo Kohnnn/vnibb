@@ -60,6 +60,23 @@ export interface DashboardTemplate {
   }>;
 }
 
+/**
+ * Catalog template contract (#252).
+ *
+ * Every placement below is authored to the widget-size contract in
+ * `@/lib/dashboardLayout` (minW/minH from `WIDGET_LAYOUT_BEHAVIORS`), fits
+ * inside 24 columns, and overlaps nothing. Two reasons this is authored here
+ * rather than repaired at insertion:
+ *  - the template preview draws these rectangles, so a repaired layout would
+ *    silently diverge from what the preview promises;
+ *  - a fresh apply reaches react-grid-layout as *static* items, where
+ *    `correctBounds` runs before `noCompactor` and pushes any colliding tile to
+ *    the bottom of the grid — the #252 Market Heatmap relocation.
+ *
+ * `fitTemplateWidgets` in `@/lib/dashboardLayout` enforces the same contract as
+ * a guard for custom/imported templates, and the regression suite asserts every
+ * template here against it.
+ */
 export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
   {
     id: 'global-markets',
@@ -101,9 +118,9 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     widgets: [
       { type: 'earnings_season_monitor', layout: { x: 0, y: 0, w: 12, h: 8 } },
       { type: 'earnings_release_recap', layout: { x: 12, y: 0, w: 12, h: 8 } },
-      { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
-      { type: 'income_statement', layout: { x: 8, y: 8, w: 8, h: 6 } },
-      { type: 'company_filings', layout: { x: 16, y: 8, w: 8, h: 6 } },
+      { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 8 } },
+      { type: 'income_statement', layout: { x: 8, y: 8, w: 8, h: 8 } },
+      { type: 'company_filings', layout: { x: 16, y: 8, w: 8, h: 8 } },
     ],
   },
   {
@@ -112,11 +129,11 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'A balanced first workspace with the market pulse, movers, a screener, and one core chart.',
     category: 'market',
     widgets: [
-      { type: 'market_overview', layout: { x: 0, y: 0, w: 8, h: 5 } },
-      { type: 'top_movers', layout: { x: 8, y: 0, w: 8, h: 5 } },
-      { type: 'market_news', layout: { x: 16, y: 0, w: 8, h: 5 } },
-      { type: 'price_chart', layout: { x: 0, y: 5, w: 12, h: 7 } },
-      { type: 'screener', layout: { x: 12, y: 5, w: 12, h: 7 } },
+      { type: 'market_overview', layout: { x: 0, y: 0, w: 8, h: 6 } },
+      { type: 'top_movers', layout: { x: 8, y: 0, w: 6, h: 6 } },
+      { type: 'market_news', layout: { x: 14, y: 0, w: 10, h: 6 } },
+      { type: 'price_chart', layout: { x: 0, y: 6, w: 12, h: 8 } },
+      { type: 'screener', layout: { x: 12, y: 6, w: 12, h: 8 } },
     ],
   },
   {
@@ -125,14 +142,14 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Real-time price action, order flow, and intraday execution context.',
     category: 'technical',
     widgets: [
-      { type: 'price_chart', layout: { x: 0, y: 0, w: 14, h: 8 } },
-      { type: 'transaction_flow', layout: { x: 14, y: 0, w: 10, h: 4 } },
-      { type: 'macd_crossovers', layout: { x: 14, y: 4, w: 10, h: 4 } },
-      { type: 'vwap_bands', layout: { x: 0, y: 8, w: 8, h: 7 } },
-      { type: 'volume_delta', layout: { x: 8, y: 8, w: 8, h: 7 } },
-      { type: 'footprint_proxy', layout: { x: 16, y: 8, w: 8, h: 7 } },
-      { type: 'intraday_trades', layout: { x: 0, y: 15, w: 12, h: 6 } },
-      { type: 'orderbook', layout: { x: 12, y: 15, w: 12, h: 6 } },
+      { type: 'price_chart', layout: { x: 0, y: 0, w: 14, h: 9 } },
+      { type: 'transaction_flow', layout: { x: 14, y: 0, w: 10, h: 9 } },
+      { type: 'macd_crossovers', layout: { x: 0, y: 9, w: 8, h: 9 } },
+      { type: 'vwap_bands', layout: { x: 8, y: 9, w: 8, h: 9 } },
+      { type: 'volume_delta', layout: { x: 16, y: 9, w: 8, h: 9 } },
+      { type: 'footprint_proxy', layout: { x: 0, y: 18, w: 8, h: 7 } },
+      { type: 'intraday_trades', layout: { x: 8, y: 18, w: 8, h: 7 } },
+      { type: 'orderbook', layout: { x: 16, y: 18, w: 8, h: 7 } },
     ],
   },
   {
@@ -142,9 +159,9 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     category: 'fundamentals',
     widgets: [
       { type: 'financial_snapshot', layout: { x: 0, y: 0, w: 24, h: 10 } },
-      { type: 'financial_ratios', layout: { x: 0, y: 10, w: 8, h: 6 } },
-      { type: 'peer_comparison', layout: { x: 8, y: 10, w: 8, h: 6 } },
-      { type: 'earnings_release_recap', layout: { x: 16, y: 10, w: 8, h: 6 } },
+      { type: 'financial_ratios', layout: { x: 0, y: 10, w: 8, h: 8 } },
+      { type: 'peer_comparison', layout: { x: 8, y: 10, w: 16, h: 8 } },
+      { type: 'earnings_release_recap', layout: { x: 0, y: 18, w: 24, h: 8 } },
     ],
   },
   {
@@ -153,12 +170,12 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Signal stack for trend, mean reversion, volatility, and factor rotation.',
     category: 'quant',
     widgets: [
-      { type: 'bollinger_squeeze', layout: { x: 0, y: 0, w: 8, h: 5 } },
-      { type: 'ema_respect', layout: { x: 8, y: 0, w: 8, h: 5 } },
-      { type: 'money_flow_trend', layout: { x: 16, y: 0, w: 8, h: 5 } },
-      { type: 'momentum', layout: { x: 0, y: 5, w: 8, h: 5 } },
-      { type: 'drawdown_recovery', layout: { x: 8, y: 5, w: 8, h: 5 } },
-      { type: 'sortino_monthly', layout: { x: 16, y: 5, w: 8, h: 5 } },
+      { type: 'bollinger_squeeze', layout: { x: 0, y: 0, w: 8, h: 9 } },
+      { type: 'ema_respect', layout: { x: 8, y: 0, w: 8, h: 9 } },
+      { type: 'sortino_monthly', layout: { x: 16, y: 0, w: 8, h: 10 } },
+      { type: 'money_flow_trend', layout: { x: 0, y: 10, w: 12, h: 9 } },
+      { type: 'momentum', layout: { x: 12, y: 10, w: 6, h: 9 } },
+      { type: 'drawdown_recovery', layout: { x: 18, y: 10, w: 6, h: 9 } },
     ],
   },
   {
@@ -167,10 +184,10 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Track sector-relative rotation, transaction flow, and price context in one workspace.',
     category: 'market',
     widgets: [
-      { type: 'money_flow_trend', layout: { x: 0, y: 0, w: 12, h: 7 } },
-      { type: 'transaction_flow', layout: { x: 12, y: 0, w: 12, h: 7 } },
-      { type: 'industry_bubble', layout: { x: 0, y: 7, w: 12, h: 7 } },
-      { type: 'price_chart', layout: { x: 12, y: 7, w: 12, h: 7 } },
+      { type: 'money_flow_trend', layout: { x: 0, y: 0, w: 12, h: 9 } },
+      { type: 'transaction_flow', layout: { x: 12, y: 0, w: 12, h: 9 } },
+      { type: 'industry_bubble', layout: { x: 0, y: 9, w: 12, h: 9 } },
+      { type: 'price_chart', layout: { x: 12, y: 9, w: 12, h: 9 } },
     ],
   },
   {
@@ -179,12 +196,16 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Macro breadth, sector rotation, and index context for scanning the full tape quickly.',
     category: 'market',
     widgets: [
-      { type: 'market_overview', layout: { x: 0, y: 0, w: 7, h: 5 } },
-      { type: 'market_heatmap', layout: { x: 7, y: 0, w: 10, h: 6 } },
-      { type: 'market_breadth', layout: { x: 17, y: 0, w: 7, h: 5 } },
-      { type: 'sector_board', layout: { x: 0, y: 5, w: 16, h: 7 } },
-      { type: 'index_comparison', layout: { x: 16, y: 5, w: 8, h: 5 } },
-      { type: 'top_movers', layout: { x: 16, y: 10, w: 8, h: 5 } },
+      // Three pulse cards across the top, then the Heatmap sits top-left of the
+      // main row beside the Sector Board and Index Comparison. Heatmap keeps a
+      // real top-of-fold position and — critically — overlaps nothing, so the
+      // static-item collision repair that used to push it to row 15 has no work.
+      { type: 'market_overview', layout: { x: 0, y: 0, w: 8, h: 6 } },
+      { type: 'market_breadth', layout: { x: 8, y: 0, w: 8, h: 7 } },
+      { type: 'top_movers', layout: { x: 16, y: 0, w: 8, h: 6 } },
+      { type: 'market_heatmap', layout: { x: 0, y: 7, w: 10, h: 12 } },
+      { type: 'sector_board', layout: { x: 10, y: 7, w: 10, h: 12 } },
+      { type: 'index_comparison', layout: { x: 20, y: 7, w: 4, h: 4 } },
     ],
   },
   {
@@ -193,12 +214,12 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Market-wide sector board, top movers, and breadth for tape-reading sessions.',
     category: 'market',
     widgets: [
-      { type: 'sector_board', layout: { x: 0, y: 0, w: 16, h: 8 } },
-      { type: 'market_overview', layout: { x: 16, y: 0, w: 8, h: 5 } },
-      { type: 'top_movers', layout: { x: 16, y: 5, w: 8, h: 5 } },
-      { type: 'market_breadth', layout: { x: 0, y: 8, w: 8, h: 5 } },
-      { type: 'sector_performance', layout: { x: 8, y: 8, w: 8, h: 5 } },
-      { type: 'market_heatmap', layout: { x: 16, y: 10, w: 8, h: 5 } },
+      { type: 'sector_board', layout: { x: 0, y: 0, w: 12, h: 12 } },
+      { type: 'market_heatmap', layout: { x: 12, y: 0, w: 12, h: 12 } },
+      { type: 'market_overview', layout: { x: 0, y: 12, w: 8, h: 7 } },
+      { type: 'top_movers', layout: { x: 8, y: 12, w: 8, h: 7 } },
+      { type: 'market_breadth', layout: { x: 16, y: 12, w: 8, h: 7 } },
+      { type: 'sector_performance', layout: { x: 0, y: 19, w: 8, h: 7 } },
     ],
   },
   {
@@ -209,11 +230,11 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     widgets: [
       { type: 'news_feed', layout: { x: 0, y: 0, w: 12, h: 8 } },
       { type: 'market_news', layout: { x: 12, y: 0, w: 12, h: 8 } },
-      { type: 'events_calendar', layout: { x: 0, y: 8, w: 12, h: 6 } },
-      { type: 'price_chart', layout: { x: 12, y: 8, w: 12, h: 6 } },
-      { type: 'world_news_monitor', layout: { x: 0, y: 14, w: 12, h: 8 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
-      { type: 'world_news_live_stream', layout: { x: 12, y: 14, w: 6, h: 8 }, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 } },
-      { type: 'world_news_sources', layout: { x: 18, y: 14, w: 6, h: 8 }, config: { region: 'all', category: 'all', language: 'all' } },
+      { type: 'events_calendar', layout: { x: 0, y: 8, w: 12, h: 8 } },
+      { type: 'price_chart', layout: { x: 12, y: 8, w: 12, h: 8 } },
+      { type: 'world_news_monitor', layout: { x: 0, y: 16, w: 12, h: 9 }, config: { region: 'all', category: 'all', limit: 50, freshnessHours: 72 } },
+      { type: 'world_news_live_stream', layout: { x: 12, y: 16, w: 6, h: 9 }, config: { region: 'all', category: 'all', limit: 30, freshnessHours: 24, pollSeconds: 60 } },
+      { type: 'world_news_sources', layout: { x: 18, y: 16, w: 6, h: 9 }, config: { region: 'all', category: 'all', language: 'all' } },
     ],
   },
   {
@@ -224,9 +245,9 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     widgets: [
       { type: 'dividend_payment', layout: { x: 0, y: 0, w: 8, h: 6 } },
       { type: 'dividend_ladder', layout: { x: 8, y: 0, w: 8, h: 6 } },
-      { type: 'financial_ratios', layout: { x: 16, y: 0, w: 8, h: 6 } },
-      { type: 'cash_flow', layout: { x: 0, y: 6, w: 12, h: 7 } },
-      { type: 'price_chart', layout: { x: 12, y: 6, w: 12, h: 7 } },
+      { type: 'financial_ratios', layout: { x: 16, y: 0, w: 8, h: 8 } },
+      { type: 'cash_flow', layout: { x: 0, y: 8, w: 12, h: 8 } },
+      { type: 'price_chart', layout: { x: 12, y: 8, w: 12, h: 8 } },
     ],
   },
   {
@@ -237,9 +258,9 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     widgets: [
       { type: 'peer_comparison', layout: { x: 0, y: 0, w: 14, h: 8 } },
       { type: 'comparison_analysis', layout: { x: 14, y: 0, w: 10, h: 8 } },
-      { type: 'rs_ranking', layout: { x: 0, y: 8, w: 8, h: 6 } },
-      { type: 'industry_bubble', layout: { x: 8, y: 8, w: 8, h: 6 } },
-      { type: 'price_chart', layout: { x: 16, y: 8, w: 8, h: 6 } },
+      { type: 'industry_bubble', layout: { x: 0, y: 8, w: 12, h: 9 } },
+      { type: 'price_chart', layout: { x: 12, y: 8, w: 12, h: 9 } },
+      { type: 'rs_ranking', layout: { x: 0, y: 17, w: 24, h: 8 } },
     ],
   },
   {
@@ -248,10 +269,10 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Visualize sector peers across valuation, growth, and market-cap dimensions.',
     category: 'research',
     widgets: [
-      { type: 'industry_bubble', layout: { x: 0, y: 0, w: 12, h: 8 } },
-      { type: 'comparison_analysis', layout: { x: 12, y: 0, w: 12, h: 8 } },
-      { type: 'financial_ratios', layout: { x: 0, y: 8, w: 8, h: 6 } },
-      { type: 'correlation_matrix', layout: { x: 8, y: 8, w: 16, h: 6 } },
+      { type: 'industry_bubble', layout: { x: 0, y: 0, w: 8, h: 9 } },
+      { type: 'comparison_analysis', layout: { x: 8, y: 0, w: 16, h: 9 } },
+      { type: 'financial_ratios', layout: { x: 0, y: 9, w: 8, h: 9 } },
+      { type: 'correlation_matrix', layout: { x: 8, y: 9, w: 16, h: 9 } },
     ],
   },
   {
@@ -260,10 +281,10 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Bank-native funding, profitability, and risk analytics with balance-sheet context and peer support.',
     category: 'fundamentals',
     widgets: [
-      { type: 'bank_metrics', layout: { x: 0, y: 0, w: 10, h: 7 } },
-      { type: 'financial_ratios', layout: { x: 10, y: 0, w: 14, h: 7 } },
-      { type: 'balance_sheet', layout: { x: 0, y: 7, w: 12, h: 7 } },
-      { type: 'comparison_analysis', layout: { x: 12, y: 7, w: 12, h: 7 } },
+      { type: 'bank_metrics', layout: { x: 0, y: 0, w: 10, h: 8 } },
+      { type: 'financial_ratios', layout: { x: 10, y: 0, w: 14, h: 8 } },
+      { type: 'balance_sheet', layout: { x: 0, y: 8, w: 12, h: 8 } },
+      { type: 'comparison_analysis', layout: { x: 12, y: 8, w: 12, h: 8 } },
     ],
   },
   {
@@ -272,10 +293,10 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
     description: 'Analyze sector peer correlations alongside bubble and price context.',
     category: 'quant',
     widgets: [
-      { type: 'correlation_matrix', layout: { x: 0, y: 0, w: 12, h: 7 } },
-      { type: 'industry_bubble', layout: { x: 12, y: 0, w: 12, h: 7 } },
-      { type: 'peer_comparison', layout: { x: 0, y: 7, w: 12, h: 7 } },
-      { type: 'price_chart', layout: { x: 12, y: 7, w: 12, h: 7 } },
+      { type: 'correlation_matrix', layout: { x: 0, y: 0, w: 12, h: 9 } },
+      { type: 'industry_bubble', layout: { x: 12, y: 0, w: 12, h: 9 } },
+      { type: 'peer_comparison', layout: { x: 0, y: 9, w: 12, h: 9 } },
+      { type: 'price_chart', layout: { x: 12, y: 9, w: 12, h: 9 } },
     ],
   },
 ];

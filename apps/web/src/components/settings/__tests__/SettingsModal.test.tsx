@@ -107,3 +107,33 @@ describe('UiPreferencesProvider — colorblind mode (BUG-01)', () => {
   })
 })
 
+describe('SettingsModal default ticker contract', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+  })
+
+  test('shows the saved default ticker instead of the active global symbol', () => {
+    localStorage.setItem('vnibb-user-preferences', JSON.stringify({ defaultTicker: 'HPG' }))
+    const { useSymbolLink } = jest.requireMock('@/contexts/SymbolLinkContext') as {
+      useSymbolLink: () => { setGlobalSymbol: jest.Mock }
+    }
+    const setGlobalSymbol = useSymbolLink().setGlobalSymbol
+    setGlobalSymbol.mockClear()
+
+    render(<SettingsModal isOpen onClose={() => {}} />)
+
+    const input = screen.getByLabelText('Default Ticker')
+    expect(input).toHaveValue('HPG')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }))
+
+    expect(JSON.parse(localStorage.getItem('vnibb-user-preferences') || '{}').defaultTicker).toBe('HPG')
+    expect(setGlobalSymbol).toHaveBeenCalledWith('HPG')
+    expect(input).toHaveValue('HPG')
+  })
+})
+

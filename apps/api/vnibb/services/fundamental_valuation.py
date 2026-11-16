@@ -26,6 +26,7 @@ from typing import Any
 
 from vnibb.core.price_units import persisted_price_record
 from vnibb.providers.vnstock.financials import admitted_interest_expense
+from vnibb.services import statement_admission
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,17 @@ VARIANT_YEAR_SUFFIX = ".year"
 
 
 ENGINE_SOURCE = "vnibb-fundamental-engine"
-SCHEMA_VERSION = 3
+# v4: derived valuation/CAGR/FCF fields require admitted field evidence and
+# disclosed fiscal coverage (#247, #248). Documents from v3 and earlier were
+# produced under the "missing capex == 0" and "periods = nonnull count" rules,
+# so their derived fields are not admissible.
+SCHEMA_VERSION = 4
+# A published "5Y" CAGR needs endpoints five fiscal years apart, i.e. six
+# consecutive annual observations. Anything shorter is reported at its actual
+# span in provenance and withheld from the 5Y fields.
+CAGR_REQUIRED_SPAN_YEARS = 5
+# Complete annual cash-flow rows required before the DCF averages a base FCF.
+DCF_BASE_ROWS = 3
 
 # --- key alias tuples (first non-null match wins) -------------------------
 
@@ -502,24 +513,267 @@ def compute_roe_roa(
     return roe, roa
 
 
-def compute_cagr(values: Sequence[float | None]) -> float | None:
-    """CAGR in percent over an ascending annual series.
+def compute_cagr_over_years(points: Sequence[tuple[int, float]]) -> float | None:
+    """Calendar-true CAGR in percent between two fiscal-year endpoints.
 
-    Returns None with fewer than 3 usable periods, a non-positive base, or a
-    sign flip between endpoints (growth rates are meaningless across zero).
+    ``points`` are ``(fiscal_year, value)`` pairs. The exponent is the actual
+    elapsed year count, so missing intermediate years never shorten the period.
+    Returns None with fewer than two points, a non-positive endpoint (growth
+    across zero is meaningless), or a zero span.
     """
 
-    cleaned = [v for v in values if v is not None]
-    if len(cleaned) < 3:
+    ordered = sorted(points, key=lambda item: item[0])
+    if len(ordered) < 2:
         return None
-    base, last = cleaned[0], cleaned[-1]
-    if base <= 0 or last <= 0:
+    (start_year, base), (end_year, last) = ordered[0], ordered[-1]
+    span = end_year - start_year
+    if span < 1 or base <= 0 or last <= 0:
         return None
-    periods = len(cleaned) - 1
     try:
-        return ((last / base) ** (1.0 / periods) - 1.0) * 100.0
+        return ((last / base) ** (1.0 / span) - 1.0) * 100.0
     except (OverflowError, ValueError, ZeroDivisionError):
         return None
+
+
+
+def _row_year(row: Any) -> int | None:
+    return _report_year(row) if isinstance(row, dict) else None
+
+
+def _annual_field_series(
+    rows: Sequence[dict[str, Any]],
+    field: str,
+    *,
+    declared_statement_unit: str | None = None,
+) -> dict[str, Any]:
+    """Ascending (year, value) points plus years that could not be admitted.
+
+    Duplicate fiscal years with different values are a restatement without
+    revision authority, so that year is withheld instead of using whichever
+    row happened to sort last. The production loader collapses duplicate rows
+    and records the collapsed conflict in ``_valuation_conflicting_observations``;
+    a field named there is withheld for that year as well, because the surviving
+    value is one of several with no established order.
+    """
+
+    aliases = {field, *statement_admission.FIELD_ALIASES.get(field, ())}
+    by_year: dict[int, list[float]] = {}
+    excluded: list[dict[str, Any]] = []
+    conflicted: set[int] = set()
+    for row in rows or []:
+        year = _row_year(row)
+        if year is None:
+            continue
+        if isinstance(row, dict) and aliases & set(
+            row.get("_valuation_conflicting_observations") or ()
+        ):
+            conflicted.add(year)
+            excluded.append({
+                "year": year, "field": field, "reason": "conflicting_observations",
+            })
+            continue
+        value, reason = statement_admission.admit_valuation_field(
+            row, field, declared_statement_unit=declared_statement_unit
+        )
+        if value is None:
+            excluded.append({"year": year, "field": field, "reason": reason})
+            continue
+        by_year.setdefault(year, []).append(value)
+    ambiguous = sorted(
+        year for year, values in by_year.items()
+        if year in conflicted or len(set(values)) > 1
+    )
+    points = [
+        (year, values[0]) for year, values in sorted(by_year.items()) if year not in ambiguous
+    ]
+    excluded.extend(
+        {"year": year, "field": field, "reason": "ambiguous_restatement"}
+        for year in ambiguous if year not in conflicted
+    )
+    return {
+        "points": points,
+        "excluded": excluded,
+        "ambiguous_years": ambiguous,
+        "conflicting_years": sorted(conflicted),
+    }
+
+
+def assess_cagr_coverage(
+    rows: Sequence[dict[str, Any]],
+    field: str,
+    *,
+    declared_statement_unit: str | None = None,
+    required_span_years: int = CAGR_REQUIRED_SPAN_YEARS,
+) -> dict[str, Any]:
+    """CAGR with explicit fiscal coverage, for 5Y fields and DCF growth.
+
+    ``published`` is what the ``5Y``-named fields may carry: it exists only
+    when two admitted endpoints are exactly ``required_span_years`` fiscal
+    years apart *and* every intermediate year is present. ``value`` is the
+    calendar-true CAGR over whatever span the admitted endpoints cover, so a
+    sparse or short history is disclosed at its actual interval instead of
+    being labelled 5Y or annualised from a nonnull count (#248).
+    """
+
+    series = _annual_field_series(
+        rows, field, declared_statement_unit=declared_statement_unit
+    )
+    points = series["points"]
+    years = [year for year, _ in points]
+    result: dict[str, Any] = {
+        "field": field,
+        "status": "unavailable",
+        "published": None,
+        "value": None,
+        "startYear": years[0] if years else None,
+        "endYear": years[-1] if years else None,
+        "spanYears": (years[-1] - years[0]) if len(years) >= 2 else None,
+        "coverage": "insufficient",
+        "reason": None,
+        "points": [{"year": year, "value": value} for year, value in points],
+        "excluded": series["excluded"],
+    }
+    if len(points) < 2:
+        result["reason"] = "insufficient_observations"
+        return result
+    # Publish from the newest window of exactly `required_span_years` intervals,
+    # so a longer history still yields a truthful five-year figure and a short
+    # or gapped one yields a reason instead of a mislabelled number.
+    end_year = years[-1]
+    window_years = list(range(end_year - required_span_years, end_year + 1))
+    by_year = dict(points)
+    window = [year for year in window_years if year in by_year]
+    result["windowStartYear"] = window_years[0]
+    result["windowEndYear"] = end_year
+    result["windowComplete"] = len(window) == len(window_years)
+    # startYear/endYear/spanYears identify the interval the reported value is
+    # actually computed over, not the extent of the retained history, so a long
+    # history never lends a 5Y claim to a shorter selected window.
+    if window:
+        result["startYear"] = window[0]
+        result["endYear"] = window[-1]
+        result["spanYears"] = window[-1] - window[0]
+        result["historyStartYear"] = years[0]
+        result["historyEndYear"] = years[-1]
+    if window:
+        result["coverage"] = "complete" if result["windowComplete"] else "gapped"
+    if not window:
+        result["reason"] = "insufficient_span:0y"
+        return result
+    base, last = by_year[window[0]], by_year[window[-1]]
+    if base <= 0 or last <= 0:
+        result["reason"] = "nonpositive_endpoint"
+        return result
+    actual = compute_cagr_over_years([(year, by_year[year]) for year in window])
+    result["value"] = actual
+    if actual is None:
+        result["reason"] = "not_computable"
+        return result
+    if result["windowComplete"]:
+        result["status"] = "complete"
+        result["published"] = actual
+        return result
+    # No published five-year interval. Distinguish a history too short to hold
+    # one from a present span with an interior hole: the first is a coverage
+    # limit, the second is missing evidence inside an otherwise sufficient span.
+    admitted_span = years[-1] - years[0]
+    if admitted_span < required_span_years:
+        result["reason"] = f"insufficient_span:{admitted_span}y"
+    else:
+        result["reason"] = "incomplete_intermediate_coverage"
+        result["missingYears"] = [year for year in window_years if year not in by_year]
+    return result
+
+
+def assess_fcf_coverage(
+    cash_flows: Sequence[dict[str, Any]],
+    *,
+    declared_statement_unit: str | None = None,
+    base_rows: int = DCF_BASE_ROWS,
+) -> dict[str, Any]:
+    """Free cash flow with capex completeness disclosed, never assumed (#247).
+
+    Capex is a required component: absent, blank or rejected capex makes that
+    year's FCF unknown rather than equal to operating cash flow. A reported
+    ``0`` is an admitted observation.
+
+    ``base_fcf`` is the mean of the newest ``base_rows`` dated annual rows, and
+    requires every one of them to carry admitted OCF and capex. The window is
+    chosen before completeness is known, so an unknown newest year makes the
+    base unavailable instead of being bridged with older complete years.
+    """
+
+    by_year: dict[int, dict[str, Any] | None] = {}
+    excluded: list[dict[str, Any]] = []
+    for row in cash_flows or []:
+        year = _row_year(row)
+        if year is None:
+            continue
+        conflicts = set(row.get("_valuation_conflicting_observations") or ()) if isinstance(row, dict) else set()
+        incomplete = []
+        ocf = capex = None
+        if {"operating_cash_flow", *OCF_ALIASES} & conflicts:
+            incomplete.append({"component": "operating_cash_flow", "reason": "conflicting_observations"})
+        else:
+            ocf, ocf_reason = statement_admission.admit_valuation_field(
+                row, "operating_cash_flow", declared_statement_unit=declared_statement_unit
+            )
+            if ocf is None:
+                incomplete.append({"component": "operating_cash_flow", "reason": ocf_reason})
+        if {"capex", *CAPEX_ALIASES} & conflicts:
+            incomplete.append({"component": "capex", "reason": "conflicting_observations"})
+        else:
+            capex, capex_reason = statement_admission.admit_valuation_field(
+                row, "capex", declared_statement_unit=declared_statement_unit
+            )
+            if capex is None:
+                incomplete.append({"component": "capex", "reason": capex_reason})
+        if incomplete:
+            excluded.append({"year": year, "incomplete": incomplete})
+            by_year[year] = None
+            continue
+        by_year[year] = {"year": year, "ocf": ocf, "capex": capex, "fcf": ocf - abs(capex)}
+
+    dated_years = sorted(by_year)
+    newest_year = dated_years[-1] if dated_years else None
+    latest_positive: bool | None = None
+    latest_reason: str | None = None
+    if newest_year is None:
+        latest_reason = "no_dated_annual_cash_flow_row"
+    elif by_year[newest_year] is not None:
+        latest_positive = bool(by_year[newest_year]["fcf"] > 0)
+    else:
+        incomplete = next(item for item in excluded if item["year"] == newest_year)
+        latest_reason = "latest_year_incomplete:" + ",".join(
+            f"{part['component']}={part['reason']}" for part in incomplete["incomplete"]
+        )
+
+    window_years = dated_years[-base_rows:]
+    window = [by_year[year] for year in window_years]
+    missing_years = [year for year, item in zip(window_years, window, strict=True) if item is None]
+    status = "complete" if len(window) == base_rows and not missing_years else "partial"
+    base_fcf: float | None = None
+    reason: str | None = None
+    if status == "complete":
+        base_fcf = sum(item["fcf"] for item in window) / len(window)
+    else:
+        detail = f"; incomplete {', '.join(str(year) for year in missing_years)}" if missing_years else ""
+        reason = (
+            f"insufficient_complete_cash_flow_years:{len(window) - len(missing_years)}/{base_rows}"
+            f" newest dated rows{detail}"
+        )
+    return {
+        "status": status,
+        "positive": latest_positive,
+        "positiveReason": latest_reason,
+        "latestYear": newest_year,
+        "baseFcf": base_fcf,
+        "baseYears": [item["year"] for item in window if item is not None],
+        "baseRows": base_rows,
+        "incompleteWindowYears": missing_years,
+        "excluded": excluded,
+        "reason": reason,
+    }
 
 
 def compute_dividend_years(cash_flows: Sequence[dict[str, Any]]) -> int | None:
@@ -538,16 +792,16 @@ def compute_dividend_years(cash_flows: Sequence[dict[str, Any]]) -> int | None:
 
 
 def compute_fcf_positive(cash_flows: Sequence[dict[str, Any]]) -> bool | None:
-    """Whether latest-year FCF (OCF - |capex|) is positive; missing capex counts as 0."""
+    """Whether latest-year FCF (OCF - |capex|) is positive.
+
+    Capex is required, so a row without an admitted capex observation yields
+    None (unknown) instead of treating OCF as FCF. Callers needing the full
+    excluded-row disclosure use :func:`assess_fcf_coverage` (#247).
+    """
 
     if not cash_flows:
         return None
-    latest = cash_flows[-1]
-    ocf = _pick_float(latest, *OCF_ALIASES)
-    if ocf is None:
-        return None
-    capex = _pick_float(latest, *CAPEX_ALIASES) or 0.0
-    return (ocf - abs(capex)) > 0
+    return assess_fcf_coverage(cash_flows)["positive"]
 
 
 def compute_moat(
@@ -880,13 +1134,23 @@ def compute_fundamental_snapshot(
         if liabilities is not None and equity is not None and equity > 0:
             debt_to_equity = liabilities / equity
 
-    recent_income = income[-5:]
-    revenue_cagr = _safe(
-        compute_cagr, [_pick_float(row, *REVENUE_ALIASES) for row in recent_income]
+    recent_income = income[-6:]
+    revenue_coverage = _safe(
+        assess_cagr_coverage,
+        income,
+        "revenue",
+        declared_statement_unit=inputs.statement_unit,
+        default={},
     )
-    profit_cagr = _safe(
-        compute_cagr, [_pick_float(row, *NPAT_ALIASES) for row in recent_income]
+    profit_coverage = _safe(
+        assess_cagr_coverage,
+        income,
+        "net_income",
+        declared_statement_unit=inputs.statement_unit,
+        default={},
     )
+    revenue_cagr = revenue_coverage.get("published")
+    profit_cagr = profit_coverage.get("published")
 
     dividend_yield: float | None = None
     if cash and inputs.market_cap is not None and inputs.market_cap > 0:
@@ -901,7 +1165,13 @@ def compute_fundamental_snapshot(
             dividend_yield = ratio_yield * 100.0 if abs(ratio_yield) <= 1.0 else ratio_yield
 
     dividend_years = _safe(compute_dividend_years, cash)
-    fcf_positive = _safe(compute_fcf_positive, cash)
+    fcf_coverage = _safe(
+        assess_fcf_coverage,
+        cash,
+        declared_statement_unit=inputs.statement_unit,
+        default={},
+    )
+    fcf_positive = fcf_coverage.get("positive")
     financial = _is_financial(inputs.sector, inputs.industry)
     discount_rate = _resolve_discount_rate(cfg, inputs.sector, inputs.industry, financial)
     moat = _safe(compute_moat, income, balance)
@@ -918,6 +1188,10 @@ def compute_fundamental_snapshot(
     growth_rate: float | None = None
     intrinsic_value: float | None = None
     valuation_method: str | None = None
+    derived_reason: str | None = None
+    growth_assumption: dict[str, Any] = {
+        "source": None, "value": None, "valuePct": None, "clampedToMax": None,
+    }
     unit_reason = _valuation_unit_reason(inputs, financial)
 
     if financial and unit_reason is None:
@@ -928,6 +1202,13 @@ def compute_fundamental_snapshot(
                 bvps = equity / inputs.shares_outstanding
         current_roe_fraction = roe / 100.0 if roe is not None else None
         growth_rate = current_roe_fraction
+        if current_roe_fraction is not None:
+            growth_assumption = {
+                "source": "current_roe",
+                "value": current_roe_fraction,
+                "valuePct": current_roe_fraction * 100.0,
+                "clampedToMax": False,
+            }
         intrinsic_value = _safe(
             compute_intrinsic_value_rim,
             bvps,
@@ -937,20 +1218,51 @@ def compute_fundamental_snapshot(
         )
         if intrinsic_value is not None:
             valuation_method = "rim"
+        else:
+            derived_reason = (
+                "Residual income intrinsic value is unavailable: the model needs "
+                "positive book value per share and a current ROE from admitted statements."
+            )
     elif not financial and unit_reason is None:
-        fcf_values: list[float] = []
-        for row in cash[-3:]:
-            ocf = _pick_float(row, *OCF_ALIASES)
-            if ocf is None:
-                continue
-            capex = _pick_float(row, *CAPEX_ALIASES) or 0.0
-            fcf_values.append(ocf - abs(capex))
-        if fcf_values:
-            base_fcf = sum(fcf_values) / len(fcf_values)
-        cagr_source = profit_cagr if profit_cagr is not None else revenue_cagr
-        growth_rate = min(
-            max((cagr_source or 0.0) / 100.0, 0.0), cfg.max_growth
+        if fcf_coverage.get("status") == "complete":
+            base_fcf = fcf_coverage.get("baseFcf")
+        else:
+            derived_reason = (
+                "Free cash flow is unavailable: "
+                f"{fcf_coverage.get('reason') or 'incomplete annual cash-flow rows'}. "
+                "Capex is required for every modelled year; a missing component is not zero."
+            )
+        # Growth may only come from a fully disclosed CAGR block. A short or
+        # gapped history is not annualised into a 10-year fade (#248).
+        guidance = next(
+            (
+                block
+                for block in (profit_coverage, revenue_coverage)
+                if block.get("published") is not None
+            ),
+            None,
         )
+        if guidance is not None:
+            raw_growth = float(guidance["published"]) / 100.0
+            growth_rate = min(max(raw_growth, 0.0), cfg.max_growth)
+            growth_assumption = {
+                "source": f"{guidance['field']}_cagr",
+                "value": growth_rate,
+                "valuePct": growth_rate * 100.0,
+                "rawValuePct": raw_growth * 100.0,
+                "startYear": guidance.get("startYear"),
+                "endYear": guidance.get("endYear"),
+                "spanYears": guidance.get("spanYears"),
+                "clampedToMax": growth_rate != raw_growth,
+            }
+        else:
+            growth_rate = 0.0
+            growth_assumption = {
+                "source": "none",
+                "value": 0.0,
+                "valuePct": 0.0,
+                "clampedToMax": False,
+            }
         intrinsic_value = _safe(
             compute_intrinsic_value_dcf,
             base_fcf,
@@ -961,6 +1273,11 @@ def compute_fundamental_snapshot(
         )
         if intrinsic_value is not None:
             valuation_method = "dcf"
+        elif derived_reason is None:
+            derived_reason = (
+                "DCF intrinsic value is unavailable: the model needs positive average FCF "
+                "from complete annual rows and a verified share count."
+            )
     comparison_reason = unit_reason
     if comparison_reason is None and inputs.price_unit != "VND":
         comparison_reason = "Price currency/scale is unknown; margin of safety cannot be compared in VND."
@@ -979,10 +1296,36 @@ def compute_fundamental_snapshot(
         "growth_rate": growth_rate,
         "horizon_years": cfg.horizon_years,
         "unit_quality": "unknown" if comparison_reason else "verified",
+        "model_confidence": "unassessed",
         "comparison_unavailable_reason": comparison_reason,
         "unit_lineage": inputs.unit_lineage or {
             "price": {"unit": inputs.price_unit}, "shares": {"unit": inputs.shares_unit},
             "statements": {"unit": inputs.statement_unit},
+        },
+        # Derived-value admission (v4): coverage and reasons travel with every
+        # derived field so a consumer can never read a number without knowing
+        # what it is anchored to (#247, #248).
+        "derived_unavailable_reason": derived_reason,
+        "derived_coverage": {
+            "cagr": {"revenue": revenue_coverage, "profit": profit_coverage},
+            "fcf": {
+                "status": fcf_coverage.get("status"),
+                "positive": fcf_coverage.get("positive"),
+                "positiveReason": fcf_coverage.get("positiveReason"),
+                "latestYear": fcf_coverage.get("latestYear"),
+                "baseFcf": fcf_coverage.get("baseFcf"),
+                "baseYears": fcf_coverage.get("baseYears"),
+                "baseRows": fcf_coverage.get("baseRows"),
+                "incompleteWindowYears": fcf_coverage.get("incompleteWindowYears"),
+                "excluded": fcf_coverage.get("excluded"),
+                "reason": fcf_coverage.get("reason"),
+            },
+            "growth": growth_assumption,
+            "cagrRule": {
+                "requiredSpanYears": CAGR_REQUIRED_SPAN_YEARS,
+                "requiredAnnualPoints": CAGR_REQUIRED_SPAN_YEARS + 1,
+                "gapPolicy": "endpoints may span a gap for the disclosed actual-interval value, but a gapped or short series never publishes the 5Y fields and never seeds DCF growth",
+            },
         },
     }
 
@@ -1042,6 +1385,12 @@ def compute_fundamental_snapshot(
 
 
 def fundamental_valuation_unavailable_reason(snapshot: dict[str, Any] | None) -> str | None:
+    """Why a retained snapshot's intrinsic value/margin of safety may not publish.
+
+    Returns None only for a v4 document whose valuation inputs are admitted and
+    whose price lineage is declared VND.
+    """
+
     if not snapshot:
         return None
     inputs = snapshot.get("inputs")
@@ -1049,11 +1398,72 @@ def fundamental_valuation_unavailable_reason(snapshot: dict[str, Any] | None) ->
     reason = inputs.get("comparisonUnavailableReason")
     if reason:
         return str(reason)
+    if snapshot.get("schemaVersion") != SCHEMA_VERSION:
+        return (
+            "Retained snapshot was produced under a superseded valuation formula "
+            f"(schema version {snapshot.get('schemaVersion')!r}, current {SCHEMA_VERSION}); "
+            "derived values must be recomputed before publication."
+        )
+    if inputs.get("derivedUnavailableReason"):
+        return str(inputs["derivedUnavailableReason"])
     lineage = inputs.get("unitLineage")
     price = lineage.get("price") if isinstance(lineage, dict) else None
     if inputs.get("unitQuality") != "verified" or not isinstance(price, dict) or price.get("unit") != "VND":
         return "Retained snapshot valuation basis is unverified; verified input units and declared VND price lineage are required."
     return None
+
+
+# Derived fields whose old-formula values must never reach a consumer.
+_DERIVED_PUBLISHED_FIELDS = (
+    "intrinsicValue",
+    "marginOfSafety",
+    "valuationMethod",
+    "valuationVerdict",
+    "revenueCagr5y",
+    "profitCagr5y",
+    "fcfPositive",
+)
+
+
+def admit_fundamental_snapshot(doc: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Withhold derived values produced under a superseded formula.
+
+    Any retained document that is not current-schema, or that lacks the v4
+    coverage blocks, still carries numbers computed with "missing capex == 0"
+    and "periods = nonnull count". Those values are nulled here instead of
+    being republished, with a reason attached; every unrelated field is
+    preserved. Idempotent on a current v4 document (returned unchanged).
+    """
+
+    if not isinstance(doc, dict):
+        return doc
+    inputs = doc.get("inputs")
+    inputs = dict(inputs) if isinstance(inputs, dict) else {}
+    inputs.setdefault("modelConfidence", "unassessed")
+    coverage = inputs.get("derivedCoverage")
+    admitted = doc.get("schemaVersion") == SCHEMA_VERSION and isinstance(coverage, dict)
+    if admitted:
+        if inputs == doc.get("inputs"):
+            return doc
+        result = dict(doc)
+        result["inputs"] = inputs
+        return result
+    result = dict(doc)
+    reason = inputs.get("derivedUnavailableReason") or (
+        "Retained snapshot predates formula schema "
+        f"{SCHEMA_VERSION} (found {doc.get('schemaVersion')!r}); derived valuation, "
+        "CAGR and FCF values are withheld until recomputed."
+    )
+    withheld = [
+        name for name in _DERIVED_PUBLISHED_FIELDS
+        if doc.get(name) is not None or name in (inputs.get("derivedWithheldFields") or ())
+    ]
+    for name in withheld:
+        result[name] = None
+    inputs["derivedUnavailableReason"] = str(reason)
+    inputs["derivedWithheldFields"] = withheld
+    result["inputs"] = inputs
+    return result
 
 
 def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str, Any]:
@@ -1103,7 +1513,10 @@ def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str,
             "growthRate": snapshot.inputs.get("growth_rate"),
             "horizonYears": snapshot.inputs.get("horizon_years"),
             "unitQuality": snapshot.inputs.get("unit_quality"),
+            "modelConfidence": snapshot.inputs.get("model_confidence", "unassessed"),
             "comparisonUnavailableReason": snapshot.inputs.get("comparison_unavailable_reason"),
+            "derivedUnavailableReason": snapshot.inputs.get("derived_unavailable_reason"),
+            "derivedCoverage": snapshot.inputs.get("derived_coverage", {}),
             "unitLineage": snapshot.inputs.get("unit_lineage", {}),
         },
         "computedFields": list(snapshot.computed_fields),

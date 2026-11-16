@@ -8,9 +8,13 @@ The router grew during the prediction-markets expansion:
   movement in YES probability between the latest snapshot and the
   historical snapshot `window_hours` ago. Supports `?direction=up|down|both`
   and `?exclude_categories=…` from Phase 8.
-* `GET /prediction-markets/alerts` — Phase 8. Diffs latest intraday
-  micro-snapshot against the snapshot `window` ago and surfaces alerts
-  above `min_movement_bps`. Tolerates the intraday table being missing.
+* `GET /prediction-markets/alerts` — Phase 8. Diffs the latest intraday
+  micro-snapshot against the nearest baseline at or before the `window`
+  cutoff, bounded by an explicit sampling tolerance at both ends, and
+  surfaces movements above `min_movement_bps`. Reports an explicit
+  `status`/`coverage` block so storage failure, an empty universe, a
+  missing baseline, stale coverage and a genuine zero-alert result stay
+  distinguishable.
 * `GET /prediction-markets/consensus?query=…` — Phase 8. Substring-matches
   the question over Polymarket and Kalshi and returns per-source YES
   price + a volume-weighted consensus.
@@ -35,7 +39,10 @@ from typing import Final, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Float, and_, case, cast, exists, func, literal_column, or_, select
+from sqlalchemy import (
+    DateTime, Float, Integer, and_, case, cast, exists, func, literal_column, null, or_,
+    select, union_all,
+)
 from sqlalchemy import String as SA_String
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,6 +62,8 @@ from vnibb.services.prediction_market_estimator import (
 )
 from vnibb.services.prediction_market_policy import (
     MAX_MARKET_OUTCOMES,
+    PREDICTION_MARKET_ALERT_BASELINE_TOLERANCE,
+    PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES,
     active_market_candidates,
     observed_yes_price,
     snapshot_eligibility,
@@ -189,6 +198,29 @@ class PredictionMarketAlertRow(BaseModel):
     movement: float
     absolute_movement: float
     direction: Literal["up", "down"]
+    # Both legs of the comparison on the source observation clock.
+    # ``elapsed_seconds`` is the actual span, never the requested window.
+    baseline_observed_at: datetime
+    current_observed_at: datetime
+    elapsed_seconds: int
+
+
+class PredictionMarketAlertCoverage(BaseModel):
+    """Per-market coverage of this window, independent of ``limit``/threshold.
+
+    Omissions are derivable: ``comparable - evaluated`` (no admissible current)
+    and ``current - evaluated`` (no admissible baseline). Catalogue size is
+    deliberately absent: it measures the catalogue, not this window.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    comparable_markets: int
+    current_markets: int
+    evaluated_markets: int
+
+
+AlertStatus = Literal["unavailable", "empty", "no_baseline", "stale", "complete"]
 
 
 class PredictionMarketAlertsResponse(BaseModel):
@@ -198,6 +230,19 @@ class PredictionMarketAlertsResponse(BaseModel):
     min_movement_bps: int
     count: int
     alerts: list[PredictionMarketAlertRow]
+    # ``unavailable`` means the comparison never ran, so ``count == 0`` carries
+    # no information about movement. ``complete`` is the only status that
+    # licenses an aggregate no-movement claim.
+    status: AlertStatus
+    coverage: PredictionMarketAlertCoverage | None
+    # Sampling contract the status was evaluated under.
+    cadence_minutes: int
+    baseline_tolerance_seconds: int
+    # Calculation clock of this evaluation; not a proxy for source freshness.
+    evaluated_at: datetime
+    # Max admissible observation across the evaluated set; the actual source
+    # clock, never invented from the request time.
+    data_observed_through: datetime | None
 
 
 class PredictionMarketConsensusSourceRow(BaseModel):
@@ -360,12 +405,16 @@ async def list_prediction_markets(
 
 
 def _is_missing_prediction_market_relation(error: OperationalError | ProgrammingError) -> bool:
+    """True only for a genuinely absent prediction-market table.
+
+    ``[a-z_]*`` deliberately spans underscores, so the intraday relation
+    (``prediction_market_intraday_snapshots``) is recognised alongside the
+    catalogue, archive and nightly snapshot tables: a partially provisioned
+    database must degrade to an explicit unavailable status, not a 500.
+    """
     message = str(error.orig).lower()
     return (
-        re.search(
-            r"\bprediction_market(?:s|_snapshots)\b",
-            message,
-        ) is not None
+        re.search(r"\bprediction_market[a-z_]*\b", message) is not None
         and (
             getattr(error.orig, "pgcode", None) == "42P01"
             or "no such table" in message
@@ -387,9 +436,19 @@ def _resolve_window_hours(
     return canonical if canonical is not None else legacy if legacy is not None else default
 
 
-def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float = 0.0, direction: str = "both", excluded: list[str] | None = None, recent: bool = False):
-    """Rank complete per-market movements in SQL before transferring result rows."""
-    market = active_market_candidates(datetime.now(UTC))
+def _snapshot_movements(
+    model, cutoff: datetime, limit: int, *, now: datetime, threshold: float = 0.0,
+    direction: str = "both", excluded: list[str] | None = None, recent: bool = False,
+    tolerance: timedelta | None = None,
+):
+    """Rank complete per-market movements in SQL before transferring result rows.
+
+    ``now`` is supplied by the caller so one response never mixes two clocks.
+    ``tolerance`` stays ``None`` for ``/movers``: that endpoint ranks the largest
+    move rather than making a per-window claim, so it keeps its unbounded
+    baseline and byte-identical behaviour. Only ``/alerts`` passes a band.
+    """
+    market = active_market_candidates(now)
     eligible = select(market.source, market.source_id).cte("eligible_markets")
     eligible_snapshot = exists(select(1).where(
         eligible.c.source == model.source, eligible.c.source_id == model.source_id,
@@ -406,6 +465,29 @@ def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float
         .where(eligible_snapshot, model.captured_at >= cutoff if recent else True)
         .subquery()
     )
+    baseline_conditions = [eligible_snapshot, model.captured_at <= cutoff]
+    if tolerance is not None:
+        latest = (
+            select(
+                model.source, model.source_id, model.question, model.category, model.url,
+                model.yes_price, model.captured_at,
+                func.row_number().over(
+                    partition_by=(model.source, model.source_id),
+                    order_by=(model.captured_at.desc(), model.id.desc()),
+                ).label("rn"),
+            )
+            .where(
+                eligible_snapshot,
+                model.captured_at >= (cutoff if recent else now - tolerance),
+                model.captured_at <= now,
+                model.yes_price >= 0,
+                model.yes_price <= 1,
+            )
+            .subquery()
+        )
+        baseline_conditions.extend(
+            [model.captured_at >= cutoff - tolerance, model.yes_price >= 0, model.yes_price <= 1]
+        )
     baseline = (
         select(
             model.source, model.source_id, model.yes_price,
@@ -414,7 +496,7 @@ def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float
                 order_by=(model.captured_at.desc(), model.id.desc()),
             ).label("rn"),
         )
-        .where(eligible_snapshot, model.captured_at <= cutoff)
+        .where(*baseline_conditions)
         .subquery()
     )
     delta = latest.c.yes_price - baseline.c.yes_price
@@ -433,6 +515,135 @@ def _snapshot_movements(model, cutoff: datetime, limit: int, *, threshold: float
     if excluded:
         stmt = stmt.where(or_(latest.c.category.is_(None), func.lower(latest.c.category).not_in(excluded)))
     return stmt.order_by(func.abs(delta).desc(), latest.c.source, latest.c.source_id).limit(limit)
+
+
+def _alert_legs(model, eligible_snapshot, *, lower: datetime, upper: datetime):
+    """Latest *admissible* observation per market inside one half of the window.
+
+    Both bounds and the ``[0, 1]`` price test are applied before ranking, so the
+    selected row is the latest usable measurement rather than the latest row
+    overall. A non-finite (-NaN) price fails both comparisons on either dialect
+    and is therefore never comparable.
+    """
+    ranked = (
+        select(
+            model.source, model.source_id, model.question, model.category, model.url,
+            model.yes_price, model.captured_at,
+            func.row_number().over(
+                partition_by=(model.source, model.source_id),
+                order_by=(model.captured_at.desc(), model.id.desc()),
+            ).label("rn"),
+        )
+        .where(
+            eligible_snapshot,
+            model.captured_at >= lower,
+            model.captured_at <= upper,
+            model.yes_price >= 0,
+            model.yes_price <= 1,
+        )
+        .subquery()
+    )
+    return select(
+        ranked.c.source, ranked.c.source_id, ranked.c.question, ranked.c.category,
+        ranked.c.url, ranked.c.yes_price, ranked.c.captured_at,
+    ).where(ranked.c.rn == 1).subquery()
+
+
+def _alert_legs_query(model, *, cutoff: datetime, now: datetime, tolerance: timedelta):
+    """The two admissible half-window legs for the alert comparison."""
+    market = active_market_candidates(now)
+    eligible = select(market.source, market.source_id).cte("eligible_markets")
+    eligible_snapshot = exists(
+        select(1).where(
+            eligible.c.source == model.source,
+            eligible.c.source_id == model.source_id,
+        )
+    )
+    current = _alert_legs(model, eligible_snapshot, lower=now - tolerance, upper=now)
+    baseline = _alert_legs(model, eligible_snapshot, lower=cutoff - tolerance, upper=cutoff)
+    return current, baseline
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Re-attach UTC to a naive DB timestamp.
+
+    SQLite drops ``tzinfo`` on ``DateTime(timezone=True)`` columns, so the
+    intraday observation clocks arrive naive even though they are UTC. Passing
+    them through unchanged would serialize without an offset and shift every
+    consumer-facing time by the reader's local offset.
+    """
+    if value is None:
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+def _alert_evaluation(current, baseline, *, threshold: float, limit: int):
+    """Coverage and ranked alert rows evaluated by ONE statement.
+
+    Four separate SELECTs each re-read the eligible universe and both legs, so a
+    concurrent catalogue or snapshot commit can land between them and yield an
+    impossible reading (``evaluated > current``, or a ranked row from a market
+    the count treated as absent). One statement sees one database snapshot, so
+    the counts and the rows always agree. The coverage branch is scalar
+    subqueries over the legs, so it stays independent of threshold and limit.
+    """
+    pairs = current.join(baseline, and_(
+        current.c.source == baseline.c.source,
+        current.c.source_id == baseline.c.source_id,
+    ))
+    delta = current.c.yes_price - baseline.c.yes_price
+    evaluated = select(current.c.source).select_from(pairs).subquery()
+
+    coverage = select(
+        literal_column("'coverage'").label("kind"),
+        select(func.count()).select_from(baseline).scalar_subquery().label("comparable_markets"),
+        select(func.count()).select_from(current).scalar_subquery().label("current_markets"),
+        select(func.count()).select_from(evaluated).scalar_subquery().label("evaluated_markets"),
+        select(func.max(current.c.captured_at)).select_from(pairs)
+        .scalar_subquery().label("observed_through"),
+        cast(null(), SA_String).label("source"),
+        cast(null(), SA_String).label("source_id"),
+        cast(null(), SA_String).label("question"),
+        cast(null(), SA_String).label("category"),
+        cast(null(), SA_String).label("url"),
+        cast(null(), Float).label("yes_price"),
+        cast(null(), Float).label("previous_yes_price"),
+        cast(null(), DateTime).label("current_observed_at"),
+        cast(null(), DateTime).label("baseline_observed_at"),
+        cast(null(), Float).label("movement"),
+    )
+    rows = (
+        select(
+            literal_column("'alert'").label("kind"),
+            cast(null(), Integer).label("comparable_markets"),
+            cast(null(), Integer).label("current_markets"),
+            cast(null(), Integer).label("evaluated_markets"),
+            cast(null(), DateTime).label("observed_through"),
+            current.c.source,
+            current.c.source_id,
+            current.c.question,
+            current.c.category,
+            current.c.url,
+            current.c.yes_price,
+            baseline.c.yes_price.label("previous_yes_price"),
+            current.c.captured_at.label("current_observed_at"),
+            baseline.c.captured_at.label("baseline_observed_at"),
+            delta.label("movement"),
+        )
+        .select_from(pairs)
+        .where(func.abs(delta) >= threshold)
+    )
+    statement = union_all(coverage, rows).subquery()
+    return (
+        select(statement)
+        # Coverage is the first UNION branch, so it must sort first.
+        .order_by(
+            case((statement.c.kind == "coverage", 0), else_=1),
+            func.abs(statement.c.movement).desc(),
+            statement.c.source,
+            statement.c.source_id,
+        )
+        .limit(limit + 1)
+    )
 
 
 @router.get("/source-health", response_model=PredictionMarketSourceHealthResponse)
@@ -547,7 +758,8 @@ async def list_prediction_market_movers(
 
     try:
         rows = (await db.execute(_snapshot_movements(
-            snapshot_model, cutoff, limit, direction=direction, excluded=excluded, recent=True
+            snapshot_model, cutoff, limit, now=now, direction=direction,
+            excluded=excluded, recent=True,
         ))).all()
     except (OperationalError, ProgrammingError):
         return PredictionMarketMoversResponse(window_hours=window_hours, count=0, movers=[])
@@ -814,37 +1026,96 @@ async def list_prediction_market_alerts(
 ) -> PredictionMarketAlertsResponse:
     """Return markets whose YES probability moved >= ``min_movement_bps``.
 
-    Reads from the intraday micro-snapshot table (every 15 min) so 1h / 4h
-    windows return meaningful data instead of always-empty. Tolerates the
-    table being absent.
+    Reads the intraday micro-snapshot table and compares the latest admissible
+    current observation against the latest admissible baseline at or before the
+    window cutoff. Each leg must sit inside ``window ± tolerance`` of its own
+    edge, so a 49-hour pair can never be reported as a 1-hour move and the
+    disclosed ``elapsed_seconds`` always agrees with the SQL bounds.
+
+    ``status`` distinguishes an unreadable store (``unavailable``), no
+    observations (``empty``), no admissible baseline (``no_baseline``), partial
+    coverage (``stale``) and a fully evaluated window (``complete``). HTTP 200
+    is retained, but ``count == 0`` only licenses a no-movement claim when
+    ``status`` is ``complete`` and ``evaluated_markets > 0``.
     """
     window_hours = _resolve_window_hours(window_hours, window, 1)
+    # One clock for universe eligibility, both sampling bounds, coverage and the
+    # elapsed assertion. Nothing below may call ``datetime.now()`` again.
     now = datetime.now(UTC)
     cutoff = now - timedelta(hours=window_hours)
+    tolerance = PREDICTION_MARKET_ALERT_BASELINE_TOLERANCE
+    span = timedelta(hours=window_hours)
+
+    def _response(*, status: AlertStatus, coverage=None, observed_through=None, alerts=()) -> PredictionMarketAlertsResponse:
+        return PredictionMarketAlertsResponse(
+            window_hours=window_hours,
+            min_movement_bps=min_movement_bps,
+            count=len(alerts),
+            alerts=list(alerts),
+            status=status,
+            coverage=coverage,
+            cadence_minutes=PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES,
+            baseline_tolerance_seconds=int(tolerance.total_seconds()),
+            evaluated_at=now,
+            data_observed_through=observed_through,
+        )
 
     try:
-        rows = (await db.execute(_snapshot_movements(
-            PredictionMarketIntradaySnapshot, cutoff, limit,
-            threshold=min_movement_bps / 10_000.0,
-        ))).all()
-    except (OperationalError, ProgrammingError):
-        return PredictionMarketAlertsResponse(
-            window_hours=window_hours, min_movement_bps=min_movement_bps,
-            count=0, alerts=[],
+        current, baseline = _alert_legs_query(
+            PredictionMarketIntradaySnapshot, cutoff=cutoff, now=now, tolerance=tolerance,
         )
-    alerts = [
-        PredictionMarketAlertRow(
+        # One statement: the coverage counts and at most ``limit`` ranked alerts,
+        # so the two can never disagree about which markets this window saw.
+        result = (await db.execute(_alert_evaluation(
+            current, baseline, threshold=min_movement_bps / 10_000.0, limit=limit,
+        ))).all()
+    except (OperationalError, ProgrammingError) as error:
+        # Only a genuinely absent intraday relation is an expected "no store";
+        # every other storage failure must surface as a server error rather
+        # than as an ordinary empty alert list.
+        if not _is_missing_prediction_market_relation(error):
+            raise
+        return _response(status="unavailable")
+    counts, rows = result[0], result[1:]
+    coverage = PredictionMarketAlertCoverage(
+        comparable_markets=int(counts.comparable_markets or 0),
+        current_markets=int(counts.current_markets or 0),
+        evaluated_markets=int(counts.evaluated_markets or 0),
+    )
+    observed_through = _as_utc(counts.observed_through)
+
+    if coverage.comparable_markets == 0 and coverage.current_markets == 0:
+        return _response(status="empty", coverage=coverage)
+    if coverage.comparable_markets == 0:
+        return _response(status="no_baseline", coverage=coverage, observed_through=observed_through)
+
+    alerts = []
+    for row in rows:
+        baseline_at = _as_utc(row.baseline_observed_at)
+        current_at = _as_utc(row.current_observed_at)
+        elapsed = int((current_at - baseline_at).total_seconds())
+        # The disclosed quantity must agree with the SQL bounds even if a future
+        # query edit, clock skew or naive/aware mixing slips through.
+        if not (0 < elapsed and span - tolerance <= timedelta(seconds=elapsed) <= span + tolerance):
+            continue
+        alerts.append(PredictionMarketAlertRow(
             source=row.source, source_id=row.source_id, question=row.question,
             category=row.category, url=row.url, yes_price=row.yes_price,
             previous_yes_price=row.previous_yes_price, movement=row.movement,
             absolute_movement=abs(row.movement),
             direction="up" if row.movement > 0 else "down",
-        )
-        for row in rows
-    ]
-    return PredictionMarketAlertsResponse(
-        window_hours=window_hours, min_movement_bps=min_movement_bps,
-        count=len(alerts), alerts=alerts,
+            baseline_observed_at=baseline_at,
+            current_observed_at=current_at,
+            elapsed_seconds=elapsed,
+        ))
+
+    status: AlertStatus = (
+        "complete"
+        if coverage.evaluated_markets == coverage.comparable_markets == coverage.current_markets
+        else "stale"
+    )
+    return _response(
+        status=status, coverage=coverage, observed_through=observed_through, alerts=alerts,
     )
 
 

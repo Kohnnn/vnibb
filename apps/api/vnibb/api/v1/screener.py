@@ -40,7 +40,10 @@ from vnibb.providers.vnstock.equity_screener import (
     VnstockScreenerFetcher,
 )
 from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
-from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
+from vnibb.services.fundamental_valuation import (
+    admit_fundamental_snapshot,
+    fundamental_valuation_unavailable_reason,
+)
 from vnibb.services.market_session import expected_market_session
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.screener_filter_service import ScreenerFilterService
@@ -1257,6 +1260,10 @@ _FUNDAMENTAL_DOC_FIELD_MAP = {
     "snapshotDate": "fundamental_as_of",
 }
 
+# The three fields that state a price comparison. An admitted doc that still
+# reports an unavailable comparison basis must not publish them.
+_VALUATION_COMPARISON_ATTRS = frozenset({"intrinsic_value", "margin_of_safety", "valuation_method"})
+
 # The single declaration of what counts as a Fundamental Field. Everything that
 # needs to know -- the enrichment decision, the early-limit shortcut, the
 # metadata -- derives from here, so adding a field to the map above is enough.
@@ -1355,6 +1362,13 @@ async def _apply_fundamental_enrichment(
     failing the screen. The outcome is returned alongside the rows because an
     empty screen caused by an unreachable corpus is not the same answer as an
     empty screen caused by nothing matching, and the caller has to say which.
+
+    Enrichment runs after the base rows load (including on a screener-cache
+    hit), so admission is re-evaluated against the current Mongo snapshot every
+    request. ``admit_fundamental_snapshot`` is applied again here because a doc
+    may reach this boundary without the shared reader (alternate or retained
+    sources), and a withheld derived value must actively clear the row
+    attribute instead of being skipped and letting a stale row survive.
     """
 
     if not rows:
@@ -1372,6 +1386,7 @@ async def _apply_fundamental_enrichment(
             doc = docs.get((row.symbol or "").upper())
             if not isinstance(doc, dict):
                 continue
+            doc = admit_fundamental_snapshot(doc)
             valuation_reason = fundamental_valuation_unavailable_reason(doc)
             if valuation_reason:
                 row.provider_evidence.append({
@@ -1380,12 +1395,17 @@ async def _apply_fundamental_enrichment(
                     "unavailable_reason": valuation_reason,
                 })
             for doc_key, attr in _FUNDAMENTAL_DOC_FIELD_MAP.items():
-                if valuation_reason and doc_key in {"intrinsicValue", "marginOfSafety", "valuationMethod"}:
+                if doc_key not in doc:
+                    continue
+                # A current-schema doc still computes IV/MOS/method when the
+                # price unit or comparison basis is unverified; the screen must
+                # not publish a comparison the engine refuses to compare. Other
+                # present keys are still assigned so a withheld value (None)
+                # clears a stale row attribute.
+                if valuation_reason and attr in _VALUATION_COMPARISON_ATTRS:
                     setattr(row, attr, None)
                     continue
-                value = doc.get(doc_key)
-                if value is not None:
-                    setattr(row, attr, value)
+                setattr(row, attr, doc.get(doc_key))
         return rows, "ok"
     except Exception as e:
         logger.warning(f"Fundamental enrichment failed: {e}")

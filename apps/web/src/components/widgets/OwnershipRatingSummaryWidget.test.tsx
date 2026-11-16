@@ -26,7 +26,14 @@ function readyQuery(data: unknown) {
 }
 
 const holderRows = [{ symbol: 'FPT', shareholder_name: 'Anchor', shareholder_type: 'fund', ownership_pct: 40, ownership_unit: 'percent', ownership_unit_status: 'explicit' }];
-const foreignRows = [{ buy_volume: 0, sell_volume: 0 }];
+// 20 qualifying weekday sessions ending 2026-05-29: the only shape that may
+// carry a "Foreign Net 20D" label.
+const sessionDates: string[] = [];
+for (const day = new Date(Date.UTC(2026, 4, 29)); sessionDates.length < 20; day.setUTCDate(day.getUTCDate() - 1)) {
+  const weekday = day.getUTCDay();
+  if (weekday !== 0 && weekday !== 6) sessionDates.push(day.toISOString().slice(0, 10));
+}
+const foreignRows = sessionDates.map((date) => ({ symbol: 'FPT', date, buy_volume: 0, sell_volume: 0 }));
 const insiderWindow = {
   symbol: 'FPT', period_days: 90, buy_count: 0, sell_count: 0,
   buy_value: 0, sell_value: 0, net_value: 0, sentiment_score: 0, total_deals: 0, value_unit: 'VND',
@@ -99,7 +106,8 @@ describe('OwnershipRatingSummaryWidget admission', () => {
     expect(payload.insiderNetValue).toBe(sentiment ? 0 : null);
     expect(screen.getByRole('status')).toHaveTextContent('Composite withheld');
     expect(screen.getByText('Score').nextElementSibling).toHaveTextContent('n/a');
-    expect(screen.getByText('Foreign Net 20D').nextElementSibling).toHaveTextContent(flows ? '0' : 'n/a');
+    expect(screen.getByText(flows ? 'Foreign Net 20D' : 'Foreign Net').nextElementSibling)
+      .toHaveTextContent(flows ? '0' : 'n/a');
     expect(screen.getByText('Insider Net 90D').nextElementSibling).toHaveTextContent(sentiment ? '0' : 'n/a');
   });
 

@@ -105,6 +105,10 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
   const hasData = seriesValues.length >= 3;
   const isFallback = Boolean(error && historyResponse?.data?.length);
 
+  const observationNote = rows.length
+    ? `Annual · ${seriesValues.length} positive observations · descriptive only`
+    : 'Annual · descriptive only';
+
   useEffect(() => {
     if (error && !hasData) return;
     onDataChange?.(buildWidgetRuntime({
@@ -144,7 +148,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
       exportFilename={`valuation_band_${upperSymbol}_${metric}`}
     >
       <div className="flex h-full flex-col bg-[var(--bg-primary)] p-3">
-        <div className="mb-3 flex items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
             {METRIC_OPTIONS.map((option) => (
               <button
@@ -166,7 +170,7 @@ export function ValuationBandWidget({ id, symbol, onRemove, onDataChange }: Valu
             fetchedAt={dataUpdatedAt}
             isCached={isFallback}
             isFetching={isFetching && hasData}
-            note={`Annual · ${seriesValues.length} positive observations · descriptive only`}
+            note={observationNote}
             sourceLabel="VniBB ratio history"
             align="right"
           />

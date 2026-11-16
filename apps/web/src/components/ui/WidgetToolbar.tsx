@@ -139,12 +139,20 @@ export function WidgetToolbar({
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !document.querySelector('[data-dropdown-menu-content], [data-ticker-combobox]')) {
+      // Defer only while focus is inside an open popover; a guide left open behind focus elsewhere
+      // must not turn this Escape into a no-op.
+      const openPopover = (event.target as Element | null)?.closest?.('[data-popover-open]');
+      const inOpenPopover = openPopover != null && compactPanelRef.current?.contains(openPopover);
+      if (event.key === 'Escape' && !inOpenPopover && !document.querySelector('[data-dropdown-menu-content], [data-ticker-combobox]')) {
         event.stopPropagation();
         setIsPanelOpen(false);
         compactTriggerRef.current?.focus();
       }
     };
+    // A guide opening inside the panel grows it without scrolling or resizing the
+    // window, so re-run the anchored position for that case too.
+    const panelObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(positionPanel);
+    if (panelObserver && compactPanelRef.current) panelObserver.observe(compactPanelRef.current);
     positionPanel();
     document.addEventListener('click', closeOutside);
     document.addEventListener('keydown', closeOnEscape, true);
@@ -152,6 +160,7 @@ export function WidgetToolbar({
     window.addEventListener('scroll', positionPanel, true);
     compactPanelRef.current?.querySelector<HTMLElement>('button, select')?.focus();
     return () => {
+      panelObserver?.disconnect();
       document.removeEventListener('click', closeOutside);
       document.removeEventListener('keydown', closeOnEscape, true);
       window.removeEventListener('resize', positionPanel);
@@ -165,7 +174,7 @@ export function WidgetToolbar({
   )));
 
   const guide = description && (
-    <Popover>
+    <Popover className={isCompact ? 'block w-full' : undefined}>
       <PopoverTrigger asChild>
         <button type="button" onClick={() => captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
           action: 'open_guide', widget_type: widgetType, widget_title: title, symbol,
@@ -173,14 +182,18 @@ export function WidgetToolbar({
           <Info size={12} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="left" className="z-[120] mt-2 max-h-[70vh] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] p-3 text-left shadow-lg">
-        <div className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{title}</div>
-        {(['purpose', 'calculation', 'interpretation'] as const).map(key => (
-          <div key={key} className="mb-2 text-xs text-[var(--text-secondary)]"><strong className="capitalize">{key}: </strong>{description[key]}</div>
-        ))}
-        {(['advanced_insights', 'limitations', 'pro_tips'] as const).map(key => description[key]?.length ? (
-          <div key={key} className="mb-2 text-xs text-[var(--text-secondary)]"><strong>{key.replace('_', ' ')}: </strong>{description[key]?.join(' · ')}</div>
-        ) : null)}
+      <PopoverContent align="left" className={isCompact
+        ? 'static z-[120] mt-2 max-h-none w-full overflow-visible rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] p-3 text-left shadow-lg'
+        : 'z-[120] mt-2 max-h-[70vh] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] p-3 text-left shadow-lg'}>
+        <div data-guide-popover className="break-words">
+          <div className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{title}</div>
+          {(['purpose', 'calculation', 'interpretation'] as const).map(key => (
+            <div key={key} className="mb-2 text-xs text-[var(--text-secondary)]"><strong className="capitalize">{key}: </strong>{description[key]}</div>
+          ))}
+          {(['advanced_insights', 'limitations', 'pro_tips'] as const).map(key => description[key]?.length ? (
+            <div key={key} className="mb-2 text-xs text-[var(--text-secondary)]"><strong>{key.replace('_', ' ')}: </strong>{description[key]?.join(' · ')}</div>
+          ) : null)}
+        </div>
       </PopoverContent>
     </Popover>
   );

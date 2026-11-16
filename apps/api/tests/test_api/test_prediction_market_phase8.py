@@ -13,7 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, text
+from sqlalchemy.ext.asyncio import AsyncSession
 from vnibb.api.v1 import prediction_markets as router
 from vnibb.models.prediction_market import PredictionMarket
 from vnibb.models.prediction_market_intraday_snapshot import (
@@ -122,9 +123,11 @@ async def test_multichoice_zero_price_counts_but_malformed_vectors_do_not(client
 @pytest.mark.asyncio
 async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, test_db):
     now = datetime.now(UTC)
+    # Both legs sit inside the sampling tolerance of a 1h window; the 3h row is
+    # a decoy that must lose to the nearer baseline for p-1.
     for source_id, price, previous in (("p-1", 0.6, 0.5), ("p-2", 0.9, 0.3), ("p-3", 0.51, 0.5)):
         test_db.add(_market(source="polymarket", source_id=source_id, question="CPI?", yes_price=price))
-        for captured_at, yes_price in ((now, price), (now - timedelta(hours=2), previous)):
+        for captured_at, yes_price in ((now, price), (now - timedelta(minutes=60), previous)):
             test_db.add(PredictionMarketIntradaySnapshot(
                 source="polymarket", source_id=source_id, question="CPI?", category="economic",
                 yes_price=yes_price, captured_at=captured_at,
@@ -138,9 +141,12 @@ async def test_alerts_select_nearest_baseline_and_rank_after_threshold(client, t
         "window_hours": 1, "min_movement_bps": 200, "limit": 1,
     })
     assert response.status_code == 200
-    assert response.json()["count"] == 1
-    assert response.json()["alerts"][0]["source_id"] == "p-2"
-    assert response.json()["alerts"][0]["movement"] == pytest.approx(0.6)
+    body = response.json()
+    assert body["status"] == "complete"
+    assert body["count"] == 1
+    assert body["alerts"][0]["source_id"] == "p-2"
+    assert body["alerts"][0]["movement"] == pytest.approx(0.6)
+    assert body["alerts"][0]["elapsed_seconds"] == 3600
 
 
 @pytest.mark.asyncio
@@ -492,3 +498,275 @@ async def test_consensus_observed_zero_volume_remains_zero(client, test_db):
     assert response["consensus_yes_price"] == 0
     assert response["sources"][0]["yes_price"] == 0
     assert response["sources"][0]["volume"] == 0
+
+
+async def _drop_intraday_table(test_db):
+    await test_db.execute(text("DROP TABLE prediction_market_intraday_snapshots"))
+    await test_db.commit()
+
+
+def _snapshot(
+    source_id: str, captured_at: datetime, yes_price: float, *, source: str = "polymarket",
+) -> PredictionMarketIntradaySnapshot:
+    return PredictionMarketIntradaySnapshot(
+        source=source, source_id=source_id, question="CPI?", category="economic",
+        yes_price=yes_price, captured_at=captured_at,
+    )
+
+
+async def _alerts(client, **params) -> dict:
+    response = await client.get("/api/v1/prediction-markets/alerts", params=params)
+    assert response.status_code == 200
+    return response.json()
+
+
+@pytest.mark.asyncio
+async def test_alerts_report_unavailable_storage_without_an_empty_claim(client, test_db):
+    await _drop_intraday_table(test_db)
+    body = await _alerts(client, window_hours=1)
+    assert body["status"] == "unavailable"
+    assert body["count"] == 0
+    assert body["alerts"] == []
+    assert body["coverage"] is None
+    assert body["data_observed_through"] is None
+    # The sampling contract is echoed even when the store is unreadable.
+    assert body["cadence_minutes"] == 15
+    assert body["baseline_tolerance_seconds"] == 1800
+
+
+@pytest.mark.asyncio
+async def test_alerts_report_empty_store_distinct_from_unavailable(client, test_db):
+    body = await _alerts(client, window_hours=1)
+    assert body["status"] == "empty"
+    assert body["coverage"] == {
+        "comparable_markets": 0, "current_markets": 0, "evaluated_markets": 0,
+    }
+    assert body["data_observed_through"] is None
+
+
+@pytest.mark.asyncio
+async def test_alerts_never_emit_a_49_hour_pair_as_a_one_hour_move(client, test_db):
+    now = datetime.now(UTC)
+    test_db.add(_market(source="polymarket", source_id="p-long", question="CPI?", yes_price=0.6))
+    test_db.add_all([
+        _snapshot("p-long", now, 0.6),
+        _snapshot("p-long", now - timedelta(hours=49), 0.4),
+    ])
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1)
+    assert body["status"] == "no_baseline"
+    assert body["count"] == 0
+    assert body["alerts"] == []
+    assert body["coverage"]["comparable_markets"] == 0
+    assert body["coverage"]["current_markets"] == 1
+
+
+@pytest.mark.asyncio
+async def test_alerts_complete_zero_movement_counts_the_evaluated_universe(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    test_db.add(_market(source="polymarket", source_id="flat", question="CPI?", yes_price=0.5))
+    test_db.add_all([
+        _snapshot("flat", now - timedelta(hours=1), 0.5),
+        _snapshot("flat", now, 0.5),
+    ])
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1)
+    assert body["status"] == "complete"
+    assert body["count"] == 0
+    coverage = body["coverage"]
+    assert coverage["evaluated_markets"] == coverage["comparable_markets"] == coverage["current_markets"] == 1
+    assert body["data_observed_through"] is not None
+
+
+@pytest.mark.asyncio
+async def test_alerts_return_both_timestamps_and_the_measured_interval(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    test_db.add(_market(source="kalshi", source_id="moved", question="CPI?", yes_price=0.7))
+    test_db.add_all([
+        _snapshot("moved", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("moved", now, 0.7, source="kalshi"),
+    ])
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1)
+    assert body["status"] == "complete"
+    assert body["count"] == 1
+    row = body["alerts"][0]
+    assert row["movement"] == pytest.approx(0.2)
+    # SQLite returns these naive; the response must still state UTC explicitly,
+    # or a client east of UTC renders the source instant shifted.
+    baseline_at = datetime.fromisoformat(row["baseline_observed_at"])
+    current_at = datetime.fromisoformat(row["current_observed_at"])
+    observed_through = datetime.fromisoformat(body["data_observed_through"])
+    for stamp in (baseline_at, current_at, observed_through):
+        assert stamp.tzinfo is not None
+        assert stamp.utcoffset() == timedelta(0)
+    assert baseline_at == now - timedelta(hours=1)
+    assert current_at == now
+    assert observed_through == now
+    assert row["elapsed_seconds"] == 3600
+    # 1h window with a 30-minute band.
+    assert 1800 <= row["elapsed_seconds"] <= 5400
+
+
+@pytest.mark.asyncio
+async def test_alerts_tolerance_boundaries_admit_the_band_and_reject_beyond_it(client, test_db):
+    # The route samples its own ``now`` after this fixture clock, so each edge is
+    # probed 30s inside and outside it rather than exactly on it.
+    now = datetime.now(UTC).replace(microsecond=0)
+    cutoff = now - timedelta(hours=1)
+    tolerance = timedelta(minutes=30)
+    for source_id in ("edge-in", "edge-out", "current-in", "current-out"):
+        test_db.add(_market(source="kalshi", source_id=source_id, question="CPI?", yes_price=0.7))
+    inside = timedelta(seconds=30)
+    test_db.add_all([
+        # Baseline inside the baseline edge: compared.
+        _snapshot("edge-in", cutoff - tolerance + inside, 0.5, source="kalshi"),
+        _snapshot("edge-in", now - timedelta(seconds=1), 0.7, source="kalshi"),
+        # Baseline outside the baseline edge: not compared.
+        _snapshot("edge-out", cutoff - tolerance - inside, 0.5, source="kalshi"),
+        _snapshot("edge-out", now - timedelta(seconds=1), 0.7, source="kalshi"),
+        # Current inside the current edge: compared.
+        _snapshot("current-in", cutoff - inside, 0.5, source="kalshi"),
+        _snapshot("current-in", now - tolerance + inside, 0.7, source="kalshi"),
+        # Current outside the current edge: not compared.
+        _snapshot("current-out", cutoff - inside, 0.5, source="kalshi"),
+        _snapshot("current-out", now - tolerance - inside, 0.7, source="kalshi"),
+    ])
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1, min_movement_bps=10)
+    assert {row["source_id"] for row in body["alerts"]} == {"edge-in", "current-in"}
+    assert body["status"] == "stale"
+    assert body["coverage"]["evaluated_markets"] == 2
+
+
+@pytest.mark.asyncio
+async def test_alerts_exclude_future_and_out_of_range_measurements(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    for source_id in ("future", "nonfinite", "out-of-range"):
+        test_db.add(_market(source="kalshi", source_id=source_id, question="CPI?", yes_price=0.7))
+    test_db.add_all([
+        _snapshot("future", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("future", now + timedelta(minutes=5), 0.7, source="kalshi"),
+        # SQLite stores NaN as NULL, so an infinite price is the storable
+        # non-finite case; it fails the ``<= 1`` admissibility test.
+        _snapshot("nonfinite", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("nonfinite", now, float("inf"), source="kalshi"),
+        _snapshot("out-of-range", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("out-of-range", now, 1.4, source="kalshi"),
+    ])
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1, min_movement_bps=10)
+    assert body["alerts"] == []
+    # None of the three has an admissible current observation.
+    assert body["coverage"]["comparable_markets"] == 3
+    assert body["coverage"]["current_markets"] == 0
+    assert body["status"] == "stale"
+
+
+@pytest.mark.asyncio
+async def test_alerts_partial_coverage_is_stale_and_keeps_honest_alerts(client, test_db):
+    now = datetime.now(UTC).replace(microsecond=0)
+    test_db.add_all([
+        _market(source="kalshi", source_id="fresh", question="CPI?", yes_price=0.7),
+        _market(source="kalshi", source_id="stale-current", question="CPI?", yes_price=0.7),
+    ])
+    test_db.add_all([
+        _snapshot("fresh", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("fresh", now, 0.7, source="kalshi"),
+        _snapshot("stale-current", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("stale-current", now - timedelta(minutes=45), 0.7, source="kalshi"),
+    ])
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1)
+    assert body["status"] == "stale"
+    assert body["coverage"]["comparable_markets"] == 2
+    assert body["coverage"]["evaluated_markets"] == 1
+    # A stale market never suppresses a comparable market's honest alert.
+    assert [row["source_id"] for row in body["alerts"]] == ["fresh"]
+
+
+@pytest.mark.asyncio
+async def test_alerts_reraise_non_missing_storage_errors(client, test_db, monkeypatch):
+    from sqlalchemy.exc import OperationalError as SAOperationalError
+
+    async def explode(*args, **kwargs):
+        raise SAOperationalError("SELECT 1", {}, RuntimeError("connection reset"))
+
+    monkeypatch.setattr("sqlalchemy.ext.asyncio.AsyncSession.execute", explode)
+    response = await client.get("/api/v1/prediction-markets/alerts", params={"window_hours": 1})
+    assert response.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_alerts_tolerance_is_derived_from_the_shared_cadence(client):
+    from vnibb.core.scheduler import (
+        PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES as scheduled_cadence,
+    )
+    from vnibb.services.prediction_market_policy import (
+        PREDICTION_MARKET_ALERT_BASELINE_TOLERANCE as tolerance,
+    )
+
+    body = await _alerts(client, window_hours=1)
+    assert scheduled_cadence == body["cadence_minutes"]
+    assert body["baseline_tolerance_seconds"] == 2 * scheduled_cadence * 60
+    assert body["baseline_tolerance_seconds"] == int(tolerance.total_seconds())
+
+
+@pytest.mark.asyncio
+async def test_alerts_read_coverage_and_rows_in_one_statement(client, test_db, monkeypatch):
+    """One statement, so a commit cannot land between the counts and the rows.
+
+    Four separate SELECTs let a catalogue or snapshot commit land in between: the
+    counts could report ``comparable_markets == 0`` while the row read returned an
+    alert, which the route then discarded as ``no_baseline`` with a nonzero
+    evaluated count. A single statement sees a single database snapshot, so that
+    interleaving is unrepresentable.
+    """
+    now = datetime.now(UTC).replace(microsecond=0)
+    test_db.add(_market(source="kalshi", source_id="one", question="CPI?", yes_price=0.7))
+    test_db.add_all([
+        _snapshot("one", now - timedelta(hours=1), 0.5, source="kalshi"),
+        _snapshot("one", now, 0.7, source="kalshi"),
+    ])
+    await test_db.commit()
+
+    original = AsyncSession.execute
+    statements: list[str] = []
+
+    async def counting(session, statement, *args, **kwargs):
+        statements.append(str(statement))
+        return await original(session, statement, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", counting)
+    body = await _alerts(client, window_hours=1)
+
+    assert len(statements) == 1, statements
+    assert "UNION" in statements[0].upper()
+    assert body["coverage"] == {
+        "comparable_markets": 1, "current_markets": 1, "evaluated_markets": 1,
+    }
+    assert body["status"] == "complete"
+    assert body["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_alerts_coverage_bounds_the_alert_set(client, test_db):
+    """No alert may come from a market the coverage counts did not evaluate."""
+    now = datetime.now(UTC).replace(microsecond=0)
+    for source_id, current_at in (("fresh", now), ("stale-current", now - timedelta(minutes=45))):
+        test_db.add(_market(source="kalshi", source_id=source_id, question="CPI?", yes_price=0.7))
+        test_db.add(_snapshot(source_id, now - timedelta(hours=1), 0.5, source="kalshi"))
+        test_db.add(_snapshot(source_id, current_at, 0.7, source="kalshi"))
+    await test_db.commit()
+
+    body = await _alerts(client, window_hours=1)
+    coverage = body["coverage"]
+    assert coverage["evaluated_markets"] <= coverage["current_markets"] <= coverage["comparable_markets"]
+    assert len(body["alerts"]) <= coverage["evaluated_markets"]
+    assert body["status"] == "stale"

@@ -209,11 +209,11 @@ export function useMetricsHistory(
 
 export function useForeignTrading(
     symbol: string,
-    options?: { limit?: number; enabled?: boolean }
+    options?: { limit?: number; sessions?: number; enabled?: boolean }
 ) {
     return useQuery({
-        queryKey: queryKeys.foreignTrading(symbol, options?.limit),
-        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit }),
+        queryKey: queryKeys.foreignTrading(symbol, options?.limit, options?.sessions),
+        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit, sessions: options?.sessions }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
         refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.foreignTrading),

@@ -380,6 +380,97 @@ async def test_news_feed_endpoint_marks_market_wide_fallback(client, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_news_feed_endpoint_keeps_sector_overlap_unscored_and_labelled(
+    client, monkeypatch
+):
+    """#250: an industry overlap reaches the wire labelled, with no score."""
+
+    async def fake_ranked_rows(**_kwargs):
+        return (
+            [
+                {
+                    "id": 3,
+                    "title": "Giá thép xây dựng tăng trong quý này",
+                    "summary": "Nguồn cung thắt chặt.",
+                    "source": "cafef",
+                    "published_date": datetime(2026, 3, 22, 11, 0),
+                    "url": "https://example.com/steel-prices",
+                    "related_symbols": [],
+                    "matched_symbols": [],
+                    "relevance_score": None,
+                    "match_reason": "sector_keyword",
+                    "association_class": "verified_sector",
+                    "match_evidence": {
+                        "sector_keywords": ["thép"],
+                        "matched_terms": [
+                            {"term": "thép", "field": "title", "kind": "sector_keyword"}
+                        ],
+                    },
+                    "is_market_wide_fallback": False,
+                }
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(news, "get_ranked_news_rows", fake_ranked_rows)
+
+    response = await client.get(
+        "/api/v1/news/feed", params={"symbol": "HPG", "mode": "related", "limit": 10}
+    )
+
+    assert response.status_code == 200
+    article = response.json()["articles"][0]
+    assert article["association_class"] == "verified_sector"
+    assert article["relevance_score"] is None
+    assert article["match_evidence"]["sector_keywords"] == ["thép"]
+    assert article["match_evidence"]["matched_terms"][0]["term"] == "thép"
+    assert article["matched_symbols"] == []
+    assert article["is_market_wide_fallback"] is False
+
+
+@pytest.mark.asyncio
+async def test_news_flow_endpoint_exposes_direct_association_evidence(client, monkeypatch):
+    async def fake_ranked_rows(**_kwargs):
+        return (
+            [
+                {
+                    "id": "direct-1",
+                    "title": "HPG công bố kết quả kinh doanh",
+                    "source": "cafef",
+                    "url": "https://example.com/hpg-results",
+                    "related_symbols": ["HPG"],
+                    "matched_symbols": ["HPG"],
+                    "relevance_score": 1.0,
+                    "match_reason": "exact_symbol_title",
+                    "association_class": "direct_company",
+                    "match_evidence": {
+                        "matched_terms": [
+                            {"term": "HPG", "field": "title", "kind": "symbol"}
+                        ]
+                    },
+                }
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.get_ranked_news_rows", fake_ranked_rows
+    )
+
+    response = await client.get(
+        "/api/v1/news/flow", params={"symbols": "HPG", "mode": "related", "limit": 10}
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["association_class"] == "direct_company"
+    assert item["match_evidence"]["matched_terms"] == [
+        {"term": "HPG", "field": "title", "kind": "symbol"}
+    ]
+    assert item["relevance_score"] == 1.0
+
+
+@pytest.mark.asyncio
 async def test_world_news_endpoint_returns_live_source_links(client, monkeypatch):
     async def fake_world_news_feed(**kwargs):
         assert kwargs["region"] == "vietnam"
@@ -566,3 +657,74 @@ async def test_news_sources_reports_free_rss_available():
 
     assert payload["available"] is True
     assert payload["sources"] == news.news_crawler.SOURCES
+
+
+@pytest.mark.asyncio
+async def test_news_feed_carries_sentiment_provenance_without_guessing(client, monkeypatch):
+    """#250: legacy bare label stays unknown, no label is unavailable, declared is echoed."""
+
+    async def fake_ranked_rows(**_kwargs):
+        return (
+            [
+                {
+                    "id": 7,
+                    "title": "HPG lợi nhuận tăng",
+                    "source": "cafef",
+                    "published_date": datetime(2026, 3, 5, 9, 0),
+                    "url": "https://example.com/hpg-legacy",
+                    "related_symbols": ["HPG"],
+                    "sentiment": "bullish",
+                    "sentiment_score": 0,
+                },
+                {
+                    "id": 8,
+                    "title": "HPG no label",
+                    "source": "cafef",
+                    "published_date": datetime(2026, 3, 5, 10, 0),
+                    "url": "https://example.com/hpg-unlabelled",
+                    "related_symbols": ["HPG"],
+                },
+                {
+                    "id": 9,
+                    "title": "HPG provider class",
+                    "source": "issuer-feed",
+                    "published_date": datetime(2026, 3, 5, 11, 0),
+                    "url": "https://example.com/hpg-provider",
+                    "related_symbols": ["HPG"],
+                    "sentiment": "positive",
+                    "sentiment_score": 71,
+                    "sentiment_source": "provider",
+                },
+            ],
+            False,
+        )
+
+    monkeypatch.setattr(news, "get_ranked_news_rows", fake_ranked_rows)
+
+    response = await client.get("/api/v1/news/feed", params={"symbol": "HPG", "limit": 10})
+
+    assert response.status_code == 200
+    articles = {article["id"]: article for article in response.json()["articles"]}
+    assert articles[7]["sentiment_source"] is None
+    # A reported zero confidence survives the mapping.
+    assert articles[7]["sentiment_score"] == 0
+    assert articles[8]["sentiment_source"] == "unavailable"
+    assert articles[8]["sentiment_score"] is None
+    assert articles[9]["sentiment_source"] == "provider"
+
+
+@pytest.mark.asyncio
+async def test_news_search_resolves_sentiment_provenance(monkeypatch):
+    """#250: the legacy search route states provenance instead of guessing it."""
+
+    async def fake_search_news(symbol, limit):
+        return [
+            {"id": 1, "title": "HPG update", "source": "cafef", "sentiment": "neutral"},
+            {"id": 2, "title": "HPG bare", "source": "cafef"},
+        ]
+
+    monkeypatch.setattr(news.news_crawler, "search_news", fake_search_news)
+
+    feed = await news.search_news_by_symbol("HPG", limit=5)
+
+    assert [article.sentiment_source for article in feed.articles] == [None, "unavailable"]

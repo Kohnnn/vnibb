@@ -1,6 +1,8 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { DashboardGrid, type LayoutItem } from './DashboardGrid';
+import { DASHBOARD_TEMPLATES } from '@/types/dashboard-templates';
+import { fitTemplateWidgets } from '@/lib/dashboardLayout';
 
 jest.mock('@/hooks/useResizeNudge', () => ({ useResizeNudge: () => {} }));
 
@@ -122,4 +124,40 @@ test('an initially hidden grid waits for real width without persisting its respo
   expect(chart.style.width).toBe('374px');
   expect(screen.getByTestId('table-cell').style.width).toBe('374px');
   expect(onLayoutChange).not.toHaveBeenCalled();
+});
+
+/**
+ * #252 mounted-grid regression.
+ *
+ * The source/reducer geometry alone could not catch this: the relocation
+ * happened inside react-grid-layout, where static items are `correctBounds`'d
+ * before `noCompactor` runs. This mounts the *real* library on the Market
+ * Overview template's fitted placement and asserts Market Heatmap keeps its
+ * authored top-of-fold row instead of being pushed to row 15.
+ */
+test('a fresh Market Overview template reaches the real grid without relocating Market Heatmap', async () => {
+  const template = DASHBOARD_TEMPLATES.find((item) => item.id === 'market-overview');
+  if (!template) throw new Error('market-overview template is missing');
+
+  const placed = fitTemplateWidgets(template.widgets).map((widget) => ({
+    i: widget.type,
+    x: widget.layout.x,
+    y: widget.layout.y,
+    w: widget.layout.w,
+    h: widget.layout.h,
+  }));
+  const heatmap = placed.find((item) => item.i === 'market_heatmap');
+  expect(heatmap).toMatchObject({ x: 0, y: 7, w: 10, h: 12 });
+
+  render(
+    <DashboardGrid layouts={placed} isEditing={false}>
+      {placed.map((item) => <div key={item.i} data-testid={`cell-${item.i}`} />)}
+    </DashboardGrid>
+  );
+  await resizeGridTo(LOCKED_GRID_WIDTH);
+
+  // 40px rows + 6px gaps: row 7 is y=322px. Row 15 (the reported live defect)
+  // would be 690px.
+  expect(screen.getByTestId('cell-market_heatmap').style.transform).toBe(lgTranslate(0, 7));
+  expect(screen.getByTestId('cell-market_overview').style.transform).toBe(lgTranslate(0, 0));
 });

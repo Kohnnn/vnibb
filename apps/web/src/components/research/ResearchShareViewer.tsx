@@ -19,13 +19,27 @@ export function ResearchShareViewer({ shareId }: { shareId: string }) {
         if (!signedIn || !user) return;
         const controller = new AbortController();
         const userId = user.id;
+        let expiryTimer: number | undefined;
         void readResearchShare(shareId, controller.signal).then((share) => {
-            if (!controller.signal.aborted) setSnapshot({ userId, shareId, share });
+            if (controller.signal.aborted) return;
+            const expiresAt = Date.parse(share.expires_at);
+            const checkExpiry = () => {
+                if (controller.signal.aborted) return;
+                const remaining = expiresAt - Date.now();
+                if (!Number.isFinite(remaining) || remaining <= 0) {
+                    setSnapshot(null);
+                    setError('Research share is unavailable.');
+                    return;
+                }
+                expiryTimer = window.setTimeout(checkExpiry, Math.min(remaining, 2_147_483_647));
+            };
+            if (expiresAt > Date.now()) setSnapshot({ userId, shareId, share });
+            checkExpiry();
         }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Research share is unavailable.'); });
         const onVisibility = () => { if (document.visibilityState === 'visible') setRefresh((value) => value + 1); };
         document.addEventListener('visibilitychange', onVisibility);
         const interval = window.setInterval(() => setRefresh((value) => value + 1), 60000);
-        return () => { controller.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility); };
+        return () => { controller.abort(); window.clearTimeout(expiryTimer); window.clearInterval(interval); document.removeEventListener('visibilitychange', onVisibility); };
     }, [shareId, signedIn, user?.id, refresh]);
 
     const share = signedIn && snapshot && snapshot.shareId === shareId && snapshot.userId === user?.id && Date.parse(snapshot.share.expires_at) > Date.now() ? snapshot.share : null;

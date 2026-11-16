@@ -62,9 +62,11 @@ function getNumberConfig(config: Record<string, unknown> | undefined, key: strin
 }
 
 function chipClass(active: boolean) {
+  // Selection is interaction, not financial direction: the active chip takes
+  // the blue state tint (#200) and never the gain green.
   return `rounded-md px-2 py-1 text-[10px] font-bold uppercase transition-colors ${
     active
-      ? 'bg-[var(--color-positive-bg)] text-[var(--color-positive)] ring-1 ring-[var(--color-state-border)]'
+      ? 'bg-[var(--color-state-bg)] text-[var(--color-accent-primary)] ring-1 ring-[var(--color-state-border)]'
       : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
   }`;
 }
@@ -199,8 +201,8 @@ function WorldNewsLiveStreamWidgetComponent({
         <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.16em] text-[var(--text-muted)]">
-              <Radio className={`h-3 w-3 ${isFetching ? 'animate-pulse text-[var(--color-positive)]' : 'text-[var(--color-positive)]'}`} />
-              Polling Stream
+              <Radio className={`h-3 w-3 text-[var(--text-muted)] ${isFetching ? 'animate-pulse' : ''}`} />
+              Polling stream
             </div>
             <WidgetMeta
               updatedAt={observation.lastDataDate}
@@ -252,52 +254,49 @@ function WorldNewsLiveStreamWidgetComponent({
           ) : (
             <div>
               {latestArticle && (
-                <article className="relative overflow-hidden border-b border-[var(--border-subtle)] bg-[#06120d] p-3 text-white">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.18),transparent_32%),linear-gradient(135deg,rgba(6,18,13,1),rgba(3,7,18,1))]" />
-                  <div className="relative z-10">
-                    <div className="mb-2 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--color-positive)]">
-                      <Zap className="h-3 w-3" />
-                      Latest Signal
-                      <span className="ml-auto text-white/45">{formatArticleTime(latestArticle.published_at)}</span>
-                    </div>
+                <article className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
+                  <div className="mb-2 flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                    <Zap className="h-3 w-3 text-[var(--color-accent-primary)]" />
+                    Latest headline
+                    <span className="ml-auto normal-case tracking-normal text-[var(--text-muted)]">{formatArticleTime(latestArticle.published_at)}</span>
+                  </div>
+                  <a
+                    href={latestArticle.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-start gap-2 text-base font-semibold leading-tight text-[var(--text-primary)] hover:text-[var(--color-accent-primary)]"
+                  >
+                    <span className="line-clamp-3 flex-1">{latestArticle.title}</span>
+                    <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 opacity-60 group-hover:opacity-100" />
+                  </a>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                    <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 font-bold uppercase text-[var(--color-accent-primary)]">
+                      {latestArticle.region}
+                    </span>
+                    <span className="rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-bold uppercase text-[var(--text-secondary)]">
+                      {formatCategory(latestArticle.category)}
+                    </span>
+                    <span className="flex items-center gap-1 font-bold uppercase text-[var(--text-secondary)]">
+                      <Globe2 className="h-2.5 w-2.5" />
+                      {latestArticle.source_domain}
+                    </span>
                     <a
-                      href={latestArticle.url}
+                      href={latestArticle.source_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="group flex items-start gap-2 text-base font-black leading-tight text-white hover:text-[var(--color-positive)]"
+                      className="ml-auto hover:text-[var(--color-accent-primary)]"
                     >
-                      <span className="line-clamp-3 flex-1">{latestArticle.title}</span>
-                      <ExternalLink className="mt-1 h-3.5 w-3.5 shrink-0 opacity-60 group-hover:opacity-100" />
+                      Source
                     </a>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-white/55">
-                      <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 font-black uppercase text-[var(--color-positive)]">
-                        {latestArticle.region}
-                      </span>
-                      <span className="rounded border border-white/10 px-1.5 py-0.5 font-bold uppercase text-white/70">
-                        {formatCategory(latestArticle.category)}
-                      </span>
-                      <span className="flex items-center gap-1 font-bold uppercase text-white/65">
-                        <Globe2 className="h-2.5 w-2.5" />
-                        {latestArticle.source_domain}
-                      </span>
-                      <a
-                        href={latestArticle.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="ml-auto hover:text-[var(--color-positive)]"
-                      >
-                        Source
-                      </a>
-                      <a
-                        href={latestArticle.feed_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 hover:text-[var(--color-positive)]"
-                      >
-                        <Rss className="h-2.5 w-2.5" />
-                        Feed
-                      </a>
-                    </div>
+                    <a
+                      href={latestArticle.feed_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 hover:text-[var(--color-accent-primary)]"
+                    >
+                      <Rss className="h-2.5 w-2.5" />
+                      Feed
+                    </a>
                   </div>
                 </article>
               )}
@@ -306,15 +305,15 @@ function WorldNewsLiveStreamWidgetComponent({
                 {articles.slice(1).map((article: WorldNewsArticle, index) => (
                   <article key={article.id} className="grid grid-cols-[46px_minmax(0,1fr)] gap-3 p-3 transition-colors hover:bg-[var(--bg-tertiary)]/30">
                     <div className="flex flex-col items-center pt-0.5">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] text-[10px] font-black text-[var(--color-positive)]">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-tertiary)] font-mono text-[10px] font-semibold tabular-nums text-[var(--text-secondary)]">
                         {String(index + 2).padStart(2, '0')}
                       </span>
                       <span className="mt-1 h-full w-px bg-[var(--border-subtle)]" />
                     </div>
                     <div className="min-w-0">
                       <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                        <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-positive-bg)] px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-[var(--color-positive)]">
-                          Live
+                        <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--color-accent-primary)]">
+                          Stream
                         </span>
                         <span className="rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
                           {formatCategory(article.category)}
@@ -328,7 +327,7 @@ function WorldNewsLiveStreamWidgetComponent({
                         href={article.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="group flex items-start gap-2 text-sm font-semibold leading-snug text-[var(--text-primary)] hover:text-[var(--color-positive)]"
+                        className="group flex items-start gap-2 text-sm font-semibold leading-snug text-[var(--text-primary)] hover:text-[var(--color-accent-primary)]"
                       >
                         <span className="line-clamp-2 flex-1">{article.title}</span>
                         <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-50 group-hover:opacity-100" />
@@ -342,7 +341,7 @@ function WorldNewsLiveStreamWidgetComponent({
                           href={article.source_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="ml-auto rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-positive)]"
+                          className="ml-auto rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)]"
                         >
                           Source
                         </a>
@@ -350,7 +349,7 @@ function WorldNewsLiveStreamWidgetComponent({
                           href={article.feed_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-positive)]"
+                          className="flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 font-bold uppercase hover:border-[var(--color-state-border)] hover:text-[var(--color-accent-primary)]"
                         >
                           <Rss className="h-2.5 w-2.5" />
                           Feed

@@ -93,6 +93,7 @@ from vnibb.providers.vnstock.shareholders import (
 from vnibb.providers.vnstock.stock_quote import StockQuoteData, VnstockStockQuoteFetcher
 from vnibb.providers.vnstock.subsidiaries import SubsidiariesQueryParams, VnstockSubsidiariesFetcher
 from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
+from vnibb.services import statement_admission as _statement_admission
 from vnibb.services.cache_manager import CacheManager
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import (
@@ -101,7 +102,13 @@ from vnibb.services.data_pipeline import (
 )
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
-from vnibb.services.fundamental_valuation import fundamental_valuation_unavailable_reason
+from vnibb.services.foreign_flow_coverage import (
+    PROVIDER_ROW_CAP,
+    build_foreign_flow_coverage,
+    provider_row_limit,
+    requested_session_dates,
+)
+from vnibb.services.fundamental_valuation import admit_fundamental_snapshot, fundamental_valuation_unavailable_reason
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 from vnibb.services.vietcap_client import VietcapClient
@@ -282,89 +289,6 @@ async def _refresh_profile_cache(symbol: str) -> None:
             raise
         logger.warning(f"Background profile refresh failed (symbol={symbol}): {e}")
 
-# Model field -> SQL column for the financial fields whose names differ. The
-# MCP reader applies the same mapping, so both readers resolve one column.
-_STATEMENT_SQL_COLUMNS = {
-    "pre_tax_profit": "income_before_tax",
-    "profit_before_tax": "income_before_tax",
-    "tax_expense": "income_tax",
-    "long_term_liabilities": "non_current_liabilities",
-}
-_STATEMENT_CANONICAL_ALIASES = {
-    "profit_before_tax": "pre_tax_profit", "pre_tax_profit": "profit_before_tax",
-    "cash": "cash_and_equivalents", "cash_and_equivalents": "cash",
-    "equity": "total_equity", "total_equity": "equity",
-    "net_cash_flow": "net_change_in_cash", "net_change_in_cash": "net_cash_flow",
-    "capital_expenditure": "capex", "capex": "capital_expenditure",
-}
-
-
-
-
-def _restore_lineage_statement(row: Any, raw: dict[str, Any], model: Any, restored: FinancialStatementData) -> FinancialStatementData:
-    """Serve a stored row from its `canonical_data` while the two agree.
-
-    A sync can leave a canonical that no longer describes the row the upsert
-    kept. Restoring such a canonical would serve a value its lineage does not
-    back, and copying the stored column over it while keeping the canonical's
-    provenance certifies it anyway. Only the disagreeing metrics are withheld,
-    each with its own unavailable reason, so the rest of the statement stays
-    readable.
-    """
-    unavailable = dict(restored.unit_metadata)
-    cleared = {}
-    withheld = {}
-    seen: set[str] = set()
-    for name in FinancialStatementData.model_fields:
-        if name in seen or name in {"fiscal_year", "fiscal_quarter"}:
-            continue
-        # A semantic alias names the same metric (`capex` for
-        # `capital_expenditure`), so every spelling shares one decision and a
-        # withheld metric is cleared under all of its names.
-        family = {name, *(alias for alias, target in _STATEMENT_CANONICAL_ALIASES.items()
-                          if target == name)}
-        seen |= family
-        # The SQL column may be named for any spelling in the family (`capex`
-        # has no column; `capital_expenditure` does).
-        column = next((_STATEMENT_SQL_COLUMNS.get(field, field) for field in sorted(family)
-                       if hasattr(row, _STATEMENT_SQL_COLUMNS.get(field, field))
-                       and isinstance(getattr(row, _STATEMENT_SQL_COLUMNS.get(field, field)), (int, float))),
-                      _STATEMENT_SQL_COLUMNS.get(name, name))
-        stored_value = getattr(row, column, None)
-        if not isinstance(stored_value, (int, float)):
-            # No stored value: the canonical is the only copy and is served as
-            # it is, which is what enriches a row that predates a metric.
-            continue
-        stated_fields = [field for field in family if field in restored.model_fields_set]
-        stated = sorted({value for field in stated_fields
-                         if isinstance(value := getattr(restored, field, None), (int, float))})
-        # Only a field the canonical actually states can disagree. The sync dumps
-        # every field, but a partial canonical may omit a metric entirely; that
-        # says nothing about the column, so the stored value is served as it is.
-        # A stated null is an explicit no-value and disagrees; an omitted metric
-        # says nothing and leaves the stored observation served.
-        disagrees = stated != [stored_value] if stated_fields else False
-        if disagrees:
-            for field in family:
-                cleared[field] = None
-                unavailable[field] = {
-                    **unavailable.get(field, {}),
-                    "unavailable_reason": "stored_statement_disagrees_with_lineage",
-                }
-            withheld[column] = stored_value
-        else:
-            # Stated-and-agreeing, or omitted: serve the stored observation under
-            # every spelling the canonical may be read by.
-            for field in family:
-                cleared[field] = stored_value
-    if cleared:
-        restored = restored.model_copy(update={**cleared, "unit_metadata": unavailable})
-    # The withheld column value is still a real stored observation; disclose it
-    # rather than dropping it from the response.
-    restored.raw_data = {**raw, **({"withheld_observations": withheld} if withheld else {})}
-    return restored
-
-
 async def _load_financial_statement_fallback(
     db: AsyncSession,
     symbol: str,
@@ -417,109 +341,14 @@ async def _load_financial_statement_fallback(
     result = await db.execute(stmt)
     rows = result.scalars().all()
 
+    # One shared projection + admission path, so a reader cannot invent a
+    # spelling the writer never persisted or admit a field the loader withholds.
     fallback_rows = [
-        FinancialStatementData(
-            symbol=row.symbol,
-            period=row.period,
-            statement_type=statement_type,
-            fiscal_year=row.fiscal_year,
-            fiscal_quarter=row.fiscal_quarter,
-            revenue=getattr(row, "revenue", None),
-            cost_of_revenue=getattr(row, "cost_of_revenue", None),
-            gross_profit=getattr(row, "gross_profit", None),
-            operating_income=getattr(row, "operating_income", None),
-            pre_tax_profit=getattr(
-                row,
-                "pre_tax_profit",
-                getattr(row, "income_before_tax", None),
-            ),
-            profit_before_tax=getattr(
-                row,
-                "pre_tax_profit",
-                getattr(row, "income_before_tax", None),
-            ),
-            tax_expense=getattr(row, "tax_expense", getattr(row, "income_tax", None)),
-            interest_expense=getattr(row, "interest_expense", None),
-            depreciation=getattr(row, "depreciation", None),
-            selling_general_admin=getattr(row, "selling_general_admin", None),
-            research_development=getattr(row, "research_development", None),
-            other_income=getattr(row, "other_income", None),
-            net_income=getattr(row, "net_income", None),
-            ebitda=getattr(row, "ebitda", None),
-            eps=getattr(row, "eps", None),
-            eps_diluted=getattr(row, "eps_diluted", None),
-            total_assets=getattr(row, "total_assets", None),
-            total_liabilities=getattr(row, "total_liabilities", None),
-            total_equity=getattr(row, "total_equity", None),
-            cash_and_equivalents=getattr(row, "cash_and_equivalents", None),
-            cash=getattr(row, "cash_and_equivalents", getattr(row, "cash", None)),
-            inventory=getattr(row, "inventory", None),
-            current_assets=getattr(row, "current_assets", None),
-            fixed_assets=getattr(row, "fixed_assets", None),
-            current_liabilities=getattr(row, "current_liabilities", None),
-            long_term_liabilities=getattr(
-                row,
-                "long_term_liabilities",
-                getattr(row, "non_current_liabilities", None),
-            ),
-            retained_earnings=getattr(row, "retained_earnings", None),
-            short_term_debt=getattr(row, "short_term_debt", None),
-            long_term_debt=getattr(row, "long_term_debt", None),
-            accounts_receivable=getattr(row, "accounts_receivable", None),
-            accounts_payable=getattr(row, "accounts_payable", None),
-            customer_deposits=getattr(row, "customer_deposits", None),
-            goodwill=getattr(row, "goodwill", None),
-            intangible_assets=getattr(row, "intangible_assets", None),
-            operating_cash_flow=getattr(row, "operating_cash_flow", None),
-            investing_cash_flow=getattr(row, "investing_cash_flow", None),
-            financing_cash_flow=getattr(row, "financing_cash_flow", None),
-            free_cash_flow=getattr(row, "free_cash_flow", None),
-            net_change_in_cash=getattr(row, "net_change_in_cash", None),
-            net_cash_flow=getattr(row, "net_change_in_cash", None),
-            capex=getattr(row, "capex", getattr(row, "capital_expenditure", None)),
-            capital_expenditure=getattr(
-                row,
-                "capital_expenditure",
-                getattr(row, "capex", None),
-            ),
-            dividends_paid=getattr(row, "dividends_paid", None),
-            stock_repurchased=getattr(row, "stock_repurchased", None),
-            debt_repayment=getattr(row, "debt_repayment", None),
-            raw_data=getattr(row, "raw_data", None),
+        _statement_admission.admit_persisted_statement(
+            row, statement_type, "quarter" if period_upper == "TTM" else period,
         )
         for row in rows
     ]
-    for index, (row, statement) in enumerate(zip(rows, fallback_rows, strict=True)):
-        raw = getattr(row, "raw_data", None) or {}
-        lineage = raw.get("_financial_lineage") or {}
-        canonical = lineage.get("canonical_data")
-        if isinstance(canonical, dict):
-            restored = FinancialStatementData.model_validate(canonical)
-            stored_identity = (statement.period, statement.fiscal_year, statement.fiscal_quarter)
-            restored_identity = (restored.period, restored.fiscal_year, restored.fiscal_quarter)
-            if _financial_statement_identity(statement) != _financial_statement_identity(restored):
-                restored = admit_statement_rows([restored.model_copy(update={
-                    "period": stored_identity[0], "fiscal_year": restored_identity[1],
-                    "fiscal_quarter": restored_identity[2],
-                })], period)[0]
-                restored.unavailable_reason = "conflicting_fiscal_identity"
-                for name in FinancialStatementData.model_fields:
-                    if name not in {"fiscal_year", "fiscal_quarter"} and isinstance(getattr(restored, name), (int, float)):
-                        setattr(restored, name, None)
-            # A column value is served from `canonical_data` only when the
-            # lineage still describes the row that was stored. Adopting a
-            # disagreeing column while keeping the canonical's provenance would
-            # relabel a value the lineage does not back as admitted.
-            fallback_rows[index] = _restore_lineage_statement(row, raw, model, restored)
-            statement = fallback_rows[index]
-        else:
-            statement.source = getattr(row, "source", None)
-            # No accepted lineage: the row's basis is unconfirmed, so `currency`
-            # and `value_unit` stay unset here. This annotation is the row's
-            # contract; enrichment adds per-metric reasons beside it (#206).
-            statement.unit_metadata = {"basis": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
-        statement.updated_at = getattr(row, "updated_at", None)
-    fallback_rows = admit_statement_rows(fallback_rows, "quarter" if period_upper == "TTM" else period)
 
     if period_upper == "TTM":
         return _build_ttm_financial_statement_rows(fallback_rows, statement_type=statement_type)
@@ -2411,7 +2240,10 @@ async def _load_latest_fundamental_snapshot(symbol: str) -> dict[str, Any] | Non
     if not service.enabled:
         return None
     snapshots = await service.get_latest_fundamental_snapshots([symbol.upper()])
-    return snapshots.get(symbol.upper())
+    # A retained document written under a superseded formula still holds
+    # missing-capex-as-zero and nonnull-count numbers. Admission nulls those
+    # fields here so no cached pre-v4 value is republished as current.
+    return admit_fundamental_snapshot(snapshots.get(symbol.upper()))
 
 
 def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -2429,7 +2261,7 @@ def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dic
         "ps": snapshot.get("ps"),
         "ev_ebitda": snapshot.get("evEbitda"),
         "as_of": snapshot.get("snapshotDate"),
-        "inputs": snapshot.get("inputs") or {},
+        "inputs": {"modelConfidence": "unassessed", **(snapshot.get("inputs") or {})},
         "source": snapshot.get("source") or "vnibb-fundamental-engine",
         "note": "Model-derived reference estimate, not investment advice.",
     }
@@ -5545,23 +5377,77 @@ def _growth_rate(current: Optional[float], previous: Optional[float]) -> Optiona
         return None
     return ((current - previous) / abs(previous)) * 100
 
-def _growth_detail(current: Optional[float], previous: Optional[float]) -> dict[str, Any]:
-    value = _growth_rate(current, previous)
-    transition = None
-    if current is not None and previous is not None:
-        if previous < 0 < current:
-            transition = "loss_to_profit"
-        elif current < 0 < previous:
-            transition = "profit_to_loss"
-    return {"value": value, "current": current, "previous": previous,
-            "negative_base": previous is not None and previous < 0, "transition": transition,
-            "unavailable_reason": "missing_base_or_value" if current is None or previous is None else
-                "zero_base" if previous == 0 else "nonfinite_value" if value is None else None}
+def _statement_period_kind(row: Any, default: str) -> str:
+    """The row's own declared flow basis, so admission rejects a mismatch."""
+    flow_basis = _statement_admission.basis_of(row, "flow_basis")
+    return {
+        "annual": "annual",
+        "single_quarter": "single_quarter",
+        "cumulative_ytd": "cumulative_ytd",
+        "trailing_twelve_months": "ttm",
+    }.get(str(flow_basis or "").lower(), default)
 
+def _growth_detail(
+    current: Any,
+    previous: Any,
+    field: str,
+    *,
+    period_kind: str,
+    statement_type: str,
+    convention: str = "absolute_prior_denominator",
+) -> dict[str, Any]:
+    """One growth rate, or the reason it cannot be published (#246).
+
+    Values come from the shared statement admission, so a populated lineage
+    dictionary is not itself evidence: currency, scale, consolidation, flow
+    basis, issuer source and fiscal step are compared before any arithmetic.
+    Reported zero, loss bases and rejected fields stay distinct.
+    """
+    comparison = _statement_admission.comparison_detail(
+        current, previous, field,
+        statement_type=statement_type, period_kind=period_kind,
+    )
+    current_value, previous_value = comparison["current"], comparison["previous"]
+    reason = comparison["unavailable_reason"]
+    value = None
+    transition = None
+    if reason is None:
+        value = _growth_rate(current_value, previous_value)
+        if previous_value == 0:
+            reason = "zero_base"
+        elif value is None:
+            reason = "nonfinite_value"
+        if previous_value < 0 < current_value:
+            transition = "loss_to_profit"
+        elif current_value < 0 < previous_value:
+            transition = "profit_to_loss"
+    detail: dict[str, Any] = {
+        "value": value,
+        "current": current_value,
+        "previous": previous_value,
+        "current_period": getattr(current, "period", None),
+        "previous_period": getattr(previous, "period", None),
+        "field_unavailable_reason": {
+            "current": comparison["current_reason"], "previous": comparison["previous_reason"],
+        },
+        "transition": transition,
+        # Retained for the client comparison label: a loss base is a real rate
+        # with a negative denominator, not a comparable growth percentage.
+        "negative_base": previous_value is not None and previous_value < 0,
+        "unavailable_reason": reason,
+        "basis_status": comparison["basis_status"],
+        "source": comparison["source"],
+        "currency": comparison["currency"],
+        "value_unit": comparison["value_unit"],
+        "consolidation_basis": comparison["consolidation_basis"],
+        "flow_basis": comparison["flow_basis"],
+        "growth_convention": convention,
+    }
+    return detail
 
 
 @router.get("/{symbol}/growth", response_model=StandardResponse[dict[str, Any]])
-@cached(ttl=3600, key_prefix="equity_growth")
+@cached(ttl=3600, key_prefix="equity_growth_v2_admitted")
 async def get_growth_rates(
     symbol: str,
     db: AsyncSession = Depends(get_db),
@@ -5590,9 +5476,46 @@ async def get_growth_rates(
         .limit(8)
     )
 
-    annual_income = (await db.execute(annual_income_stmt)).scalars().all()
-    annual_balance = (await db.execute(annual_balance_stmt)).scalars().all()
-    quarterly_income = (await db.execute(quarterly_income_stmt)).scalars().all()
+    # Read every persisted row through the shared restoration + admission, so a
+    # disagreeing canonical, a rejected field or a conflicting fiscal identity is
+    # withheld here exactly as the statement endpoints withhold it (#246).
+    annual_income = [
+        _statement_admission.admit_persisted_statement(row, "income", "year")
+        for row in (await db.execute(annual_income_stmt)).scalars().all()
+    ]
+    annual_balance = [
+        _statement_admission.admit_persisted_statement(row, "balance", "year")
+        for row in (await db.execute(annual_balance_stmt)).scalars().all()
+    ]
+    quarterly_income = [
+        _statement_admission.admit_persisted_statement(row, "income", "quarter")
+        for row in (await db.execute(quarterly_income_stmt)).scalars().all()
+    ]
+
+    current_annual = annual_income[0] if annual_income else None
+    previous_annual = annual_income[1] if len(annual_income) > 1 else None
+    current_balance = annual_balance[0] if annual_balance else None
+    previous_balance = annual_balance[1] if len(annual_balance) > 1 else None
+
+    latest_quarter = quarterly_income[0] if quarterly_income else None
+    same_quarter_prev_year = None
+    if latest_quarter and latest_quarter.fiscal_quarter:
+        comparison_stmt = (
+            select(IncomeStatement)
+            .where(
+                IncomeStatement.symbol == symbol_upper,
+                IncomeStatement.period_type == "quarter",
+                IncomeStatement.fiscal_year == latest_quarter.fiscal_year - 1,
+                IncomeStatement.fiscal_quarter == latest_quarter.fiscal_quarter,
+                or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
+            )
+            .limit(1)
+        )
+        previous_quarter_row = (await db.execute(comparison_stmt)).scalar_one_or_none()
+        same_quarter_prev_year = (
+            _statement_admission.admit_persisted_statement(previous_quarter_row, "income", "quarter")
+            if previous_quarter_row is not None else None
+        )
 
     yoy: dict[str, Optional[float]] = {
         "revenue_growth": None,
@@ -5608,81 +5531,50 @@ async def get_growth_rates(
         "ebitda_growth": None,
     }
     comparisons: dict[str, dict[str, Any]] = {"yoy": {}, "qoq": {}}
-    same_quarter_prev_year = None
 
-    if len(annual_income) >= 2 and annual_income[0].fiscal_year == annual_income[1].fiscal_year + 1:
-        current, previous = annual_income[0], annual_income[1]
-        yoy["revenue_growth"] = _growth_rate(current.revenue, previous.revenue)
-        yoy["earnings_growth"] = _growth_rate(current.net_income, previous.net_income)
-        yoy["eps_growth"] = _growth_rate(current.eps, previous.eps)
-        yoy["ebitda_growth"] = _growth_rate(current.ebitda, previous.ebitda)
-
-    if len(annual_balance) >= 2 and annual_balance[0].fiscal_year == annual_balance[1].fiscal_year + 1:
-        current, previous = annual_balance[0], annual_balance[1]
-        yoy["asset_growth"] = _growth_rate(current.total_assets, previous.total_assets)
-
-    latest_quarter = quarterly_income[0] if quarterly_income else None
-    if latest_quarter and latest_quarter.fiscal_quarter:
-        comparison_stmt = (
-            select(IncomeStatement)
-            .where(
-                IncomeStatement.symbol == symbol_upper,
-                IncomeStatement.period_type == "quarter",
-                IncomeStatement.fiscal_year == latest_quarter.fiscal_year - 1,
-                IncomeStatement.fiscal_quarter == latest_quarter.fiscal_quarter,
-                or_(IncomeStatement.source.is_(None), IncomeStatement.source != "issuer_report"),
-            )
-            .limit(1)
+    annual_kind = _statement_period_kind(current_annual, "annual")
+    for name, field in (
+        ("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
+        ("eps_growth", "eps"), ("ebitda_growth", "ebitda"),
+    ):
+        detail = _growth_detail(
+            current_annual, previous_annual, field,
+            period_kind=annual_kind, statement_type="income",
         )
-        same_quarter_prev_year = (await db.execute(comparison_stmt)).scalar_one_or_none()
-        if same_quarter_prev_year:
-            qoq["revenue_growth"] = _growth_rate(
-                latest_quarter.revenue,
-                same_quarter_prev_year.revenue,
-            )
-            qoq["earnings_growth"] = _growth_rate(
-                latest_quarter.net_income,
-                same_quarter_prev_year.net_income,
-            )
-            qoq["eps_growth"] = _growth_rate(latest_quarter.eps, same_quarter_prev_year.eps)
-            qoq["ebitda_growth"] = _growth_rate(
-                latest_quarter.ebitda, same_quarter_prev_year.ebitda
-            )
-    for scope, current, previous in [
-        ("yoy", annual_income[0] if annual_income else None, annual_income[1] if len(annual_income) > 1 else None),
-        ("qoq", latest_quarter, same_quarter_prev_year),
-    ]:
-        for name, field in [("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
-                            ("eps_growth", "eps"), ("ebitda_growth", "ebitda")]:
-            detail = _growth_detail(getattr(current, field, None), getattr(previous, field, None))
-            detail["current_period"] = getattr(current, "period", None)
-            detail["previous_period"] = getattr(previous, "period", None)
-            if current is not None and previous is not None and current.fiscal_year != previous.fiscal_year + 1:
-                detail.update(value=None, unavailable_reason="non_comparable_periods")
-            current_lineage = (getattr(current, "raw_data", None) or {}).get("_financial_lineage") or {}
-            previous_lineage = (getattr(previous, "raw_data", None) or {}).get("_financial_lineage") or {}
-            detail["basis_status"] = "confirmed" if current_lineage and previous_lineage else "legacy_basis_unconfirmed"
-            detail["source"] = getattr(current, "source", None)
-            for basis_name in ("value_unit", "consolidation_basis", "flow_basis"):
-                current_basis, previous_basis = current_lineage.get(basis_name), previous_lineage.get(basis_name)
-                detail[basis_name] = current_basis
-                if current_basis is not None and previous_basis is not None and current_basis != previous_basis:
-                    detail.update(value=None, unavailable_reason="incompatible_reporting_basis", basis_status="incompatible")
-            (yoy if scope == "yoy" else qoq)[name] = detail["value"]
-            comparisons[scope][name] = detail
+        yoy[name] = detail["value"]
+        comparisons["yoy"][name] = detail
 
+    asset_detail = _growth_detail(
+        current_balance, previous_balance, "total_assets",
+        period_kind="instant", statement_type="balance",
+    )
+    yoy["asset_growth"] = asset_detail["value"]
+    comparisons["yoy"]["asset_growth"] = asset_detail
+
+    quarter_kind = _statement_period_kind(latest_quarter, "single_quarter")
+    for name, field in (
+        ("revenue_growth", "revenue"), ("earnings_growth", "net_income"),
+        ("eps_growth", "eps"), ("ebitda_growth", "ebitda"),
+    ):
+        detail = _growth_detail(
+            latest_quarter, same_quarter_prev_year, field,
+            period_kind=quarter_kind, statement_type="income",
+        )
+        qoq[name] = detail["value"]
+        comparisons["qoq"][name] = detail
 
     payload = {
         "symbol": symbol_upper,
-        "yoy": yoy,
-        "qoq": qoq,
         "growth_convention": "absolute_prior_denominator",
         "growth_formula": "((current - previous) / abs(previous)) * 100",
         "quarter_comparison": "same_quarter_previous_year",
+        "admission_contract": "statement_admission_v1",
+        "yoy": yoy,
+        "qoq": qoq,
         "comparisons": comparisons,
         "as_of": {
-            "annual": annual_income[0].period if annual_income else None,
-            "quarter": latest_quarter.period if latest_quarter else None,
+            "annual": getattr(current_annual, "period", None),
+            "quarter": getattr(latest_quarter, "period", None),
         },
     }
     return StandardResponse(data=payload, meta=MetaData(count=1))
@@ -6611,13 +6503,21 @@ async def _load_foreign_trading_fallback(
     db: AsyncSession,
     symbol: str,
     limit: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[ForeignTradingData]:
-    result = await db.execute(
+    statement = (
         select(ForeignTrading)
         .where(ForeignTrading.symbol == symbol.upper())
         .order_by(ForeignTrading.trade_date.desc())
         .limit(limit)
     )
+    if start_date is not None:
+        statement = statement.where(ForeignTrading.trade_date >= start_date)
+    if end_date is not None:
+        statement = statement.where(ForeignTrading.trade_date <= end_date)
+    result = await db.execute(statement)
     rows = result.scalars().all()
     return [
         ForeignTradingData(
@@ -6634,74 +6534,108 @@ async def _load_foreign_trading_fallback(
     ]
 
 
-def _latest_foreign_trading_date(data: list[Any]) -> str | None:
-    for row in data:
-        date_value = getattr(row, "date", None)
-        if date_value:
-            return str(date_value)
-        if isinstance(row, dict) and row.get("date"):
-            return str(row.get("date"))
-    return None
-
-
 @router.get("/{symbol}/foreign-trading", response_model=StandardResponse[List[Any]])
 async def get_foreign_trading(
     symbol: str,
     limit: int = Query(60, ge=1, le=365),
+    sessions: Optional[int] = Query(
+        None,
+        ge=1,
+        le=260,
+        description=(
+            "Market sessions requested, counted back from the latest expected "
+            "session. Omit to read the latest retained rows."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
+    """Foreign flow for an explicit market-session window.
+
+    A row count is not a calendar window: retained history can be sparse, so a
+    window is qualified against exchange sessions and the response discloses
+    the requested and observed ranges, gaps and the last validated session
+    (#249). Rows dated on a weekend or closure are excluded rather than summed,
+    and rows whose buy/sell volumes are unknown never become zero.
+    """
     symbol_upper = symbol.upper()
+    provider_limit = provider_row_limit(sessions, limit)
+    provider_error: str | None = None
+    provider_rows: list[ForeignTradingData] = []
     try:
-        data = await asyncio.wait_for(
+        provider_rows = await asyncio.wait_for(
             VnstockForeignTradingFetcher.fetch(
-                ForeignTradingQueryParams(symbol=symbol_upper, limit=min(limit, 100))
+                ForeignTradingQueryParams(symbol=symbol_upper, limit=provider_limit)
             ),
             timeout=30,
         )
-        if data:
-            limited_data = data[:limit]
-            latest_date = _latest_foreign_trading_date(limited_data)
-            return StandardResponse(
-                data=limited_data,
-                meta=MetaData(
-                    count=len(limited_data),
-                    symbol=symbol_upper,
-                    last_data_date=latest_date,
-                ),
-            )
-
-        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
-        return StandardResponse(
-            data=fallback,
-            meta=MetaData(
-                count=len(fallback),
-                symbol=symbol_upper,
-                last_data_date=fallback[0].date if fallback else None,
-            ),
-            error="Live foreign trading feed returned no rows; using cached database fallback." if fallback else None,
-        )
     except (asyncio.TimeoutError, ProviderTimeoutError):
-        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
-        return StandardResponse(
-            data=fallback,
-            meta=MetaData(
-                count=len(fallback),
-                symbol=symbol_upper,
-                last_data_date=fallback[0].date if fallback else None,
-            ),
-            error="Request timed out" if not fallback else "Live foreign trading request timed out; using cached database fallback.",
+        provider_error = "live foreign trading feed timed out"
+    except Exception as exc:  # provider failure must not hide retained rows
+        provider_error = f"live foreign trading feed unavailable: {exc}"
+
+    window_start: date | None = None
+    window_end: date | None = None
+    if sessions:
+        requested_days = requested_session_dates(sessions)
+        if requested_days:
+            window_start, window_end = requested_days[0], requested_days[-1]
+
+    # Each source is read at the window's own size: a 120/250-session window
+    # must not be truncated to the default 60-row limit before the merge. The
+    # row limit is applied once, after dedupe, and only to unwindowed reads.
+    retained = await _load_foreign_trading_fallback(
+        db,
+        symbol_upper,
+        max(limit, sessions or 0),
+        start_date=window_start,
+        end_date=window_end,
+    )
+    coverage = build_foreign_flow_coverage(
+        [*provider_rows, *retained],
+        requested_sessions=sessions,
+        start_date=window_start,
+        end_date=window_end,
+        row_limit=None if sessions else limit,
+        primary_source_count=len(provider_rows),
+    )
+
+    live_feed_empty = provider_error is None and not provider_rows
+    warnings: list[str] = list(coverage.warnings)
+    if provider_error:
+        warnings.insert(
+            0,
+            provider_error + ("; using cached database fallback" if retained else ""),
         )
-    except Exception as e:
-        fallback = await _load_foreign_trading_fallback(db, symbol_upper, limit)
-        return StandardResponse(
-            data=fallback,
-            meta=MetaData(
-                count=len(fallback),
-                symbol=symbol_upper,
-                last_data_date=fallback[0].date if fallback else None,
-            ),
-            error=str(e) if not fallback else f"Live foreign trading unavailable; using cached database fallback: {e}",
+    elif live_feed_empty and retained:
+        # A live feed that answers with no rows is degradation, not evidence
+        # that the retained sessions are live (#249).
+        warnings.insert(
+            0,
+            "Live foreign trading feed returned no rows; using cached database fallback.",
         )
+    if sessions and sessions > PROVIDER_ROW_CAP:
+        warnings.append(
+            f"the live feed caps a request at {PROVIDER_ROW_CAP} rows; "
+            f"{sessions}-session coverage relies on retained history"
+        )
+    # The envelope and meta carry the same degradation record: a consumer that
+    # keeps rows must still see why the window is partial (#249).
+    coverage.warnings = warnings
+
+    return StandardResponse(
+        data=coverage.rows,
+        meta=MetaData(
+            count=len(coverage.rows),
+            symbol=symbol_upper,
+            last_data_date=(
+                coverage.last_validated_session.isoformat()
+                if coverage.last_validated_session
+                else None
+            ),
+            **coverage.meta(),
+        ),
+        error="; ".join(warnings) if warnings else None,
+    )
 
 
 @router.get("/{symbol}/subsidiaries", response_model=StandardResponse[List[Any]])

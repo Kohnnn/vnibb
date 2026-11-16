@@ -315,13 +315,18 @@ class _FakeMongoService:
 _CANNED_DOC = {
     "symbol": "VNM",
     "snapshotDate": "2026-06-10",
+    "schemaVersion": 4,
     "intrinsicValue": 78200.0,
     "marginOfSafety": 16.9,
     "moat": "narrow",
     "dividendYears": 9,
     "fcfPositive": True,
     "valuationMethod": "dcf",
-    "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    "inputs": {
+        "unitQuality": "verified",
+        "unitLineage": {"price": {"unit": "VND"}},
+        "derivedCoverage": {},
+    },
 }
 
 
@@ -415,6 +420,72 @@ async def test_enrichment_empty_rows_skips_service(monkeypatch):
     monkeypatch.setattr(screener_module, "get_mongo_market_data_service", _boom)
 
     assert await _apply_fundamental_enrichment([]) == ([], "ok")
+
+
+@pytest.mark.asyncio
+async def test_enrichment_clears_withheld_derived_values_on_a_stale_row(monkeypatch):
+    """A withheld doc must null the row, not silently skip the field.
+
+    The row arrives carrying values from an earlier enrichment pass (the
+    screener-cache shape); skipping ``None`` would keep that stale truth.
+    """
+
+    stale = {
+        "symbol": "VNM", "snapshotDate": "2026-06-10", "schemaVersion": 3,
+        "intrinsicValue": 30.48, "marginOfSafety": -64.02, "valuationMethod": "dcf",
+        "revenueCagr5y": 21.0, "profitCagr5y": 21.0, "fcfPositive": True,
+        "moat": "narrow", "dividendYears": 9,
+        "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    }
+    svc = _FakeMongoService(docs={"VNM": stale})
+    monkeypatch.setattr(screener_module, "get_mongo_market_data_service", lambda: svc)
+
+    row = _row(
+        "VNM", intrinsic_value=30.48, margin_of_safety=-64.02,
+        valuation_method="dcf", fcf_positive=True, moat="narrow", dividend_years=9,
+    )
+    result, outcome = await _apply_fundamental_enrichment([row])
+
+    assert outcome == "ok"
+    enriched = result[0]
+    assert (enriched.intrinsic_value, enriched.margin_of_safety, enriched.valuation_method) == (None, None, None)
+    assert enriched.fcf_positive is None
+    assert enriched.dividend_years == 9
+    # Moat survives on a schema-3 document; only derived valuation is withheld.
+    assert enriched.moat == "narrow"
+    assert enriched.provider_evidence[-1]["dataset"] == "market_fundamental_screener"
+    assert "schema" in enriched.provider_evidence[-1]["unavailable_reason"]
+    # Retained corpus document stays immutable.
+    assert stale["fcfPositive"] is True
+    assert stale["intrinsicValue"] == 30.48
+
+
+@pytest.mark.asyncio
+async def test_enrichment_keeps_current_schema_derived_values(monkeypatch):
+    """A v4 doc keeps its derived values and its moat score."""
+
+    current = {
+        "symbol": "VNM", "snapshotDate": "2026-06-10", "schemaVersion": 4,
+        "intrinsicValue": 78200.0, "marginOfSafety": 16.9, "valuationMethod": "dcf",
+        "revenueCagr5y": 10.0, "profitCagr5y": 10.0, "fcfPositive": True,
+        "moat": "wide", "dividendYears": 9,
+        "inputs": {
+            "unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
+            "derivedCoverage": {"cagr": {}, "fcf": {}},
+        },
+    }
+    svc = _FakeMongoService(docs={"VNM": current})
+    monkeypatch.setattr(screener_module, "get_mongo_market_data_service", lambda: svc)
+
+    result, outcome = await _apply_fundamental_enrichment([_row("VNM")])
+
+    assert outcome == "ok"
+    enriched = result[0]
+    assert enriched.intrinsic_value == 78200.0
+    assert enriched.margin_of_safety == 16.9
+    assert enriched.fcf_positive is True
+    assert enriched.moat == "wide"
+    assert enriched.provider_evidence == []
 
 
 @pytest.mark.asyncio
@@ -736,6 +807,62 @@ async def test_enrichment_outcome_reported_when_mongo_errors(client, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_cached_screen_admits_through_shared_reader(client, monkeypatch, test_db):
+    """Actual collection -> reader -> cached-screen route.
+
+    A stale schema-3 snapshot advertising positive FCF must not satisfy an
+    ``fcf_positive`` screen from the screener cache; a current v4 snapshot with
+    its moat intact must survive.
+    """
+
+    from vnibb.core.config import settings
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    await _seed_screener_snapshots(test_db, ["STALE", "CUR"])
+
+    stale = {
+        "symbol": "STALE", "snapshotDate": "2026-06-10", "schemaVersion": 3,
+        "intrinsicValue": 30.48, "marginOfSafety": -64.02, "valuationMethod": "dcf",
+        "fcfPositive": True, "moat": "narrow", "moatScore": 60.0,
+        "inputs": {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}},
+    }
+    current = {
+        "symbol": "CUR", "snapshotDate": "2026-06-10", "schemaVersion": 4,
+        "intrinsicValue": 78200.0, "marginOfSafety": 16.9, "valuationMethod": "dcf",
+        "fcfPositive": True, "moat": "wide", "moatScore": 95.0,
+        "moatFactors": {"interest_coverage": 8.0},
+        "inputs": {
+            "unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
+            "derivedCoverage": {"cagr": {}, "fcf": {}},
+        },
+    }
+    documents = [stale, current]
+
+    class FundamentalCollection:
+        def aggregate(self, _pipeline):
+            return [{"doc": dict(document)} for document in documents]
+
+    service = MongoMarketDataService()
+    monkeypatch.setattr(service, "_get_collection", lambda _: FundamentalCollection())
+    monkeypatch.setattr(settings, "mongodb_enabled", True)
+    monkeypatch.setattr(settings, "mongodb_url", "mongodb://127.0.0.1:1/vnibb-market")
+    monkeypatch.setattr(screener_module, "get_mongo_market_data_service", lambda: service)
+
+    response = await client.get(f"/api/v1/screener/?limit=10&filters={_FCF_BLOB}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meta"]["fundamental_enrichment"] == "ok"
+    assert [row["symbol"] for row in body["data"]] == ["CUR"]
+    assert body["data"][0]["fcf_positive"] is True
+    assert body["data"][0]["moat"] == "wide"
+    # Retained corpus rows are never mutated by the read path.
+    assert documents[0]["fcfPositive"] is True
+    assert documents[0]["intrinsicValue"] == 30.48
+    assert documents[1]["moat"] == "wide"
+
+
+@pytest.mark.asyncio
 async def test_enrichment_outcome_ok_when_corpus_simply_has_no_match(client, monkeypatch, test_db):
     """The honest empty result: enrichment worked, nothing matched."""
     await _seed_screener_snapshots(test_db, ["AAA", "BBB"])
@@ -934,3 +1061,43 @@ async def test_live_path_cannot_shrink_shared_snapshot_to_one_request_limit(
         "a request-shaped fetch must not write to the shared screener snapshot: "
         f"got {len(writes)} write(s)"
     )
+
+
+@pytest.mark.parametrize("snapshot_inputs", [
+    {"unitQuality": "verified", "unitLineage": {"price": {"unit": "unknown"}}},
+    {"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
+     "comparisonUnavailableReason": "Statement currency/scale is unknown."},
+])
+@pytest.mark.asyncio
+async def test_admitted_v4_doc_with_unavailable_comparison_publishes_no_valuation_fields(
+    monkeypatch, snapshot_inputs,
+):
+    """A current-schema doc can carry IV without a verified price basis.
+
+    The engine computes it; the screen must not compare it. The three
+    comparison fields are withheld while independent/other coverage survives.
+    """
+
+    doc = {
+        "symbol": "VNM", "snapshotDate": "2026-06-10", "schemaVersion": 4,
+        "intrinsicValue": 78200.0, "marginOfSafety": 16.9, "valuationMethod": "dcf",
+        "fcfPositive": True, "revenueCagr5y": 10.0, "moat": "narrow", "dividendYears": 9,
+        "inputs": {
+            **snapshot_inputs, "derivedCoverage": {"cagr": {}, "fcf": {}},
+        },
+    }
+    svc = _FakeMongoService(docs={"VNM": doc})
+    monkeypatch.setattr(screener_module, "get_mongo_market_data_service", lambda: svc)
+
+    row = _row("VNM", intrinsic_value=30.48, margin_of_safety=-64.02, valuation_method="dcf")
+    result, outcome = await _apply_fundamental_enrichment([row])
+
+    assert outcome == "ok"
+    enriched = result[0]
+    assert (enriched.intrinsic_value, enriched.margin_of_safety, enriched.valuation_method) == (None, None, None)
+    # Other present keys still flow: coverage is a separate lineage.
+    assert enriched.fcf_positive is True
+    assert enriched.moat == "narrow"
+    assert enriched.dividend_years == 9
+    assert enriched.fundamental_as_of == "2026-06-10"
+    assert enriched.provider_evidence[-1]["dataset"] == "market_fundamental_screener"

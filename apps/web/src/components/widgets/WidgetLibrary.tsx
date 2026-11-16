@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { getWidgetDefinition, getWidgetLibrarySectionId, normalizeWidgetType, widgetDefinitions, widgetLibrarySections } from '@/data/widgetDefinitions';
 import {
@@ -13,8 +14,9 @@ import { getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getRegisteredWidgetIds } from '@/components/widgets/WidgetRegistry';
+import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { WidgetPreview } from './WidgetPreview';
+import { getRegisteredWidgetIds } from '@/components/widgets/WidgetRegistry';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { WidgetType } from '@/types/dashboard';
 
@@ -131,51 +133,49 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
     const [selectedWidgetTypes, setSelectedWidgetTypes] = useState<WidgetType[]>([]);
 
+    // Declared before the trap on purpose: effect cleanups run in declaration
+    // order, so the background must be un-inerted *before* the trap restores
+    // focus to the opener. A still-inert opener silently refuses focus.
+    //
+    // `aria-modal` alone leaves the obscured workspace in the accessibility
+    // tree. The native `inert` attribute removes every background control from
+    // both the keyboard and AT surfaces while the drawer is open, and the exact
+    // previous state is restored on close (some hosts already carry `inert`,
+    // e.g. a maximized widget's original card).
     useEffect(() => {
-        if (!isOpen) return;
-
-        // Capture phase + stopPropagation, matching PromptsLibrary/WidgetToolbar.
-        // Without it the dashboard-level window handler also fired, so one Escape
-        // closed the drawer *and* the Apps library, template selector, widget
-        // settings and copilot (#109).
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'Escape') return;
-            event.preventDefault();
-            event.stopPropagation();
-            onClose();
-        };
-
-        window.addEventListener('keydown', handleKeyDown,true);
-        return () => window.removeEventListener('keydown', handleKeyDown,true);
-    }, [isOpen, onClose]);
-
-    // Dismissal semantics match Templates/Apps/command palette: Escape closes
-    // the drawer (handler above) and focus returns to the control that opened
-    // it. Tracked through focusin because the search input autofocuses during
-    // commit, before effects run (#109).
-    const lastFocusedRef = useRef<HTMLElement | null>(null);
-    useEffect(() => {
-        const trackFocus = (event: FocusEvent) => {
-            const target = event.target;
-            if (target instanceof HTMLElement && !target.closest('[role="dialog"]')) {
-                lastFocusedRef.current = target;
+        if (!isOpen || typeof document === 'undefined') return;
+        const portal = document.querySelector('[data-widget-library-portal]');
+        if (!portal) return;
+        const previous = Array.from(document.body.children)
+            .filter((element) => element !== portal)
+            .map((element) => ({ element, inert: element.hasAttribute('inert'), ariaHidden: element.getAttribute('aria-hidden') }));
+        for (const { element } of previous) {
+            element.setAttribute('inert', '');
+            element.setAttribute('aria-hidden', 'true');
+        }
+        return () => {
+            for (const { element, inert, ariaHidden } of previous) {
+                if (!inert) element.removeAttribute('inert');
+                if (ariaHidden === null) element.removeAttribute('aria-hidden');
+                else element.setAttribute('aria-hidden', ariaHidden);
             }
         };
-
-        document.addEventListener('focusin', trackFocus);
-        return () => document.removeEventListener('focusin', trackFocus);
-    }, []);
+    }, [isOpen]);
+    const drawerRef = useDialogFocusTrap<HTMLDivElement>({
+        enabled: isOpen,
+        onClose,
+        initialFocusTo: searchInputRef,
+    });
+    // #261: the drawer is modal, so its own trap owns Escape, Tab wrapping and
+    // focus return. A separate capture-phase Escape listener duplicated the
+    // close (drawer *and* the layer beneath it, #109) and the focusin tracker
+    // let escaped background focus replace the real opener.
 
     useEffect(() => {
         if (isOpen) return;
         setSearchQuery('');
         setActiveCategory(null);
         setSelectedWidgetTypes([]);
-        const previous = lastFocusedRef.current;
-        lastFocusedRef.current = null;
-        if (previous?.isConnected) {
-            previous.focus();
-        }
     }, [isOpen]);
 
     useEffect(() => {
@@ -309,7 +309,10 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
         bundle.widgetTypes.every((type) => REGISTERED_WIDGET_IDS.has(type))
     );
 
-    return (
+    // Portalled to body like the other overlays so the trap's containment and
+    // the `aria-modal` dialog are not nested inside the workspace tree.
+    return createPortal(
+        <div data-widget-library-portal>
         <AnimatePresence>
             {isOpen && (
                 <>
@@ -319,13 +322,18 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
+                        aria-hidden
+                        tabIndex={-1}
                         className="fixed inset-0 z-[40] bg-[rgba(0,0,0,0.5)]"
                     />
 
                     {/* Sidebar */}
                     <motion.div
+                        ref={drawerRef}
                         role="dialog"
+                        aria-modal="true"
                         aria-label="Add widgets"
+                        tabIndex={-1}
                         initial={{ x: -350, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: -350, opacity: 0 }}
@@ -343,6 +351,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                             </div>
                             <button
                                 onClick={onClose}
+                                aria-label="Close widget library"
+                                title="Close widget library"
                                 className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                             >
                                 <X size={18} />
@@ -356,7 +366,6 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                                 <input
                                     ref={searchInputRef}
                                     type="text"
-                                    autoFocus
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
                                     placeholder="Search widgets, bundles, or data sources..."
@@ -640,6 +649,8 @@ function WidgetLibraryComponent({ isOpen, onClose }: WidgetLibraryProps) {
                 </>
             )}
         </AnimatePresence>
+        </div>,
+        document.body,
     );
 }
 

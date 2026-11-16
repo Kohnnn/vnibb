@@ -35,7 +35,13 @@ class RSRatingResponse(BaseModel):
 
 
 class RSStockItem(BaseModel):
-    """Stock item in RS rankings."""
+    """Stock item in RS rankings.
+
+    `price_unit` is the stored price's own unit evidence, never inferred from
+    magnitude. `price_asof`/`price_source` describe that price observation;
+    `rating_asof` is the date the RS score itself was calculated. Neither is the
+    request or fetch time.
+    """
 
     symbol: str
     company_name: Optional[str] = None
@@ -43,6 +49,9 @@ class RSStockItem(BaseModel):
     rs_rank: Optional[int] = None
     price: Optional[float] = None
     price_unit: PriceUnit = "unknown"
+    price_source: Optional[str] = None
+    price_asof: Optional[str] = None
+    rating_asof: Optional[str] = None
     industry: Optional[str] = None
 
 

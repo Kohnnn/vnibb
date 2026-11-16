@@ -13,6 +13,21 @@ SNAPSHOT_SOURCES = ("polymarket", "kalshi", "predictit", "limitless", "manifold"
 SNAPSHOT_MARKET_LIMIT = 5_000
 SNAPSHOT_SOURCE_LIMIT = 1_000
 MARKET_FRESHNESS = timedelta(hours=24)
+# Intraday micro-snapshot ingest cadence. Single source of truth: the scheduler
+# builds its ``CronTrigger`` from this value and the alert endpoints derive
+# their comparison tolerance from it, so a cadence change cannot leave the two
+# disagreeing about how stale a comparison leg may be.
+PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES = 15
+# An alert comparison tolerates one skipped sampling tick at each end: the job
+# is ``max_instances=1``/``coalesce=True`` with a 300s misfire grace, so a
+# single-multiple band would flip most of the universe to stale on one dropped
+# tick. Measured intervals are therefore confined to
+# ``window ± tolerance``. This is deliberately NOT derived from
+# ``PREDICTION_MARKET_STALE_AFTER_SECONDS`` (source-health, 24h): reusing that
+# horizon would re-admit a day-shifted "1h" alert.
+PREDICTION_MARKET_ALERT_BASELINE_TOLERANCE = timedelta(
+    minutes=2 * PREDICTION_MARKET_INTRADAY_CADENCE_MINUTES
+)
 MAX_INGEST_MARKETS = 1_000
 MAX_MARKET_PAYLOAD_BYTES = 4 * 1024 * 1024
 MAX_CATALOGUE_RELATION_BYTES = 4 * 1024 * 1024 * 1024

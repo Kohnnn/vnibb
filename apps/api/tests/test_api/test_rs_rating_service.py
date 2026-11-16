@@ -81,6 +81,9 @@ async def test_get_rs_leaders_falls_back_to_live_rankings_when_snapshots_missing
             "rs_rank": 1,
             "price": 120000.0,
             "price_unit": "VND",
+            "price_source": None,
+            "price_asof": None,
+            "rating_asof": None,
             "industry": "Technology",
         }
     ]

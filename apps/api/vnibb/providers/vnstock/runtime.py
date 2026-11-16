@@ -100,7 +100,7 @@ def _refuse_persisted_paid_account() -> None:
             "verifiable paid tier; refusing to acquire."
         )
     raise ProviderCredentialRefusedError(
-        f"Free runtime cannot use an authenticated {tier} credential; "
+        "Free runtime cannot use an authenticated non-free credential; "
         "authenticate as a free or guest account."
     )
 

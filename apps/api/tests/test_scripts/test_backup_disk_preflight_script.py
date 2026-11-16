@@ -759,8 +759,8 @@ def test_mongodump_config_is_removed_after_success_and_failure(run_backup):
             if cmd[:1] == ["exec"] and "rm" in cmd and any(".mongodump.json" in p for p in cmd)
         ]
 
-    _, commands, _ = run_backup()
+    _, commands, _ = run_backup(stamp="20250102T000000Z")
     assert config_removals(commands), commands
 
-    _, failed_commands, _ = run_backup(mongodump_fails=True)
+    _, failed_commands, _ = run_backup(mongodump_fails=True, stamp="20250102T000001Z")
     assert config_removals(failed_commands), failed_commands

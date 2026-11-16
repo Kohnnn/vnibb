@@ -547,9 +547,13 @@ async def test_dedicated_price_tool_returns_all_requested_full_rows_up_to_cap(sq
     assert result["max_limit"] == 250
     assert result["symbol"] == "FPT"
     assert result["interval"] == "1D"
-    assert [item["id"] for item in result["items"]] == list(range(1, expected_count + 1))
+    assert result["descending"] is False
+    assert result["selection"]["limit_applies_to"] == "latest_retained_in_window"
+    assert result["selection"]["order"] == "time_asc"
+    latest_rows = rows[len(rows) - expected_count:]
+    assert [item["id"] for item in result["items"]] == [row["id"] for row in latest_rows]
     columns = server.COLLECTION_MODELS["stock_prices"].__table__.columns.keys()
-    for expected, actual in zip(rows[:expected_count], result["items"], strict=True):
+    for expected, actual in zip(latest_rows, result["items"], strict=True):
         assert {key: actual[key] for key in columns} == _json_value(expected)
 
 

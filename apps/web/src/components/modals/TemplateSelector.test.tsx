@@ -267,4 +267,52 @@ describe('TemplateSelector', () => {
       `${starter.name} seeds this workspace with widgets that share the global ticker.`,
     );
   });
+
+
+  /**
+   * #252 preview parity. The preview drew raw authored coordinates while the
+   * apply path inserted them verbatim, so an under-sized or overlapping custom
+   * template looked fine in the card and landed differently on the grid.
+   */
+  it('draws the same fitted rectangles that applying the template will insert', async () => {
+    const user = userEvent.setup();
+    const overlapping = {
+      id: 'custom-overlap',
+      name: 'Overlapping Test Layout',
+      description: 'Two authored tiles share a cell.',
+      category: 'market' as const,
+      isCustom: true as const,
+      createdAt: '2026-11-13T00:00:00.000Z',
+      updatedAt: '2026-11-13T00:00:00.000Z',
+      widgets: [
+        { type: 'market_overview' as const, layout: { x: 0, y: 0, w: 12, h: 6 } },
+        { type: 'top_movers' as const, layout: { x: 6, y: 0, w: 8, h: 6 } },
+      ],
+    };
+    window.localStorage.setItem('vnibb:custom-templates:v1', JSON.stringify([overlapping]));
+    const onSelectTemplate = jest.fn();
+
+    render(
+      <TemplateSelector
+        open
+        onClose={jest.fn()}
+        onSelectTemplate={onSelectTemplate}
+        currentDashboard={currentDashboard}
+        currentSymbol="VCI"
+      />
+    );
+
+    const card = screen.getAllByRole('article')
+      .find((element) => within(element).queryByRole('heading', { name: overlapping.name }));
+    if (!card) throw new Error('custom template card not found');
+
+    // Preview tiles carry their repaired left offset; the second tile moved from
+    // 6/24 to 12/24 of the card width, matching `fitTemplateWidgets`.
+    const previewLefts = Array.from(card.querySelectorAll<HTMLElement>('[title]'))
+      .map((element) => element.style.left);
+    expect(previewLefts).toEqual(['0%', '50%']);
+
+    await user.click(within(card).getByRole('button', { name: /use layout/i }));
+    expect(onSelectTemplate).toHaveBeenCalledWith(expect.objectContaining({ id: overlapping.id }));
+  });
 });

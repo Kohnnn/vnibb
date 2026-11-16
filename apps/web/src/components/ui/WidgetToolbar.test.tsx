@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { WidgetToolbar } from './WidgetToolbar';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { TickerCombobox } from '@/components/widgets/TickerCombobox';
@@ -161,6 +162,25 @@ test.each([360, 180])('compact panel remains inside a %ipx viewport when trigger
   expect(panelRight).toBeGreaterThanOrEqual(0);
 });
 
+test('compact panel moves back inside the viewport when its content grows near the bottom edge', () => {
+  jest.replaceProperty(window, 'innerHeight', 800);
+  jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+    width, height: 36, top: 700, left: 0, bottom: 736, right: 20, x: 0, y: 700, toJSON() {},
+  }));
+  let panelHeight = 120;
+  jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => panelHeight);
+  render(<ToolbarHarness />);
+  fireEvent.click(screen.getByRole('button', { name: 'More controls for Long company price history' }));
+  const panel = screen.getByRole('dialog', { name: 'Long company price history controls' });
+  // Anchored under the trigger (736 + 4) clamped so the 120px panel fits: 800-120-8.
+  expect(Number.parseFloat(panel.style.top)).toBe(672);
+
+  // A guide opening inside the panel grows it with no scroll or window resize.
+  panelHeight = 400;
+  act(() => { observers[observers.length - 1](); });
+  expect(Number.parseFloat(panel.style.top)).toBe(392);
+});
+
 test('stays compacted once the expanded controls no longer fit, without re-measuring on re-render', async () => {
   // Regression: `parameters`/`actions` are inline JSX rebuilt by the parent every
   // render. Depending on them re-ran the measure effect and rebuilt the
@@ -194,4 +214,64 @@ test('stays compacted once the expanded controls no longer fit, without re-measu
   // The compact DOM is narrower, but the threshold must survive it.
   await act(async () => { observers.forEach(notify => notify()); });
   expect(more()).toBeInTheDocument();
+});
+
+test('widget guide Escape closes the popover before the wrapping dialog', async () => {
+  width = 900;
+  const user = userEvent.setup();
+
+  function ModalHarness() {
+    const [open, setOpen] = useState(false);
+    const dialogRef = useDialogFocusTrap<HTMLDivElement>({ enabled: open, onClose: () => setOpen(false) });
+    return <>
+      <button type="button" onClick={() => setOpen(true)}>Open widget</button>
+      {open && <div ref={dialogRef} role="dialog" aria-label="Widget modal" tabIndex={-1}>
+        <WidgetToolbar title="Price history" widgetType="price_chart" onMaximize={() => {}} />
+      </div>}
+    </>;
+  }
+
+  render(<ModalHarness />);
+  const opener = screen.getByRole('button', { name: 'Open widget' });
+  await user.click(opener);
+  expect(screen.getByRole('dialog', { name: 'Widget modal' })).toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'About Price history' }));
+  expect(await screen.findByText(/Provides a live lightweight chart/)).toBeInTheDocument();
+
+  await user.keyboard('{Escape}');
+  expect(screen.queryByText(/Provides a live lightweight chart/)).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: 'Widget modal' })).toBeInTheDocument();
+
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Widget modal' })).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
+});
+
+test('compact guide stays inside its panel and layers Escape with it', async () => {
+  const user = userEvent.setup();
+  render(<WidgetToolbar title="Price history" widgetType="price_chart" onMaximize={() => {}} />);
+  const more = screen.getByRole('button', { name: 'More controls for Price history' });
+  await user.click(more);
+  const panel = screen.getByRole('dialog', { name: 'Price history controls' });
+  const about = within(panel).getByRole('button', { name: 'About Price history' });
+
+  await user.click(about);
+  const guide = (await screen.findByText(/Provides a live lightweight chart/)).closest('[data-guide-popover]');
+  expect(guide).not.toBeNull();
+  expect(panel).toContainElement(guide as HTMLElement);
+
+  await user.keyboard('{Escape}');
+  expect(screen.queryByText(/Provides a live lightweight chart/)).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: 'Price history controls' })).toBeInTheDocument();
+  expect(about).toHaveFocus();
+
+  // Guide reopened, then focus leaves it: Escape must still close the panel, not become a no-op.
+  await user.click(about);
+  expect(await screen.findByText(/Provides a live lightweight chart/)).toBeInTheDocument();
+  await user.tab();
+  expect(about).not.toHaveFocus();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Price history controls' })).not.toBeInTheDocument();
+  expect(more).toHaveFocus();
 });

@@ -435,6 +435,65 @@ export function preserveTemplateGridItems<T extends CompactableLayoutItem>(items
   return items.map((item) => normalizeItemLayout(item, cols))
 }
 
+/**
+ * Template insertion contract (#252).
+ *
+ * One placement pass shared by the template preview and the instantiated
+ * workspace, so the preview describes what the user actually gets:
+ *  - width/height never fall below the widget's own size contract
+ *    (`WIDGET_LAYOUT_BEHAVIORS`, the same source `getWidgetDefaultLayout` uses),
+ *  - every rectangle stays inside `cols`,
+ *  - a collision is repaired by moving only the offending tile to the first
+ *    free slot at or below its authored row — never by repacking the others.
+ *
+ * Authored coordinates pass through untouched when they already comply. The
+ * catalog templates are authored to this contract rather than repaired on
+ * load, because a fresh apply must reach the grid non-overlapping: static
+ * items are `correctBounds`'d before `noCompactor` runs, so any overlap is
+ * repaired into a materially different layout (react-grid-layout 2.2.2).
+ */
+export type PlacedWidget<T extends CompactableLayoutItem> = T & {
+  layout: T['layout'] & { minW: number; minH: number }
+}
+
+export function fitTemplateWidgets<T extends CompactableLayoutItem>(
+  items: ReadonlyArray<T>,
+  cols = 24
+): Array<PlacedWidget<T>> {
+  const placed: Array<PlacedWidget<T>> = []
+
+  const takeSlot = (w: number, h: number, preferredY: number) => {
+    // `bottom` is the first row guaranteed free: every placed tile ends at or
+    // above it. Scanning only to there is complete for this pass, because a
+    // candidate at `bottom` never overlaps anything already placed.
+    const bottom = placed.reduce((max, item) => Math.max(max, item.layout.y + item.layout.h), 0)
+    for (let y = Math.max(0, preferredY); y <= bottom; y += 1) {
+      for (let x = 0; x <= cols - w; x += 1) {
+        const candidate = { x, y, w, h }
+        if (!placed.some((item) => layoutsOverlap(candidate, item.layout))) return candidate
+      }
+    }
+    return { x: 0, y: Math.max(bottom, 0) }
+  }
+
+  items.forEach((item) => {
+    const defaults = getWidgetDefaultLayout(item.type, cols)
+    const w = clamp(Math.max(item.layout.w || defaults.w, defaults.minW), defaults.minW, cols)
+    const h = Math.max(item.layout.h || defaults.h, defaults.minH)
+    const x = clamp(Number.isFinite(item.layout.x) ? item.layout.x : 0, 0, cols - w)
+    const y = Math.max(0, Number.isFinite(item.layout.y) ? item.layout.y : 0)
+    const base: PlacedWidget<T> = {
+      ...item,
+      layout: { ...item.layout, x, y, w, h, minW: defaults.minW, minH: defaults.minH },
+    }
+
+    const collides = placed.some((existing) => layoutsOverlap(base.layout, existing.layout))
+    placed.push(collides ? { ...base, layout: { ...base.layout, ...takeSlot(w, h, y) } } : base)
+  })
+
+  return placed
+}
+
 export function autoFitGridItems<T extends CompactableLayoutItem>(items: T[], cols = 24): T[] {
   const normalized = items.map((item) => ({
     ...normalizeItemLayout(item, cols),

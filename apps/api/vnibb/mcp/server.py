@@ -21,7 +21,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
-from sqlalchemy import and_, or_, select, tuple_
+from sqlalchemy import and_, func, or_, select, tuple_
 
 from vnibb.core.auth import User, require_active_user
 from vnibb.core.config import settings
@@ -429,6 +429,15 @@ def _query_order(attribute: str, descending: bool = False) -> dict[str, Any]:
     return {"method": "orderDesc" if descending else "orderAsc", "attribute": attribute}
 
 
+def _query_order_expression(expression: Any, descending: bool = True) -> dict[str, Any]:
+    """Order by a SQL expression rather than one model attribute; NULL sorts last."""
+    return {
+        "method": "orderDesc" if descending else "orderAsc",
+        "column": expression,
+        "nulls_last": True,
+    }
+
+
 def _query_gte(attribute: str, value: Any) -> dict[str, Any]:
     return {"method": "greaterThanEqual", "attribute": attribute, "values": [value]}
 
@@ -665,7 +674,11 @@ catalog inline.
    - `get_symbol_snapshot` for the database-first cross-section.
    - `get_latest_financial_ratios` and `get_latest_financial_statement` for
      the latest reported period.
-   - `get_symbol_prices` (interval 1D) to validate recent price action.
+   - `get_symbol_prices` (interval 1D) to validate recent price action; it
+     selects the latest retained N observations and returns them chronological
+     by default. `descending=true` flips presentation only. Pass
+     `start_date`/`end_date` for an explicit historical window; a window wider
+     than `limit` still keeps its most recent observations.
    - `get_company_news` and `get_corporate_timeline` for catalysts and events.
    - Cite source, scope, and data date for every claim.
 
@@ -1278,7 +1291,12 @@ def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]
                 statement = statement.offset(max(0, int(values[0])))
             continue
 
-        column = getattr(model, str(query.get("attribute") or ""), None)
+        # ``column`` may be a prebuilt SQL expression (for example a COALESCE
+        # fallback date) when one model attribute cannot express the ordering,
+        # so the model attribute lookup is only the fallback path.
+        column = query.get("column")
+        if column is None:
+            column = getattr(model, str(query.get("attribute") or ""), None)
         if column is None:
             raise ValueError(f"Unmapped SQL constraint '{query.get('attribute')}'")
 
@@ -1294,9 +1312,10 @@ def _apply_sql_queries(statement: Any, model: Any, queries: list[dict[str, Any]]
             if values:
                 statement = statement.where(column <= _coerce_compared_value(column, values[0]))
         elif method in {"orderAsc", "orderDesc"}:
-            statement = statement.order_by(
-                column.desc() if method == "orderDesc" else column.asc()
-            )
+            ordering = column.desc() if method == "orderDesc" else column.asc()
+            if query.get("nulls_last"):
+                ordering = ordering.nullslast()
+            statement = statement.order_by(ordering)
 
         else:
             raise ValueError(f"Unsupported SQL constraint method '{method}'")
@@ -1323,9 +1342,10 @@ async def list_collection_documents(
     model = _resolve_collection_model(collection_id)
     statement = _apply_sql_queries(select(*_model_columns(model)), model, list(queries or []))
 
-    async with async_session_maker() as session:
-        result = await session.execute(statement)
-        return [_serialize_row(row, model=model) for row in result.mappings().all()]
+    async with asyncio.timeout(timeout_seconds):
+        async with async_session_maker() as session:
+            result = await session.execute(statement)
+            return [_serialize_row(row, model=model) for row in result.mappings().all()]
 
 
 async def list_collection_documents_paginated(
@@ -1351,22 +1371,23 @@ async def list_collection_documents_paginated(
     collected: list[dict[str, Any]] = []
     offset = 0
 
-    while max_documents is None or len(collected) < max_documents:
-        remaining = page_size if max_documents is None else min(page_size, max_documents - len(collected))
-        statement = _apply_sql_queries(
-            select(*_model_columns(model)),
-            model,
-            list(queries or []) + [_query_limit(remaining), _query_offset(offset)],
-        )
+    async with asyncio.timeout(timeout_seconds):
+        while max_documents is None or len(collected) < max_documents:
+            remaining = page_size if max_documents is None else min(page_size, max_documents - len(collected))
+            statement = _apply_sql_queries(
+                select(*_model_columns(model)),
+                model,
+                list(queries or []) + [_query_limit(remaining), _query_offset(offset)],
+            )
 
-        async with async_session_maker() as session:
-            result = await session.execute(statement)
-            page = [_serialize_row(row, model=model) for row in result.mappings().all()]
+            async with async_session_maker() as session:
+                result = await session.execute(statement)
+                page = [_serialize_row(row, model=model) for row in result.mappings().all()]
 
-        collected.extend(page)
-        if len(page) < remaining:
-            break
-        offset += len(page)
+            collected.extend(page)
+            if len(page) < remaining:
+                break
+            offset += len(page)
 
     return collected
 
@@ -1392,11 +1413,18 @@ async def get_stock_price_rows(
     limit: int = 250,
     descending: bool = False,
 ) -> list[dict[str, Any]]:
-    """Fetch stock price rows for a symbol/date window."""
+    """Fetch the latest retained stock price rows, in ``descending`` presentation order.
+
+    Window membership and presentation order are separate concerns: the
+    candidate rows are always the newest ``limit`` observations inside the
+    optional inclusive date window, and ``descending`` only decides whether
+    that same window comes back chronological (default) or newest-first. An
+    explicit range wider than ``limit`` therefore keeps its recent rows.
+    """
     queries: list[dict[str, Any]] = [
         _query_equal("symbol", [symbol.upper()]),
         _query_equal("interval", [interval]),
-        _query_order("time", descending=descending),
+        _query_order("time", descending=True),
     ]
 
     if start_date is not None:
@@ -1404,12 +1432,13 @@ async def get_stock_price_rows(
     if end_date is not None:
         queries.append(_query_lte("time", end_date))
 
-    return await list_collection_documents_paginated(
+    rows = await list_collection_documents_paginated(
         "stock_prices",
         queries=queries,
         page_size=min(max(limit, 1), 250),
         max_documents=limit,
     )
+    return rows if descending else list(reversed(rows))
 
 
 async def check_database_connectivity(timeout_seconds: float = 3.0) -> dict[str, Any]:
@@ -1560,12 +1589,24 @@ async def _get_symbol_rows(
     *,
     order_attribute: str,
     limit: int,
+    order_expression: Any = None,
 ) -> list[dict[str, Any]]:
+    """Newest-first symbol rows capped at ``limit``.
+
+    ``order_expression`` replaces ``order_attribute`` when the newest-first key
+    is computed (a date fallback). NULL effective dates sort last on every
+    backend, so undated rows can never displace dated ones under the cap.
+    """
+    ordering = (
+        _query_order_expression(order_expression)
+        if order_expression is not None
+        else {**_query_order(order_attribute, descending=True), "nulls_last": True}
+    )
     return await list_collection_documents(
         collection_id,
         queries=[
             _query_equal("symbol", [normalize_symbol_input(symbol)]),
-            _query_order(order_attribute, descending=True),
+            ordering,
             _query_limit(limit),
         ],
     )
@@ -1922,7 +1963,13 @@ async def get_symbol_prices(
     limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 250}, description="Zero returns no rows; requests above 250 are capped")] = 60,
     descending: bool = False,
 ) -> dict[str, Any]:
-    """Get VNIBB database OHLCV rows for one symbol and interval."""
+    """Get the latest retained VNIBB database OHLCV rows for one symbol and interval.
+
+    Membership is the newest ``limit`` retained observations inside the optional
+    inclusive ``start_date``/``end_date`` window; ``descending`` only chooses the
+    output order of those same rows (chronological by default, newest-first when
+    true). An explicit range wider than ``limit`` keeps its recent observations.
+    """
     await _ensure_database_available()
     normalized = normalize_symbol_input(symbol)
     if not normalized:
@@ -1941,6 +1988,19 @@ async def get_symbol_prices(
         descending=descending,
     )
 
+    limit_saturated = bounded_limit > 0 and len(rows) == bounded_limit
+    selection = {
+        "order": "time_desc" if descending else "time_asc",
+        "limit_applies_to": "latest_retained_in_window",
+        "explicit_range": parsed_start is not None or parsed_end is not None,
+        "retained_dates_are_source_dates": True,
+        "limit_saturated": limit_saturated,
+        "freshness": "not_assessed; items carry observation dates and source, not retrieval time",
+    }
+    if limit_saturated:
+        selection["limit_saturation_note"] = (
+            "the cap was met; more observations may exist in the requested window"
+        )
     return {
         "symbol": normalized,
         "interval": _normalize_filter_value("interval", interval),
@@ -1952,6 +2012,8 @@ async def get_symbol_prices(
         "max_limit": 250,
         "start_date": start_date,
         "end_date": end_date,
+        "descending": descending,
+        "selection": selection,
         "items": serialize_data_value(rows),
     }
 
@@ -2047,7 +2109,14 @@ async def get_company_news(symbol: str, limit: Annotated[int, Field(ge=0, json_s
 
 @mcp.tool()
 async def get_corporate_timeline(symbol: str, limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 30})] = 15) -> dict[str, Any]:
-    """Get a merged VNIBB database timeline across company events, dividends, and insider deals."""
+    """Get a merged VNIBB database timeline across company events, dividends, and insider deals.
+
+    Each source is capped on its own timeline effective date before the merge:
+    the event date, the dividend exercise date with the payment date as fallback
+    only when the exercise date is absent, and the insider announcement date.
+    Rows with no usable effective date sort last so they cannot displace known
+    recent events, and their raw dates stay in the payload as evidence.
+    """
     await _ensure_database_available()
     normalized_symbol = normalize_symbol_input(symbol)
     if not normalized_symbol:
@@ -2088,7 +2157,14 @@ async def get_corporate_timeline(symbol: str, limit: Annotated[int, Field(ge=0, 
             }
         )
 
-    timeline.sort(key=lambda item: str(item.get("date") or ""), reverse=True)
+    # Rows are already newest-first per source (effective date desc, primary key
+    # asc), so a stable sort on the merged effective date keeps same-date ties in
+    # the documented source order and undated rows last instead of first.
+    timeline.sort(
+        key=lambda item: (item.get("date") is not None, str(item.get("date") or "")),
+        reverse=True,
+    )
+    undated_count = sum(item.get("date") is None for item in timeline)
     timeline = timeline[:bounded_limit]
 
     return {
@@ -2098,8 +2174,19 @@ async def get_corporate_timeline(symbol: str, limit: Annotated[int, Field(ge=0, 
         "row_count": len(timeline),
         "limit": bounded_limit,
         "max_limit": 30,
+        "selection": {
+            "order": "effective_date_desc",
+            "dividend_date_rule": "exercise_date, else payment_date",
+            "undated_rows": "sorted last; raw date fields retained in payload",
+            "undated_candidate_count": undated_count,
+        },
         "items": serialize_data_value(timeline),
     }
+
+
+def _dividend_timeline_date() -> Any:
+    """Dividend timeline date: exercise date, falling back to payment date."""
+    return func.coalesce(Dividend.exercise_date, Dividend.payment_date)
 
 
 async def _gather_corporate_timeline_rows(
@@ -2110,7 +2197,11 @@ async def _gather_corporate_timeline_rows(
         "company_events", symbol, order_attribute="event_date", limit=limit
     )
     dividend_rows = await _get_symbol_rows(
-        "dividends", symbol, order_attribute="exercise_date", limit=limit
+        "dividends",
+        symbol,
+        order_attribute="exercise_date",
+        order_expression=_dividend_timeline_date(),
+        limit=limit,
     )
     insider_rows = await _get_symbol_rows(
         "insider_deals", symbol, order_attribute="announce_date", limit=limit

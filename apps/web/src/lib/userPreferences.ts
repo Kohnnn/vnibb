@@ -255,6 +255,51 @@ export function findPreferredTabId<T extends { id: string; name: string }>(
   return preferredTabMatch?.id || null
 }
 
+/**
+ * Tab *roles* (#253): a stable identity for "the tab that shows a company's
+ * financials", independent of whatever the tab is currently labelled.
+ *
+ * The published Fundamental layout names that tab **Fundamentals**; the bundled
+ * fallback names it **Financials**. Resolving by exact display name is what made
+ * the Evaluate-a-company walkthrough fail against production (`tab.name ===
+ * 'Financials'` found nothing, so the goal returned `false`). Accepting only
+ * the slug `financials` would make it fail against the fallback instead, so
+ * both names — and the slug — resolve to the same role.
+ */
+export const ROLE_TAB_LABELS = {
+  financials: ['fundamentals', 'financials'],
+  overview: ['overview'],
+} as const
+
+// Only the roles the onboarding goals actually route to; `financials` is the
+// #253 fix, `overview` is the Follow-a-ticker target in the same handler.
+export type DashboardTabRole = keyof typeof ROLE_TAB_LABELS
+
+function normalizeLabel(label: string): string {
+  return label.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Suffixes like "Fundamentals 2" / "Financials (HOSE)" keep their role.
+function labelMatchesRole(label: string, candidates: readonly string[]): boolean {
+  const normalized = normalizeLabel(label);
+  return candidates.some((candidate) =>
+    normalized === candidate || normalized.startsWith(`${candidate} `) || normalized.startsWith(`${candidate}(`),
+  );
+}
+
+/**
+ * Resolves a tab role against whatever tab set is currently published, then the
+ * bundled fallback. Tab order is a preference, never an identity: the role picks
+ * a named tab, so a layout that adds, renames or reorders tabs cannot silently
+ * redirect a workflow to the wrong surface.
+ */
+export function findRoleTab<T extends { id: string; name: string }>(
+  tabs: readonly T[],
+  role: DashboardTabRole,
+): T | null {
+  return tabs.find((tab) => labelMatchesRole(tab.name, ROLE_TAB_LABELS[role])) ?? null;
+}
+
 export function findPreferredDashboardId<T extends { id: string; name: string; tabs?: Array<{ name: string }> }>(
   dashboards: T[],
   preferredTab?: DefaultTabPreference

@@ -30,6 +30,7 @@ import { useUrlSync } from '@/hooks/useUrlSync';
 import {
     autoFitGridItems,
     findNextAvailableLayout,
+    fitTemplateWidgets,
     getWidgetDefaultLayout,
     hasLayoutCoordinatesChanged,
     layoutsOverlap
@@ -57,6 +58,7 @@ import {
     dismissDashboardWalkthrough,
     dispatchOnboardingMeaningfulAction,
     markDashboardWalkthroughCompleted,
+    findRoleTab,
     selectOnboardingGoal,
     normalizeTabKey,
     shouldShowDashboardWalkthrough,
@@ -74,7 +76,7 @@ const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m)
 const AppsLibrary = dynamic(() => import('@/components/modals').then((m) => ({ default: m.AppsLibrary })), { ssr: false });
 const TemplateSelector = dynamic(() => import('@/components/modals').then((m) => ({ default: m.TemplateSelector as unknown as React.ComponentType<{ open: boolean; onClose: () => void; onSelectTemplate: (template: DashboardTemplate) => void; onStarterPromptRequest?: (promptKey: StarterPromptKey, workflow: ResearchStarter['workflow']) => void; sharedTickerGroups?: readonly WidgetGroupId[]; currentDashboard: Dashboard | null; currentSymbol: string }> })), { ssr: false });
 const AICopilot = dynamic(() => import('@/components/ui/AICopilot').then((m) => ({ default: m.AICopilot })), { ssr: false });
-const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void }> })), { ssr: false });
+const OnboardingWalkthrough = dynamic(() => import('@/components/onboarding/OnboardingWalkthrough').then((m) => ({ default: m.OnboardingWalkthrough as unknown as React.ComponentType<{ open: boolean; currentSymbol: string; onSkip: () => void; onGoalSelect: (goalId: OnboardingGoalId, symbol?: string) => boolean; onComplete: (goalId: OnboardingGoalId, openVniAgent?: boolean) => void; workspaceReady: boolean }> })), { ssr: false });
 
 export default function DashboardPage() {
     return (
@@ -985,12 +987,16 @@ function DashboardContent() {
     }, [activeDashboard?.id, activeTab]);
 
     const applyTemplateToDashboard = useCallback((template: DashboardTemplate, dashboardId: string, tabId: string) => {
-        template.widgets.forEach(w => {
+        // #252: one placement pass, shared with the template preview. Compliant
+        // templates pass through unchanged; an imported/custom template that
+        // under-sizes or overlaps a tile is corrected here instead of by the
+        // grid's static-item collision repair after mount.
+        fitTemplateWidgets(template.widgets).forEach((w, index) => {
             addWidget(dashboardId, tabId, {
                 type: w.type,
                 tabId,
                 layout: w.layout,
-                config: w.config || {}
+                config: template.widgets[index].config || {}
             });
         });
     }, [addWidget]);
@@ -1072,15 +1078,24 @@ function DashboardContent() {
             }
         }
 
+        // #253: resolve the financial surface by *role*, never by literal tab
+        // name. The published Fundamental layout labels it "Fundamentals" while
+        // the bundled fallback labels it "Financials"; matching one exact name
+        // made this goal return false against the other layout.
+        //
+        // The return value answers exactly one question - did this route the
+        // user right now - so a caller may show the guide only on `true`.
+        // Readiness is not this function's business: the walkthrough does not
+        // offer a goal until the catalogue has settled, so there is no
+        // queued-intent case to report.
         const dashboard = state.dashboards.find((item) => item.id === MAIN_FUNDAMENTAL_DASHBOARD_ID);
-        const tabName = goalId === 'follow_ticker' ? 'Overview' : 'Financials';
-        const tab = dashboard?.tabs.find((item) => item.name === tabName);
+        const tab = dashboard ? findRoleTab(dashboard.tabs, goalId === 'follow_ticker' ? 'overview' : 'financials') : null;
         if (!dashboard || !tab || !symbol) return false;
 
         setActiveDashboard(dashboard.id);
         setActiveTab(tab.id);
         applySelectedSymbol(symbol, { domain: 'vn', dashboardId: dashboard.id, completeOnboarding: false });
-        setTemplateApplyStatus({ message: `Opened ${symbol} ${tabName}.`, tone: 'success' });
+        setTemplateApplyStatus({ message: `Opened ${symbol} ${tab.name}.`, tone: 'success' });
         selectOnboardingGoal(goalId);
         return true;
     }, [applySelectedSymbol, applyTemplateToDashboard, createDashboard, createTab, setActiveDashboard, setActiveTab, state.dashboards]);
@@ -1125,12 +1140,12 @@ function DashboardContent() {
             return;
         }
 
-        template.widgets.forEach((widget) => {
+        fitTemplateWidgets(template.widgets).forEach((widget, index) => {
             addWidget(activeDashboard.id, activeTab.id, {
                 type: widget.type,
                 tabId: activeTab.id,
                 layout: widget.layout,
-                config: widget.config || {},
+                config: template.widgets[index].config || {},
             });
         });
         // A starter-bound layout primes VniAgent the moment it lands, so the
@@ -1795,6 +1810,7 @@ function DashboardContent() {
                 onSkip={skipWalkthrough}
                 onGoalSelect={handleOnboardingGoalSelect}
                 onComplete={handleOnboardingComplete}
+                workspaceReady={dashboardCatalogueReady}
             />
         </div>
     );

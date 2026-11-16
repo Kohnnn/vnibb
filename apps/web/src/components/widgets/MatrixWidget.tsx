@@ -213,7 +213,15 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
     focusOrigin.current = document.activeElement as HTMLElement;
     setInspected({ dimension, resultId: cell?.result_id });
   };
-  const closeInspector = () => { setInspected(null); focusOrigin.current?.focus(); };
+  const closeInspector = () => setInspected(null);
+  // Restore after the inspector has unmounted and its child trap has torn
+  // down; a synchronous focus inside the handler would be reclaimed by the
+  // still-mounted trap. Runs post-commit, so an Escape lands the opener.
+  useEffect(() => {
+    if (inspected || !focusOrigin.current) return;
+    const target = focusOrigin.current;
+    if (target.isConnected) target.focus({ preventScroll: true });
+  }, [inspected]);
   const keyboard = (event: KeyboardEvent<HTMLButtonElement>, row: number, col: number, cell: MatrixCell) => {
     if (event.key === ' ') { event.preventDefault(); toggleCell(cell.result_id); return; }
     const offsets: Record<string, [number, number]> = { ArrowRight: [0, 1], ArrowLeft: [0, -1], ArrowDown: [1, 0], ArrowUp: [-1, 0] };
@@ -281,7 +289,7 @@ function MatrixWorkspace({ id, symbol, onDataChange, owner }: WidgetProps & { ow
         const cell = cellIndex.get(`${entity.entity_id}:${dimension.dimension_id}`);
         return <td key={dimension.dimension_id} className={cell && selected.has(cell.result_id) ? 'matrix-selected' : ''}>{cell ? <><label className="matrix-select-cell"><input type="checkbox" checked={selected.has(cell.result_id)} onChange={() => toggleCell(cell.result_id)} aria-label={`Select ${entity.symbol} ${dimension.label}`} /></label><button type="button" className="matrix-cell" data-matrix-cell={`${row}:${col}`} onKeyDown={(event) => keyboard(event, row, col, cell)} onClick={() => inspect(dimension, cell)} aria-label={`Inspect ${entity.symbol} ${dimension.label}`}><MatrixResult cell={cell} density={view.density} /></button></> : <p className="matrix-notice">Unavailable · no result was retained.</p>}</td>;
       })}</tr>)}</tbody></table>{entities.length === 0 && <p className="matrix-empty">No companies match. Your selected result IDs are retained.</p>}{dimensions.length === 0 && <p className="matrix-empty">Show a question using Visible questions.</p>}</div>
-      {inspected && <MatrixInspector key={`${snapshot.snapshot_id}:${inspected.resultId ?? inspected.dimension.dimension_id}`} snapshot={snapshot} cell={snapshot.cells.find((cell) => cell.result_id === inspected.resultId) ?? null} dimension={inspected.dimension} canReview={!!owner && !snapshot.synthetic} busy={busy} onClose={closeInspector} onReview={review} onQuarantine={handleEvidenceQuarantine} />}</div>
+      {inspected && <MatrixInspector key={`${snapshot.snapshot_id}:${inspected.resultId ?? inspected.dimension.dimension_id}`} snapshot={snapshot} cell={snapshot.cells.find((cell) => cell.result_id === inspected.resultId) ?? null} dimension={inspected.dimension} canReview={!!owner && !snapshot.synthetic} busy={busy} onClose={closeInspector} onReview={review} onQuarantine={handleEvidenceQuarantine} returnFocusTo={focusOrigin} />}</div>
       <details className="matrix-limitations"><summary>Snapshot basis and limitations · {snapshot.limitations.length}</summary><p>Snapshot {snapshot.snapshot_id} · revision {snapshot.revision}</p>{snapshot.limitations.map((limit) => <p key={limit}>{limit}</p>)}</details>
     </>}
     {revokeRef && owner && <div className="matrix-revoke">{!revokeConfirm ? <button type="button" disabled={busy} onClick={() => setRevokeConfirm(true)}>Revoke snapshot…</button> : <><p>Revoke snapshot {revokeRef}? Revocation blocks future reads and follow-ups. Previously copied text cannot be recalled.</p><button type="button" disabled={busy} onClick={() => revoke(revokeRef)}>Confirm revoke</button><button type="button" onClick={() => setRevokeConfirm(false)}>Cancel</button></>}</div>}

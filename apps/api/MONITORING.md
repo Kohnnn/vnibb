@@ -105,4 +105,4 @@ Key sections:
 
 ## Full Documentation
 
-See [MONITORING_SETUP.md](../MONITORING_SETUP.md) for complete setup guide.
+See the canonical [`DEPLOYMENT_AND_OPERATIONS.md`](../../docs/DEPLOYMENT_AND_OPERATIONS.md) for deployment/operations context; this page is the complete Sentry setup quick reference.

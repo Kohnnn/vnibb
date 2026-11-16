@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, Zap, RefreshCw } from 'lucide-react';
 import { useRSLeaders, useRSLaggards, useRSGainers } from '@/lib/queries';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +12,12 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
+import { EMPTY_VALUE } from '@/lib/units';
+import type { RSPriceUnit, RSStockItem } from '@/lib/api';
 import type { WidgetGroupId } from '@/types/widget';
+import type { WidgetDataPayload } from '@/lib/widgetRuntime';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
 
 interface RSRankingWidgetProps {
     isEditing?: boolean;
@@ -46,6 +50,72 @@ export function getRSBg(rating: number): { background: string } {
     return { background: `color-mix(in srgb, var(--color-accent-primary) ${Math.round((score / 100) * RS_MAX_TINT)}%, transparent)` };
 }
 
+export interface RSPriceDisplay {
+    /** What the row shows in the price column. Never a bare number for an unverified unit. */
+    text: string;
+    /** The certified unit shown beside the number, or null when unavailable. */
+    unitLabel: 'VND' | 'pts' | null;
+    /** Provenance for the row's tooltip; null when nothing was observed. */
+    title: string | null;
+}
+
+function formatRSPriceValue(value: number): string {
+    return value.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+}
+
+// #251: a stored snapshot price can carry `price_unit: "unknown"`. Printing that
+// number beside unit-qualified ones turns an unverified magnitude into a
+// comparison against VND, so an unverified unit renders as unavailable with its
+// own reason instead of a bare number. Value and unit always travel together.
+export function describeRSPrice(
+    stock: Pick<RSStockItem, 'price' | 'price_unit' | 'price_asof' | 'price_source'>,
+): RSPriceDisplay {
+    // An undated stored price has no observation date of its own; neither the
+    // ranking's calculation date nor the fetch time stands in for it.
+    const asOf = stock.price_asof ? ` as of ${stock.price_asof}` : ', observation date unknown';
+    const source = stock.price_source ? ` (${stock.price_source})` : '';
+    const raw = stock.price;
+    if (raw === null || raw === undefined || !Number.isFinite(raw)) {
+        return { text: EMPTY_VALUE, unitLabel: null, title: 'Price unavailable: no stored price observation for this ranking row.' };
+    }
+    if (raw <= 0) {
+        return {
+            text: EMPTY_VALUE,
+            unitLabel: null,
+            title: `Price unavailable: the stored observation${asOf} is not a usable quote; a zero or negative value is reported as unavailable, not as a price.`,
+        };
+    }
+    const unit: RSPriceUnit | null | undefined = stock.price_unit;
+    if (unit === 'VND') {
+        return { text: formatRSPriceValue(raw), unitLabel: 'VND', title: `Stored price${asOf}${source} in VND.` };
+    }
+    if (unit === 'index_points') {
+        return { text: formatRSPriceValue(raw), unitLabel: 'pts', title: `Stored price${asOf}${source} in index points, not currency.` };
+    }
+    return {
+        text: EMPTY_VALUE,
+        unitLabel: null,
+        title: `Price unavailable: the stored observation${asOf}${source} has no verified currency or scale, so its raw value is withheld rather than compared as VND.`,
+    };
+}
+
+/** True when the row shows a number at all (certified unit, usable value). */
+function isDisplayablePrice(
+    stock: Pick<RSStockItem, 'price' | 'price_unit'>,
+): boolean {
+    const raw = stock.price;
+    if (raw === null || raw === undefined || !Number.isFinite(raw) || raw <= 0) return false;
+    return stock.price_unit === 'VND' || stock.price_unit === 'index_points';
+}
+
+function latestDate(values: Array<string | null | undefined>): string | null {
+    const dated = values.filter(
+        (value): value is string => typeof value === 'string' && !Number.isNaN(new Date(value).getTime()),
+    );
+    if (dated.length === 0) return null;
+    return dated.reduce((latest, value) => (new Date(value) > new Date(latest) ? value : latest));
+}
+
 export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetProps) {
     const [activeTab, setActiveTab] = useState<TabType>('leaders');
     const [limit] = useState(50);
@@ -74,6 +144,32 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
     const hasData = activeItems.length > 0;
     const isFallback = Boolean(activeQuery.error && hasData);
 
+    // Source observation dates only: the ranking's calculation date and each
+    // price's own date. Query receipts stay in `fetchedAt`. A price without a
+    // trade date keeps that gap visible rather than borrowing either clock.
+    const priceAsOf = latestDate(activeItems.map((item) => item.price_asof));
+    const ratingAsOf = latestDate(activeItems.map((item) => item.rating_asof));
+    const unknownUnitCount = activeItems.filter(
+        (item) => item.price != null && item.price_unit !== 'VND' && item.price_unit !== 'index_points',
+    ).length;
+    // Only a price the row actually shows can be "undated": zero, negative,
+    // non-finite and unit-withheld values are already reported as unavailable.
+    const undatedPriceCount = activeItems.filter(
+        (item) => isDisplayablePrice(item) && !item.price_asof,
+    ).length;
+    const health = deriveWidgetHealth({ updatedAt: ratingAsOf, stale: isFallback });
+    const warnings = useMemo(
+        () => [
+            ...(unknownUnitCount > 0
+                ? [`${unknownUnitCount} price${unknownUnitCount === 1 ? '' : 's'} withheld: stored observation has no verified unit`]
+                : []),
+            ...(undatedPriceCount > 0
+                ? [`${undatedPriceCount} price${undatedPriceCount === 1 ? '' : 's'} without a trade date: freshness unknown`]
+                : []),
+        ],
+        [undatedPriceCount, unknownUnitCount],
+    );
+
     useEffect(() => {
         const endpoint = activeTab === 'leaders'
             ? `/rs/leaders?limit=${limit}`
@@ -86,20 +182,26 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
             apiGroup: '/rs',
             endpoint,
             sourceLabel: `RS ${activeTab}`,
-            lastDataDate: null,
+            lastDataDate: ratingAsOf,
             fetchedAt: activeQuery.dataUpdatedAt,
+            cached: isFallback,
+            coverage: unknownUnitCount > 0 || undatedPriceCount > 0 ? 'partial' : undefined,
+            warnings,
             extra: {
                 count: activeItems.length,
                 limit,
+                priceAsOf,
+                unknownUnitCount,
+                undatedPriceCount,
             },
         }));
-    }, [activeItems.length, activeQuery.dataUpdatedAt, activeTab, hasData, limit, onDataChange]);
+    }, [activeItems.length, activeQuery.dataUpdatedAt, activeTab, hasData, isFallback, limit, onDataChange, priceAsOf, ratingAsOf, undatedPriceCount, unknownUnitCount, warnings]);
 
     const handleRefresh = () => {
         activeQuery.refetch();
     };
 
-    const renderList = (items: any[], isLoading: boolean, error: unknown) => {
+    const renderList = (items: RSStockItem[], isLoading: boolean, error: unknown) => {
         if (isLoading && items.length === 0) {
             return <WidgetSkeleton lines={6} />;
         }
@@ -135,9 +237,24 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
-                                {stock.price && (
-                                    <span className="text-[10px] text-[var(--text-secondary)] font-mono">{stock.price.toLocaleString()}</span>
-                                )}
+                                {/* #251: value and unit render together, or the row shows
+                                    an explicit unavailable state — never a bare number a
+                                    reader could compare as if it were VND. */}
+                                {(() => {
+                                    const display = describeRSPrice(stock);
+                                    return (
+                                        <span
+                                            data-testid={`rs-price-${stock.symbol}`}
+                                            title={display.title ?? undefined}
+                                            className="text-[10px] text-[var(--text-secondary)] font-mono whitespace-nowrap"
+                                        >
+                                            {display.text}
+                                            {display.unitLabel && (
+                                                <span className="ml-1 text-[9px] text-[var(--text-muted)]">{display.unitLabel}</span>
+                                            )}
+                                        </span>
+                                    );
+                                })()}
                                 <div className="flex flex-col items-end">
                                     <Badge
                                         variant="outline"
@@ -175,11 +292,17 @@ export function RSRankingWidget({ widgetGroup, onDataChange }: RSRankingWidgetPr
                 </div>
                 <div className="flex items-center gap-2">
                     <WidgetMeta
-                        updatedAt={null}
+                        updatedAt={ratingAsOf}
                         fetchedAt={activeQuery.dataUpdatedAt}
                         isFetching={activeQuery.isFetching && hasData}
                         isCached={isFallback}
-                        note={activeTab === 'leaders' ? 'Leaders' : activeTab === 'laggards' ? 'Laggards' : 'Gainers'}
+                        health={hasData ? health : undefined}
+                        note={[
+                            activeTab === 'leaders' ? 'Leaders' : activeTab === 'laggards' ? 'Laggards' : 'Gainers',
+                            priceAsOf ? `price as of ${priceAsOf}` : null,
+                            undatedPriceCount > 0 ? `${undatedPriceCount} undated price${undatedPriceCount === 1 ? '' : 's'}` : null,
+                            unknownUnitCount > 0 ? `${unknownUnitCount} price${unknownUnitCount === 1 ? '' : 's'} unverified` : null,
+                        ].filter(Boolean).join(' · ')}
                         align="right"
                     />
                     <button

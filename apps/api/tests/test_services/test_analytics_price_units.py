@@ -191,10 +191,31 @@ async def test_latest_rs_price_retains_provenance_without_stale_unknown_fallback
         _price("VNINDEX", close=1200, source="KBS"),
     ]])
 
-    prices = await RSRatingService()._get_latest_price_map(session, ["FPT", "VNM", "VCB", "VNINDEX"])
+    evidence = await RSRatingService()._get_latest_price_evidence(
+        session, ["FPT", "VNM", "VCB", "VNINDEX"]
+    )
 
     assert session.statements[0].column_descriptions[0]["expr"] is StockPrice
-    assert prices == {"FPT": 500, "VNM": 0.5, "VNINDEX": 1200}
+    assert evidence == {
+        "FPT": {
+            "price": 500.0,
+            "price_unit": "VND",
+            "price_source": "vnstock_history:VCI",
+            "price_asof": "2026-01-01",
+        },
+        "VNM": {
+            "price": 0.5,
+            "price_unit": "VND",
+            "price_source": "vnstock_vnd:VCI",
+            "price_asof": "2026-01-01",
+        },
+        "VNINDEX": {
+            "price": 1200.0,
+            "price_unit": "index_points",
+            "price_source": "vnstock_history:KBS",
+            "price_asof": "2026-01-01",
+        },
+    }
 
 
 @pytest.mark.asyncio

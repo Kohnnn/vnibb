@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -294,6 +296,115 @@ def mock_price_sql(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("paginated", [False, True])
+@pytest.mark.parametrize("slow_phase", ["execute", "cleanup"])
+async def test_collection_read_deadline_covers_execute_and_cleanup(
+    mock_price_sql, monkeypatch, paginated, slow_phase,
+):
+    session_type = server.async_session_maker
+    execute = session_type.execute
+    finished = set()
+
+    async def slow_execute(session, statement):
+        try:
+            if slow_phase == "execute":
+                await asyncio.Event().wait()
+            return await execute(session, statement)
+        finally:
+            finished.add("execute")
+
+    async def cleanup(session, *_args):
+        try:
+            if slow_phase == "cleanup":
+                await asyncio.Event().wait()
+            await asyncio.sleep(0)
+        finally:
+            finished.add("cleanup")
+
+    monkeypatch.setattr(session_type, "execute", slow_execute)
+    monkeypatch.setattr(session_type, "__aexit__", cleanup)
+    read = server.list_collection_documents_paginated if paginated else server.list_collection_documents
+
+    async with asyncio.timeout(1):
+        with pytest.raises(TimeoutError):
+            await read("stock_prices", timeout_seconds=0.05)
+
+    assert finished == {"execute", "cleanup"}
+
+
+@pytest.mark.asyncio
+async def test_paginated_collection_read_deadline_is_shared_across_pages(mock_price_sql, monkeypatch):
+    records, statements = mock_price_sql
+    records.append({"symbol": "FPT", "close": 65000.0, "source": "vnstock_vnd:VCI"})
+    session_type = server.async_session_maker
+    execute = session_type.execute
+    executed = []
+    closed = []
+
+    async def slow_execute(session, statement):
+        try:
+            await asyncio.sleep(0.2)
+            return await execute(session, statement)
+        finally:
+            executed.append(session)
+
+    async def cleanup(session, exc_type, *_args):
+        await asyncio.sleep(0)
+        closed.append(exc_type)
+
+    monkeypatch.setattr(session_type, "execute", slow_execute)
+    monkeypatch.setattr(session_type, "__aexit__", cleanup)
+
+    async with asyncio.timeout(1):
+        with pytest.raises(TimeoutError):
+            await server.list_collection_documents_paginated(
+                "stock_prices", page_size=1, max_documents=2, timeout_seconds=0.3,
+            )
+
+    assert len(statements) == 1
+    assert len(executed) == 2
+    assert closed == [None, asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paginated", [False, True])
+async def test_collection_read_propagates_caller_cancellation_after_cleanup(
+    mock_price_sql, monkeypatch, paginated,
+):
+    started = asyncio.Event()
+    finished = set()
+    session_type = server.async_session_maker
+
+    async def slow_execute(session, statement):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.add("execute")
+
+    async def cleanup(session, exc_type, *_args):
+        assert exc_type is asyncio.CancelledError
+        await asyncio.sleep(0)
+        finished.add("cleanup")
+
+    monkeypatch.setattr(session_type, "execute", slow_execute)
+    monkeypatch.setattr(session_type, "__aexit__", cleanup)
+    read = server.list_collection_documents_paginated if paginated else server.list_collection_documents
+    task = asyncio.create_task(read("stock_prices", timeout_seconds=10))
+    try:
+        async with asyncio.timeout(1):
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert finished == {"execute", "cleanup"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paginated", [False, True])
 async def test_stock_price_sql_projects_source_and_normalizes_units(mock_price_sql, paginated):
     records, statements = mock_price_sql
     records.extend([
@@ -333,8 +444,9 @@ async def test_mcp_price_wrappers_warn_about_unknown_series(mock_price_sql, gene
     assert result["unknown_price_unit_count"] == 1
     assert result["prices_comparable"] is False
     assert result["warnings"]
-    assert result["items"][1]["price_unit"] == "unknown"
-    assert result["items"][1]["close"] == 65.0
+    unknown = [item for item in result["items"] if item["price_unit"] == "unknown"]
+    assert len(unknown) == 1
+    assert unknown[0]["close"] == 65.0
 
 
 @pytest.mark.asyncio

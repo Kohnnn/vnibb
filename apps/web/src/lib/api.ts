@@ -743,10 +743,10 @@ export async function getMetricsHistory(
 
 export async function getForeignTrading(
     symbol: string,
-    options?: { limit?: number }
+    options?: { limit?: number; sessions?: number }
 ): Promise<ForeignTradingResponse> {
     return fetchAPI<ForeignTradingResponse>(`/equity/${symbol}/foreign-trading`, {
-        params: { limit: options?.limit },
+        params: { limit: options?.limit, sessions: options?.sessions },
     });
 }
 
@@ -1227,9 +1227,14 @@ export interface GrowthComparisonDetail {
     negative_base?: boolean;
     transition?: 'loss_to_profit' | 'profit_to_loss' | null;
     unavailable_reason?: string | null;
+    field_unavailable_reason?: { current?: string | null; previous?: string | null };
     current_period?: string | null;
     previous_period?: string | null;
-    basis_status?: 'confirmed' | 'legacy_basis_unconfirmed' | 'incompatible';
+    basis_status?: 'confirmed' | 'unconfirmed' | 'incompatible';
+    currency?: string | null;
+    value_unit?: string | null;
+    consolidation_basis?: string | null;
+    flow_basis?: string | null;
 }
 
 export interface GrowthRatesResponse {
@@ -2522,12 +2527,20 @@ export interface EarningsQualitySeriesPoint {
     operating_cash_flow?: number | null;
 }
 
+export interface EarningsQualityAvailability {
+    status: 'available' | 'partial' | 'unavailable';
+    unavailable_reason: string | null;
+    admitted_periods?: number;
+    component_availability?: Record<string, Record<string, string | null>>;
+}
+
 export interface EarningsQualityPayload {
     symbol: string;
     computed_at: string;
-    grade: string;
+    // Absent when no period was admitted: a grade or trend implies coverage.
+    grade: string | null;
     quality_score: number | null;
-    trend: 'Improving' | 'Stable' | 'Declining' | string;
+    trend: 'Improving' | 'Stable' | 'Declining' | string | null;
     accruals_ratio_pct: number | null;
     revenue_quality_pct: number | null;
     earnings_persistence: number | null;
@@ -2537,6 +2550,7 @@ export interface EarningsQualityPayload {
         persistence?: number | null;
     };
     checks: string[];
+    coverage?: EarningsQualityAvailability;
     series: EarningsQualitySeriesPoint[];
 }
 
@@ -3901,12 +3915,21 @@ export async function getIndustryBubble(options: {
 
 // ============ RS Rating API ============
 
+export type RSPriceUnit = 'VND' | 'index_points' | 'unknown';
+
 export interface RSStockItem {
     symbol: string;
     company_name?: string | null;
     rs_rating: number;
     rs_rank?: number | null;
     price?: number | null;
+    /** The stored price's own unit evidence; never inferred from magnitude. */
+    price_unit?: RSPriceUnit | null;
+    price_source?: string | null;
+    /** Observation date of `price`, never the request or fetch time. */
+    price_asof?: string | null;
+    /** Date the RS score was calculated. */
+    rating_asof?: string | null;
     industry?: string | null;
 }
 
