@@ -489,4 +489,50 @@ describe('PredictionAlertsWidget', () => {
             expect(stored[0]?.detail).not.toMatch(/No market moved/);
         });
     });
+
+    it('withdraws a no-movement claim when revalidation fails', async () => {
+        localStorage.removeItem('vnibb-alert-activity-v1');
+        const complete = {
+            window_hours: 1, min_movement_bps: 200, count: 0, alerts: [],
+            status: 'complete',
+            baseline_tolerance_seconds: 1800,
+            coverage: coverage(4, 4, 4),
+            data_observed_through: '2026-11-14T10:00:00+00:00',
+        };
+        (global.fetch as jest.Mock).mockImplementation((url: string) => {
+            if (url.includes('/prediction-markets/alerts')) {
+                if (url.includes('window_hours=4')) return Promise.reject(new Error('store refused'));
+                return Promise.resolve(new JsonTestResponse(JSON.stringify(complete)));
+            }
+            return Promise.resolve(new JsonTestResponse(JSON.stringify({ sources: [] })));
+        });
+        const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        const onDataChange = jest.fn();
+        render(
+            <QueryClientProvider client={client}>
+                <PredictionAlertsWidget onDataChange={onDataChange} />
+            </QueryClientProvider>,
+        );
+        await waitFor(() => {
+            expect(screen.getByText(/No market moved more than 2pp/i)).toBeInTheDocument();
+        });
+        expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.layoutHint.empty).toBe(true);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Last 4h' }));
+        await waitFor(() => {
+            expect(screen.getByText(/Coverage unverified/i)).toBeInTheDocument();
+        });
+        // The previous window evaluated cleanly, but its result is no longer
+        // current: a failed revalidation must retract the conclusion and the
+        // compact tile rather than leave the last verdict standing.
+        expect(screen.queryByText(/No market moved/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/Feed stale/i)).toBeInTheDocument();
+        // The retained payload is the 1h evaluation, so the header names both
+        // windows instead of presenting 1h numbers under a 4h selection.
+        expect(screen.getByText(/requested 4h; retaining last 1h evaluation/i)).toBeInTheDocument();
+        const payload = onDataChange.mock.calls.at(-1)?.[0];
+        expect(payload.feedState).toBe('stale');
+        expect(payload.__widgetRuntime.layoutHint.empty).toBe(false);
+        expect(payload.__widgetRuntime.provenance.coverage).not.toBe('complete');
+    });
 });
