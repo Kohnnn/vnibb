@@ -13,6 +13,8 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE, formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import type { WidgetDataPayload } from '@/lib/widgetRuntime';
+import { getMarketState } from '@/lib/marketHours';
+import { parseForeignTradingSnapshotTime } from './ForeignTradingWidget';
 import { signedToneClass } from '@/lib/priceColor';
 
 interface OwnershipRatingSummaryWidgetProps {
@@ -62,6 +64,15 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const error = shareholderError || foreignQuery.error || insiderQuery.error
     || (foreignEnvelopeError ? new Error(foreignEnvelopeError) : null)
   const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
+  const foreignDate = foreignFlow?.length ? foreignCoverage?.last_data_date : null
+  const foreignSnapshot = parseForeignTradingSnapshotTime(foreignDate)
+  const foreignSnapshotTime = foreignSnapshot?.getTime()
+  const foreignAgeHours = foreignSnapshotTime !== undefined && Number.isFinite(foreignSnapshotTime) && foreignSnapshotTime <= Date.now()
+    ? (Date.now() - foreignSnapshotTime) / (1000 * 60 * 60)
+    : null
+  const foreignAsOf = foreignAgeHours === null ? null : foreignDate
+  const foreignStale = foreignAgeHours !== null && foreignAgeHours >= 12
+    && !(getMarketState().phase === 'weekend' && foreignAgeHours <= 96)
   const gradeTone = summary.grade === 'A' ? 'text-[var(--color-positive)]' : summary.grade === 'B' ? 'text-[var(--color-accent-primary)]' : summary.grade === 'C' ? 'text-[var(--color-warning)]' : summary.grade === 'D' ? 'text-[var(--color-negative)]' : 'text-[var(--text-muted)]'
   const warnings = useMemo(() => {
     const inputs = [
@@ -78,34 +89,40 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
     return inputs.flatMap(([name, query, usable]) => query.error
       ? [`${name}: ${usable ? 'refresh failed; retained data may be stale' : 'unavailable (request failed)'}.`]
       : !usable ? [`${name}: ${query.isLoading ? 'loading' : 'no usable observations'}.`] : [])
+      .concat(foreignEnvelopeError ? [`Foreign flow: ${foreignEnvelopeError}`] : [])
+      .concat((foreignCoverage?.warnings ?? [])
+        .filter((warning) => !foreignEnvelopeError?.includes(warning))
+        .map((warning) => `Foreign flow: ${warning}`))
       .concat(coverageNote ?? [])
       .concat(coverage.warning && coverage.status !== 'partial' ? [`Foreign flow: ${coverage.warning}.`] : [])
       .concat(summary.holderCount && summary.ownershipUnitStatus !== 'explicit' ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [])
       .concat(summary.score === null ? ['Composite withheld until all three inputs and ownership percentage units are usable.'] : [])
-  }, [foreignEnvelopeError, shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
+  }, [foreignCoverage?.warnings, foreignEnvelopeError, shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
   const ownershipHealth: WidgetHealthState | undefined = error && hasData
     ? { status: 'stale', label: 'Refresh failed', detail: warnings.join(' ') }
-    : summary.coverage !== 'complete' && !isLoading
-      ? { status: hasData ? 'limited' : 'coverage_gap', label: hasData ? 'Partial ownership view' : 'Coverage gap', detail: warnings.join(' ') }
-      : undefined
+    : foreignStale
+      ? { status: 'stale', label: 'Foreign flow stale', detail: `Foreign flow was last observed on ${foreignAsOf}.` }
+      : summary.coverage !== 'complete' && !isLoading
+        ? { status: hasData ? 'limited' : 'coverage_gap', label: hasData ? 'Partial ownership view' : 'Coverage gap', detail: warnings.join(' ') }
+        : undefined
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity + /insider',
       endpoint: `/api/v1/equity/${upperSymbol}/shareholders; /api/v1/equity/${upperSymbol}/foreign-trading; /api/v1/insider/${upperSymbol}/sentiment`,
-      sourceLabel: 'Shareholders + foreign flow + insider sentiment',
+      sourceLabel: foreignAsOf ? 'Shareholders + foreign flow + insider sentiment (foreign flow as-of only)' : 'Shareholders + foreign flow + insider sentiment',
       derived: true,
-      lastDataDate: null,
+      lastDataDate: foreignAsOf,
       fetchedAt,
       coverage: summary.coverage,
-      stale: Boolean(error && hasData),
+      stale: Boolean((error && hasData) || foreignStale),
       cached: Boolean(error && hasData),
       warnings,
       extra: { ...summary, warnings },
       exportData: { ...summary, warnings },
     }))
-  }, [error, fetchedAt, hasData, onDataChange, summary, upperSymbol, warnings])
+  }, [error, fetchedAt, foreignAsOf, foreignStale, hasData, onDataChange, summary, upperSymbol, warnings])
 
   const refresh = () => {
     void shareholdersQuery.refetch()
@@ -138,7 +155,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
               <div className="text-[11px] text-[var(--text-secondary)]">{summary.stance ?? 'Ownership rating unavailable'}</div>
             </div>
           </div>
-          <WidgetMeta updatedAt={null} fetchedAt={fetchedAt} isFetching={isFetching && hasData} note={summary.holderCount !== null ? `${summary.holderCount} reported holders` : 'Holder count unavailable'} health={ownershipHealth} align="right" />
+          <WidgetMeta updatedAt={foreignAsOf} fetchedAt={fetchedAt} isFetching={isFetching && hasData} sourceLabel={foreignAsOf ? 'Foreign flow as-of only' : undefined} note={summary.holderCount !== null ? `${summary.holderCount} reported holders` : 'Holder count unavailable'} health={ownershipHealth} align="right" />
         </div>
         {hasData && warnings.length > 0 && <p role="status" className="mb-3 text-[11px] text-[var(--text-secondary)]">{warnings.join(' ')}</p>}
 

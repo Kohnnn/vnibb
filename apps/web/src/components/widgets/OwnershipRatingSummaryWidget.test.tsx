@@ -127,6 +127,50 @@ describe('OwnershipRatingSummaryWidget admission', () => {
     expect(screen.queryByText('Ownership feed unavailable')).not.toBeInTheDocument();
   });
 
+  test('retains only the foreign source as-of and marks an old no-error snapshot stale', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-03T12:00:00Z'));
+    try {
+      setInputs(true, true, true);
+      foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: { last_data_date: '2026-05-29' } }));
+      const onDataChange = jest.fn();
+      const { rerender } = render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+      expect(screen.getByText('Foreign flow stale')).toBeInTheDocument();
+      expect(screen.getByText('Foreign flow as-of only')).toBeInTheDocument();
+      expect(screen.getByText(/As of 2026-05-29/)).toBeInTheDocument();
+      expect(screen.getByText('Foreign Net 20D').nextElementSibling).toHaveTextContent('0');
+      expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance).toEqual(expect.objectContaining({ updatedAt: '2026-05-29', stale: true, cached: false }));
+
+      const freshRows = ['2026-06-03', '2026-06-02', '2026-06-01']
+        .map((date) => ({ symbol: 'FPT', date, buy_volume: 0, sell_volume: 0 }))
+        .concat(foreignRows.slice(0, 17));
+      foreign.mockReturnValue(readyQuery({ data: freshRows, meta: { last_data_date: '2026-06-03', last_validated_session: '2026-06-03' } }));
+      rerender(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+      expect(screen.queryByText('Foreign flow stale')).not.toBeInTheDocument();
+      expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance).toEqual(expect.objectContaining({ updatedAt: '2026-06-03', stale: false }));
+
+      foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: {} }));
+      rerender(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+      expect(screen.getByText('As-of unknown')).toBeInTheDocument();
+      expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance).toEqual(expect.objectContaining({ updatedAt: null, stale: false }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('retains foreign fallback and metadata warnings alongside admitted values', () => {
+    setInputs(true, true, true);
+    const warning = 'Live foreign trading feed returned no rows; using cached database fallback.';
+    foreign.mockReturnValue(readyQuery({ data: foreignRows, error: warning, meta: { last_data_date: '2026-05-29', warnings: [warning] } }));
+    const onDataChange = jest.fn();
+    render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+    expect(screen.getByRole('status')).toHaveTextContent(warning);
+    expect(screen.getByText('Refresh failed')).toBeInTheDocument();
+    expect(screen.getByText('Foreign Net 20D').nextElementSibling).toHaveTextContent('0');
+    const payload = onDataChange.mock.calls.at(-1)?.[0];
+    expect(payload.__widgetRuntime.provenance).toEqual(expect.objectContaining({ updatedAt: '2026-05-29', stale: true, cached: true, warnings: expect.arrayContaining([expect.stringContaining(warning)]) }));
+    expect(getWidgetExportData(payload)).toEqual(expect.objectContaining({ warnings: expect.arrayContaining([expect.stringContaining(warning)]) }));
+  });
+
   test('discloses failed refresh while retaining previously admitted facts', () => {
     setInputs(true, true, true);
     shareholders.mockReturnValue({ ...readyQuery({ data: holderRows }), error: new Error('Refresh failed') });
