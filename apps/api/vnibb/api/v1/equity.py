@@ -2261,7 +2261,7 @@ def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dic
         "ps": snapshot.get("ps"),
         "ev_ebitda": snapshot.get("evEbitda"),
         "as_of": snapshot.get("snapshotDate"),
-        "inputs": snapshot.get("inputs") or {},
+        "inputs": {"modelConfidence": "unassessed", **(snapshot.get("inputs") or {})},
         "source": snapshot.get("source") or "vnibb-fundamental-engine",
         "note": "Model-derived reference estimate, not investment advice.",
     }

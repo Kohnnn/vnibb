@@ -735,6 +735,21 @@ class TestComputeFundamentalSnapshot:
         assert "roe" in snapshot.computed_fields
         assert "intrinsic_value" in snapshot.computed_fields
 
+    def test_positive_and_negative_capex_have_identical_fcf_and_dcf(self) -> None:
+        negative_inputs = _happy_inputs()
+        positive_inputs = _happy_inputs()
+        for row in positive_inputs.cash_flows:
+            row["purchase_of_fixed_assets"] = -row["purchase_of_fixed_assets"]
+
+        negative = compute_fundamental_snapshot(negative_inputs)
+        positive = compute_fundamental_snapshot(positive_inputs)
+
+        assert negative.fcf_positive is positive.fcf_positive is True
+        assert negative.inputs["base_fcf"] == positive.inputs["base_fcf"] == 200.0
+        assert negative.valuation_method == positive.valuation_method == "dcf"
+        assert negative.intrinsic_value is not None
+        assert positive.intrinsic_value == pytest.approx(negative.intrinsic_value)
+
     def test_missing_capex_withholds_fcf_valuation_and_margin(self) -> None:
         inputs = FundamentalInputs(
             symbol="QAZ",
@@ -896,6 +911,30 @@ class TestToDocument:
         assert coverage["cagr"]["revenue"]["published"] == pytest.approx(10.0, rel=1e-6)
         assert doc["valuationMethod"] == "dcf"
 
+    def test_model_confidence_is_independent_of_unit_quality_and_completeness(self) -> None:
+        complete = _happy_inputs()
+        incomplete = _happy_inputs()
+        incomplete.price_unit = "unknown"
+        incomplete.cash_flows[-1]["purchase_of_fixed_assets"] = None
+
+        for inputs, unit_quality, fcf_status in (
+            (complete, "verified", "complete"),
+            (incomplete, "unknown", "partial"),
+        ):
+            snapshot = compute_fundamental_snapshot(inputs)
+            doc = to_document(snapshot, date(2026, 6, 10))
+            assert snapshot.inputs["model_confidence"] == "unassessed"
+            assert doc["inputs"]["modelConfidence"] == "unassessed"
+            assert doc["inputs"]["unitQuality"] == unit_quality
+            assert doc["inputs"]["derivedCoverage"]["fcf"]["status"] == fcf_status
+
+        retained = to_document(compute_fundamental_snapshot(complete), date(2026, 6, 10))
+        retained["inputs"].pop("modelConfidence")
+        admitted = admit_fundamental_snapshot(retained)
+        assert admitted["inputs"]["modelConfidence"] == "unassessed"
+        assert "modelConfidence" not in retained["inputs"]
+        assert admit_fundamental_snapshot(admitted) is admitted
+
 
 # --- retained snapshot admission ------------------------------------------------
 
@@ -939,6 +978,7 @@ class TestAdmitFundamentalSnapshot:
         assert admitted["dividendYears"] == 5
         assert "schema" in admitted["inputs"]["derivedUnavailableReason"]
         assert admitted["inputs"]["derivedWithheldFields"]
+        assert admitted["inputs"]["modelConfidence"] == "unassessed"
 
     def test_withheld_snapshot_reports_valuation_unavailable(self) -> None:
         reason = fundamental_valuation_unavailable_reason(admit_fundamental_snapshot(_v3_doc()))

@@ -1296,6 +1296,7 @@ def compute_fundamental_snapshot(
         "growth_rate": growth_rate,
         "horizon_years": cfg.horizon_years,
         "unit_quality": "unknown" if comparison_reason else "verified",
+        "model_confidence": "unassessed",
         "comparison_unavailable_reason": comparison_reason,
         "unit_lineage": inputs.unit_lineage or {
             "price": {"unit": inputs.price_unit}, "shares": {"unit": inputs.shares_unit},
@@ -1438,10 +1439,15 @@ def admit_fundamental_snapshot(doc: dict[str, Any] | None) -> dict[str, Any] | N
         return doc
     inputs = doc.get("inputs")
     inputs = dict(inputs) if isinstance(inputs, dict) else {}
+    inputs.setdefault("modelConfidence", "unassessed")
     coverage = inputs.get("derivedCoverage")
     admitted = doc.get("schemaVersion") == SCHEMA_VERSION and isinstance(coverage, dict)
     if admitted:
-        return doc
+        if inputs == doc.get("inputs"):
+            return doc
+        result = dict(doc)
+        result["inputs"] = inputs
+        return result
     result = dict(doc)
     reason = inputs.get("derivedUnavailableReason") or (
         "Retained snapshot predates formula schema "
@@ -1507,6 +1513,7 @@ def to_document(snapshot: FundamentalSnapshot, snapshot_date: date) -> dict[str,
             "growthRate": snapshot.inputs.get("growth_rate"),
             "horizonYears": snapshot.inputs.get("horizon_years"),
             "unitQuality": snapshot.inputs.get("unit_quality"),
+            "modelConfidence": snapshot.inputs.get("model_confidence", "unassessed"),
             "comparisonUnavailableReason": snapshot.inputs.get("comparison_unavailable_reason"),
             "derivedUnavailableReason": snapshot.inputs.get("derived_unavailable_reason"),
             "derivedCoverage": snapshot.inputs.get("derived_coverage", {}),

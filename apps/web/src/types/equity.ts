@@ -177,7 +177,7 @@ export interface FundamentalValuation {
   ps?: number | null;
   ev_ebitda?: number | null;
   as_of?: string | null;
-  inputs?: Record<string, unknown> | null;
+  inputs?: (Record<string, unknown> & { modelConfidence?: 'unassessed' | null }) | null;
   source?: string | null;
   note?: string | null;
 }
