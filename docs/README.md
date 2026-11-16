@@ -6,6 +6,7 @@
 
 - `../project-work-backlog.md`: cross-session work index; use its dependencies and current GitHub tickets before reviving historical plans.
 - `CONTINUING_WORK_EVIDENCE_2026-11-10.md`: integration decisions, operational limits and the individual widget-ID disposition inventory; verification is separate from source presence.
+- `VNIBB_VNSTOCK_CONTINUATION_HANDOFF.md`: start here when continuing vnstock migration, DNSE offline work, or database readiness; includes transfer limits and authorization gates.
 
 - `API_REFERENCE.md`: API-level reference material for the backend surface
 - `APPS_SCRIPT_SHEETS.md`: Google Apps Script / Sheets read-only API integration

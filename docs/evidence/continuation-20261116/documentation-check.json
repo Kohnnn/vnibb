@@ -1,0 +1,36 @@
+{
+  "schema_version": "handoff-documentation-check-v1",
+  "checkout_base": "13de94e526b777135c4472b000576a3f1f4a39e8",
+  "branch": "codex/264-vnibb-continuation-handoff",
+  "scope": [
+    "docs/README.md",
+    "docs/VNIBB_VNSTOCK_CONTINUATION_HANDOFF.md",
+    "docs/evidence/continuation-20261116/README.md",
+    "docs/evidence/continuation-20261116/dnse-offline-receipt.json",
+    "docs/evidence/continuation-20261116/dnse-offline-bc2c8ff2.patch.base64"
+  ],
+  "local_markdown_links_checked": 7,
+  "broken_links": [],
+  "decoded_patch_sha256": "ab9444a12396b02309e071c402a56a28661487e3adb8b67a199acb84ef73ed48",
+  "decoded_patch_bytes": 69612,
+  "reconstruction": {
+    "source_parent": "7d71fb4ab3491da008b1e71599f032b75301ec10",
+    "source_candidate": "bc2c8ff20dfe2f96e5742311a834a2e31e4f467c",
+    "tree": "5b998b80e90b39e6755af10a507a973bf72a738e",
+    "method": "base64 --decode; SHA256 check; GIT_INDEX_FILE disposable index: git read-tree parent; git apply --cached --check; git apply --cached; git write-tree compared with original candidate tree",
+    "actual_exit": 0,
+    "first_attempt": "Text export normalized CRLF and failed applicability, exit 1; that artifact was removed. Byte-exact encoding corrected the cause before retry."
+  },
+  "privacy_check": {
+    "scope": "published docs, receipt and decoded source delta",
+    "method": "private-path, private-key, credential-token, bearer-value and long inline-secret patterns; does not claim an exhaustive secret audit",
+    "findings": []
+  },
+  "application_checks_run": false,
+  "outcome": "pass",
+  "limits": [
+    "No raw prior acceptance logs are published",
+    "No live source/data, account state, private fixtures or environment files were read or transferred",
+    "No installer, provider, production, browser or full-suite acceptance claimed"
+  ]
+}
