@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Preserve foreign-flow source dates, stale status and fallback warnings in Ownership Summary without treating retrieval time as source freshness (#249).
 - Carry article-sentiment provenance through news routes and widgets: distinguish locally computed heuristics, explicit provider classifications and unrecorded origins; preserve missing or null flow sentiment as null, never fabricated Neutral or implied stock-price impact (#250).
 - Validate reviewed image references before retention-config updates and atomically replace the private file at mode0600; missing inputs and failed writes preserve the previous configuration.
 - Apply admitted fiscal, unit and source evidence before cash-flow aliases, growth comparisons, Earnings Quality grades and earnings-recap context; preserve measured zero and explicit unavailable reasons. Use the same case-preserving field admission for valuation inputs and refuse incomparable margin exports (#245–#248, #257, #258).
