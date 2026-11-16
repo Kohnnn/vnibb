@@ -9,13 +9,16 @@ The source branch `codex/233-dnse-offline-20261116` was not present on the remot
 From an existing clone, recover only into a new, issue-bound isolated checkout at that parent. Set `EVIDENCE` to the absolute path of this directory before changing directories:
 
 ```sh
-patch=$(mktemp)
-base64 --decode "$EVIDENCE/dnse-offline-bc2c8ff2.patch.base64" > "$patch"
-printf '%s  %s\n' 'ab9444a12396b02309e071c402a56a28661487e3adb8b67a199acb84ef73ed48' "$patch" | sha256sum --check
-# In the isolated checkout at 7d71fb4ab3491da008b1e71599f032b75301ec10:
-git apply --check "$patch"
-git apply "$patch"
-rm "$patch"
+(
+  set -e
+  patch=$(mktemp)
+  trap 'rm -f "$patch"' 0
+  base64 --decode "$EVIDENCE/dnse-offline-bc2c8ff2.patch.base64" > "$patch"
+  printf '%s  %s\n' 'ab9444a12396b02309e071c402a56a28661487e3adb8b67a199acb84ef73ed48' "$patch" | sha256sum --check
+  # In the isolated checkout at 7d71fb4ab3491da008b1e71599f032b75301ec10:
+  git apply --check "$patch"
+  git apply "$patch"
+)
 ```
 
 Do not apply the delta over the dirty original checkout or current main without reviewing intervening changes. A new commit will have a new identity; do not claim the original commit was recreated. `dnse-offline-receipt.json` records the decoded digest and complete candidate-file hashes.
