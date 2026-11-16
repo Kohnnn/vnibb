@@ -5,6 +5,7 @@
   "framework": "nextjs",
   "git": {
     "deploymentEnabled": {
+      "main": false,
       "codex/241-post-release-advisories-20261111": false,
       "codex/project-integration-20261110": false
     },
