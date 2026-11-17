@@ -54,12 +54,14 @@ async def stores_context(monkeypatch):
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
     redis_prefix = f"{schema}:cache"
+    cache_attempts = []
 
     def redis_key(key):
         return f"{redis_prefix}:{key}"
 
     class IsolatedRedisClient(RedisClient):
         async def set_json(self, key, value, ttl=None):
+            cache_attempts.append(key)
             return await super().set_json(redis_key(key), value, ttl=ttl)
 
     redis = IsolatedRedisClient(url=redis_url) if redis_url else None
@@ -76,7 +78,7 @@ async def stores_context(monkeypatch):
             await connection.run_sync(Base.metadata.create_all)
         yield SimpleNamespace(
             sessions=sessions, mongo=database, service=service, redis=redis,
-            redis_prefix=redis_prefix, redis_key=redis_key,
+            redis_prefix=redis_prefix, redis_key=redis_key, cache_attempts=cache_attempts,
         )
     finally:
         try:

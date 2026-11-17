@@ -66,6 +66,11 @@ async def sql_snapshot(sessions):
         ]
 
 
+async def cache_snapshot(stores):
+    keys = [key async for key in stores.redis.client.scan_iter(f"{stores.redis_prefix}:*")]
+    return {key: await stores.redis.client.get(key) for key in keys}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("symbol", ["FPT", "VNINDEX"])
 async def test_replayed_unknown_dnse_rows_cannot_overwrite_histories_or_cache(stores, monkeypatch, caplog, symbol):
@@ -91,10 +96,13 @@ async def test_replayed_unknown_dnse_rows_cannot_overwrite_histories_or_cache(st
     ])
     mongo_before = list(collection.find().sort([("source", 1), ("_id", 1)]))
     sql_before = await sql_snapshot(stores.sessions)
-    cache_key = stores.redis_key(build_cache_key("vnibb", "price", "latest", symbol))
     if stores.redis:
-        await stores.redis.client.set(cache_key, '{"source":"VCI","close":11000,"value":null}')
-        cache_before = await stores.redis.client.get(cache_key)
+        latest_key = stores.redis_key(build_cache_key("vnibb", "price", "latest", symbol))
+        recent_key = stores.redis_key(build_cache_key("vnibb", "price", "recent", symbol))
+        await stores.redis.client.set(latest_key, '{"source":"VCI","close":11000,"value":null}')
+        await stores.redis.client.set(recent_key, '[{"source":"VCI","close":11000}]')
+        cache_before = await cache_snapshot(stores)
+        assert set(cache_before) == {latest_key, recent_key}
 
     row = dnse_row(symbol)
     pipeline = DataPipeline()
@@ -134,7 +142,10 @@ async def test_replayed_unknown_dnse_rows_cannot_overwrite_histories_or_cache(st
         assert await sql_snapshot(stores.sessions) == sql_before
         assert list(collection.find().sort([("source", 1), ("_id", 1)])) == mongo_before
         if stores.redis:
-            assert await stores.redis.client.get(cache_key) == cache_before
+            assert stores.cache_attempts == []
+            assert await stores.redis.client.get(latest_key) == cache_before[latest_key]
+            assert await stores.redis.client.get(recent_key) == cache_before[recent_key]
+            assert await cache_snapshot(stores) == cache_before
 
 
 @pytest.mark.asyncio
@@ -172,6 +183,13 @@ async def test_conflicting_rows_cannot_impersonate_trusted_unit_or_source(stores
     })
     mongo_before = list(collection.find())
     sql_before = await sql_snapshot(stores.sessions)
+    if stores.redis:
+        latest_key = stores.redis_key(build_cache_key("vnibb", "price", "latest", symbol))
+        recent_key = stores.redis_key(build_cache_key("vnibb", "price", "recent", symbol))
+        await stores.redis.client.set(latest_key, '{"source":"VCI","close":11000}')
+        await stores.redis.client.set(recent_key, '[{"source":"VCI","close":11000}]')
+        cache_before = await cache_snapshot(stores)
+        assert set(cache_before) == {latest_key, recent_key}
     pipeline = DataPipeline()
 
     async def listing(_client):
@@ -190,13 +208,20 @@ async def test_conflicting_rows_cannot_impersonate_trusted_unit_or_source(stores
     for _ in range(2):
         caplog.clear()
         progress = {}
-        assert await pipeline.sync_daily_prices([symbol], start_date=DAY, end_date=DAY, progress=progress) == 0
+        assert await pipeline.sync_daily_prices(
+            [symbol], start_date=DAY, end_date=DAY, progress=progress, cache_recent=True,
+        ) == 0
         assert progress["stage_stats"]["prices"]["errors"] == 1
         assert f"Conflicting price provenance for {symbol}" in caplog.text
         with pytest.raises(ValueError, match="provenance"):
             await stores.service.bulk_upsert_eod_prices(symbol, [deepcopy(row)], source="vnstock-data")
         assert await sql_snapshot(stores.sessions) == sql_before
         assert list(collection.find()) == mongo_before
+        if stores.redis:
+            assert stores.cache_attempts == []
+            assert await stores.redis.client.get(latest_key) == cache_before[latest_key]
+            assert await stores.redis.client.get(recent_key) == cache_before[recent_key]
+            assert await cache_snapshot(stores) == cache_before
 
 
 @pytest.mark.asyncio
