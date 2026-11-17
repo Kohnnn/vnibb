@@ -14,7 +14,7 @@ from hashlib import sha256
 from typing import Any
 
 from vnibb.core.config import settings
-from vnibb.core.price_units import normalize_price_record
+from vnibb.core.price_units import conflicting_price_source, normalize_price_record
 from vnibb.services.fundamental_valuation import (
     SCHEMA_VERSION,
     admit_fundamental_snapshot,
@@ -1194,6 +1194,8 @@ class MongoMarketDataService:
                     "VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI", "VNSTOCK5_HISTORY:VCI",
                 }:
                     raise ValueError(f"Free VCI provenance required for EOD fallback: {symbol_upper}")
+                if conflicting_price_source(raw, "vietcap" if source == "vietcap" else "VCI"):
+                    raise ValueError(f"Conflicting EOD provenance for {symbol_upper}")
                 trade_date = raw.get("tradeDate")
                 if not isinstance(trade_date, datetime):
                     continue

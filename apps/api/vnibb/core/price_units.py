@@ -23,6 +23,28 @@ _THOUSAND_UNITS = {"THOUSAND_VND", "THOUSANDVND", "K_VND", "KVND", "VND_THOUSAND
 _HISTORY_SOURCES = {"KBS", "VCI", "TCBS"}
 
 
+def conflicting_price_source(record: Mapping[str, Any], source: str) -> str | None:
+    def identity(value: str) -> str:
+        value = value.strip().upper()
+        match = re.fullmatch(
+            r"VNSTOCK(?:_HISTORY|5_HISTORY|_DATA_HISTORY|_VND|_POINTS):(KBS|VCI|TCBS)", value,
+        )
+        if match:
+            return match.group(1)
+        return {"VNSTOCK-DATA": "VCI", "VIETCAP_VND": "VIETCAP"}.get(value, value)
+
+    expected = identity(source)
+    for field in ("source", "providerSource", "provider_source", "price_source"):
+        value = record.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            return "invalid_source"
+        if identity(value) != expected:
+            return value
+    return None
+
+
 def is_index_symbol(symbol: str) -> bool:
     normalized = str(symbol or "").upper().replace("-", "")
     return normalized in _INDEX_SYMBOLS or bool(_DERIVATIVE_SYMBOL.fullmatch(normalized))
@@ -144,5 +166,8 @@ def history_price_records(
         if marker is not None and not (record.get("price_unit") or record.get("priceUnit")):
             record["price_unit"] = marker
         record["provider_module"] = module
-        records.append(normalize_price_record(record, symbol=symbol, source=provenance))
+        conflict = conflicting_price_source(record, actual_source)
+        if conflict:
+            record["price_unit"] = "unknown"
+        records.append(normalize_price_record(record, symbol=symbol, source=conflict or provenance))
     return records

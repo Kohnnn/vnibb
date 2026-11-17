@@ -399,7 +399,7 @@ async def test_recent_cache_normalizes_source_marked_rows_without_double_scaling
             return await super().execute(stmt, params)
 
     async def fetch(**kwargs):
-        return pd.DataFrame([{**vars(stored[-1]), "price_unit": "VND", "price_source": "vnstock_history:VCI"}])
+        return pd.DataFrame([{**vars(stored[-1]), "source": "VCI", "price_unit": "VND", "price_source": "vnstock_history:VCI"}])
 
     async def cache(key, value, ttl, **kwargs):
         writes[key] = value
