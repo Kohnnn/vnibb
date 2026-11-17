@@ -1,10 +1,9 @@
 from uuid import uuid4
 
 import pytest
-
+from dnse_store_fixture import stores as stores
+from dnse_store_fixture import stores_context
 from vnibb.core.cache import build_cache_key
-
-from dnse_store_fixture import stores, stores_context
 
 
 @pytest.mark.asyncio

@@ -5,14 +5,13 @@ from datetime import UTC, date, datetime
 
 import pandas as pd
 import pytest
+from dnse_store_fixture import stores as stores
 from sqlalchemy import select
 from vnibb.core.cache import build_cache_key
 from vnibb.core.price_units import conflicting_price_source, history_price_records
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.dnse import dnse_history
 from vnibb.services.data_pipeline import DataPipeline
-
-from dnse_store_fixture import stores
 
 DAY = date(2026, 10, 26)
 

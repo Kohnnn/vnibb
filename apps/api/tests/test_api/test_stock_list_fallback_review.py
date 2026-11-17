@@ -2,7 +2,6 @@ import pandas as pd
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from vnibb.core.config import settings
 from vnibb.models.stock import Stock
 from vnibb.providers.vnstock import runtime

@@ -14,8 +14,13 @@ from typing import Literal
 
 from vnibb.providers.dnse_request import dnse_request as dnse_request
 from vnibb.providers.dnse_types import (
-    HistoryObservation, ListingAssembly, ListingObservation, PriceObservation, ProviderError,
-    QuoteObservation, UnavailableCapability,
+    HistoryObservation,
+    ListingAssembly,
+    ListingObservation,
+    PriceObservation,
+    ProviderError,
+    QuoteObservation,
+    UnavailableCapability,
 )
 from vnibb.providers.dnse_validation import integer as _integer
 from vnibb.providers.dnse_validation import symbol as _symbol
