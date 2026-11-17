@@ -98,6 +98,7 @@ def _frame_to_rows(frame: Any) -> list[dict[str, Any]]:
                 "tradeDate": trade_date,
                 "price_unit": record.get("price_unit", "unknown"),
                 "price_source": record.get("price_source"),
+                **{field: record[field] for field in ("source", "providerSource", "provider_source") if field in record},
                 "open": _coerce_float(record.get("open")),
                 "high": _coerce_float(record.get("high")),
                 "low": _coerce_float(record.get("low")),

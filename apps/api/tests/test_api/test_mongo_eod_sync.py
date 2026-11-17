@@ -176,6 +176,37 @@ async def test_run_mongo_eod_sync_isolates_symbol_failures(iq_sync, monkeypatch)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["source", "providerSource", "provider_source"])
+@pytest.mark.parametrize("value,admitted", [("VCI", True), ("DNSE", False), (17, False), ("", False)])
+async def test_run_mongo_eod_sync_preserves_fallback_lineage_at_admission(
+    iq_sync, monkeypatch, field, value, admitted,
+):
+    from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+    iq_sync.client.get_ohlc.side_effect = RuntimeError("IQ unavailable")
+    iq_sync.fallback.side_effect = None
+    iq_sync.fallback.return_value = pd.DataFrame([{
+        "time": date.today().isoformat(), "close": 15, "price_unit": "VND",
+        "price_source": "vnstock5_history:VCI", field: value,
+    }])
+    collection = MagicMock()
+    collection.find.return_value = []
+    service = MongoMarketDataService()
+    monkeypatch.setattr(MongoMarketDataService, "enabled", property(lambda self: True))
+    monkeypatch.setattr(service, "_get_collection", lambda name: collection)
+    monkeypatch.setattr(service, "ensure_eod_indexes", lambda: [])
+    iq_sync.service.bulk_upsert_eod_prices = service.bulk_upsert_eod_prices
+
+    result = await mongo_eod_sync.run_mongo_eod_sync(symbols=["VCI"])
+
+    assert result["rows"] == int(admitted)
+    assert result["failures"] == int(not admitted)
+    assert collection.bulk_write.call_count == int(admitted)
+    if not admitted:
+        assert any(error["type"] == "ValueError" for error in result["errors"])
+
+
+@pytest.mark.asyncio
 async def test_run_mongo_eod_sync_counts_write_failure_per_symbol(iq_sync):
     def write(symbol, rows, *, source):
         if symbol == "BAD":

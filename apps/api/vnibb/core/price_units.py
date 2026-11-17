@@ -1,5 +1,6 @@
 """Source-backed equity price units; never infer currency scale from magnitude."""
 
+import math
 import re
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -36,7 +37,8 @@ def conflicting_price_source(record: Mapping[str, Any], source: str) -> str | No
     expected = identity(source)
     for field in ("source", "providerSource", "provider_source", "price_source"):
         value = record.get(field)
-        if value is None:
+        # Pandas materializes absent optional cells in mixed frames as NaN.
+        if value is None or isinstance(value, float) and math.isnan(value):
             continue
         if not isinstance(value, str) or not value.strip():
             return "invalid_source"
