@@ -10,10 +10,7 @@ You are the lead implementation and integration owner for two DISTINCT repositor
 1. Kohnnn/vnibb — VniBB application, data readiness, QA and the direct-DNSE/vnstock transition.
 2. Kitkitkittt/vietcap_datalake — controlled research journey, evidence/report rendering, trusted CI packaging and separately admitted installed-runtime acceptance.
 
-Use the existing documentation handoff branches/PRs if they are not merged:
-- VniBB PR #265, branch codex/264-vnibb-continuation-handoff.
-- Datalake PR #1501, branch codex/1498-research-journey-handoff.
-Do not assume either handoff or an implementation PR is on main. Obtain the current branch/document version before using it; preserve unrelated dirty work and unique local commits.
+The documentation handoffs #265 (VniBB) and #1501 (datalake) are merged as of the 2026-11-17 receipt. Start from each repository's current main and canonical handoff; use a later existing writer/PR when it owns the work. Reconcile actual refs rather than resuming a closed handoff branch. Preserve unrelated dirty work and unique local commits.
 
 READ FIRST
 - Each repository's applicable AGENTS.md and issue/worktree/verification conventions.
@@ -28,7 +25,7 @@ Then begin the first genuinely runnable implementation or acceptance slice. Do n
 
 VniBB TRACK
 - Use the canonical cross-session ledger and live #241/#233/#231/#232 plus their current descendants; reconcile the QA, financial/Matrix, ownership/freshness, iframe/MCP, branding and operations workstreams rather than treating migration as the whole backlog.
-- The retained approved direction is VniBB-only direct DNSE offline work, not an automatic Gen6 installation. Source recovery and successor integration are complete in merged PR #266; use the latest source-bound handoff rather than repeating recovery or historical suites. The subsequent disclosure repair is published in PR #268 at code candidate `d657aa7e736fb8aaca1c0e88a64532573bd803eb`; its 13-job CI passed, but any successor still needs its own normal checks and review. Reconcile the current PR/head before continuing. Held #239 and deployed code remain separate.
+- The retained approved direction is VniBB-only direct DNSE offline work, not an automatic Gen6 installation. Source recovery and successor integration are complete in merged PR #266. The bounded disclosure repair in PR #268 is also merged: main `810d0e27888308dfdbc2d26b27e6d465feb9db45`, tree-identical to approved candidate `cb30d408ac9aea3f21ff8f3af717e3ef02598aaa`. Exact-candidate CI44143539472 passed all 13 jobs and the independent final reviewer approved source merge only. The normal main-push CI44147585723 was queued/running at this receipt; inspect its actual result, not the earlier-head pass. The local frozen offline frontend build passed with BUILD_ID `l14xc3sFRbNfBFCGW3Ast`; the backend aggregate passed 5,150 tests with 118 skips. Reuse the source-bound receipts rather than repeating recovery or unchanged suites. Held #239, production serving identity and deployment acceptance remain separate.
 - Unmatched provider features, financials/ratios and unproven semantics stay explicitly HOLD/unavailable until an authorized equivalent or user decision exists. Do not invent discontinued features, silently substitute units/data, suppress SchemaChangeWarning or manufacture old/new parity.
 - Keep source-use permission/coverage #168, custody/rotation gates, bounded production recovery #171, sustainable daily owner #172 and consumer/strict-watch #173 separate. A working key, account entitlement or source-code ownership does not clear these acceptance requirements.
 - If the user renews the Gen6 alternative, first follow the official migration-assistant START HERE and contract-check procedure cited in the handoff: review environment/entitlement safely, preserve v5-compatible contracts, use centralized user-selected source configuration, isolate environments/code, compare lawful saved outputs route by route, and list unsupported/uncomparable contracts. Do not infer approval to install or migrate callers from old chat requests. Keep the external parent AGENTS.md unchanged unless explicitly authorized.
@@ -36,7 +33,7 @@ VniBB TRACK
 
 DATALAKE TRACK
 Follow the six gates in the canonical handoff:
-1. Resolve #1494 trusted CI runner routing and controller/ref/event evidence with the authorized maintainer.
+1. Resolve #1494 trusted CI runner routing and controller/ref/event evidence with the authorized maintainer. The #1527 owner accepted one normal ready transition for #1535 at unchanged `f7ec45ec88fb85dc4389d6cfca8ca81caba54d10`; local importer/tests/lint and non-skipped GitHub ARM lint pass. Trusted-base acceptance run44144794023 succeeded: controller/base `ec49bb693a334fd5a354a078d40da5330258d515`, executed merge candidate `1651a839d30562dc47bfe110bc1c44c46c02ed0e`, PR head f7ec45ec. This is not post-cutover helper-integrated workflow proof. Buildkite185 actual execution versus skip still needs provider evidence and a replacement credential from its custodian; the prior credential is considered exposed and must not be reused. A green receiver check can describe a skipped job. The loaded ARM runtime and source five-minute deadline remain unverified; the inherited 90-minute command fallback is not equivalent. Follow the existing writer, not a competing repair.
 2. Continue the existing controller writer on draft #1536, head `66a7dd99896cc19677675082428739f898fe0eec` at the 2026-11-17 receipt, which preserves the four reviewed correction blobs on current main; #1520 is closed as superseded, not merged. Source recovery is no longer the next step. Obtain ARM runtime deadline evidence and fresh normal hosted checks through the existing trusted-controller gates; skipped draft checks are not qualification. Then diagnose/qualify AMD64 attestations through the existing authorized workflow.
 3. Qualify and integrate saved-work leaf #1492 into its declared integration base.
 4. Reconcile #1456 and dependent journey acceptance #1460 using their actual criteria.
@@ -63,6 +60,7 @@ Final report: completed and published changes; exact verified results; issues re
 - [Session coverage and cleanup boundaries](SESSION_HISTORY_INDEX.md)
 - [VniBB handoff PR #265](https://github.com/Kohnnn/vnibb/pull/265)
 - [Datalake handoff PR #1501](https://github.com/Kitkitkittt/vietcap_datalake/pull/1501)
-- [Datalake current handoff](https://github.com/Kitkitkittt/vietcap_datalake/blob/codex/1498-research-journey-handoff/VCIDataPlatform/docs/research-brain/RESEARCH_JOURNEY_CONTINUATION_1455.md)
+- [Datalake current handoff](https://github.com/Kitkitkittt/vietcap_datalake/blob/main/VCIDataPlatform/docs/research-brain/RESEARCH_JOURNEY_CONTINUATION_1455.md)
+- [VniBB source-merge receipt](https://github.com/Kohnnn/vnibb/issues/241#issuecomment-6957086093)
 
-The branch links above intentionally lead to the newest published handoff; PR history preserves exact documentation revisions. Runtime claims inside the handoffs remain bound to their recorded immutable evidence, not to these mutable navigation links.
+Current-main links are navigation, not immutable runtime evidence. PR history preserves exact documentation revisions; runtime claims remain bound to their recorded source/artifact identities and actual checks. The merged handoff PRs above are historical provenance, not active writer assignments.
