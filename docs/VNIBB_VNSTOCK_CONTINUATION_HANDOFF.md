@@ -17,6 +17,71 @@ The portable [source delta and recovery instructions](evidence/continuation-2026
 
 Historical offline results and their limits are retained in that receipt: 287 unit/compatibility and 65 disposable-store passes; the full backend run had 32 MCP harness failures, followed by a separate 43-test affected-file pass after isolation correction. No clean aggregate, new application run, live-source parity or full frontend/build result is claimed. Raw scripts/logs remain in the original ignored migration workspace and are not portable evidence here.
 
+## Continuation receipt: 2026-11-17 isolated source recovery
+
+This dated receipt supplements, rather than rewrites, the snapshots above; its local and unpublished states are observations from the 2026-11-17 recovery, not present-status claims. The first authorized runnable slice was **#233 portable source-recovery acceptance only**. It is complete; #233's broader adapter, semantics and live acceptance are not. Issue #233 was claimed by `Kitkitkittt`. Its local recovery binding was repository `Kohnnn/vnibb`, branch `codex/233-dnse-recovery-20261117`, base/HEAD `7d71fb4ab3491da008b1e71599f032b75301ec10`, role `offline source recovery, no promotion`, checkout `/tmp/vnibb-continuation-20261117-X9gc3y/recovered`. The recovered delta was unstaged; no new commit was created and the branch then pointed at the base.
+
+### Reconciled identities and exercised scope
+
+- VniBB main: `13de94e526b777135c4472b000576a3f1f4a39e8`; draft #265 head and clean documentation checkout before this receipt: `8b3afb69f0e090516a4cf94dcacb5db5a3b93ee2`. This receipt was initially an uncommitted local update to that existing handoff, not a published PR revision. PR #265's observed CI was still partly in progress; no new green CI claim is made.
+- Preserved candidate: `bc2c8ff20dfe2f96e5742311a834a2e31e4f467c`; base: `7d71fb4ab3491da008b1e71599f032b75301ec10`; reconstructed tree: `5b998b80e90b39e6755af10a507a973bf72a738e`. Patch: 69,612 bytes, SHA-256 `ab9444a12396b02309e071c402a56a28661487e3adb8b67a199acb84ef73ed48`. Every one of the receipt's 13 file sizes and SHA-256 hashes matched. This establishes the tree, not a newly recreated commit or application acceptance.
+- At recovery, the original dirty checkout remained at `64ee0e70bb539765e760a1914e48a2d2eb4b516b`, with its backup, listing and Matrix/readability edits preserved. The original clean offline candidate checkout and held #239 were not modified. During recovery, no existing branch was reset, rebased or merged.
+- Review of the five files changed between the recorded base and main found no backend overlap. The two changelogs overlap; the ownership component/test and Vercel deployment controls contain the already merged #263 work and must be retained. A read-only `merge-tree` check exited 0 with tree `f1f4208db181c5dd136041bb046effd4fd4c9eee`. During recovery, no integration checkout or merge commit was made; conflict-free text merging is not qualification.
+- Controller SHA: not applicable to this local recovery; no CI controller, hosted qualification, provider, application, database, browser or deployment entry point was exercised. Historical application results above remain historical, including the failed full-suite aggregate.
+
+### Exact recovery checks and actual exits
+
+Local evidence root: `/tmp/vnibb-continuation-20261117-X9gc3y`. Logs are local and not included in the published handoff; the original portable patch and receipt remain unchanged. The commands below identify the actual exercised source and paths. Do not repeat `git apply` in the already recovered checkout; a reproduction needs a fresh isolated checkout at the recorded base.
+
+```sh
+HANDOFF=/mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb-worktrees/264-vnibb-continuation-handoff
+EVIDENCE=/tmp/vnibb-continuation-20261117-X9gc3y
+cd "$EVIDENCE/recovered"
+test "$(GIT_MASTER=1 git rev-parse HEAD)" = 7d71fb4ab3491da008b1e71599f032b75301ec10
+printf '%s  %s\n' ab9444a12396b02309e071c402a56a28661487e3adb8b67a199acb84ef73ed48 "$EVIDENCE/candidate.patch" | sha256sum --check
+GIT_MASTER=1 git apply --check "$EVIDENCE/candidate.patch"
+GIT_MASTER=1 git apply "$EVIDENCE/candidate.patch"
+# Each command above exited 0; recovery-apply.txt records application/status.
+```
+
+The separate file-hash check ran the following Python body with `python3 -` from that checkout (the receipt path was the literal absolute path represented by `HANDOFF` above); exit 0, output `PATCH_BYTES=69612 FILES_VERIFIED=13 ALL_MATCH=true`, recorded in `hash-check.txt`:
+
+```python
+import hashlib, json
+from pathlib import Path
+receipt = json.loads(Path('/mnt/newvolume/PersonalWebsite/stockscreen/VNIBB/vnibb-worktrees/264-vnibb-continuation-handoff/docs/evidence/continuation-20261116/dnse-offline-receipt.json').read_text())
+patch = Path('/tmp/vnibb-continuation-20261117-X9gc3y/candidate.patch').read_bytes()
+assert len(patch) == receipt['patch_bytes']
+assert hashlib.sha256(patch).hexdigest() == receipt['patch_sha256']
+for entry in receipt['files']:
+    data = Path(entry['path']).read_bytes()
+    assert len(data) == entry['bytes'], entry['path']
+    assert hashlib.sha256(data).hexdigest() == entry['sha256'], entry['path']
+print(f"PATCH_BYTES={len(patch)} FILES_VERIFIED={len(receipt['files'])} ALL_MATCH=true")
+```
+
+The tree check used only a disposable index; it did not stage the recovery worktree's real index. These commands exited 0, recorded in `recovery-tree.txt`:
+
+```sh
+export GIT_INDEX_FILE="$EVIDENCE/recovery.index"
+GIT_MASTER=1 git read-tree 7d71fb4ab3491da008b1e71599f032b75301ec10
+GIT_MASTER=1 git add -- CHANGELOG.md apps/api/tests/test_api/test_data_pipeline_price_sync.py apps/api/tests/test_contract/test_dnse_offline_admission.py apps/api/tests/test_core/test_dnse_port.py apps/api/tests/test_providers/test_dnse_offline.py apps/api/vnibb/core/price_units.py apps/api/vnibb/providers/__init__.py apps/api/vnibb/providers/dnse.py apps/api/vnibb/providers/market_data.py apps/api/vnibb/services/data_pipeline.py apps/api/vnibb/services/mongo_market_data_service.py apps/web/src/data/changelog.generated.ts docs/oracle_runbook.md
+tree=$(GIT_MASTER=1 git write-tree)
+test "$tree" = 5b998b80e90b39e6755af10a507a973bf72a738e
+unset GIT_INDEX_FILE
+GIT_MASTER=1 git merge-tree --write-tree 13de94e526b777135c4472b000576a3f1f4a39e8 bc2c8ff20dfe2f96e5742311a834a2e31e4f467c
+```
+
+**Non-green diagnostic preserved:** `GIT_MASTER=1 git diff --check` in the recovery checkout exited **2**, reporting trailing whitespace at `apps/api/tests/test_api/test_data_pipeline_price_sync.py:402` (`main-compatibility.txt`). Inspection found the preserved line's CRLF terminator. The exact candidate bytes were deliberately not normalized during recovery. The initial chained compatibility command stopped at that diagnostic; the separately executed `merge-tree` command above exited 0 (`merge-tree-check.txt`). This is not a clean source-hygiene claim or permission to suppress the diagnostic in a future promotion.
+
+### Review disposition and remaining owners
+
+Recovery disposition: **accepted for byte-identical source preservation only**. Independent bounded VniBB reconciliation found no conflicting non-provider instruction or earlier runnable prerequisite; datalake reconciliation confirmed its separate ordered gates. Their local reports are `/tmp/vnibb-nonprovider-reconciliation-E6UkTV/report.md` and `/tmp/datalake-reconciliation-20261117-W46DFL1q/RECONCILIATION.md`. No fresh behavioral review, application test, full build or release acceptance is claimed. Source promotion remains a separate exact-candidate integration/review decision under #241/#233, including disposition of the whitespace diagnostic; provider semantics remain unresolved.
+
+For VniBB, #231's security/operator retains private containment and custody; #232/#168's source owner retains written per-source/per-use permission and coverage; #171/#172's operator retains fresh independent-custody backup/restore, bounded recovery authority and a daily producer; #173's QA/operator retains consumer and following-session watch acceptance. Unproven units, basis, finality, header semantics, financials, ratios and unmatched features remain HOLD/unavailable. No provider calls, credential/account reads, schedules, database writes, deployment, admin unlock or human Send occurred.
+
+For datalake, the one bounded reconciliation observed main `39edb052bf3bfeaef41dbf17fb0f92b71d598101` and draft #1501 head `9e32e523432ab58e227a3f4d00b523e9fc7c8982`. Its existing handoff remains authoritative: #1494's authorized maintainer (`Kitkitkittt`) must establish admitted ARM64 routing/controller/PR-event proof; #1494/#1520's owner must recover local-only correction `09ae05e1b933c28d7e278da4429e1fefae8c0a3d` against parent `b8a6d7d7ef96100830ddd210f712358c23582b60`, then qualify/diagnose after routing. #1492 remains before #1456/#1460 acceptance, then #1462 integration and its own qualification. #1443/#1449/#1450's runtime custodian still needs disposable-host admission and a qualified immutable package. No datalake source, CI or host execution was attempted; no gate was waived and no second datalake handoff was created.
+
 ## Migration and data gates
 
 The external parent `VNIBB/AGENTS.md` still describes vnstock 5.2.1/VCI. It remains unchanged and is not proof of Generation 6 adoption. The [preserved audit summary](evidence/continuation-20261116/README.md#prior-migration-review-not-a-generation-6-deployment) records environment-identification limits and official references. The 2026-11-16 metadata review found no Gen6 distribution in the inspected standard locations, did not run `vnstock status`, and did not install packages or call a provider. It does not establish the production interpreter. Separately, the [2026-11-13 isolated Gen6 research probe](../project-work-backlog.md#5-providers-credentials-and-source-selection) exercised import/status without Python provider dispatch, while tracing observed contained DNS attempts; that earlier probe was not a deployment or application compatibility proof.
