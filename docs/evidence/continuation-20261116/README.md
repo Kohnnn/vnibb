@@ -27,6 +27,8 @@ The transfer check decoded the artifact, used a disposable Git index at the reco
 
 ## Historical evidence ceiling
 
+The historical [SHA256SUMS](SHA256SUMS) manifest is sealed to revision `0a57e8740a0e65d5d759262f65560d378f56bbc5`, not the current tree. The later `docs/README.md` and `docs/VNIBB_VNSTOCK_CONTINUATION_HANDOFF.md` have expected drift; this evidence README also differs because of this explanation. Therefore, `sha256sum --check docs/evidence/continuation-20261116/SHA256SUMS` from the current repository root exits 1 for those three files, not because of evidence corruption. The manifest itself, the encoded patch, `dnse-offline-receipt.json` and `documentation-check.json` retain their sealed bytes; the latter three entries still match the manifest. Do not rewrite the historical manifest.
+
 `dnse-offline-receipt.json` is a sanitized summary of the previously recorded local candidate receipt, not the original raw logs. It retains 287 unit/compatibility passes, 65 disposable PostgreSQL/MongoDB/Redis passes, the full backend run's 32 failures, and the separate successful 43-test MCP harness correction. The full run is not relabelled as green. Original raw command scripts/logs remain local under the ignored `vnstock-migration/` workspace; they are not portable evidence in this PR.
 
 The isolated candidate has pure transforms/signing/request construction and provenance guards, no transport or credential loader. Unknown monetary/volume units, adjustment basis, session finality, the `Date`/`X-Aux-Date` discrepancy, source permission and full feature parity remain unresolved. The older held PR #239 is not this candidate and must not be merged as a shortcut.
