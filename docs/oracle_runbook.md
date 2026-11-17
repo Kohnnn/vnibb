@@ -902,20 +902,50 @@ reading provider credentials, importing application or provider modules,
 connecting to a provider, opening a database session, or writing a receipt.
 `--help` and `-h` alone show the acquisition hold and exit 0; all other
 invocations, with or without arguments, refuse and exit 2. This is not an
-import implementation. No DNSE provider, sync service, or scheduler is
-registered by this candidate. `DNSE_ENABLED` or any other environment flag
-cannot bypass the hold.
+import implementation. Offline DNSE transforms accept explicitly supplied
+in-memory payloads through the provider port; they do not install a live client,
+load fixtures, read credentials, register a scheduler or perform I/O.
+`DNSE_ENABLED` or any other environment flag cannot bypass the hold.
 Never run the held published #239 candidate: its flag-enabled path is unsafe.
 
-The [official OHLC schema](https://developers.dnse.com.vn/docs/dnse/get-ohlc-history/)
-documents the literal candle arrays `t/o/h/l/c/v`, `nextTime`, and required
-authentication headers. The inspected documentation does not establish price or
-volume units, request time units, session coverage, finality, rate limits, or
-data-use rights. Do not infer a price multiplier, session date, entitlement, or
-safe storage/redistribution from the schema. The pages inspected do not establish
-that fundamentals are available or that they are absent. A future adapter still
-needs the missing semantics, source-use authorization, and an import-safe cold
-authorization seam; the source-neutral port alone does not provide that seam.
+The rendered [official OHLC schema](https://developers.dnse.com.vn/docs/dnse/get-ohlc-history/)
+defines `t/o/h/l/c/v`, with `t` and `nextTime` in Unix seconds and `nextTime=0`
+meaning no further page. It does not establish currency/volume units, adjustment
+basis, request-bound inclusion or session finality. The rendered
+[instruments schema](https://developers.dnse.com.vn/docs/dnse/get-instruments/)
+provides page/total metadata and listing identity;
+[latest executed trades](https://developers.dnse.com.vn/docs/dnse/get-latest-trades/)
+provide board identity and `GMT+7` observation times, not verified monetary units.
+Preserve those distinctions: page exhaustion is not a complete trading session,
+a listing page is not an entitled universe, and unknown-unit prices stay null.
+Financials, ratios, news and other unmatched capabilities remain HOLD.
+
+The pure request helper follows official SDK commit
+`aa55a5117de2534707bca6165b6738e1cc6fc6a4`, version `2026-07-23`, path-only signing
+and `Date`. The rendered endpoint schema instead names `X-Aux-Date`; that
+discrepancy must be resolved before any future live client is reviewed. Request
+construction is inert and accepts explicit test values only; it is not a client
+or authorization to supply real keys.
+
+Offline acceptance uses hand-built fixtures and existing tests:
+
+```bash
+PYTHONPATH=apps/api python -m pytest -q \
+  apps/api/tests/test_providers/test_dnse_offline.py \
+  apps/api/tests/test_core/test_dnse_port.py \
+  apps/api/tests/test_core/test_market_data_port.py \
+  apps/api/tests/test_services/test_dnse_safety.py
+```
+
+Run from an isolated checkout with an empty test home/environment and external
+network denied. For real-store replay, supply only disposable loopback
+`POSTGRES_CONTRACT_DATABASE_URL`, `MONGODB_CONTRACT_URL` (and
+`REDIS_CONTRACT_URL` for cache preservation), set `POSTGRES_CONTRACT=1`, and run
+`apps/api/tests/test_contract/test_dnse_offline_admission.py`. Never substitute
+production URLs. These checks prove refusal/retention contracts, not authorized
+DNSE ingestion or old/new data parity. Do not select DNSE for legacy operations,
+remove vnstock, enable schedulers, push an auto-deployed branch or redeploy until
+source semantics, rights, custody, recovery and full consumer acceptance are met.
 
 **Operator-only custody, not an acquisition authorization.** If credentials are
 issued, create the private store without truncating an existing file. The root
@@ -959,10 +989,12 @@ keep examples empty instead of allowlisting provider names. Staged safe content
 must pass even when unrelated secrets exist only outside the index. CI retains
 the history scan; neither scan proves image-layer or live-container secrecy.
 
-This command-only candidate contains no source observations. A future DNSE
-adapter must preserve a cold-import guard before application package initializers
-enumerate credentials; the existing shared provider and core initializers do not
-yet provide it. Prior #239 history may contain disclosed source data: it remains
+The offline candidate uses hand-built synthetic fixtures, not source observations
+or PR #239 history. Normal imports of the provider package, DNSE module and
+market-data port, including explicit DNSE transform resolution, remain cold.
+Resolving legacy or FHSC exports (including wildcard imports) may initialize
+their existing application configuration; that path is not credential-read-free.
+Prior #239 history may contain disclosed source data: it remains
 held and must not be republished until private rights/incident review and an
 approved history-remediation decision.
 

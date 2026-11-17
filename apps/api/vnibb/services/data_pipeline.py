@@ -49,7 +49,7 @@ from vnibb.core.database import async_session_maker, engine
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.insider_units import normalize_deal_action
 from vnibb.core.retry import with_retry
-from vnibb.core.price_units import history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
+from vnibb.core.price_units import conflicting_price_source, history_price_records, normalize_price_record, persisted_price_record, persisted_price_source, screener_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.core.vn_sectors import resolve_sector_name
 from vnibb.providers.market_data import validate_source
@@ -469,6 +469,8 @@ class DataPipeline:
                 return frame
         prepared = []
         for row in rows:
+            if conflicting_price_source(row, "vietcap"):
+                raise ValueError(f"Conflicting IQ EOD provenance for {symbol}")
             values = {field: float(row[field]) for field in ("open", "high", "low", "close", "volume")}
             if row.get("symbol", symbol) != symbol or not isinstance(row.get("tradeDate"), datetime):
                 raise ValueError(f"Invalid IQ EOD identity for {symbol}")
@@ -1010,7 +1012,9 @@ class DataPipeline:
         industry_df = pd.DataFrame()
         for method_name in ("symbols_by_exchange", "symbols_by_industries"):
             try:
-                frame = await asyncio.to_thread(getattr(listing, method_name))
+                frame = await asyncio.to_thread(
+                    market_data.listing, settings.vnstock_source, view=method_name,
+                )
                 if method_name == "symbols_by_exchange":
                     exchange_df = frame
                 else:
@@ -2820,6 +2824,16 @@ class DataPipeline:
                         for _, row in range_df.iterrows():
                             if row.get("price_unit") not in {"VND", "index_points"}:
                                 raise ValueError(f"Unknown price unit for {symbol}")
+                            price_source = str(row.get("price_source") or "").strip().upper()
+                            allowed_sources = {
+                                "VCI", "VNSTOCK_HISTORY:VCI", "VNSTOCK_VND:VCI",
+                                "VNSTOCK_POINTS:VCI", "VNSTOCK5_HISTORY:VCI",
+                            }
+                            if not is_index_symbol(symbol):
+                                allowed_sources.add("VIETCAP")
+                            source = "vietcap" if price_source == "VIETCAP" else "VCI"
+                            if price_source not in allowed_sources or conflicting_price_source(row, source):
+                                raise ValueError(f"Conflicting price provenance for {symbol}")
                             row_time = (
                                 row["time"].date() if hasattr(row["time"], "date") else row["time"]
                             )

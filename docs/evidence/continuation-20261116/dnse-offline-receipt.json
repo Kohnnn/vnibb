@@ -1,0 +1,120 @@
+{
+  "schema_version": "offline-dnse-preservation-v1",
+  "source_commit": "bc2c8ff20dfe2f96e5742311a834a2e31e4f467c",
+  "source_parent": "7d71fb4ab3491da008b1e71599f032b75301ec10",
+  "source_branch": "codex/233-dnse-offline-20261116",
+  "source_remote_branch_present": false,
+  "portable_patch": "dnse-offline-bc2c8ff2.patch.base64",
+  "patch_encoding": "base64; decode before git apply to preserve mixed line endings",
+  "patch_sha256": "ab9444a12396b02309e071c402a56a28661487e3adb8b67a199acb84ef73ed48",
+  "patch_bytes": 69612,
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "c6d16a987231bcf35b91e3c4f931e89ab4ad5ccf4760bd2aaa2e5c70aedd3311",
+      "bytes": 140793
+    },
+    {
+      "path": "apps/api/tests/test_api/test_data_pipeline_price_sync.py",
+      "sha256": "bce4f02d9e75ff38fb26100e71346958b76b1d0fba77a1ed3652ac12cb06e1d2",
+      "bytes": 41180
+    },
+    {
+      "path": "apps/api/tests/test_contract/test_dnse_offline_admission.py",
+      "sha256": "5f4bac44464c0f5d4ca7b82ae40d4e40a9e4698f6fd7c82366ff405defb2a05f",
+      "bytes": 14745
+    },
+    {
+      "path": "apps/api/tests/test_core/test_dnse_port.py",
+      "sha256": "19fdd97c95a5368757a93a3ce20e0823945f26f0f0579e1d0499d222eca59c34",
+      "bytes": 5991
+    },
+    {
+      "path": "apps/api/tests/test_providers/test_dnse_offline.py",
+      "sha256": "89ca58cdbf149b26aaf6ee80075da2de1ed6650c5ec493c8daab396d8b18f908",
+      "bytes": 10146
+    },
+    {
+      "path": "apps/api/vnibb/core/price_units.py",
+      "sha256": "8a92dac80c0e20ac2c2d321d29730e394e28fab835f416c99d374ea2cbf6d94a",
+      "bytes": 8212
+    },
+    {
+      "path": "apps/api/vnibb/providers/__init__.py",
+      "sha256": "20e240b09e7652f8793a7fdd9767156f9f467c371b19fc291ac2b577627e36af",
+      "bytes": 472
+    },
+    {
+      "path": "apps/api/vnibb/providers/dnse.py",
+      "sha256": "b63ddec34f9cda6222d430a5cc36ae3bb40bde4a79a632683a404992964acc32",
+      "bytes": 14173
+    },
+    {
+      "path": "apps/api/vnibb/providers/market_data.py",
+      "sha256": "552ce4f4be45b64b1a153decc16da6c67028d4fbf64ae1edafef9a87fff6204b",
+      "bytes": 1610
+    },
+    {
+      "path": "apps/api/vnibb/services/data_pipeline.py",
+      "sha256": "b480286aa687f6088d438617387d0edbbb6fd095e58cab6f155c4c79caa6179b",
+      "bytes": 389604
+    },
+    {
+      "path": "apps/api/vnibb/services/mongo_market_data_service.py",
+      "sha256": "2d6906b86b2ca51ebb15844140cc9a535148eee26f89601d372d390836245a6f",
+      "bytes": 57001
+    },
+    {
+      "path": "apps/web/src/data/changelog.generated.ts",
+      "sha256": "a12302994f1c5659dddec1616b7399b04ab6391bcefbae9777c707e324549138",
+      "bytes": 141820
+    },
+    {
+      "path": "docs/oracle_runbook.md",
+      "sha256": "9b7dc8b99a879c23cb11b7dd475aa501c2ae9c752c0237b7ebd7de79b8c60bbe",
+      "bytes": 104863
+    }
+  ],
+  "authority": "Documentation/source-delta preservation only; not source implementation promotion, cutover, live request, credential use, deployment or database-write authority.",
+  "recorded_prior_verification": {
+    "receipt": "vnstock-migration/evidence-20261116/candidate.md",
+    "raw_logs_portable": false,
+    "unit_compatibility": {
+      "passed": 287,
+      "exit": 0
+    },
+    "disposable_postgresql_mongodb_redis": {
+      "passed": 65,
+      "exit": 0
+    },
+    "full_backend": {
+      "passed": 5073,
+      "failed": 32,
+      "skipped": 116,
+      "subtests_passed": 4,
+      "exit": 1,
+      "cause": "Recorded MCP harness loopback/port restrictions; this is not a passing aggregate."
+    },
+    "affected_mcp_files_after_harness_correction": {
+      "passed": 43,
+      "exit": 0
+    },
+    "focused_mypy_exit": 0,
+    "changed_line_ruff_exit": 0,
+    "selected_and_staged_gitleaks_exit": 0,
+    "independent_reviews": "Standards and Specification: no findings in approved offline scope; recorded quality model identifier, upstream route unexposed.",
+    "source_identity_caveat": "Prior 352-pass result was file-hash-bound, not committed-revision-bound; later completion captured all 13 candidate hashes unchanged before local selective commit. No historical result is relabelled as a new check."
+  },
+  "unverified": [
+    "live provider responses and entitlement",
+    "source rights/storage/public serving",
+    "monetary/volume units and adjustment basis",
+    "Date versus X-Aux-Date discrepancy",
+    "session finality/coverage",
+    "financials, ratios and unmatched-feature replacement",
+    "saved-old/live-new parity",
+    "frontend/build/live consumer acceptance",
+    "production recovery/deployment"
+  ],
+  "new_checks": "Portable patch integrity and applicability only; no application tests rerun."
+}

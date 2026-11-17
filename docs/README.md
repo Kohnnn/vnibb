@@ -4,8 +4,11 @@
 
 ## Core References
 
-- `../project-work-backlog.md`: cross-session work index; use its dependencies and current GitHub tickets before reviving historical plans.
-- `CONTINUING_WORK_EVIDENCE_2026-11-10.md`: integration decisions, operational limits and the individual widget-ID disposition inventory; verification is separate from source presence.
+- `../project-work-backlog.md`: [#241](https://github.com/Kohnnn/vnibb/issues/241) cross-session work ledger; use its dependencies and current GitHub tickets before reviving historical plans.
+- `CONTINUING_WORK_EVIDENCE_2026-11-10.md`: dated integration decisions, operational limits and widget-ID dispositions; verification is separate from source presence.
+- `VNIBB_VNSTOCK_CONTINUATION_HANDOFF.md`: VniBB continuation across provider migration, database readiness, QA, release, identity and other workstreams; includes transfer limits and authorization gates.
+- `SESSION_HISTORY_INDEX.md`: recovered session-summary coverage and dated workstream routing; not a replacement for GitHub status or a full transcript archive.
+- `AI_CONTINUATION_PROMPT.md`: the single cross-repository next-agent prompt and scope boundaries.
 
 - `API_REFERENCE.md`: API-level reference material for the backend surface
 - `APPS_SCRIPT_SHEETS.md`: Google Apps Script / Sheets read-only API integration
@@ -21,10 +24,10 @@
 
 ## Operations And Data
 
-Current source of truth:
+Repository reference, not a claim about the currently deployed runtime:
 
 - The executable Oracle deployment defines PostgreSQL (`vnibb-db`), MongoDB (`vnibb-mongo`, database `vnibb-market`) and Redis (`vnibb-redis`) on the application host. The last recorded production release retained those containers and their volumes; inspect actual mounts and connection targets before recovery. Older n6v instructions describe a separate historical topology, not proof of current routing.
-- Vietnamese structured-data ingestion uses Vietcap IQ/Trading first, then free `vnstock` VCI only where supported. KBS, TCBS and sponsor packages are not runtime fallbacks. Raw provider records, descriptor evidence and source units remain available alongside admitted structured fields.
+- Existing Vietnamese structured-data ingestion uses Vietcap IQ/Trading first, then free `vnstock` VCI only where supported. KBS, TCBS and sponsor packages are not runtime fallbacks. Raw provider records, descriptor evidence and source units remain available alongside admitted structured fields. The separately selected VniBB-only direct-DNSE work is an offline candidate, not an installed or deployed cutover; see the continuation handoff for permissions and gates.
 - Local database startup uses `docker-compose.data.local.yml`, private credentials and loopback ports `55432` / `57017`; see `oracle_runbook.md` for setup and the distinct production recovery procedure.
 
 - `DEPLOYMENT_AND_OPERATIONS.md`: deployment profile, Oracle runtime guidance, and ops notes
@@ -40,9 +43,8 @@ Current source of truth:
 - `VNIBB_MCP_READONLY.md`: implemented read-only MCP server for VNIBB database-stack access
 - `VNIBB_MCP_DEPLOYMENT.md`: dedicated OCI deployment and smoke-check reference for `vnibb-mcp`
 - `DEVELOPMENT_JOURNAL.md`: maintainer journal and decision history
-- `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only
-- `archive/`: superseded plans kept for history, each carrying an archived
-  header. Do not action anything in there without checking that header first.
+- `WIDGET_CATALOG.md`: legacy widget snapshot, useful as historical context only.
+- `archive/`: superseded plans kept for history, each carrying an archived header. Do not action anything there without checking that header first. Reconcile other dated plans against the canonical ledger and current issues; retain them as evidence rather than deleting them merely for age.
 - `PRODUCT_INFRA_DATA_EXECUTION_PLAN.md`: active product trust, OCI hardening, n6v backup/Parquet, rate-limit, and scheduler rollout plan and progress
 - `V1_6_1_BACKEND_DATA_EXECUTION_PLAN.md`: v1.6.1 backend observability, corpus quality, database, performance, hardening, and rollout plan and progress
 - `VNIBB_PRODUCT_IMPROVEMENT_EXECUTION_PLAN.md`: active research, discovery, investor workflow, activation, and product-enabling platform plan and progress

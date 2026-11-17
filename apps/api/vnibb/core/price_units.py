@@ -1,5 +1,6 @@
 """Source-backed equity price units; never infer currency scale from magnitude."""
 
+import math
 import re
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -21,6 +22,29 @@ _PRICE_FIELDS = {
 }
 _THOUSAND_UNITS = {"THOUSAND_VND", "THOUSANDVND", "K_VND", "KVND", "VND_THOUSANDS"}
 _HISTORY_SOURCES = {"KBS", "VCI", "TCBS"}
+
+
+def conflicting_price_source(record: Mapping[str, Any], source: str) -> str | None:
+    def identity(value: str) -> str:
+        value = value.strip().upper()
+        match = re.fullmatch(
+            r"VNSTOCK(?:_HISTORY|5_HISTORY|_DATA_HISTORY|_VND|_POINTS):(KBS|VCI|TCBS)", value,
+        )
+        if match:
+            return match.group(1)
+        return {"VNSTOCK-DATA": "VCI", "VIETCAP_VND": "VIETCAP"}.get(value, value)
+
+    expected = identity(source)
+    for field in ("source", "providerSource", "provider_source", "price_source"):
+        value = record.get(field)
+        # Pandas materializes absent optional cells in mixed frames as NaN.
+        if value is None or isinstance(value, float) and math.isnan(value):
+            continue
+        if not isinstance(value, str) or not value.strip():
+            return "invalid_source"
+        if identity(value) != expected:
+            return value
+    return None
 
 
 def is_index_symbol(symbol: str) -> bool:
@@ -144,5 +168,8 @@ def history_price_records(
         if marker is not None and not (record.get("price_unit") or record.get("priceUnit")):
             record["price_unit"] = marker
         record["provider_module"] = module
-        records.append(normalize_price_record(record, symbol=symbol, source=provenance))
+        conflict = conflicting_price_source(record, actual_source)
+        if conflict:
+            record["price_unit"] = "unknown"
+        records.append(normalize_price_record(record, symbol=symbol, source=conflict or provenance))
     return records
