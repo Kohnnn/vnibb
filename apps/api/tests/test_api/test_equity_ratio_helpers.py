@@ -315,7 +315,9 @@ class FakeMongoMarketDataService:
     ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}, "comparisonUnavailableReason": "Statement currency/scale is unknown."}, False),
     ({"unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}}}, True),
 ])
-async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, snapshot_inputs, valuation_available):
+async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, snapshot_inputs, valuation_available, caplog):
+    sentinel = "SYNTHETIC_SUBSIDIARY_INTERNAL_DETAIL"
+
     async def fake_profile(symbol, refresh, db):
         return StandardResponse(data={"symbol": symbol, "company_name": "FPT Corp"})
 
@@ -332,7 +334,7 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
         return StandardResponse(data=[{"name": "CEO"}])
 
     async def fake_subsidiaries(symbol):
-        raise RuntimeError("subsidiaries unavailable")
+        raise RuntimeError(sentinel)
 
     async def fake_news(symbol, limit):
         return StandardResponse(data=[{"title": "News"}])
@@ -391,11 +393,11 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
     assert response.data["competitive_advantage"]["moat"] == "wide"
     assert "ROE 22.5%" in response.data["competitive_advantage"]["reasons"]
     assert response.data["subsidiaries"] == []
-    assert response.data["section_errors"] == {
-        "subsidiaries": "subsidiaries unavailable",
-        "events": "events unavailable",
-    }
-    assert response.error == "Partial data unavailable"
+    assert set(response.data["section_errors"]) == {"subsidiaries", "events"}
+    assert all(response.data["section_errors"].values())
+    assert sentinel not in response.model_dump_json()
+    assert any(sentinel in record.getMessage() for record in caplog.records)
+    assert response.error
 
 
 def test_statement_enrichment_does_not_guess_scale_from_other_periods():

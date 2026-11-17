@@ -188,7 +188,8 @@ async def test_financial_http_competition_preserves_truthful_source_and_basis(
     if reason:
         assert row["unavailable_reason"] == reason
     if mode == "sql_failure":
-        assert "SQL unavailable" in response.json()["error"]
+        assert response.json()["error"]
+        assert "SQL unavailable" not in response.text
     provider.assert_not_awaited()
 
 
@@ -328,8 +329,9 @@ async def test_statement_endpoint_falls_back_on_empty_or_failed_iq(monkeypatch, 
     monkeypatch.setattr(equity, "_load_financial_statement_fallback", AsyncMock(return_value=[]))
     response = await equity.get_financials("VNM", "balance", "year", 10, db=None)
     assert response.data[0].total_assets == 100
-    assert "IQ unavailable" in response.error
-    assert ("Mongo unavailable" in response.error) == primary_failure
+    assert response.error
+    assert "IQ unavailable" not in response.error
+    assert "Mongo unavailable" not in response.error
     fallback.assert_awaited_once()
 
 
@@ -690,9 +692,9 @@ async def test_empty_store_financials_http_acquires_actual_iq_eps_before_vci(
     assert row["unit_metadata"]["eps"]["unit"] == "VND/share"
     assert row["raw_data"]["structured"]["unavailable"]["revenue"] == "unit_unverified"
     assert row["raw_data"]["descriptors"] == sections["INCOME_STATEMENT"]
-    assert "balance unavailable" in payload["error"]
-    assert "ratios unavailable" in payload["error"]
-    assert ("Mongo unavailable" in payload["error"]) == stored_read_failure
+    assert payload["error"]
+    for internal_error in ("balance unavailable", "ratios unavailable", "Mongo unavailable"):
+        assert internal_error not in response.text
     assert stored.await_count == 2
     income_write = next(call for call in stored.await_args_list if call.args[0] is IncomeStatement)
     assert income_write.args[1][0]["eps"] == 4321

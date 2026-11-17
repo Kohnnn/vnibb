@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Keep provider and IQ exception details in operator diagnostics rather than public financial-ratio, financial-statement and foreign-trading errors; retain available rows, lineage and failure distinctions (#111, #191, #249).
 - Preserve foreign-flow source dates, stale status and fallback warnings in Ownership Summary without treating retrieval time as source freshness (#249).
 - Carry article-sentiment provenance through news routes and widgets: distinguish locally computed heuristics, explicit provider classifications and unrecorded origins; preserve missing or null flow sentiment as null, never fabricated Neutral or implied stock-price impact (#250).
 - Validate reviewed image references before retention-config updates and atomically replace the private file at mode0600; missing inputs and failed writes preserve the previous configuration.
