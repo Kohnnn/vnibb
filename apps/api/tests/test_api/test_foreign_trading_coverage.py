@@ -171,8 +171,9 @@ async def test_endpoint_qualifies_a_session_window_and_reports_coverage(client, 
 
 @pytest.mark.asyncio
 async def test_endpoint_keeps_provider_failure_visible_when_rows_are_retained(
-    client, monkeypatch, test_db
+    client, monkeypatch, test_db, caplog
 ):
+    monkeypatch.setattr(coverage_module, "expected_market_session", lambda: date(2026, 5, 29))
     session = requested_session_dates(2)[-1]
     test_db.add(
         ForeignTrading(
@@ -185,8 +186,10 @@ async def test_endpoint_keeps_provider_failure_visible_when_rows_are_retained(
     )
     await test_db.commit()
 
+    sentinel = "SYNTHETIC_FOREIGN_INSTALLER_SECRET"
+
     async def failing_fetch(params):
-        raise RuntimeError("provider deadline exceeded")
+        raise RuntimeError(sentinel)
 
     monkeypatch.setattr(
         equity_module.VnstockForeignTradingFetcher, "fetch", failing_fetch, raising=True
@@ -194,13 +197,20 @@ async def test_endpoint_keeps_provider_failure_visible_when_rows_are_retained(
 
     response = await client.get("/api/v1/equity/FPT/foreign-trading?sessions=2")
 
+    assert response.status_code == 200
+    assert sentinel not in response.text
     payload = response.json()
     assert payload["meta"]["count"] == 1
     assert payload["meta"]["observed_session_count"] == 1
     assert payload["meta"]["coverage_status"] == "partial"
     assert payload["meta"]["window_net_volume"] == 300.0
-    assert "provider deadline exceeded" in (payload["error"] or "")
-    assert any("provider deadline exceeded" in warning for warning in payload["meta"]["warnings"])
+    provider_warning = "live foreign trading feed unavailable; using cached database fallback"
+    assert provider_warning in payload["error"]
+    assert provider_warning in payload["meta"]["warnings"]
+    assert payload["data"][0]["date"] == session.isoformat()
+    assert payload["data"][0]["buy_volume"] == 500
+    assert payload["data"][0]["sell_volume"] == 200
+    assert any(sentinel in record.getMessage() for record in caplog.records)
 
 
 @pytest.mark.asyncio

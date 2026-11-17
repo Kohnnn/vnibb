@@ -2223,15 +2223,16 @@ async def _safe_fundamental_section(
             section_errors[section] = str(response.error)
         return _serialize_analysis_section(getattr(response, "data", response))
     except TimeoutError as exc:
+        logger.warning("Fundamental analysis section timed out (section=%s): %s", section, exc)
         section_errors[section] = (
-            "Section deadline exceeded" if deadline.expired() else str(exc) or "Dependency timed out"
+            "Section deadline exceeded" if deadline.expired() else "Dependency timed out"
         )
         return default
     except BaseException as exc:
         if _is_control_flow_exception(exc):
             raise
         logger.warning("Fundamental analysis section failed (section=%s): %s", section, exc)
-        section_errors[section] = str(exc)
+        section_errors[section] = "Section unavailable"
         return default
 
 
@@ -5042,14 +5043,17 @@ async def get_financials(
                     raise ValueError(f"IQ financial records unavailable for {symbol}")
             except FinancialAcquisitionPartial as exc:
                 records = exc.records
-                primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                logger.warning("IQ statement acquisition partially failed for %s: %s", symbol, exc)
+                primary_error = exc
             except Exception as exc:
-                primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                logger.warning("IQ statement acquisition failed for %s: %s", symbol, exc)
+                primary_error = exc
             if records:
                 try:
                     await persist_vietcap_financials(records, cache_manager=CacheManager(db))
                 except Exception as exc:
-                    primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+                    logger.warning("IQ statement persistence failed for %s: %s", symbol, exc)
+                    primary_error = exc
                 acquired = await _load_mongo_financial_statement_rows(
                     symbol=symbol, statement_type=statement_type, period=period, limit=limit,
                     records=records,
@@ -5062,17 +5066,17 @@ async def get_financials(
                         db=db, symbol=symbol, statement_type=statement_type, period=period, limit=limit, source="VCI",
                     )
                 except Exception as exc:
-                    primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
-                    mongo_data = [row.model_copy(update={"unavailable_reason": "financial_source_comparison_unavailable"})
-                                  for row in mongo_data]
+                    logger.warning("IQ statement comparison failed for %s: %s", symbol, exc)
+                    primary_error = exc
+                    mongo_data = [row.model_copy(update={"unavailable_reason": "financial_source_comparison_unavailable"}) for row in mongo_data]
                 else:
                     mongo_data = _select_retained_financial_rows(mongo_data, retained, limit)
             return StandardResponse(
                 data=admit_statement_rows(mongo_data, period), meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
-                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+                error="IQ financial source unavailable" if primary_error else None,
             )
     except Exception as exc:
-        primary_error = RuntimeError(f"{primary_error}; {exc}" if primary_error else str(exc))
+        primary_error = exc
         logger.warning("IQ statement acquisition failed for %s: %s", symbol, exc)
     try:
         data = await get_financials_with_ttm(
@@ -5083,11 +5087,7 @@ async def get_financials(
         )
         data = admit_statement_rows(data, period)
         fallback_data = await _load_financial_statement_fallback(
-            db=db,
-            symbol=symbol,
-            statement_type=statement_type,
-            period=period,
-            limit=limit,
+            db=db, symbol=symbol, statement_type=statement_type, period=period, limit=limit,
         )
         fy_legacy_primary = str(period).upper() in {"FY", "YEAR"} and bool(fallback_data)
         if fy_legacy_primary:
@@ -5108,7 +5108,7 @@ async def get_financials(
             return StandardResponse(
                 data=admit_statement_rows(data, period),
                 meta=MetaData(count=len(data), last_data_date=last_data_date),
-                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+                error="IQ financial source unavailable" if primary_error else None,
             )
 
         fallback_data = _merge_financial_statement_rows(mongo_data, fallback_data)
@@ -5125,12 +5125,12 @@ async def get_financials(
             return StandardResponse(
                 data=admit_statement_rows(fallback_data, period),
                 meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
-                error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+                error="IQ financial source unavailable" if primary_error else None,
             )
 
         return StandardResponse(
             data=[], meta=MetaData(count=0, last_data_date=last_data_date),
-            error=f"IQ financial source unavailable: {primary_error}" if primary_error else None,
+            error="IQ financial source unavailable" if primary_error else None,
         )
     except BaseException as e:
         if _is_control_flow_exception(e):
@@ -5158,14 +5158,14 @@ async def get_financials(
                 return StandardResponse(
                     data=admit_statement_rows(fallback_data, period),
                     meta=MetaData(count=len(fallback_data), last_data_date=last_data_date),
-                    error=f"IQ financial source unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"VCI supplement unavailable: {e}",
+                    error="IQ financial source unavailable; VCI supplement unavailable" if primary_error else "VCI supplement unavailable",
                 )
         except Exception as fallback_error:
             logger.warning(f"DB fallback failed for financials {symbol}: {fallback_error}")
 
         return StandardResponse(
             data=mongo_data, meta=MetaData(count=len(mongo_data), last_data_date=last_data_date),
-            error=f"Data unavailable: {primary_error}; VCI supplement unavailable: {e}" if primary_error else f"Data unavailable: {e}",
+            error="IQ financial source unavailable; VCI supplement unavailable" if primary_error else "Data unavailable",
         )
 
 
@@ -6571,7 +6571,8 @@ async def get_foreign_trading(
     except (asyncio.TimeoutError, ProviderTimeoutError):
         provider_error = "live foreign trading feed timed out"
     except Exception as exc:  # provider failure must not hide retained rows
-        provider_error = f"live foreign trading feed unavailable: {exc}"
+        logger.warning("Live foreign trading feed failed for %s: %s", symbol_upper, exc)
+        provider_error = "live foreign trading feed unavailable"
 
     window_start: date | None = None
     window_end: date | None = None
@@ -6850,10 +6851,10 @@ async def get_financial_ratios(
         acquisition_error = (
             "Financial ratio provider deadline exceeded"
             if isinstance(provider_error, (TimeoutError, ProviderTimeoutError))
-            else f"Financial ratio provider unavailable: {provider_error}"
+            else "Financial ratio provider unavailable"
         )
     elif primary_error is not None:
-        acquisition_error = f"IQ financial source unavailable: {primary_error}"
+        acquisition_error = "IQ financial source unavailable"
 
     for rows in (provider_ratio_rows, db_ratio_rows):
         for item in rows:
