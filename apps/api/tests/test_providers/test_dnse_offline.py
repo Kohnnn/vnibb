@@ -144,8 +144,13 @@ def test_error_classification_and_unavailable_capabilities_are_sanitized():
 
 
 def test_adapter_imports_only_stdlib_and_has_no_io_calls():
-    tree = ast.parse(inspect.getsource(dnse))
-    imports = {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
-    imports.update(alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names)
-    assert imports <= {"__future__", "base64", "datetime", "hashlib", "hmac", "math", "re", "urllib"}
-    assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"open", "exec", "eval", "__import__"} for node in ast.walk(tree))
+    from vnibb.providers import dnse_request, dnse_types, dnse_validation
+
+    allowed = {"__future__", "base64", "collections", "datetime", "hashlib", "hmac", "math", "re", "typing", "urllib"}
+    internal = {"vnibb.providers.dnse_request", "vnibb.providers.dnse_types", "vnibb.providers.dnse_validation"}
+    for module in (dnse, dnse_request, dnse_types, dnse_validation):
+        tree = ast.parse(inspect.getsource(module))
+        imports = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
+        imports.update(alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names)
+        assert all(name in internal or name.split(".")[0] in allowed for name in imports)
+        assert not any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"open", "exec", "eval", "__import__"} for node in ast.walk(tree))

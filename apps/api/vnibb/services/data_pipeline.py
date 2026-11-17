@@ -1012,7 +1012,9 @@ class DataPipeline:
         industry_df = pd.DataFrame()
         for method_name in ("symbols_by_exchange", "symbols_by_industries"):
             try:
-                frame = await asyncio.to_thread(getattr(listing, method_name))
+                frame = await asyncio.to_thread(
+                    market_data.listing, settings.vnstock_source, view=method_name,
+                )
                 if method_name == "symbols_by_exchange":
                     exchange_df = frame
                 else:

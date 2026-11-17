@@ -9,6 +9,16 @@ Adapters enforce source policy before acquisition and never return SDK clients.
 """
 
 from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vnibb.providers.dnse import dnse_history, dnse_listing, dnse_quote, dnse_unavailable
+    from vnibb.providers.fhsc import fhsc_financials, fhsc_history, fhsc_listing, fhsc_quote
+    from vnibb.providers.vnstock.market_data import (
+        balance_sheet, company_overview, company_profile, financial_ratios, forex_rates,
+        history, index_history, intraday, listing, listing_metadata, price_board, raw_dataset,
+        run_financial, run_reference, validate_source,
+    )
 
 _DNSE_EXPORTS = ("dnse_history", "dnse_quote", "dnse_listing", "dnse_unavailable")
 _FHSC_EXPORTS = ("fhsc_financials", "fhsc_history", "fhsc_listing", "fhsc_quote")

@@ -1,29 +1,18 @@
 """Offline DNSE rows cannot enter existing canonical histories or caches."""
 
-import ipaddress
-import os
 from copy import deepcopy
 from datetime import UTC, date, datetime
-from types import SimpleNamespace
-from urllib.parse import urlsplit
-from uuid import uuid4
 
 import pandas as pd
 import pytest
-from pymongo import MongoClient
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
-from vnibb.core import cache as cache_module
-from vnibb.core.cache import RedisClient, build_cache_key
-from vnibb.core.config import settings
-from vnibb.core.database import Base
+from sqlalchemy import select
+from vnibb.core.cache import build_cache_key
 from vnibb.core.price_units import conflicting_price_source, history_price_records
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.dnse import dnse_history
-from vnibb.services import data_pipeline as pipeline_module
 from vnibb.services.data_pipeline import DataPipeline
-from vnibb.services.mongo_market_data_service import MongoMarketDataService
+
+from dnse_store_fixture import stores
 
 DAY = date(2026, 10, 26)
 
@@ -68,65 +57,6 @@ def test_known_price_source_aliases_remain_compatible(source, expected):
     assert conflicting_price_source({"source": source}, expected) is None
 
 
-def _loopback(url):
-    host = urlsplit(url).hostname
-    try:
-        return host == "localhost" or bool(host and ipaddress.ip_address(host).is_loopback)
-    except ValueError:
-        return False
-
-
-@pytest.fixture
-async def stores(monkeypatch):
-    pg_url = os.environ.get("POSTGRES_CONTRACT_DATABASE_URL")
-    mongo_url = os.environ.get("MONGODB_CONTRACT_URL")
-    redis_url = os.environ.get("REDIS_CONTRACT_URL")
-    if os.environ.get("POSTGRES_CONTRACT") != "1" or not pg_url or not mongo_url:
-        pytest.skip("Requires disposable POSTGRES_CONTRACT_DATABASE_URL and MONGODB_CONTRACT_URL")
-    for url in (pg_url, mongo_url, redis_url):
-        if url:
-            assert _loopback(url), "Contract store must be loopback"
-
-    schema = f"dnse_admission_{uuid4().hex}"
-    admin = create_async_engine(pg_url, poolclass=NullPool)
-    async with admin.begin() as connection:
-        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    engine = create_async_engine(
-        pg_url, poolclass=NullPool, connect_args={"server_settings": {"search_path": schema}},
-    )
-    client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
-    database = client[schema]
-    service = MongoMarketDataService()
-    monkeypatch.setattr(service, "_get_collection", lambda name: database[name])
-    monkeypatch.setattr(settings, "mongodb_enabled", True)
-    monkeypatch.setattr(settings, "mongodb_url", mongo_url)
-    monkeypatch.setattr(pipeline_module, "engine", engine)
-    sessions = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(pipeline_module, "async_session_maker", sessions)
-    redis = RedisClient(url=redis_url) if redis_url else None
-    if redis:
-        monkeypatch.setattr(settings, "redis_url", redis_url)
-        monkeypatch.setattr(cache_module, "_redis_cache_enabled", lambda: True)
-        monkeypatch.setattr(pipeline_module, "redis_client", redis)
-    else:
-        monkeypatch.setattr(settings, "redis_url", "")
-    try:
-        if redis:
-            await redis.connect()
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-        yield SimpleNamespace(sessions=sessions, mongo=database, service=service, redis=redis)
-    finally:
-        if redis:
-            await redis.disconnect()
-        client.drop_database(schema)
-        client.close()
-        await engine.dispose()
-        async with admin.begin() as connection:
-            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        await admin.dispose()
-
-
 async def sql_snapshot(sessions):
     async with sessions() as session:
         rows = (await session.scalars(select(StockPrice).order_by(StockPrice.symbol, StockPrice.time))).all()
@@ -162,7 +92,7 @@ async def test_replayed_unknown_dnse_rows_cannot_overwrite_histories_or_cache(st
     ])
     mongo_before = list(collection.find().sort([("source", 1), ("_id", 1)]))
     sql_before = await sql_snapshot(stores.sessions)
-    cache_key = build_cache_key("vnibb", "price", "latest", symbol)
+    cache_key = stores.redis_key(build_cache_key("vnibb", "price", "latest", symbol))
     if stores.redis:
         await stores.redis.client.set(cache_key, '{"source":"VCI","close":11000,"value":null}')
         cache_before = await stores.redis.client.get(cache_key)
@@ -188,28 +118,24 @@ async def test_replayed_unknown_dnse_rows_cannot_overwrite_histories_or_cache(st
             pytest.fail("Rejected price must not publish a cache entry")
         monkeypatch.setattr(pipeline, "_cache_set_json", no_cache)
 
-    try:
-        for _ in range(2):
-            caplog.clear()
-            progress = {}
-            count = await pipeline.sync_daily_prices(
-                [symbol], start_date=DAY, end_date=DAY, progress=progress, cache_recent=True,
-            )
-            assert count == 0
-            assert progress["stage_stats"]["prices"]["errors"] == 1
-            assert f"Unknown price unit for {symbol}" in caplog.text
-            for source in ("vnstock-data", "vietcap"):
-                with pytest.raises(ValueError, match="provenance"):
-                    await stores.service.bulk_upsert_eod_prices(symbol, [deepcopy(row)], source=source)
-            with pytest.raises(ValueError, match="Unsupported EOD source"):
-                await stores.service.bulk_upsert_eod_prices(symbol, [deepcopy(row)], source="DNSE")
-            assert await sql_snapshot(stores.sessions) == sql_before
-            assert list(collection.find().sort([("source", 1), ("_id", 1)])) == mongo_before
-            if stores.redis:
-                assert await stores.redis.client.get(cache_key) == cache_before
-    finally:
+    for _ in range(2):
+        caplog.clear()
+        progress = {}
+        count = await pipeline.sync_daily_prices(
+            [symbol], start_date=DAY, end_date=DAY, progress=progress, cache_recent=True,
+        )
+        assert count == 0
+        assert progress["stage_stats"]["prices"]["errors"] == 1
+        assert f"Unknown price unit for {symbol}" in caplog.text
+        for source in ("vnstock-data", "vietcap"):
+            with pytest.raises(ValueError, match="provenance"):
+                await stores.service.bulk_upsert_eod_prices(symbol, [deepcopy(row)], source=source)
+        with pytest.raises(ValueError, match="Unsupported EOD source"):
+            await stores.service.bulk_upsert_eod_prices(symbol, [deepcopy(row)], source="DNSE")
+        assert await sql_snapshot(stores.sessions) == sql_before
+        assert list(collection.find().sort([("source", 1), ("_id", 1)])) == mongo_before
         if stores.redis:
-            await stores.redis.client.delete(cache_key)
+            assert await stores.redis.client.get(cache_key) == cache_before
 
 
 @pytest.mark.asyncio
