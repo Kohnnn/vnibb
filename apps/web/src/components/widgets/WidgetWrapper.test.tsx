@@ -609,6 +609,37 @@ test('Open VniAgent sends a bounded admitted sample with its source qualificatio
   expect(JSON.stringify(onCopilotClick.mock.calls)).not.toMatch(/__widgetRuntime|provider-debug-fixture/);
 });
 
+test('Open VniAgent keeps the verified Foreign Trading coverage window and drops private detail', async () => {
+  mockWidgetType = 'foreign_trading';
+  const user = userEvent.setup();
+  const onCopilotClick = jest.fn();
+  const sourceLabel = `Foreign Trading ${'x'.repeat(500)}`;
+  const observation = { date: '2026-11-13', buy_value: 0, sell_value: null };
+  const coverageDetail = {
+    requestedStart: '2026-08-19', requestedEnd: '2026-11-13', requestedSessions: 60,
+    observedStart: '2026-11-13', observedEnd: '2026-11-13', observedSessions: 1,
+    lastValidatedSession: '2026-11-13', gapSessions: 59, calendarVerified: true,
+  };
+  render(<WidgetWrapper id="screener" title="Foreign Trading" widgetType="foreign_trading"
+    dashboardId="dashboard" tabId="tab" onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={{ __widgetRuntime: {
+      layoutHint: { empty: false }, exportData: [observation],
+      provenance: {
+        sourceLabel, updatedAt: '2026-11-13', coverage: 'partial',
+        coverageDetail: { ...coverageDetail, privateDetail: 'provider-debug-fixture', providerIds: ['internal'] },
+        endpoint: 'internal', warnings: ['provider-debug-fixture'],
+      },
+    } }} />
+  </WidgetWrapper>);
+
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({
+    dataSample: [observation],
+    dataProvenance: { sourceLabel: sourceLabel.slice(0, 500), updatedAt: '2026-11-13', coverage: 'partial', coverageDetail },
+  }));
+});
+
 test.each([
   { publication: 'explicitly empty admitted rows', exportData: [] },
   { publication: 'withheld rows with a legacy fallback present', exportData: undefined },
