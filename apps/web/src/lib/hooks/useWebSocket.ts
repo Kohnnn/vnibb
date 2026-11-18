@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { config } from '@/lib/config';
 import { logClientError, logClientWarn } from '@/lib/clientLogger';
-import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation } from '@/lib/marketAlertObservation';
+import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation, rejectFuturePriceObservation } from '@/lib/marketAlertObservation';
 
 const WS_URL = config.wsPriceUrl;
 const MAX_RECONNECT_ATTEMPTS = config.isProd ? 10 : 3;
@@ -152,7 +152,11 @@ export function useWebSocket({
                         || !data.source || typeof data.as_of !== 'string' || typeof data.stale !== 'boolean') return;
                     const observedAt = parseMarketObservationTime(data.as_of);
                     const now = Date.now();
-                    if (observedAt === null || rejectFutureMarketObservation(futureObservationsRef.current, data.symbol, observedAt, now)
+                    if (observedAt === null) return;
+                    const rejected = data.price_unit === 'VND'
+                        ? rejectFuturePriceObservation(data.symbol, observedAt, now)
+                        : rejectFutureMarketObservation(futureObservationsRef.current, data.symbol, observedAt, now);
+                    if (rejected
                         || observedAt < (observationTimesRef.current.get(data.symbol) ?? -Infinity)) return;
                     observationTimesRef.current.set(data.symbol, observedAt);
                     subscribedRef.current.add(data.symbol);

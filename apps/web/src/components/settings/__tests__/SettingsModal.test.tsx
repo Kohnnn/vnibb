@@ -172,7 +172,7 @@ test('turning desktop alerts off in workspace Settings silences all three sender
     data: symbols.map((ticker) => ({ ticker, market_session: {
       session_date: '2026-11-18', status: 'traded', source: 'vietcap', scope: 'vietcap_board', match_as_of: new Date().toISOString(),
     } })),
-    meta: { availability: 'available', stale: false },
+    meta: { availability: 'available', stale: false, screen_scope: 'universe', matched_count: symbols.length, fundamental_enrichment: 'skipped' },
   })
   setScan('VCI')
   socket.mockReturnValue({ isConnected: true, isReceiving: true, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() })

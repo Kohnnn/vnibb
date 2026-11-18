@@ -19,6 +19,8 @@ export interface SavedScreen {
   viewMode?: 'table' | 'chart' | 'performance';
   alertEnabled?: boolean;
   alertMatchSymbols?: string[];
+  alertMatchObservations?: Record<string, number>;
+  alertMatchBaselineComplete?: boolean;
   isBuiltIn?: boolean;
 }
 

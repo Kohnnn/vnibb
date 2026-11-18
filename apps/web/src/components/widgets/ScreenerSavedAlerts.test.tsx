@@ -206,6 +206,25 @@ function setScan(data: ScreenerResponse, dataUpdatedAt = 0, refetch = jest.fn())
   } as unknown as UseQueryResult<ScreenerResponse, Error>)
 }
 
+function alertScan(
+  matches: { ticker: string; price_as_of?: string }[], overrides: NonNullable<ScreenerResponse['meta']> = {},
+): ScreenerResponse {
+  return {
+    data: matches.map(({ ticker, price_as_of }) => ({
+      ticker,
+      updated_at: new Date().toISOString(),
+      market_session: price_as_of ? {
+        session_date: '2026-11-18', status: 'traded', source: 'vietcap', scope: 'vietcap_board', match_as_of: price_as_of,
+      } : undefined,
+    })),
+    meta: {
+      availability: 'available', source: 'cache', stale: false, last_data_date: '2026-11-18',
+      screen_scope: 'universe', matched_count: matches.length, fundamental_enrichment: 'skipped',
+      ...overrides,
+    },
+  }
+}
+
 describe('screener availability', () => {
   beforeEach(() => {
     jest.clearAllMocks()
@@ -346,7 +365,7 @@ describe('screener availability', () => {
     window.localStorage.clear()
     Object.defineProperty(window, 'Notification', { configurable: true, value: native })
     try {
-      setScan({ data: [{ ticker: 'VNM' }], meta: { availability: 'available' } })
+      setScan(alertScan([{ ticker: 'VNM' }]))
       const view = render(<ScreenerWidget id="screen-alert" config={config} />)
       await userEvent.setup().click(screen.getByRole('button', { name: 'Enable alerts for Quality' }))
       expect(await screen.findByRole('button', { name: 'Disable alerts for Quality' })).toBeEnabled()
@@ -376,18 +395,11 @@ describe('screener availability', () => {
       window.localStorage.clear()
       Object.defineProperty(window, 'Notification', { configurable: true, value: native })
       const observed = new Date(start - 1000).toISOString()
-      const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'] }
+      const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'], alertMatchBaselineComplete: true }
       const config = { ...saved, savedScreens: [saved], activeScreenId: saved.id }
       const refetch = jest.fn()
-      const scan = (symbols: { ticker: string; price_as_of?: string }[], stale = false): ScreenerResponse => ({
-        data: symbols.map(({ ticker, price_as_of }) => ({
-          ticker,
-          updated_at: new Date().toISOString(),
-          market_session: price_as_of ? {
-            session_date: '2026-11-18', status: 'traded', source: 'vietcap', scope: 'vietcap_board', match_as_of: price_as_of,
-          } : undefined,
-        })),
-        meta: { availability: 'available', source: stale ? 'stale_cache' : 'cache', stale, last_data_date: '2026-11-18' },
+      const scan = (matches: Parameters<typeof alertScan>[0], stale = false) => alertScan(matches, {
+        source: stale ? 'stale_cache' : 'cache', stale,
       })
       const baseline = { ticker: 'VNM', price_as_of: observed }
       const oldMatch = { ticker: 'FPT', price_as_of: observed }
@@ -468,8 +480,62 @@ describe('screener availability', () => {
     },
   )
 
+  test.each(['complete empty', 'page scope', 'truncated universe', 'unavailable enrichment'] as const)(
+    'keeps a saved-screen observation through %s and delivers one genuine re-entry', async (transition) => {
+      const start = Date.parse('2026-11-18T03:00:00Z')
+      jest.useFakeTimers({ now: start })
+      const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+      const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() })
+      Object.defineProperty(window, 'Notification', { configurable: true, value: native })
+      const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['FPT'] }
+      const config = { ...saved, savedScreens: [saved], activeScreenId: saved.id }
+      const widget = () => <ScreenerWidget id="screen-alert" config={config} limit={1} />
+      const match = (symbol: string, offset: number) => ({ ticker: symbol, price_as_of: new Date(start + offset).toISOString() })
+      const originalMatch = match('FPT', 1000)
+      try {
+        expect(await enableDesktopAlerts()).toBe(true)
+        jest.setSystemTime(start + 1500)
+        setScan(alertScan([originalMatch]))
+        const view = render(widget())
+        const update = (response: ScreenerResponse, offset: number) => {
+          jest.setSystemTime(start + offset)
+          setScan(response, start + offset)
+          view.rerender(widget())
+        }
+        const vnm = [match('VNM', 1000)]
+        const missing = {
+          'complete empty': alertScan([]),
+          'page scope': alertScan(vnm, { screen_scope: 'page' }),
+          'truncated universe': alertScan(vnm, { matched_count: 2 }),
+          'unavailable enrichment': alertScan([], { fundamental_enrichment: 'unavailable' }),
+        }[transition]
+        update(missing, 3000)
+        const replay = transition === 'complete empty' ? originalMatch : match('FPT', 3500)
+        const returnScan = transition === 'page scope' || transition === 'truncated universe'
+          ? { ...missing, data: alertScan([replay]).data }
+          : alertScan([replay])
+        update(returnScan, 4000)
+        expect(readAlertActivity().filter((event) => event.symbol === 'FPT')).toEqual([])
+        expect(native.mock.calls.filter(([, options]) => options?.body === 'FPT')).toEqual([])
+
+        update(alertScan([]), 5000)
+        const fresh = match('FPT', 5500)
+        update(alertScan([fresh]), 6000)
+        update(alertScan([fresh]), 7000)
+        expect(readAlertActivity().filter((event) => event.symbol === 'FPT')).toEqual([
+          expect.objectContaining({ triggerTime: fresh.price_as_of, read: false }),
+        ])
+        expect(native.mock.calls.filter(([, options]) => options?.body === 'FPT')).toHaveLength(1)
+      } finally {
+        if (original) Object.defineProperty(window, 'Notification', original)
+        else Reflect.deleteProperty(window, 'Notification')
+        jest.useRealTimers()
+      }
+    },
+  )
+
   test('does not replace a saved-screen baseline during outage', async () => {
-    const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'] }
+    const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'], alertMatchBaselineComplete: true }
     const config = {
       savedScreens: [saved],
       activeScreenId: saved.id,

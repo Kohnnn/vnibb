@@ -18,7 +18,7 @@ import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { recordAlertActivity } from '@/lib/alertActivity';
 import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
 import { parseAlertTime } from '@/lib/alertTime';
-import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation } from '@/lib/marketAlertObservation';
+import { isFreshMarketObservation, parseMarketObservationTime, rejectFuturePriceObservation } from '@/lib/marketAlertObservation';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 import { EMPTY_VALUE } from '@/lib/units';
 
@@ -147,7 +147,6 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
     // synchronously, without putting storage or delivery inside a React updater.
     const alertsRef = useRef(alerts);
     const priceCacheRef = useRef(new Map<string, { price: number; observedAt: number }>());
-    const futureObservationsRef = useRef(new Map<string, Set<number>>());
     const replaceAlerts = useCallback((next: PriceAlert[]) => {
         alertsRef.current = next;
         setAlerts(next);
@@ -182,9 +181,9 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
     const handlePriceUpdate = useCallback((symbol: string, price: number, asOf: string | null | undefined, stale: boolean | null | undefined, deliveryClass: 'browser_local' | 'polled') => {
         const now = Date.now();
         const observedAt = parseMarketObservationTime(asOf);
-        if (!navigator.onLine || !Number.isFinite(price) || price <= 0 || observedAt === null
-            || rejectFutureMarketObservation(futureObservationsRef.current, symbol, observedAt, now)
-            || stale !== false || !isFreshMarketObservation(observedAt, now)) return;
+        if (!Number.isFinite(price) || price <= 0 || observedAt === null
+            || rejectFuturePriceObservation(symbol, observedAt, now)
+            || !navigator.onLine || stale !== false || !isFreshMarketObservation(observedAt, now)) return;
         const previous = priceCacheRef.current.get(symbol);
         if (previous && observedAt <= previous.observedAt) return;
         const previousPrice = previous && isFreshMarketObservation(previous.observedAt, now) ? previous.price : undefined;
