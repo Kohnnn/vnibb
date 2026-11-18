@@ -197,7 +197,7 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const health = deriveWidgetHealth(provenance);
     const observed = provenance.updatedAt;
     const label = health.status === 'cached' ? 'Cached snapshot'
-        : health.status === 'stale' && observed ? `Stale · last sync ${formatDate(String(observed))}`
+        : health.status === 'stale' && observed ? `Stale · source as of ${formatDate(String(observed))}`
         : health.status === 'awaiting_update' && provenance.expectedClosedSession && observed ? `Last trading day · ${formatDate(String(observed))}`
         : health.label;
 

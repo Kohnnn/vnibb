@@ -316,6 +316,21 @@ export function isUnavailableStatementRow(row: { unavailable_reason?: unknown } 
   return typeof reason === 'string' && reason.trim().length > 0
 }
 
+/** Read rejection text without copying the underlying provider evidence. */
+export function statementFieldWithheldReason(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== 'object') return null
+  if ('unavailable_reason' in metadata && typeof metadata.unavailable_reason === 'string' && metadata.unavailable_reason.trim()) {
+    return metadata.unavailable_reason.trim()
+  }
+  if ('components' in metadata && Array.isArray(metadata.components)) {
+    for (const component of metadata.components) {
+      const reason = statementFieldWithheldReason(component)
+      if (reason) return reason
+    }
+  }
+  return null
+}
+
 /** Visible row- and field-level withholding reasons, deduplicated across periods. */
 export function describeUnavailableStatementRows(
   rows: Array<{ period?: string | null; unavailable_reason?: unknown; unit_metadata?: unknown }> | null | undefined

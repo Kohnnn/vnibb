@@ -8,16 +8,14 @@ import { IncomeStatementWidget } from '@/components/widgets/IncomeStatementWidge
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { useBalanceSheet, useCashFlow, useFinancialRatios, useIncomeStatement } from '@/lib/queries';
+import type { UnitConfig } from '@/lib/units';
 import { getWidgetExportData } from '@/lib/widgetRuntime';
 
 jest.mock('@/lib/queries', () => ({
   useBalanceSheet: jest.fn(), useCashFlow: jest.fn(), useFinancialRatios: jest.fn(), useIncomeStatement: jest.fn(),
 }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
-jest.mock('@/contexts/UnitContext', () => {
-  const config = { display: 'B', decimalPlaces: 2, currency: 'VND', locale: 'en-US' };
-  return { useUnit: () => ({ config }) };
-});
+jest.mock('@/contexts/UnitContext', () => ({ useUnit: () => ({ config: mockUnitConfig }) }));
 jest.mock('@/components/ui/WidgetContainer', () => ({
   WidgetContainer: ({ children, headerActions, exportData }: { children: ReactNode; headerActions?: ReactNode; exportData?: unknown }) => (
     <>{headerActions}{children}<output data-testid="container-export">{JSON.stringify(exportData)}</output></>
@@ -33,6 +31,8 @@ const response = <T,>(data: T[], ticker = symbol) => ({
 const basis = { symbol, source: 'synthetic-controlled', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated' };
 const vnd = { source_unit: 'VND', value_unit: 'VND' };
 const rejection = { unavailable_reason: 'unverified_monetary_unit' };
+const defaultUnitConfig: UnitConfig = { display: 'B', decimalPlaces: 2, currency: 'VND', locale: 'en-US' };
+let mockUnitConfig = defaultUnitConfig;
 const fyIncome = { ...basis, period: '2025', flow_basis: 'annual', revenue: 98_496_000_000_000,
   depreciation: 7123456, unit_metadata: { revenue: vnd, depreciation: rejection } };
 const qIncome = { ...basis, period: 'Q3-2026', flow_basis: 'single_quarter', revenue: 26_002_944_000_000,
@@ -71,9 +71,32 @@ function renderIncome(config: Record<string, unknown> = published) {
 beforeEach(() => {
   window.localStorage.clear();
   jest.clearAllMocks();
+  mockUnitConfig = defaultUnitConfig;
 });
 
 describe('published FPT Income Statement period admission', () => {
+  it('keeps admitted VND amounts and statement basis in both export inputs under USD display', () => {
+    mockUnitConfig = { ...defaultUnitConfig, display: 'USD', currency: 'USD', usdVndRatesByYear: { '2025': 25_500 } };
+    jest.mocked(useIncomeStatement).mockReturnValue(response([{
+      ...fyIncome, revenue: 25_500_000_000, profit_before_tax: 9_876_543,
+      eps: 25_500, unit_metadata: {
+        ...fyIncome.unit_metadata, pre_tax_profit: rejection, profit_before_tax: vnd,
+        eps: { source_unit: 'VND/share', value_unit: 'VND/share' },
+      },
+    }]) as never);
+
+    const { tile, containerRows, exportRows, payload } = renderIncome()();
+    expect(tile.getByText('Revenue').closest('tr')).toHaveTextContent(/1\.00$/);
+    expect(tile.getByText(/Display units: Millions USD/)).toBeInTheDocument();
+    expect(exportRows).toEqual(containerRows);
+    expect(exportRows).toEqual([expect.objectContaining({ revenue: 25_500_000_000, eps: 25_500, eps_unit: 'VND/share',
+      currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated', flow_basis: 'annual',
+      depreciation: null, pre_tax_profit: null, profit_before_tax: null,
+      withheld_fields: expect.stringContaining('unverified_monetary_unit'),
+    })]);
+    expect(payload.__widgetRuntime.provenance).toMatchObject({ units: 'VND, VND/share', basis: 'consolidated / annual' });
+  });
+
   it('keeps the retained annual revenue, not the quarter, in initial FY and after returning from Q', () => {
     jest.mocked(useIncomeStatement).mockReturnValue(response([fyIncome, qIncome]) as never);
     const readIncome = renderIncome();
@@ -144,7 +167,9 @@ function renderPublishedGroup(responseMode: 'mixed' | 'quarter-only' = 'mixed') 
   )));
   jest.mocked(useIncomeStatement).mockImplementation(ticker => forSymbol(ticker, selectRows([fyIncome], qIncome)));
   jest.mocked(useBalanceSheet).mockImplementation(ticker => forSymbol(ticker, selectRows([
-    { ...basis, period: '2025', total_assets: balance.fy[0], unit_metadata: { total_assets: vnd, cash: rejection }, raw_data: { cash: withheldRawCash } },
+    { ...basis, period: '2025', total_assets: balance.fy[0], cash: withheldRawCash, cash_and_equivalents: withheldRawCash,
+      unit_metadata: { total_assets: vnd, cash: { ...rejection, provider_value: withheldRawCash, source_record: { cash: withheldRawCash } } },
+      raw_data: { cash: withheldRawCash } },
     noAnnualRow,
   ], { ...basis, period: 'Q3-2026', total_assets: balance.q[0], unit_metadata: { total_assets: vnd } })));
   jest.mocked(useCashFlow).mockImplementation(ticker => forSymbol(ticker, selectRows([
@@ -181,6 +206,12 @@ function assertPublishedRows(readGroup: ReturnType<typeof renderPublishedGroup>[
       period, periodScope: 'shared', endpoint: expect.stringContaining(`/equity/${ticker}/`),
     } } });
     expect(JSON.stringify(row.containerRows)).not.toContain(String(withheldRawCash));
+    if (row.field === 'total_assets' && period === 'FY') {
+      expect(row.tile.queryByText('Cash', { exact: true })).not.toBeInTheDocument();
+      expect(row.exportRows).toEqual([expect.objectContaining({ cash: null, cash_and_equivalents: null,
+        withheld_fields: expect.stringContaining('unverified_monetary_unit') })]);
+      expect(JSON.stringify(row.payload)).not.toMatch(/unit_metadata|provider_value|source_record|8765432100123/);
+    }
   }
 }
 

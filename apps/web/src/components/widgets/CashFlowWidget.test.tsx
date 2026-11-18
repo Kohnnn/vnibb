@@ -338,6 +338,36 @@ describe('cash flow admitted data', () => {
 });
 
 describe('producer-admitted annual cash flow', () => {
+  it.each([[-120, -900], [-900, -120]])('withholds conflicting FYs with admitted taxes of %i and %i', (first, second) => {
+    const publish = jest.fn();
+    const row = {
+      ...admittedRow,
+      unit_metadata: { ...admittedRow.unit_metadata, taxes_paid: { source_unit: 'VND', value_unit: 'VND' } },
+    };
+    renderWith([
+      { ...row, raw_data: { taxes_paid: first } },
+      { ...row, raw_data: { taxes_paid: second } },
+      annualAdmission.admittedZero,
+    ], 'HPG', publish);
+
+    expect(screen.queryByRole('columnheader', { name: '2025' })).not.toBeInTheDocument();
+    expect(screen.getByText(/2025 returned conflicting rows/)).toBeVisible();
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toEqual([expect.objectContaining({ period: '2022', taxes_paid: null })]);
+  });
+
+  it('collapses equivalent FY spellings and ignores receipt times and unused raw fields', () => {
+    const publish = jest.fn();
+    const row = {
+      ...admittedRow,
+      unit_metadata: { ...admittedRow.unit_metadata, taxes_paid: { source_unit: 'VND', value_unit: 'VND' } },
+      raw_data: { taxes_paid: -120, unrelated: 1 },
+    };
+    renderWith([row, { ...row, period: '2025FY', updated_at: '2026-06-20', raw_data: { taxes_paid: -120, unrelated: 2 } }], 'HPG', publish);
+
+    expect(screen.getAllByRole('columnheader', { name: '2025' })).toHaveLength(1);
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toEqual([expect.objectContaining({ period: '2025', taxes_paid: -120 })]);
+  });
+
   it('does not lend a blank repurchase field’s unit to a different raw alias', () => {
     const publish = jest.fn();
     renderWith([annualAdmission.unadmittedAlias], 'HPG', publish);
