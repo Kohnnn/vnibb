@@ -7,7 +7,13 @@ export interface ScreenerData {
     symbol?: string;
     updated_at?: string | null;
     trade_date?: string | null;
-    market_session?: { session_date: string; status: 'traded' | 'no_trade' | 'suspended'; source: string; scope: 'vietcap_board' } | null;
+    market_session?: {
+        session_date: string;
+        status: 'traded' | 'no_trade' | 'suspended';
+        source: string;
+        scope: 'vietcap_board';
+        match_as_of?: string;
+    } | null;
 
     company_name?: string;
     organ_name?: string | null;
