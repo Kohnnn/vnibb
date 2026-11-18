@@ -9,7 +9,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from zoneinfo import ZoneInfo
 
@@ -109,6 +109,7 @@ from vnibb.services.foreign_flow_coverage import (
     requested_session_dates,
 )
 from vnibb.services.fundamental_valuation import admit_fundamental_snapshot, fundamental_valuation_unavailable_reason
+from vnibb.services.market_session import expected_market_session, verified_market_closure
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 from vnibb.services.vietcap_client import VietcapClient
@@ -6574,12 +6575,14 @@ async def get_foreign_trading(
         logger.warning("Live foreign trading feed failed for %s: %s", symbol_upper, exc)
         provider_error = "live foreign trading feed unavailable"
 
+    checked_at = datetime.now(UTC)
+    expected_session = expected_market_session(now=checked_at)
+    closure = verified_market_closure(now=checked_at, latest_session=expected_session)
     window_start: date | None = None
     window_end: date | None = None
     if sessions:
-        requested_days = requested_session_dates(sessions)
-        if requested_days:
-            window_start, window_end = requested_days[0], requested_days[-1]
+        requested_days = requested_session_dates(sessions, end=expected_session)
+        window_start, window_end = requested_days[0], requested_days[-1]
 
     # Each source is read at the window's own size: a 120/250-session window
     # must not be truncated to the default 60-row limit before the merge. The
@@ -6633,6 +6636,7 @@ async def get_foreign_trading(
                 if coverage.last_validated_session
                 else None
             ),
+            latest_closed_session=closure,
             **coverage.meta(),
         ),
         error="; ".join(warnings) if warnings else None,

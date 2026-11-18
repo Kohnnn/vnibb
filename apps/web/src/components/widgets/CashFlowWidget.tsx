@@ -29,7 +29,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isUnavailableStatementRow, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildTableInsightContext, describeSelection, seriesFromSelection, toggleSelection, type ChartableColumn, type TableSelection } from '@/lib/tableInsight';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
@@ -47,10 +47,14 @@ interface CashFlowWidgetProps {
 
 type ViewMode = 'table' | 'chart';
 
-const labels: Record<string, string> = {
+const labels = {
     operating_cash_flow: 'Operating CF',
     investing_cash_flow: 'Investing CF',
     financing_cash_flow: 'Financing CF',
+    net_change_in_cash: 'Net Change in Cash',
+    free_cash_flow: 'Free Cash Flow',
+    capex: 'CapEx',
+    dividends_paid: 'Dividends Paid',
     depreciation: 'Depreciation',
     taxes_paid: 'Taxes Paid',
     interest_paid: 'Interest Paid',
@@ -62,14 +66,24 @@ const labels: Record<string, string> = {
     proceeds_from_share_issuance: 'Share Issuance',
     proceeds_from_asset_sales: 'Asset Sale Proceeds',
     acquisition_spend: 'Acquisition Spend',
-    net_cash_flow: 'Net Cash Flow',
-    net_change_in_cash: 'Net Change in Cash',
-    free_cash_flow: 'Free Cash Flow',
-    capex: 'CapEx',
-    capital_expenditure: 'CapEx',
-    dividends_paid: 'Dividends Paid',
     debt_repayment: 'Debt Repayment',
     stock_repurchased: 'Stock Repurchased',
+} as const;
+
+type CashFlowMetric = keyof typeof labels;
+const cashFlowMetrics = Object.keys(labels).filter((key): key is CashFlowMetric => Object.hasOwn(labels, key));
+// Only the fields defined by the API statement model may bypass raw alias admission.
+const wireFields: Readonly<Partial<Record<CashFlowMetric, readonly string[]>>> = {
+    operating_cash_flow: ['operating_cash_flow'],
+    investing_cash_flow: ['investing_cash_flow'],
+    financing_cash_flow: ['financing_cash_flow'],
+    net_change_in_cash: ['net_change_in_cash', 'net_cash_flow'],
+    free_cash_flow: ['free_cash_flow'],
+    capex: ['capex', 'capital_expenditure'],
+    dividends_paid: ['dividends_paid'],
+    stock_repurchased: ['stock_repurchased'],
+    debt_repayment: ['debt_repayment'],
+    depreciation: ['depreciation'],
 };
 
 const TABLE_YEAR_LIMIT = 20;
@@ -111,7 +125,7 @@ function toNumeric(value: unknown): number | null {
  * the raw provider alias (issue #245).
  */
 export function fieldWithheldReason(entry: CashFlowData, metricKey: string): string | null {
-    return unitReason(entry as unknown as Record<string, unknown>, metricKey)
+    return unitReason({ ...entry }, metricKey)
 }
 
 /** The rejection recorded for one key, in any evidence location. */
@@ -170,17 +184,9 @@ export function getRawMetric(entry: CashFlowData, metricKey: string): number | n
  * unverified row basis all keep the raw alias out of the table.
  */
 export function isRawMetricAdmitted(entry: CashFlowData, metricKey: string): boolean {
-    const record = entry as unknown as Record<string, unknown>;
-    const reason = (key: string) => unitReason(record, key);
-    if (reason(metricKey)) return false;
-    // A rejection may be recorded under an alias rather than the canonical key,
-    // so every spelling is scanned before any raw value is read.
-    if ((RAW_CASHFLOW_ALIASES[metricKey] || []).some((alias) => reason(alias))) return false;
-    // The row's own basis must be admitted; otherwise the raw number has no
-    // currency or scale that this table may apply.
+    const record: Record<string, unknown> = { ...entry };
     const keys = [metricKey, ...(RAW_CASHFLOW_ALIASES[metricKey] || [])];
-    if (keys.map((key) => unitReason(record, key)).some((value) => Boolean(value))) return false;
-    if (unitReason(record, 'basis')) return false;
+    if (cashFlowWithholding(record, keys)) return false;
     if (typeof record.unavailable_reason === 'string' && record.unavailable_reason) return false;
     // Affirmative per-field evidence for this metric, under its own currency.
     if (!keys.some((key) => hasUnitEvidence(record, key))) return false;
@@ -253,6 +259,51 @@ function declaredVndBasis(record: Record<string, unknown>): boolean {
     return currency === 'VND' && valueUnit === 'VND';
 }
 
+function cashFlowWithholding(record: Record<string, unknown>, keys: readonly string[]): string | null {
+    return unitReason(record, 'basis') ?? keys.map((key) => unitReason(record, key)).find((reason) => reason !== null) ?? null;
+}
+
+/** The same admitted, source-unit observations drive the table, charts and downstream consumers. */
+function projectCashFlow(entry: CashFlowData) {
+    const record: Record<string, unknown> = { ...entry };
+    const withheld: CashFlowData['unit_metadata'] = {};
+    const values = Object.fromEntries(cashFlowMetrics.map((metric): [CashFlowMetric, number | null] => {
+        const wireKeys = wireFields[metric] ?? [];
+        const reason = cashFlowWithholding(record, [metric, ...wireKeys, ...(RAW_CASHFLOW_ALIASES[metric] ?? [])]);
+        if (reason) {
+            withheld[metric] = { unavailable_reason: reason };
+            return [metric, null];
+        }
+        // Canonical wire fields have already gone through API admission. An
+        // optional provider alias needs affirmative evidence even as a fallback.
+        for (const key of wireKeys) {
+            const value = record[key];
+            if (typeof value === 'number' && Number.isFinite(value)) return [metric, value];
+        }
+        return [metric, RAW_CASHFLOW_ALIASES[metric] ? getRawMetric(entry, metric) : null];
+    }));
+    const metrics: Readonly<Partial<Record<CashFlowMetric, number | null>>> = values;
+    const source = typeof record.source === 'string' ? record.source : null;
+    return {
+        row: {
+            symbol: entry.symbol,
+            period: entry.period,
+            source,
+            currency: entry.currency ?? null,
+            value_unit: entry.value_unit ?? null,
+            consolidation_basis: entry.consolidation_basis ?? null,
+            flow_basis: entry.flow_basis ?? null,
+            aggregation_basis: entry.aggregation_basis ?? null,
+            source_periods: entry.source_periods ?? null,
+            withheld_fields: describeUnavailableStatementRows([{ period: entry.period, unit_metadata: withheld }]),
+            ...metrics,
+            net_cash_flow: metrics.net_change_in_cash ?? null,
+            capital_expenditure: metrics.capex ?? null,
+        },
+        reportedMetadata: { ...entry.unit_metadata, ...withheld },
+    };
+}
+
 function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: CashFlowWidgetProps) {
     // Default to the shared group the "Financial Period View" banner writes; a
     // widget-level `periodSyncGroup` overrides it and an explicit `null` opts out
@@ -294,30 +345,22 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         dataUpdatedAt,
     } = useCashFlow(symbol, { period: apiPeriod, limit: visiblePeriodLimit });
 
-    const items = data?.data || [];
+    const items = data?.data;
     // Provider payloads can repeat a fiscal period or emit rows with no fiscal
     // identity at all. `canonicalPeriodRows` never picks between conflicting rows
     // (nothing in the payload proves which basis is authoritative) - it excludes
     // them and reports the reason, so a duplicate is disclosed rather than shown as
     // two columns labelled "2020" (issue #103).
     const { rows: canonicalItems, issues: periodIssues, invalidPeriodCount } = useMemo(
-        () => canonicalPeriodRows(items),
+        () => canonicalPeriodRows(items ?? []),
         [items]
     );
     const orderedItems = useMemo(
         () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalItems]
     );
-    // The TTM branch returns a single TTM row today (financial_service
-    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
-    // never render a quarter row under a TTM header if a payload carries one
-    // (issue #101).
     const periodItems = useMemo(
-        () => periodMode === 'quarter'
-            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : periodMode === 'ttm'
-                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
-                : orderedItems,
+        () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
     // A row the API returned without certification carries every numeric field as
@@ -325,10 +368,13 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
     // reported zero, so reason-bearing rows are held out of the table/chart and
     // disclosed in the note instead; a row that merely has some null fields is a
     // valid partial row and stays (issue #103).
-    const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
+    const projectedItems = useMemo(() => periodItems.map((entry) => ({ entry, ...projectCashFlow(entry) })), [periodItems]);
+    const unavailableNote = useMemo(() => describeUnavailableStatementRows(projectedItems.map(({ entry, reportedMetadata }) => ({
+        period: entry.period, unavailable_reason: entry.unavailable_reason, unit_metadata: reportedMetadata,
+    }))), [projectedItems]);
     const displayItems = useMemo(
-        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
-        [periodItems]
+        () => projectedItems.filter(({ entry }) => !isUnavailableStatementRow(entry)).map(({ row }) => row),
+        [projectedItems]
     );
     const duplicatePeriodNote = useMemo(() => {
         const notes: string[] = [];
@@ -363,35 +409,13 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
             investingCF: convertFinancialValueForUnit(d.investing_cash_flow ?? null, unitConfig, d.period),
             financingCF: convertFinancialValueForUnit(d.financing_cash_flow ?? null, unitConfig, d.period),
             freeCashFlow: convertFinancialValueForUnit(d.free_cash_flow ?? null, unitConfig, d.period),
-            netCashFlow: convertFinancialValueForUnit(d.net_change_in_cash ?? d.net_cash_flow ?? null, unitConfig, d.period),
+            netCashFlow: convertFinancialValueForUnit(d.net_change_in_cash, unitConfig, d.period),
         }));
     }, [displayItems, periodMode, unitConfig]);
 
     const tableScale = useMemo(() => {
-        const values = displayItems.flatMap((item) => [
-            item.operating_cash_flow,
-            item.investing_cash_flow,
-            item.financing_cash_flow,
-            getRawMetric(item, 'depreciation'),
-            getRawMetric(item, 'taxes_paid'),
-            getRawMetric(item, 'interest_paid'),
-            getRawMetric(item, 'change_in_receivables'),
-            getRawMetric(item, 'change_in_inventory'),
-            getRawMetric(item, 'change_in_payables'),
-            getRawMetric(item, 'fx_effect'),
-            getRawMetric(item, 'proceeds_from_borrowings'),
-            getRawMetric(item, 'proceeds_from_share_issuance'),
-            getRawMetric(item, 'proceeds_from_asset_sales'),
-            getRawMetric(item, 'acquisition_spend'),
-            item.free_cash_flow,
-            item.net_change_in_cash,
-            item.net_cash_flow,
-            item.capex,
-            item.capital_expenditure,
-            item.dividends_paid,
-            item.debt_repayment,
-            item.stock_repurchased,
-        ].map((value) => convertFinancialValueForUnit(value, unitConfig, item.period)));
+        const values = displayItems.flatMap((item) => cashFlowMetrics.map((metric) =>
+            convertFinancialValueForUnit(item[metric], unitConfig, item.period)));
         return resolveUnitScale(values, unitConfig);
     }, [displayItems, unitConfig]);
 
@@ -449,6 +473,10 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
     );
 
     useEffect(() => {
+        const units = [...new Set(displayItems.map((item) => item.value_unit).filter(Boolean))].join(', ') || undefined;
+        const basis = [...new Set(displayItems.map((item) =>
+            [item.consolidation_basis, item.flow_basis, item.aggregation_basis].filter(Boolean).join(' / '),
+        ).filter(Boolean))].join('; ') || undefined;
         onDataChange?.(buildWidgetRuntime({
             apiGroup: '/equity',
             empty: !hasData,
@@ -456,10 +484,18 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             sourceLabel: 'Cash flow',
             lastDataDate: null,
             fetchedAt: dataUpdatedAt,
-            stale: isFallback,
-            extra: hasData ? { periods: displayItems.length, tableInsight: chartInsight } : undefined,
+            cached: isFallback,
+            observationStatus: hasData ? 'available' : isLoading ? 'loading' : error || statementNote ? 'unavailable' : 'empty',
+            refreshStatus: isFetching ? 'refreshing' : error ? 'failed' : dataUpdatedAt ? 'succeeded' : undefined,
+            period,
+            periodScope: periodSyncGroup ? 'shared' : 'local',
+            units,
+            basis,
+            warnings: statementNote ? [statementNote] : undefined,
+            exportData: displayItems,
+            extra: { periods: displayItems.length, data: displayItems, ...(hasData ? { tableInsight: chartInsight } : {}) },
         }));
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight]);
+    }, [onDataChange, hasData, isFallback, isLoading, error, isFetching, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems, statementNote, chartInsight]);
     // A metric selection is a series selection: the shared contract charts one
     // series only for a `column` selection whose key is a series key. Table row
     // ids are the raw statement metric names while the chart series are
@@ -486,38 +522,23 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
     );
     const clearSelection = useCallback(() => setSelection(null), []);
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const valueFor = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
-            if (metricKey === 'net_change_in_cash') return entry.net_change_in_cash ?? entry.net_cash_flow
-            if (metricKey === 'capex') return entry.capex ?? entry.capital_expenditure
-
-            const normalizedValue = (entry as unknown as Record<string, number | null | undefined>)[metricKey]
-            if (typeof normalizedValue === 'number' && Number.isFinite(normalizedValue)) {
-                return normalizedValue
-            }
-
-            if (metricKey in RAW_CASHFLOW_ALIASES) return getRawMetric(entry as CashFlowData, metricKey)
-            return normalizedValue
-        }
         const recentItems = displayItems.slice(-visiblePeriodLimit)
-        const hasMetricData = (metricKey: string) =>
-            recentItems.some((entry) => {
-                const value = valueFor(entry, metricKey)
-                return typeof value === 'number' && Number.isFinite(value)
-            })
+        const hasMetricData = (metricKey: CashFlowMetric) =>
+            recentItems.some((entry) => entry[metricKey] != null)
 
-        const mapValues = (metricKey: string) =>
+        const mapValues = (metricKey: CashFlowMetric) =>
             Object.fromEntries(
                 recentItems.map((entry, index) => [
                     tableColumns[index]?.key ?? `period_${index}`,
-                    convertFinancialValueForUnit(valueFor(entry, metricKey), unitConfig, entry.period),
+                    convertFinancialValueForUnit(entry[metricKey], unitConfig, entry.period),
                 ])
             );
 
-        const createRow = (groupId: string, metricKey: string): DenseTableRow | null =>
+        const createRow = (groupId: string, metricKey: CashFlowMetric): DenseTableRow | null =>
             hasMetricData(metricKey)
                 ? attachSelection({
                     id: metricKey,
-                    label: labels[metricKey] || metricKey,
+                    label: labels[metricKey],
                     parentId: groupId,
                     indent: 12,
                     values: mapValues(metricKey),
@@ -562,10 +583,9 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             storageKey={`cash-flow:${id}:${symbol}:${period}`}
             selectedColumnKey={selection?.kind === 'column' ? selection.key : null}
             onSelectionClear={clearSelection}
-            footerNote={unitNote + (period === 'TTM' ? displayItems.map((item) => {
-                const row = item as unknown as Record<string, unknown>;
-                return ` • TTM basis: ${typeof row.aggregation_basis === 'string' ? row.aggregation_basis : 'Unknown'}; Source periods: ${Array.isArray(row.source_periods) && row.source_periods.length ? row.source_periods.join(', ') : 'Unknown'}`;
-            }).join('') : '')}
+            footerNote={unitNote + (period === 'TTM' ? displayItems.map((item) =>
+                ` • TTM basis: ${item.aggregation_basis ?? 'Unknown'}; Source periods: ${item.source_periods?.length ? item.source_periods.join(', ') : 'Unknown'}`,
+            ).join('') : '')}
             valueFormatter={(value) =>
                 formatUnitValuePlain(value as number | null | undefined, tableScale, unitConfig)
             }

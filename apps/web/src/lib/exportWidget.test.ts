@@ -34,6 +34,16 @@ describe('historical warnings provenance', () => {
 });
 
 describe('source and retrieval provenance', () => {
+  it('exports a date-only observation without inventing a time of day', () => {
+    const markdown = provenanceToMarkdown({
+      updatedAt: '2026-11-06', fetchedAt: '2026-11-14T03:00:00Z',
+      capturedAt: '2026-11-14T03:01:00Z',
+    });
+
+    expect(markdown.split('\n')).toContain('- Source as of: 2026-11-06');
+    expect(markdown.split('\n')).toContain('- Fetched at: 2026-11-14T03:00:00.000Z');
+  });
+
   it('keeps old source data stale in exported metadata after a new fetch', () => {
     const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
     try {
@@ -125,7 +135,11 @@ describe('exportToXLSX', () => {
 });
 
 describe('exportToJSON', () => {
-  it('wraps rows with _provenance and keeps source time distinct from fetch time', async () => {
+  it.each([
+    [undefined, null],
+    ['2026-11-06', '2026-11-06'],
+    ['2026-11-06T15:00:00.137+07:00', '2026-11-06T08:00:00.137Z'],
+  ])('serializes the source as-of %s separately from fetch time', async (updatedAt, expectedAsOf) => {
     const captured: Array<{ blob: Blob; filename: string }> = [];
     const originalCreate = URL.createObjectURL;
     const originalRevoke = URL.revokeObjectURL;
@@ -142,7 +156,7 @@ describe('exportToJSON', () => {
       exportToJSON(
         [{ symbol: 'FPT', revenue: 63000 }],
         'fpt',
-        { symbol: 'FPT', sourceLabel: 'VniBB financials API', fetchedAt: '2026-11-02T03:00:00Z' },
+        { symbol: 'FPT', sourceLabel: 'VniBB financials API', updatedAt, fetchedAt: '2026-11-14T03:00:00Z' },
       );
 
       const { blob, filename } = captured[0];
@@ -150,8 +164,8 @@ describe('exportToJSON', () => {
       const payload = JSON.parse(text);
       expect(filename).toBe('fpt.json');
       expect(payload.data).toEqual([{ symbol: 'FPT', revenue: 63000 }]);
-      expect(payload._provenance.fetchedAt).toBe('2026-11-02T03:00:00.000Z');
-      expect(payload._provenance.updatedAt).toBeNull();
+      expect(payload._provenance.fetchedAt).toBe('2026-11-14T03:00:00.000Z');
+      expect(payload._provenance.updatedAt).toBe(expectedAsOf);
       expect(payload._provenance.capturedAt).toBeTruthy();
     } finally {
       URL.createObjectURL = originalCreate;
@@ -207,7 +221,7 @@ describe('exportToPNG', () => {
   });
 
 
-  it('paints the surrounding surface and stamps source + both timestamps into the image', async () => {
+  it('paints the surrounding surface and stamps the source date and receipt time into the image', async () => {
     const options: Array<Record<string, unknown>> = [];
     const drawn: string[] = [];
     let stampedHeight = 0;
@@ -269,9 +283,9 @@ describe('exportToPNG', () => {
       // The strip is added below the capture, so the widget's own layout is untouched.
       expect(stampedHeight).toBeGreaterThan(200);
       expect(drawn.join(' ')).toContain('source: Market heatmap');
-      expect(drawn.join(' ')).toContain('source_as_of: 2026-11-03T00:00:00.000Z');
-      expect(drawn.join(' ')).toContain('fetched_at:');
-      expect(drawn.join(' ')).not.toContain('1762000000000');
+      const footer = drawn.join(' ');
+      expect(footer).toMatch(/source_as_of: 2026-11-03\b(?!T)/);
+      expect(footer).toContain('fetched_at: 2025-11-01T12:26:40.000Z');
     } finally {
       jest.restoreAllMocks();
       host.remove();

@@ -11,7 +11,7 @@ import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -93,9 +93,6 @@ const ratioLabels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
-// A current-year YTD column may exist only in the statement reference. Without
-// a matching ratio period its cells remain empty instead of borrowing FY values.
-const YTD_PERIOD_REGEX = /^\d{4} YTD$/;
 // These metrics are undefined, not zero, when a denominator is missing. Providers
 // emit a literal 0 for a period they could not compute, which would otherwise
 // render as a real 0.00 multiple and feed the swing heuristic a bogus base.
@@ -110,18 +107,6 @@ const UNDEFINED_WHEN_ZERO_RATIO_KEYS: Record<string, true> = {
     p_fcf: true,
     price_to_fcf: true,
 };
-
-/**
- * Statement periods this widget is expected to mirror as columns: fiscal years, canonical
- * quarters, and the current-year YTD roll-up. TTM closes a twelve-month window and is a
- * display mode of its own, so it never names a reference column.
- */
-function readStatementReferencePeriod(raw: unknown): string | null {
-    const normalized = normalizeRatioPeriod(typeof raw === 'string' ? raw : null);
-    if (!normalized) return null;
-    if (isCanonicalQuarterPeriod(normalized) || /^\d{4}$/.test(normalized)) return normalized;
-    return YTD_PERIOD_REGEX.test(normalized) ? normalized : null;
-}
 
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
@@ -153,10 +138,6 @@ function readRatioMetric(entry: Record<string, unknown> | undefined, metricKey: 
         return numeric;
     }
     return null;
-}
-
-function normalizeRatioPeriod(period: string | null | undefined): string | null {
-    return normalizeFinancialPeriod(period);
 }
 
 function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: FinancialRatiosWidgetProps) {
@@ -206,12 +187,13 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     const rawRatios = useMemo(() => period === 'TTM' ? [] : data?.data || [], [period, data?.data]);
     const canonicalRatios = useMemo(() => canonicalPeriodRows(rawRatios), [rawRatios]);
     const ratios = useMemo(() => canonicalRatios.rows
-        .map((entry) => ({ ...entry, period: normalizeRatioPeriod(entry.period)!,
+        .map((entry) => ({ ...entry, period: normalizeFinancialPeriod(entry.period)!,
             payout_ratio: readRatioMetric(entry as unknown as Record<string, unknown>, 'payout_ratio'),
             dividend_yield: readRatioMetric(entry as unknown as Record<string, unknown>, 'dividend_yield'),
         }))
+        .filter((entry) => matchesFinancialPeriodMode(entry.period, periodMode))
         .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
-        [canonicalRatios.rows]);
+        [canonicalRatios.rows, periodMode]);
     const exportData = useMemo(() => ratios.map((entry) => ({
         period: entry.period,
         ...Object.fromEntries(Object.keys(entry).filter((key) => typeof entry[key as keyof typeof entry] === 'number')
@@ -227,19 +209,16 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     // fill and therefore renders as empty cells. The ratio feed is a value lookup for those
     // headings and only becomes the period source when the reference series is unavailable.
     const displayPeriods = useMemo(() => {
-        if (period === 'TTM') return ratios.map((entry) => entry.period);
-        const referencePeriods = (statementReferenceQuery.data?.data || [])
-            .map((entry) => readStatementReferencePeriod(entry.period))
-            .filter((value): value is string => Boolean(value))
-            .sort((left, right) => periodSortKey(left) - periodSortKey(right));
-        if (referencePeriods.length === 0) {
-            return ratios.map((entry) => entry.period);
+        if (period === 'TTM') return [];
+        const referencePeriods = new Set<string>();
+        for (const entry of statementReferenceQuery.data?.data ?? []) {
+            const label = normalizeFinancialPeriod(entry.period);
+            if (label && matchesFinancialPeriodMode(label, periodMode)) referencePeriods.add(label);
         }
-
-        return referencePeriods
-            .slice(-visiblePeriodLimit)
-            .filter((periodValue) => period !== 'Q' || isCanonicalQuarterPeriod(periodValue));
-    }, [period, ratios, statementReferenceQuery.data?.data, visiblePeriodLimit]);
+        return referencePeriods.size > 0
+            ? [...referencePeriods].sort((left, right) => periodSortKey(left) - periodSortKey(right)).slice(-visiblePeriodLimit)
+            : ratios.map((entry) => entry.period);
+    }, [period, periodMode, ratios, statementReferenceQuery.data?.data, visiblePeriodLimit]);
 
     const hasData = ratios.length > 0;
     const responseWarning = period === 'TTM' ? null : data?.error || null;
@@ -258,10 +237,14 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 warnings: refreshWarning ? [refreshWarning] : undefined,
+                period,
+                periodScope: periodSyncGroup ? 'shared' : 'local',
+                observationStatus: period === 'TTM' ? 'unsupported' : hasData ? 'available' : isLoading ? 'loading' : refreshWarning ? 'unavailable' : 'empty',
+                exportData,
                 extra: hasData ? { periods: ratios.length, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, refreshWarning, dataUpdatedAt, symbol, apiPeriod, ratios.length, exportData]);
+    }, [onDataChange, hasData, isFallback, isLoading, refreshWarning, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, ratios.length, exportData]);
 
     const categoryMetrics = {
         valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],

@@ -384,6 +384,8 @@ export interface ForeignTradingMeta {
   coverage_status?: ForeignFlowCoverageStatus;
   window_contract?: 'sessions' | 'latest_retained_rows';
   calendar_verified?: boolean | null;
+  /** API calendar proof, separate from window coverage; valid until the next open (exclusive). */
+  latest_closed_session?: { readonly date: string; readonly checked_at: string; readonly valid_until: string } | null;
   provider_row_cap?: number | null;
   provider_row_cap_applied?: boolean;
   warnings?: string[];

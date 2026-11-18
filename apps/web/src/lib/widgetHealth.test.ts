@@ -59,8 +59,12 @@ describe('source observation freshness', () => {
     expect(health({ ...base, lastDataDate: OLD, marketClosed: true, stale: true }).state?.status).toBe('stale');
     expect(health({ ...base, marketClosed: true }).state?.status).toBe('unknown');
   });
-  it('does not claim full coverage from a fresh partial observation', () => {
+  it('keeps a coverage gap above ordinary cached delivery but below a failed refresh', () => {
+    const snapshot = { ...base, lastDataDate: FRESH, coverage: 'partial', cached: true } as const;
     expect(health({ ...base, lastDataDate: FRESH, coverage: 'partial' }).state?.status).toBe('coverage_gap');
+    expect(health(snapshot).state.status).toBe('coverage_gap');
+    expect(health({ ...snapshot, refreshStatus: 'failed' }).state.status).toBe('cached');
+    expect(health({ ...snapshot, refreshStatus: 'failed', stale: true }).state.status).toBe('stale');
   });
 
   it('ages date-only observations by the day while full timestamps keep the 6h window', () => {

@@ -39,7 +39,7 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
-import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isUnavailableStatementRow, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
 import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
@@ -143,16 +143,8 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalItems]
     );
-    // The TTM branch returns a single TTM row today (financial_service
-    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
-    // never render a quarter row under a TTM header if a payload carries one
-    // (issue #101).
     const periodItems = useMemo(
-        () => periodMode === 'quarter'
-            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : periodMode === 'ttm'
-                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
-                : orderedItems,
+        () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
     // A row the API returned without certification carries every numeric field as
@@ -299,6 +291,9 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
+                period,
+                periodScope: periodSyncGroup ? 'shared' : 'local',
+                exportData,
                 extra: hasData
                     ? {
                         periods: displayItems.length,
@@ -310,7 +305,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight, exportData]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems.length, chartInsight, exportData]);
     const attachSelection = useCallback(
         (row: DenseTableRow): DenseTableRow => {
             // Only metrics this widget actually charts are selectable; the rest

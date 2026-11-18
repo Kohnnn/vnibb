@@ -4,6 +4,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import type { HeatmapResponse } from '@/lib/api';
 import { useMarketHeatmap } from '@/lib/queries';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import type { WidgetDataPayload } from '@/lib/widgetRuntime';
 import { MarketHeatmapWidget } from './MarketHeatmapWidget';
 
 jest.mock('@/lib/queries', () => ({
@@ -289,6 +291,27 @@ describe('MarketHeatmapWidget', () => {
     mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({ partial:true, cached:false }));
     render(<MarketHeatmapWidget id="market-heatmap" />);
     expect(screen.getByText(/Partial universe/)).toBeInTheDocument();
+  });
+
+  it('keeps missing market caps visible in shared health even on an ordinary cache hit', () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-13T10:05:00Z'));
+    // The API removes constituents that cannot be sized by market cap and sets partial.
+    mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
+      cached: true, partial: true,
+      constituents_as_of: '2026-11-13', constituents_stale: false,
+    }));
+    const onDataChange = jest.fn<void, [WidgetDataPayload]>();
+
+    try {
+      render(<MarketHeatmapWidget id="cached-partial-caps" onDataChange={onDataChange} />);
+      const provenance = onDataChange.mock.lastCall?.[0].__widgetRuntime?.provenance;
+      expect(provenance).toMatchObject({ cached: true, stale: false, coverage: 'partial' });
+      expect(provenance?.refreshStatus).not.toBe('failed');
+      if (!provenance) throw new Error('Missing heatmap provenance');
+      expect(deriveWidgetHealth(provenance).status).toBe('coverage_gap');
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('discloses a failed refresh while retaining the heatmap and its observation dates', () => {

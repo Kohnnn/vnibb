@@ -1,6 +1,6 @@
 'use client'
 
-import type { ExportProvenance } from '@/lib/exportWidget'
+import type { ExportProvenance } from '@/lib/widgetProvenance'
 
 /**
  * Shared `__widgetRuntime` payload builder for ALL dashboard widgets.
@@ -28,11 +28,18 @@ export interface WidgetRuntimeInput {
   lastDataDate?: number | string | Date | null
   /** Retrieval time; does not establish source freshness. */
   fetchedAt?: number | string | Date | null
-  coverage?: 'complete' | 'partial' | 'unknown'
+  coverage?: ExportProvenance['coverage']
+  coverageDetail?: ExportProvenance['coverageDetail']
   marketClosed?: boolean
+  expectedClosedSession?: boolean
+  observationStatus?: ExportProvenance['observationStatus']
+  refreshStatus?: ExportProvenance['refreshStatus']
   adjustmentMode?: string
   /** Reporting period the figures belong to (e.g. 'FY', 'Q2', 'TTM'). */
   period?: string
+  periodScope?: ExportProvenance['periodScope']
+  units?: string
+  basis?: string
   /** True when the widget computes its values client-side. */
   derived?: boolean
   /** Whether the served data is cached / stale (optional badges). */
@@ -44,7 +51,14 @@ export interface WidgetRuntimeInput {
   exportData?: unknown
 }
 
-export type WidgetDataPayload = Record<string, unknown>
+export interface WidgetRuntime<T = unknown> {
+  readonly layoutHint?: { readonly empty?: boolean; readonly compactHeight?: number }
+  readonly provenance?: Partial<ExportProvenance>
+  readonly exportData?: unknown
+  readonly data?: T
+}
+
+export type WidgetDataPayload = Record<string, unknown> & { __widgetRuntime?: WidgetRuntime }
 
 export function getWidgetExportData(data: unknown): unknown {
   if (
@@ -75,21 +89,28 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     endpoint: input.endpoint,
     adjustmentMode: input.adjustmentMode,
     period: input.period,
+    periodScope: input.periodScope,
+    units: input.units,
+    basis: input.basis,
     updatedAt: input.lastDataDate ?? null,
     fetchedAt: input.fetchedAt,
     coverage: input.coverage,
+    coverageDetail: input.coverageDetail,
     marketClosed: input.marketClosed,
+    expectedClosedSession: input.expectedClosedSession,
+    observationStatus: input.observationStatus,
+    refreshStatus: input.refreshStatus,
     localOnly: input.derived || undefined,
     cached: input.cached,
     stale: input.stale,
     warnings: input.warnings,
   }
   return {
+    ...(input.extra ?? {}),
     __widgetRuntime: {
       layoutHint: { empty: input.empty, compactHeight: input.compactHeight },
       provenance,
       exportData: input.exportData,
     },
-    ...(input.extra ?? {}),
   }
 }
