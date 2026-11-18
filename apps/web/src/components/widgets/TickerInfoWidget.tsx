@@ -208,13 +208,32 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
       hideHeader={hideHeader}
     >
       <div role="region" aria-label={`${symbol} ticker information`} tabIndex={0} className="h-full min-h-0 min-w-0 space-y-2 overflow-auto focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
-        <div role="group" aria-label={`${symbol} quote and freshness`} tabIndex={0} className="flex flex-nowrap items-center gap-x-2 overflow-x-auto scrollbar-hide focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
-          <span className="inline-flex shrink-0 items-baseline gap-x-1">
-            <span className="font-mono text-2xl font-bold tracking-tight text-[var(--text-primary)] tabular-nums">
-              {formatPriceValueForUnit(price, priceDisplayConfig)}
+        <div role="group" aria-label={`${symbol} quote and freshness`} tabIndex={0} className="min-w-0 space-y-1 pt-0.5 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent-primary)]">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1">
+              <span className="wrap-anywhere font-mono text-2xl font-bold tracking-tight text-[var(--text-primary)] tabular-nums">
+                {formatPriceValueForUnit(price, priceDisplayConfig)}
+              </span>
+              <span className="text-[9px] text-[var(--text-muted)]">{priceUnitLabel}</span>
             </span>
-            <span className="text-[9px] text-[var(--text-muted)]">{priceUnitLabel}</span>
-          </span>
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)]">{symbol}</span>
+              <span
+                className={cn(
+                  'inline-flex min-w-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold tabular-nums',
+                  changeDirection === 'up'
+                    ? 'price-up bg-price-up border-[color-mix(in_srgb,var(--color-positive)_28%,transparent)]'
+                    : changeDirection === 'down'
+                      ? 'price-down bg-price-down border-[color-mix(in_srgb,var(--color-negative)_28%,transparent)]'
+                      : 'text-[var(--text-muted)] bg-[var(--bg-secondary)] border-[var(--border-default)]'
+                )}
+                aria-label={`Daily change: ${changeLabel}`}
+              >
+                <ChangeIcon size={11} aria-hidden="true" className="shrink-0" />
+                <span className="wrap-anywhere">{changeLabel}</span>
+              </span>
+            </div>
+          </div>
           <WidgetMeta
             updatedAt={sourceUpdatedAt}
             fetchedAt={quoteUpdatedAt}
@@ -231,26 +250,8 @@ function TickerInfoWidgetComponent({ id, symbol, hideHeader, onRemove, onDataCha
                     : undefined
             }
             sourceLabel="Quote + profile"
-            className="shrink-0 flex-nowrap"
+            className="min-w-0 gap-y-1"
           />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent-primary)]">{symbol}</span>
-          <span
-            className={cn(
-              'inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold tabular-nums',
-              changeDirection === 'up'
-                ? 'price-up bg-price-up border-[color-mix(in_srgb,var(--color-positive)_28%,transparent)]'
-                : changeDirection === 'down'
-                  ? 'price-down bg-price-down border-[color-mix(in_srgb,var(--color-negative)_28%,transparent)]'
-                  : 'text-[var(--text-muted)] bg-[var(--bg-secondary)] border-[var(--border-default)]'
-            )}
-            aria-label={`Daily change: ${changeLabel}`}
-          >
-            <ChangeIcon size={11} aria-hidden="true" />
-            <span>{changeLabel}</span>
-          </span>
         </div>
 
         <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
