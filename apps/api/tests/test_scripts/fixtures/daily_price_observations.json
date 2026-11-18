@@ -1,0 +1,23 @@
+{
+  "schema_version": "daily-price-observations-v1",
+  "partition": {"exchange": "HOSE", "session_date": "2026-11-10", "interval": "1D"},
+  "evidence": {
+    "kind": "fixture",
+    "source": "synthetic-sql-price-rows",
+    "revision": "1",
+    "as_of": "2026-11-11T00:00:00Z"
+  },
+  "scope": {
+    "completeness": "complete",
+    "symbols": ["AAA", "BBB", "CCC", "EEE", "FFF", "GGG", "ZZZ"]
+  },
+  "rows": [
+    {"symbol": "AAA", "time": "2026-11-10", "interval": "1D", "volume": 0},
+    {"symbol": "CCC", "time": "2026-11-10", "interval": "1D", "volume": 10},
+    {"symbol": "CCC", "time": "2026-11-10", "interval": "1D", "volume": 20},
+    {"symbol": "EEE", "time": "2026-11-10", "interval": "1D", "volume": 30},
+    {"symbol": "FFF", "time": "2026-11-10", "interval": "1D", "volume": 40},
+    {"symbol": "ZZZ", "time": "2026-11-10", "interval": "1D", "volume": 50},
+    {"symbol": "ZZZ", "time": "2026-11-10", "interval": "1D", "volume": 60}
+  ]
+}
