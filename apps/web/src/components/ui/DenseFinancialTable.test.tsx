@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { DenseFinancialTable } from './DenseFinancialTable'
 
 const columns = [
@@ -68,5 +68,43 @@ describe('financial comparison language and navigation', () => {
     expect(within(region).getByRole('table')).toBeInTheDocument()
     expect(within(region).getByRole('columnheader', { name: '2024' })).toBeInTheDocument()
     expect(within(region).getByRole('columnheader', { name: '2025' })).toBeInTheDocument()
+  })
+
+  test('keeps the native scroll position through settling and resets on a different financial period', () => {
+    jest.useFakeTimers()
+    try {
+      const rows = [{ id: 'net_income', label: 'Net Income', values: { '2024': 10, '2025': 15 } }]
+      const table = (storageKey: string) => (
+        <DenseFinancialTable columns={[...columns]} rows={rows} showTrend={false}
+          initialScrollPosition="end" storageKey={storageKey} />
+      )
+      const { rerender } = render(table('income:FY'))
+      const region = screen.getByRole('region', { name: /financial statement.*scroll/i })
+      Object.defineProperties(region, {
+        scrollWidth: { value: 700 },
+        clientWidth: { value: 370, configurable: true },
+      })
+      act(() => jest.advanceTimersByTime(50))
+      expect(region.scrollLeft).toBe(330)
+
+      region.focus()
+      expect(fireEvent.keyDown(region, { key: 'ArrowLeft' })).toBe(true)
+      // JSDOM does not apply the browser's default arrow-key scrolling.
+      region.scrollLeft = 250
+      act(() => jest.advanceTimersByTime(400))
+      expect(region.scrollLeft).toBe(250)
+
+      Object.defineProperty(region, 'clientWidth', { value: 320 })
+      rerender(table('income:FY'))
+      act(() => jest.advanceTimersByTime(400))
+      expect(region.scrollLeft).toBe(250)
+      expect(region).toHaveFocus()
+
+      rerender(table('income:Q'))
+      act(() => jest.advanceTimersByTime(400))
+      expect(region.scrollLeft).toBe(380)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })
