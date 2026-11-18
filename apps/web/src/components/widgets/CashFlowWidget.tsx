@@ -29,7 +29,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isUnavailableStatementRow, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildTableInsightContext, describeSelection, seriesFromSelection, toggleSelection, type ChartableColumn, type TableSelection } from '@/lib/tableInsight';
 import { buildCashFlowWaterfallModel } from '@/lib/financialVisualizations';
@@ -360,11 +360,7 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         [canonicalItems]
     );
     const periodItems = useMemo(
-        () => periodMode === 'quarter'
-            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : periodMode === 'ttm'
-                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
-                : orderedItems,
+        () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
     // A row the API returned without certification carries every numeric field as

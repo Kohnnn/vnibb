@@ -27,7 +27,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_OPTIONS, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_OPTIONS, FUNDAMENTAL_PERIOD_SYNC_GROUP, isUnavailableStatementRow, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface BalanceSheetWidgetProps {
@@ -115,16 +115,8 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
         () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalItems]
     );
-    // The TTM branch returns a single TTM row today (financial_service
-    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
-    // never render a quarter row under a TTM header if a payload carries one
-    // (issue #101).
     const periodItems = useMemo(
-        () => periodMode === 'quarter'
-            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : periodMode === 'ttm'
-                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
-                : orderedItems,
+        () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
     // A row the API returned without certification carries every numeric field as
@@ -134,7 +126,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
     // valid partial row and stays (issue #103).
     const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
     const displayItems = useMemo(
-        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)).map(({ raw_data, ...item }) => item),
         [periodItems]
     );
     const duplicatePeriodNote = useMemo(() => {
@@ -168,10 +160,13 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { periods: displayItems.length } : undefined,
+                period,
+                periodScope: periodSyncGroup ? 'shared' : 'local',
+                exportData: displayItems,
+                extra: hasData ? { periods: displayItems.length, data: displayItems } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems]);
 
     // One FX conversion boundary: values below are ALREADY in display units. The
     // axis and tooltip format these without converting again (issue #100), and a
@@ -463,7 +458,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={orderedItems}
+            exportData={displayItems}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 <div className="pb-1 border-b border-[var(--border-subtle)]">
