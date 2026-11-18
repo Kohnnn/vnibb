@@ -308,7 +308,7 @@ describe('TickerInfoWidget freshness contract', () => {
     expect(region).toHaveAttribute('tabindex', '0');
   });
 
-  test('tabs from the information region to its quote and freshness scroller', async () => {
+  test('tabs from the information region to its quote and freshness group', async () => {
     mockStockQuote.mockReturnValue({
       data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: true },
       isLoading: false, isFetching: true, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
@@ -317,33 +317,28 @@ describe('TickerInfoWidget freshness contract', () => {
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
 
     const region = screen.getByRole('region', { name: 'FPT ticker information' });
-    const scroller = within(region).getByRole('group', { name: 'FPT quote and freshness' });
+    const quote = within(region).getByRole('group', { name: 'FPT quote and freshness' });
     await user.tab();
     expect(region).toHaveFocus();
     await user.tab();
-    expect(scroller).toHaveFocus();
-    expect(within(scroller).getByText('Stale data')).toBeInTheDocument();
+    expect(quote).toHaveFocus();
+    expect(within(quote).getByText('Stale data')).toBeInTheDocument();
     await user.tab({ shift: true });
     expect(region).toHaveFocus();
   });
 
-  test('keeps the freshness group on one scrollable line instead of wrapping it', () => {
+  test('keeps a flat daily change and source attribution in the cached quote group', () => {
     mockStockQuote.mockReturnValue({
-      data: { symbol: 'FPT', price: 57300, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: true },
-      isLoading: false, isFetching: true, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
+      data: { symbol: 'FPT', price: 57300, change: 0, changePct: 0, price_unit: 'VND', updatedAt: QUOTE_OBSERVED_AT, stale: true, cached: true },
+      isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: QUOTE_RECEIPT,
     });
     render(<TickerInfoWidget id="ticker-1" symbol="FPT" />);
 
-    const quote = screen.getByRole('group', { name: 'FPT quote and freshness' });
-    // The row scrolls horizontally rather than growing: a 70px region cannot
-    // absorb a second line.
-    expect(quote).toHaveClass('flex-nowrap', 'overflow-x-auto', 'scrollbar-hide');
-    expect(quote).not.toHaveClass('flex-wrap');
-    // WidgetMeta must neither wrap between chips nor shrink so far that each
-    // chip wraps inside itself.
-    const freshness = quote.querySelector(':scope > div')!;
-    expect(freshness).toHaveClass('flex-nowrap', 'shrink-0');
-    expect(freshness).not.toHaveClass('flex-wrap');
+    const quote = within(screen.getByRole('group', { name: 'FPT quote and freshness' }));
+    expect(quote.getByText('Flat 0.00 (0.00%)')).toBeInTheDocument();
+    expect(quote.getByText('Stale data')).toBeInTheDocument();
+    expect(quote.getByText('Cached response')).toBeInTheDocument();
+    expect(quote.getByText('Quote + profile')).toBeInTheDocument();
   });
 
   test('leaves the source date unknown instead of promoting the receipt time', () => {
