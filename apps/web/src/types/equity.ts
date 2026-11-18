@@ -384,6 +384,8 @@ export interface ForeignTradingMeta {
   coverage_status?: ForeignFlowCoverageStatus;
   window_contract?: 'sessions' | 'latest_retained_rows';
   calendar_verified?: boolean | null;
+  /** API calendar proof, separate from window coverage; valid until the next open (exclusive). */
+  latest_closed_session?: { readonly date: string; readonly checked_at: string; readonly valid_until: string } | null;
   provider_row_cap?: number | null;
   provider_row_cap_applied?: boolean;
   warnings?: string[];
@@ -514,7 +516,18 @@ export interface SubsidiariesResponse {
   data: SubsidiaryData[];
 }
 
-export interface BalanceSheetData {
+interface StatementProvenance {
+  source?: string | null;
+  unit_metadata?: Record<string, { unavailable_reason?: string | null } & Record<string, unknown>>;
+  currency?: string | null;
+  value_unit?: string | null;
+  consolidation_basis?: string | null;
+  flow_basis?: string | null;
+  aggregation_basis?: string | null;
+  source_periods?: string[];
+}
+
+export interface BalanceSheetData extends StatementProvenance {
   symbol: string;
   period?: string;
   updated_at?: string;
@@ -550,7 +563,7 @@ export interface BalanceSheetResponse {
   data: BalanceSheetData[];
 }
 
-export interface IncomeStatementData {
+export interface IncomeStatementData extends StatementProvenance {
   symbol: string;
   period?: string;
   updated_at?: string;
@@ -580,18 +593,11 @@ export interface IncomeStatementResponse {
   data: IncomeStatementData[];
 }
 
-export interface CashFlowData {
+export interface CashFlowData extends StatementProvenance {
   symbol: string;
   period?: string;
   updated_at?: string;
   raw_data?: Record<string, unknown>;
-  unit_metadata?: Record<string, { unavailable_reason?: string | null } & Record<string, unknown>>;
-  currency?: string | null;
-  value_unit?: string | null;
-  consolidation_basis?: string | null;
-  flow_basis?: string | null;
-  aggregation_basis?: string | null;
-  source_periods?: string[];
   operating_cash_flow?: number;
   investing_cash_flow?: number;
   financing_cash_flow?: number;
@@ -610,6 +616,7 @@ export interface CashFlowResponse {
   symbol: string;
   count: number;
   data: CashFlowData[];
+  error?: string | null;
 }
 
 export interface MarketIndexData {

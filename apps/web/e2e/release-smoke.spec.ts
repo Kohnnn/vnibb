@@ -78,16 +78,13 @@ async function installNetworkGuard(context: BrowserContext, baseURL?: string) {
   });
 }
 
-// The delayed walkthrough overlays What's new; dismiss the topmost dialog first.
 async function openDashboard(page: Page) {
   await page.goto('/dashboard');
   const walkthrough = page.getByRole('dialog', { name: 'VniBB walkthrough' });
   await expect(walkthrough).toBeVisible();
   await walkthrough.getByRole('button', { name: 'Close walkthrough' }).click();
   await expect(walkthrough).toBeHidden();
-  const whatsNew = page.getByRole('dialog', { name: "What's new" });
-  await whatsNew.getByRole('button', { name: "Dismiss what's new" }).click();
-  await expect(whatsNew).toBeHidden();
+  await expect(page.getByRole('dialog', { name: "What's new" })).toBeHidden();
 }
 
 test.beforeEach(async ({ context, page, baseURL }) => {

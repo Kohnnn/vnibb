@@ -39,7 +39,7 @@ import { usePeriodState } from '@/hooks/usePeriodState';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
-import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, isUnavailableStatementRow, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, statementFieldWithheldReason, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { buildIncomeSankeyModel } from '@/lib/financialVisualizations';
 import { IncomeSankeyChart } from '@/components/widgets/charts/IncomeSankeyChart';
@@ -76,6 +76,8 @@ const labels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
+const incomeFields = Object.keys(labels);
+const PRE_TAX_ALIASES = ['pre_tax_profit', 'profit_before_tax'];
 
 /** Only rows with a corresponding chart series offer metric selection. */
 const CHARTED_SERIES_BY_METRIC: Record<string, string> = {
@@ -143,16 +145,8 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
         () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalItems]
     );
-    // The TTM branch returns a single TTM row today (financial_service
-    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
-    // never render a quarter row under a TTM header if a payload carries one
-    // (issue #101).
     const periodItems = useMemo(
-        () => periodMode === 'quarter'
-            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : periodMode === 'ttm'
-                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
-                : orderedItems,
+        () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
     // A row the API returned without certification carries every numeric field as
@@ -164,20 +158,29 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     const displayItems = useMemo(
         () => periodItems.filter((item) => !isUnavailableStatementRow(item)).map((item) => {
             const record = item as unknown as Record<string, unknown>;
+            const { unit_metadata } = item;
+            const preTaxWithheld = PRE_TAX_ALIASES.some((key) => statementFieldWithheldReason(unit_metadata?.[key]));
+            const basisWithheld = statementFieldWithheldReason(unit_metadata?.basis);
             return {
                 ...item,
                 raw_data: undefined,
-                ...Object.fromEntries([...Object.keys(labels), 'operating_expense'].map((key) => [key, readCanonicalStatementValue(record, key)])),
+                ...Object.fromEntries([...incomeFields, 'operating_expense'].map((key) => [key,
+                    basisWithheld || (preTaxWithheld && PRE_TAX_ALIASES.includes(key)) ? null : readCanonicalStatementValue(record, key),
+                ])),
             };
         }),
         [periodItems]
     );
-    const exportData = useMemo(() => displayItems.map((item) => ({
-        period: item.period,
-        ...Object.fromEntries(Object.keys(labels).map((key) => [key, convertFinancialValueForUnit(
-            (item as unknown as Record<string, number | null>)[key], unitConfig, item.period,
-        )])),
-    })), [displayItems, unitConfig]);
+    const exportData = useMemo(() => displayItems.map((item) => {
+        const { symbol, period, source, currency, value_unit, consolidation_basis, flow_basis, aggregation_basis, source_periods } = item;
+        const record = item as unknown as Record<string, number | null>;
+        return {
+            symbol, period, source, currency, value_unit, consolidation_basis, flow_basis, aggregation_basis, source_periods,
+            eps_unit: item.eps != null || item.eps_diluted != null ? 'VND/share' : null,
+            withheld_fields: describeUnavailableStatementRows([item]),
+            ...Object.fromEntries(incomeFields.map((key) => [key, record[key]])),
+        };
+    }), [displayItems]);
     const duplicatePeriodNote = useMemo(() => {
         const notes: string[] = [];
         const ambiguous = periodIssues.filter((issue) => issue.reason === 'ambiguous-basis');
@@ -290,6 +293,10 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
     const clearSelection = useCallback(() => setSelection(null), []);
 
     useEffect(() => {
+        const units = [...new Set(exportData.flatMap((row) => [row.value_unit, row.eps_unit]).filter(Boolean))].join(', ') || undefined;
+        const basis = [...new Set(exportData.map((row) =>
+            [row.consolidation_basis, row.flow_basis, row.aggregation_basis].filter(Boolean).join(' / '),
+        ).filter(Boolean))].join('; ') || undefined;
         onDataChange?.(
             buildWidgetRuntime({
                 apiGroup: '/equity',
@@ -299,6 +306,12 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
+                period,
+                periodScope: periodSyncGroup ? 'shared' : 'local',
+                units,
+                basis,
+                warnings: statementNote ? [statementNote] : undefined,
+                exportData,
                 extra: hasData
                     ? {
                         periods: displayItems.length,
@@ -310,7 +323,7 @@ function IncomeStatementWidgetComponent({ id, symbol, config, isEditing, onRemov
                     : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length, chartInsight, exportData]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems.length, chartInsight, exportData, statementNote]);
     const attachSelection = useCallback(
         (row: DenseTableRow): DenseTableRow => {
             // Only metrics this widget actually charts are selectable; the rest

@@ -30,8 +30,9 @@ import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
-import { logClientError } from '@/lib/clientLogger';
-import { recordAlertActivity } from '@/lib/alertActivity';
+import { readAlertActivity, recordAlertActivity } from '@/lib/alertActivity';
+import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
+import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation } from '@/lib/marketAlertObservation';
 import { parseWatchlistSymbols } from './WatchlistWidget';
 import { findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
@@ -353,6 +354,7 @@ export function ScreenerWidget({
     const [watchlistStatus, setWatchlistStatus] = useState('');
     const alertPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const alertPollInFlightRef = useRef(false);
+    const futureAlertObservationsRef = useRef(new Map<string, Set<number>>());
 
     const { getActiveColumns, setColumns } = useColumnPresets();
 
@@ -532,6 +534,14 @@ export function ScreenerWidget({
     const activeScreenAlertEnabled = Boolean(activeSavedScreen?.alertEnabled);
     const hasData = filteredData.length > 0;
     const isScanUnavailable = Boolean(error || screenerData?.meta?.availability === 'unavailable' || screenerData?.error);
+    const scanMeta = screenerData?.meta;
+    const canUpdateAlertMatches = !isScanUnavailable && !scanMeta?.stale && !scanMeta?.fallback
+        && scanMeta?.source !== 'stale_cache' && scanMeta?.source !== 'fallback_cache'
+        && !scanMeta?.membership_stale && scanMeta?.membership_available !== false
+        && scanMeta?.fundamental_enrichment !== 'unavailable' && scanMeta?.fundamental_enrichment !== 'failed';
+    const completeAlertScan = canUpdateAlertMatches && scanMeta?.availability === 'available' && scanMeta.stale === false
+        && scanMeta.screen_scope === 'universe' && scanMeta.matched_count === screenerData?.data.length
+        && (scanMeta.fundamental_enrichment === 'ok' || scanMeta.fundamental_enrichment === 'skipped');
 
     const isFallback = Boolean(error && hasData && !screenerData?.error);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
@@ -593,45 +603,80 @@ export function ScreenerWidget({
     }, [activeSavedScreen?.id, activeSavedScreenIsCurrent, activeScreenAlertEnabled, refetch]);
 
     useEffect(() => {
-        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent || isScanUnavailable || !screenerData?.data) return;
+        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent
+            || !canUpdateAlertMatches || !screenerData?.data) return;
         const isHidden = typeof document !== 'undefined' && document.hidden;
         const isOnline = typeof navigator === 'undefined' || navigator.onLine;
         if (!canProcessScreenerAlert(isHidden, isOnline)) return;
 
-        const currentSymbols = getScreenerMatchSymbols(dataWithPassReasons);
-        const previousSymbols = activeSavedScreen.alertMatchSymbols;
-        if (previousSymbols) {
-            const newMatches = getNewScreenerMatchSymbols(previousSymbols, dataWithPassReasons);
-            if (newMatches.length > 0) {
-                const triggerTime = new Date().toISOString();
-                recordAlertActivity({
-                    id: buildSavedScreenAlertId(activeSavedScreen.id, newMatches, triggerTime),
-                    source: 'saved_screen',
-                    triggerTime,
-                    deliveryClass: 'polled',
-                    serverBacked: false,
-                    title: `${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`,
-                    detail: newMatches.slice(0, 8).join(', '),
-                });
+        const now = Date.now();
+        const previous = new Set(activeSavedScreen.alertMatchSymbols?.map((symbol) => symbol.toUpperCase()));
+        const current = new Set<string>(completeAlertScan ? [] : previous);
+        const hadCompleteBaseline = activeSavedScreen.alertMatchBaselineComplete === true;
+        const observations = new Map(Object.entries(activeSavedScreen.alertMatchObservations ?? {}));
+        let observationsChanged = false;
+        const seen = new Set<string>();
+        const desktopEvents: Parameters<typeof sendDesktopAlerts>[0][number][] = [];
+        let activityIds: Set<string> | undefined;
+        for (const row of screenerData.data) {
+            const symbol = String(row.ticker ?? row.symbol ?? '').trim().toUpperCase();
+            if (!symbol || seen.has(symbol)) continue;
+            seen.add(symbol);
+            const session = row.market_session;
+            const observedAt = session?.status === 'traded' && session.source === 'vietcap' && session.scope === 'vietcap_board'
+                ? parseMarketObservationTime(session.match_as_of) : null;
+            const future = observedAt !== null && rejectFutureMarketObservation(
+                futureAlertObservationsRef.current, `${activeSavedScreen.id}:${symbol}`, observedAt, now,
+            );
+            const wasPresent = previous.has(symbol);
+            if (wasPresent) current.add(symbol);
+            if (observedAt !== null && !future) {
+                if (observedAt <= (observations.get(symbol) ?? -Infinity)) continue;
+                observations.set(symbol, observedAt);
+                observationsChanged = true;
             }
-            if (newMatches.length > 0 && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                try {
-                    const notification = new Notification(`${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`, {
-                        body: newMatches.slice(0, 8).join(', '),
-                        tag: `screener-${id}-${activeSavedScreen.id}`,
-                    });
-                    setTimeout(() => notification.close(), 10_000);
-                } catch (notificationError) {
-                    logClientError('Failed to show screener alert notification:', notificationError);
-                }
+            if (!hadCompleteBaseline || wasPresent) {
+                if (!future) current.add(symbol);
+                continue;
+            }
+
+            // A match has the same identity regardless of which other rows arrived with it.
+            const triggerTime = observedAt === null ? '' : new Date(observedAt).toISOString();
+            const event = {
+                id: buildSavedScreenAlertId(activeSavedScreen.id, [symbol], triggerTime),
+                triggerTime,
+                title: `${activeSavedScreen.name}: 1 new match`,
+                detail: symbol,
+                symbol,
+            };
+            activityIds ??= new Set(readAlertActivity().map((item) => item.id));
+            // Replaying a match that already left the screen must not consume its next entry.
+            if (observedAt !== null && activityIds.has(event.id)) continue;
+            if (!future) {
+                current.add(symbol);
+                recordAlertActivity({ ...event, source: 'saved_screen', deliveryClass: 'polled', serverBacked: false });
+            }
+            if (observedAt !== null && (observedAt > now || (!future && scanMeta?.availability === 'available'
+                && scanMeta.stale === false && isFreshMarketObservation(observedAt, now)))) {
+                // Keep future candidates in the delivery ledger so they stay quiet after remount.
+                desktopEvents.push(event);
             }
         }
+        sendDesktopAlerts(desktopEvents, now);
 
-        if (JSON.stringify(previousSymbols ?? []) === JSON.stringify(currentSymbols)) return;
+        const currentSymbols = [...current].sort();
+        const baselineComplete = hadCompleteBaseline || completeAlertScan;
+        if (!observationsChanged && baselineComplete === hadCompleteBaseline
+            && JSON.stringify(activeSavedScreen.alertMatchSymbols) === JSON.stringify(currentSymbols)) return;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
-            ? { ...screen, alertMatchSymbols: currentSymbols }
+            ? {
+                ...screen,
+                alertMatchSymbols: currentSymbols,
+                alertMatchObservations: Object.fromEntries(observations),
+                alertMatchBaselineComplete: baselineComplete,
+            }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataWithPassReasons, id, isScanUnavailable, screenerData?.data]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, canUpdateAlertMatches, completeAlertScan, scanMeta, screenerData?.data]);
 
     useEffect(() => {
 
@@ -773,21 +818,17 @@ export function ScreenerWidget({
         }
     }, [activeScreenId]);
 
-    const handleToggleScreenAlert = useCallback(async () => {
+    const handleToggleScreenAlert = useCallback(() => {
         if (!activeSavedScreen || !activeSavedScreenIsCurrent) return;
         const nextEnabled = !activeSavedScreen.alertEnabled;
-        if (nextEnabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-            await Notification.requestPermission();
-        }
-        const currentSymbols = !isScanUnavailable ? getScreenerMatchSymbols(dataWithPassReasons) : activeSavedScreen.alertMatchSymbols;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? {
                 ...screen,
                 alertEnabled: nextEnabled,
-                alertMatchSymbols: nextEnabled ? currentSymbols : screen.alertMatchSymbols,
+                alertMatchBaselineComplete: nextEnabled ? false : screen.alertMatchBaselineComplete,
             }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, dataWithPassReasons, isScanUnavailable]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent]);
 
     const handleResetFilters = useCallback(() => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {
@@ -852,7 +893,7 @@ export function ScreenerWidget({
                             onClick={handleToggleScreenAlert}
                             disabled={!activeSavedScreenIsCurrent}
                             aria-label={activeScreenAlertEnabled ? `Disable alerts for ${activeSavedScreen.name}` : `Enable alerts for ${activeSavedScreen.name}`}
-                            title={activeSavedScreenIsCurrent ? 'Notify when new stocks enter this saved screen' : 'Re-select the saved screen before enabling alerts'}
+                            title={activeSavedScreenIsCurrent ? 'Track new matches in the alert inbox' : 'Re-select the saved screen before enabling alerts'}
                             className={cn(
                                 'flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] font-bold uppercase transition-all',
                                 activeScreenAlertEnabled

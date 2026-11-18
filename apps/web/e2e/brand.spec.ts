@@ -149,7 +149,8 @@ for (const viewport of VIEWPORTS.filter((size) => size.width < 1024)) {
     // The compact header must not push the wordmark past the right edge.
     expect(before!.x + before!.width).toBeLessThanOrEqual(viewport.width);
 
-    await page.getByRole('button', { name: 'Display settings' }).click();
+    await page.getByRole('button', { name: 'Dashboard options' }).click();
+    await page.getByRole('menuitem', { name: 'Display settings' }).click();
     await page.getByRole('menuitem', { name: 'light', exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
     await expect(brand).toHaveAccessibleName('VniBB home');

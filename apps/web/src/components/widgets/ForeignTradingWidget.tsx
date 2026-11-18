@@ -10,11 +10,10 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
 import { formatShortDate } from '@/lib/formatDate';
-import { getMarketState } from '@/lib/marketHours';
+import { describeForeignFlow } from '@/lib/foreignFlowProvenance';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { memo, useEffect, useMemo, useState } from 'react';
-import type { WidgetHealthState } from '@/lib/widgetHealth';
-
-import { EMPTY_VALUE } from '@/lib/units';
 type WindowOption = '1M' | '3M' | '6M' | '1Y';
 
 const WINDOW_OPTIONS: WindowOption[] = ['1M', '3M', '6M', '1Y'];
@@ -59,21 +58,7 @@ function formatDate(dateStr: string | null | undefined): string {
     return formatShortDate(dateStr);
 }
 
-export function parseForeignTradingSnapshotTime(value: string | null | undefined): Date | null {
-    if (!value) return null;
-    const text = String(value).trim();
-    if (!text) return null;
-
-    // Foreign trading is a daily settled feed. A date-only value means the
-    // latest trading session, not midnight; use the post-close settlement
-    // timestamp (17:00 ICT = 10:00 UTC) so 19:00 ICT reads as ~2h old.
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-        return new Date(`${text}T10:00:00.000Z`);
-    }
-
-    const parsed = new Date(text);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
+export { parseForeignTradingSnapshotTime } from '@/lib/foreignFlowProvenance';
 
 function getNetFlowLabel(net: number | null): string {
     if (net === null) return 'Unavailable';
@@ -91,12 +76,12 @@ function getNetFlowClass(net: number | null): string {
 
 function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: ForeignTradingWidgetProps) {
     const [flowWindow, setFlowWindow] = useState<WindowOption>('3M');
+    const [lastClosureCheck, setLastClosureCheck] = useState(0);
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, {
         sessions: WINDOW_SESSIONS[flowWindow],
     });
 
     const coverage = data?.meta;
-    const responseWarning = data?.error || null;
     // Rows are already admitted to the session window server-side; sorting is
     // presentation only and never re-derives a window total from a row count.
     const trades = useMemo(() => {
@@ -132,31 +117,6 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
         const gaps = coverage?.gap_session_count ?? 0;
         return `${observed}/${requested} sessions${range ? ` · ${range}` : ''}${gaps ? ` · ${gaps} gap${gaps === 1 ? '' : 's'}` : ''}`;
     }, [coverage, flowWindow]);
-
-    const coverageWarning = useMemo(() => {
-        const parts: string[] = [];
-        // The response-level degradation record travels with the rows: a
-        // retained fallback sample must not read as live data (#249).
-        if (responseWarning) parts.push(responseWarning.replace(/^; |; $/g, ''));
-        for (const warning of coverage?.warnings ?? []) {
-            if (!responseWarning?.includes(warning)) parts.push(warning);
-        }
-        if (coverage?.provider_row_cap_applied) {
-            parts.push(`Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`);
-        }
-        const nonSessionDates = coverage?.non_session_dates ?? [];
-        if (nonSessionDates.length > 0) {
-            parts.push(`${nonSessionDates.length} row(s) dated on a non-session were excluded.`);
-        }
-        const duplicateDates = coverage?.duplicate_session_dates ?? [];
-        if (duplicateDates.length > 0) {
-            parts.push(`${duplicateDates.length} duplicated session date(s) collapsed.`);
-        }
-        if (coverage?.calendar_verified === false) {
-            parts.push('Exchange calendar unverified for this range; closures may appear as gaps.');
-        }
-        return [...new Set(parts)].join(' ');
-    }, [coverage, responseWarning]);
 
     const columns = useMemo((): VirtualizedColumn<any>[] => [
         {
@@ -208,113 +168,54 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     ], []);
 
     const hasData = trades.length > 0;
-    const isFallback = Boolean((error || responseWarning) && hasData);
-    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
-
-    // B7 — accurate freshness badge.
-    //
-    // The widget previously showed "Cached snapshot · 11h old" any time the
-    // last data row was older than 1h, which made fresh end-of-session data
-    // look broken. We split the badge into three states based on the actual
-    // age of the most recent row, regardless of whether the response is a
-    // server-side fallback:
-    //
-    //   - Fresh         (< 6h, weekday market hours): "Live · syncs every 5m"
-    //   - End-of-day    (< 26h):                       "Last sync: <date>"
-    //   - Stale         (≥ 26h):                       "Stale · last sync <date>"
-    //
-    // We retain the "cached snapshot" wording only when we genuinely served
-    // a database fallback row (provider degradation), since that's the
-    // operator-meaningful distinction.
-    const snapshotAgeHours = useMemo(() => {
-        const lastDateStr = data?.meta?.last_data_date;
-        if (!lastDateStr) return null;
-        const lastDate = parseForeignTradingSnapshotTime(lastDateStr);
-        if (!lastDate) return null;
-        const diffMs = Date.now() - lastDate.getTime();
-        if (diffMs < 0) return null;
-        return diffMs / (1000 * 60 * 60);
-    }, [data?.meta?.last_data_date]);
-
-    const formattedLastSync = useMemo(() => {
-        const lastDateStr = data?.meta?.last_data_date;
-        if (!lastDateStr) return null;
-        const d = parseForeignTradingSnapshotTime(lastDateStr);
-        if (!d) return null;
-        return d.toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: 'short',
-        });
-    }, [data?.meta?.last_data_date]);
-
-    const healthState: WidgetHealthState | undefined = (() => {
-        // QA-v4 Note F6 / T-2: When the user opens the dashboard on a weekend
-        // (or outside market hours), the freshest available row is by
-        // definition the last trading day's close. The previous "Cached
-        // snapshot · 3d old" copy made this look like a defect when in
-        // fact it's the canonical, intended state. Surface a clearer
-        // weekend label and skip the "stale" red badge.
-        const marketState = getMarketState();
-        if (marketState.phase === 'weekend' && snapshotAgeHours !== null && snapshotAgeHours <= 96) {
-            return {
-                status: 'live',
-                label: `Last trading day · ${formattedLastSync ?? EMPTY_VALUE}`,
-                detail: 'Foreign trading reports settle T+0 from HOSE. Showing the most recent trading day; live updates resume Monday at 09:00 ICT.',
-            };
-        }
-        if (isFallback) {
-            return {
-                status: 'cached',
-                label:
-                    snapshotAgeHours !== null && snapshotAgeHours >= 1
-                        ? `Cached snapshot · ${snapshotAgeHours >= 24 ? `${Math.floor(snapshotAgeHours / 24)}d` : `${Math.floor(snapshotAgeHours)}h`} old`
-                        : 'Cached snapshot',
-                detail: responseWarning || 'Showing the last successful foreign flow snapshot while refresh is degraded.',
-            };
-        }
-        if (snapshotAgeHours === null) return undefined;
-        // Tiered freshness per QA-v2 F3: red >12h, orange >6h, otherwise live.
-        if (snapshotAgeHours >= 12) {
-            return {
-                status: 'stale',
-                label: `Stale · last sync ${formattedLastSync ?? EMPTY_VALUE}`,
-                detail: 'Foreign trading data has not refreshed in over 12 hours. Use Refresh to retry.',
-            };
-        }
-        if (snapshotAgeHours >= 6) {
-            return {
-                status: 'cached',
-                label: `Catching up · ${Math.floor(snapshotAgeHours)}h old`,
-                detail: 'Snapshot is older than 6 hours; backend is catching up. Use Refresh to force a sync.',
-            };
-        }
-        if (snapshotAgeHours >= 2) {
-            return {
-                status: 'live',
-                label: `Last sync ${formattedLastSync ?? 'today'}`,
-                detail: 'Foreign trading reports settle T+0 from HOSE. Intraday updates run every 5 min during market hours.',
-            };
-        }
-        return undefined;
-    })();
+    const { provenance, closureExpiresAt } = useMemo(() => {
+        const { closureExpiresAt, ...provenance } = describeForeignFlow({
+            response: data,
+            fetchedAt: dataUpdatedAt,
+            requestedSessions: WINDOW_SESSIONS[flowWindow],
+            requestFailed: Boolean(error),
+            isLoading,
+            isFetching,
+        }, Math.max(lastClosureCheck, Date.now()));
+        return { provenance, closureExpiresAt };
+    }, [data, dataUpdatedAt, error, flowWindow, isLoading, isFetching, lastClosureCheck]);
 
     useEffect(() => {
-        onDataChange?.({
-            __widgetRuntime: {
-                layoutHint: {
-                    empty: !hasData,
-                    compactHeight: 3,
-                },
-                provenance: {
-                    sourceLabel: 'Foreign trading',
-                    apiGroup: '/equity',
-                    endpoint: `/equity/${symbol}/foreign-trading`,
-                    updatedAt: data?.meta?.last_data_date ?? null,
-                    fetchedAt: dataUpdatedAt || null,
-                },
-            },
-        });
-    }, [hasData, onDataChange, symbol, data?.meta?.last_data_date, dataUpdatedAt]);
+        if (closureExpiresAt === undefined) return;
+        const delay = Math.min(Math.max(0, closureExpiresAt - Date.now()), 2 ** 31 - 1);
+        const timer = window.setTimeout(() => setLastClosureCheck(Date.now()), delay);
+        return () => window.clearTimeout(timer);
+    }, [closureExpiresAt, lastClosureCheck]);
+    const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
+    const coverageWarning = [
+        ...(provenance.warnings ?? []),
+        coverage?.provider_row_cap_applied && `Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`,
+        coverage?.non_session_dates?.length && `${coverage.non_session_dates.length} row(s) dated on a non-session were excluded.`,
+        coverage?.duplicate_session_dates?.length && `${coverage.duplicate_session_dates.length} duplicated session date(s) collapsed.`,
+        coverage?.calendar_verified === false && 'Exchange calendar unverified for this range; closures may appear as gaps.',
+    ].filter(Boolean).join(' ');
+    const health = deriveWidgetHealth(provenance);
+    const observed = provenance.updatedAt;
+    const label = health.status === 'cached' ? 'Cached snapshot'
+        : health.status === 'stale' && observed ? `Stale · source as of ${formatDate(String(observed))}`
+        : health.status === 'awaiting_update' && provenance.expectedClosedSession && observed ? `Last trading day · ${formatDate(String(observed))}`
+        : health.label;
+
+    useEffect(() => {
+        const { updatedAt, ...facts } = provenance;
+        onDataChange?.(buildWidgetRuntime({
+            ...facts,
+            empty: !hasData,
+            compactHeight: 3,
+            sourceLabel: 'Foreign trading',
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/foreign-trading?sessions=${WINDOW_SESSIONS[flowWindow]}`,
+            lastDataDate: updatedAt,
+            units: 'Volume: shares',
+            basis: 'Admitted foreign trading sessions; window net requires complete coverage.',
+            exportData: trades,
+        }));
+    }, [flowWindow, hasData, onDataChange, provenance, symbol, trades]);
 
     return (
         <WidgetContainer
@@ -349,10 +250,10 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         ))}
                     </div>
                     <WidgetMeta
-                        updatedAt={data?.meta?.last_data_date ?? null}
-                        fetchedAt={dataUpdatedAt}
+                        updatedAt={provenance.updatedAt}
+                        fetchedAt={provenance.fetchedAt}
                         isFetching={isFetching && hasData}
-                        health={healthState}
+                        health={hasData ? { ...health, label } : undefined}
                         note={coverageLabel}
                         align="right"
                         className="min-w-[10rem] flex-1"
@@ -408,12 +309,12 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
                         />
                     ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
-                    ) : (error || responseWarning) && !hasData ? (
-                        <WidgetError error={(error as Error) || new Error(responseWarning ?? undefined)} onRetry={() => refetch()} />
+                    ) : provenance.observationStatus === 'unavailable' ? (
+                        <WidgetError error={error || new Error(data?.error || 'Foreign trading is unavailable.')} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={`No data for ${symbol}`}
-                            detail={responseWarning || 'Foreign flow appears here when exchange data is available.'}
+                            detail={data?.error || 'Foreign flow appears here when exchange data is available.'}
                             health={{
                                 status: 'coverage_gap',
                                 label: 'Coverage gap',

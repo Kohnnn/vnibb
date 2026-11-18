@@ -62,14 +62,84 @@ import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@
 import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
 import { getWidgetExportData } from '@/lib/widgetRuntime';
+import type { WidgetRuntimeLayoutHint } from './types';
 
 interface WidgetRuntimePayload {
-    __widgetRuntime?: {
-        provenance?: Partial<ExportProvenance>;
-        exportData?: unknown;
+    readonly __widgetRuntime?: {
+        readonly layoutHint?: WidgetRuntimeLayoutHint;
+        readonly provenance?: Partial<ExportProvenance>;
+        readonly exportData?: unknown;
     };
 }
 
+function readWidgetRuntime(data: unknown) {
+    return data && typeof data === 'object' && !Array.isArray(data)
+        ? (data as WidgetRuntimePayload).__widgetRuntime
+        : undefined;
+}
+
+function readAdmittedWidgetData(data: unknown, runtime = readWidgetRuntime(data)) {
+    if (runtime?.layoutHint?.empty && runtime.exportData === undefined) return null;
+    return getWidgetExportData(data);
+}
+
+// Outgoing context allowlist, not another runtime schema. The additive fields
+// can be forwarded when published without making older producers supply them.
+const agentProvenanceFields = new Set([
+    'sourceLabel', 'updatedAt', 'fetchedAt', 'period', 'periodScope', 'units', 'basis',
+    'coverage', 'adjustmentMode', 'cached', 'stale', 'localOnly', 'expectedClosedSession',
+    'observationStatus', 'refreshStatus',
+]);
+const agentCoverageDateFields = new Set([
+    'requestedStart', 'requestedEnd', 'observedStart', 'observedEnd', 'lastValidatedSession',
+]);
+const agentCoverageCountFields = new Set(['requestedSessions', 'observedSessions', 'gapSessions']);
+const MAX_AGENT_QUALIFIER_LENGTH = 500;
+const MAX_AGENT_WARNINGS = 5;
+
+function projectAgentCoverageDetail(detail: unknown) {
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
+
+    const fields: Record<string, string | number | boolean | null> = {};
+    for (const [key, value] of Object.entries(detail)) {
+        if (agentCoverageDateFields.has(key)) {
+            if (value === null || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+                && new Date(value).toJSON()?.slice(0, 10) === value)) fields[key] = value;
+        } else if (agentCoverageCountFields.has(key)) {
+            if (value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) fields[key] = value;
+        } else if (key === 'calendarVerified' && (value === null || typeof value === 'boolean')) {
+            fields[key] = value;
+        }
+    }
+    return Object.keys(fields).length ? fields : undefined;
+}
+
+function projectAgentProvenance(provenance: Partial<ExportProvenance>, widgetType: WidgetType) {
+    const publicFields: Record<string, string | number | boolean | null | string[]> = {};
+    let coverageDetail: ReturnType<typeof projectAgentCoverageDetail>;
+    const entries: [string, unknown][] = Object.entries(provenance);
+    for (const [key, value] of entries) {
+        if (key === 'coverageDetail') {
+            coverageDetail = projectAgentCoverageDetail(value);
+            continue;
+        }
+        if (!agentProvenanceFields.has(key)) continue;
+        if (typeof value === 'string') publicFields[key] = value.slice(0, MAX_AGENT_QUALIFIER_LENGTH);
+        else if (value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+            publicFields[key] = value;
+        } else if (value instanceof Date && (key === 'updatedAt' || key === 'fetchedAt')) {
+            publicFields[key] = value.toJSON();
+        }
+    }
+
+    // Cash Flow publishes admission/withholding notices here. Other publishers
+    // can put raw refresh errors in the same field; don't forward those messages.
+    if (widgetType === 'cash_flow' && provenance.warnings?.length) {
+        publicFields.warnings = provenance.warnings.slice(0, MAX_AGENT_WARNINGS)
+            .map(warning => warning.slice(0, MAX_AGENT_QUALIFIER_LENGTH));
+    }
+    return coverageDetail ? { ...publicFields, coverageDetail } : publicFields;
+}
 
 // Multi-select parameter interface
 export interface WidgetMultiSelectParam {
@@ -97,7 +167,7 @@ export interface WidgetWrapperProps {
     showGroupLabels?: boolean; // Controls visibility of sync badge
     parameters?: WidgetParameter[]; // Inline parameter controls (OpenBB-style)
     multiSelectParams?: WidgetMultiSelectParam[]; // Multi-select params (for indicators)
-    data?: any; // Data for export (CSV/JSON)
+    data?: unknown; // Fallback data for export (CSV/JSON) and agent context
     onRemove?: () => void;
 
     onMaximize?: () => void;
@@ -167,7 +237,10 @@ export function WidgetWrapper({
     const [isTickerDropdownOpen, setIsTickerDropdownOpen] = useState(false);
     const [showCapabilities, setShowCapabilities] = useState(false);
     const [widgetGroup, setWidgetGroup] = useState<WidgetGroupId>(initialWidgetGroup);
-    const [internalData, setInternalData] = useState<any>(widgetData);
+    const [publishedData, setPublishedData] = useState<unknown>();
+    // A mount-time prop effect can overwrite the child's first publication.
+    // Keep the fallback separate so the child's current empty/withheld state wins.
+    const internalData = publishedData === undefined ? widgetData : publishedData;
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
     const tickerTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -201,12 +274,6 @@ export function WidgetWrapper({
     useEffect(() => {
         setWidgetGroup(initialWidgetGroup);
     }, [initialWidgetGroup]);
-
-    // Sync internal data with prop if provided
-    useEffect(() => {
-        if (widgetData) setInternalData(widgetData);
-    }, [widgetData]);
-
 
     useEffect(() => {
         setIsCollapsed(initialCollapsed);
@@ -342,57 +409,27 @@ export function WidgetWrapper({
         rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
             ? rawExchangeBadge
             : null;
-    const exportableInternalData = useMemo(
-        () => getWidgetExportData(internalData),
-        [internalData],
-    );
+    const widgetRuntime = readWidgetRuntime(internalData);
+    const dataToExport = useMemo(() => {
+        const data = readAdmittedWidgetData(internalData, widgetRuntime);
+        // An older publisher may supply only metadata in its runtime envelope.
+        return data === undefined && internalData !== widgetData ? readAdmittedWidgetData(widgetData) : data;
+    }, [internalData, widgetData, widgetRuntime]);
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]
     );
 
-    // Dashboard-wide source-health chip. Widgets opt in by publishing a
-    // `provenance` object through their runtime payload (onDataChange). When a
-    // widget does not publish provenance, no chip is shown, so this stays a
-    // progressive enhancement rather than a forced UI change.
-    const publishedProvenance = useMemo<Partial<ExportProvenance> | undefined>(() => {
-        if (
-            internalData &&
-            typeof internalData === 'object' &&
-            !Array.isArray(internalData)
-        ) {
-            return (internalData as WidgetRuntimePayload).__widgetRuntime?.provenance;
-        }
-        return undefined;
-    }, [internalData]);
+    const publishedProvenance = widgetRuntime?.provenance;
 
-    const widgetHealth = useMemo(() => {
-        if (!publishedProvenance) return null;
-        return deriveWidgetHealth({
-            cached: publishedProvenance.cached,
-            stale: publishedProvenance.stale,
-            localOnly: publishedProvenance.localOnly,
-            updatedAt: publishedProvenance.updatedAt,
-            coverage: publishedProvenance.coverage,
-            marketClosed: publishedProvenance.marketClosed,
-            sourceLabel: publishedProvenance.sourceLabel,
-        });
-    }, [publishedProvenance]);
-
+    // Keep the whole runtime provenance intact so the shared helper, not the
+    // toolbar, decides the precedence of observation, delivery, and refresh.
+    const widgetHealth = useMemo(
+        () => publishedProvenance ? deriveWidgetHealth(publishedProvenance) : null,
+        [publishedProvenance]
+    );
     const healthChip = widgetHealth ? (
-        <WidgetHealthChip
-            health={widgetHealth}
-            details={{
-                sourceLabel: publishedProvenance?.sourceLabel,
-                apiGroup: publishedProvenance?.apiGroup,
-                endpoint: publishedProvenance?.endpoint,
-                updatedAt: publishedProvenance?.updatedAt,
-                fetchedAt: publishedProvenance?.fetchedAt,
-                cached: publishedProvenance?.cached,
-                coverage: publishedProvenance?.coverage,
-                adjustmentMode: publishedProvenance?.adjustmentMode,
-            }}
-        />
+        <WidgetHealthChip health={widgetHealth} details={publishedProvenance} />
     ) : null;
 
     const trackWidgetAction = (action: string, properties?: Record<string, string | number | boolean | string[] | null | undefined>) => {
@@ -647,7 +684,6 @@ export function WidgetWrapper({
 
     const handleExport = async (format: 'csv' | 'json' | 'png') => {
         const filename = `${title.replace(/\s+/g, '_')}_${displaySymbol}_${new Date().toISOString().split('T')[0]}`;
-        const dataToExport = exportableInternalData || widgetData;
 
         trackWidgetAction('export', {
             export_format: format,
@@ -656,28 +692,24 @@ export function WidgetWrapper({
         // Source-aware provenance: combine what the wrapper knows (widget type,
         // title, symbol) with any provenance the child widget published through
         // its runtime payload, so every export remains self-describing.
-        const runtimeProvenance =
-            internalData &&
-            typeof internalData === 'object' &&
-            !Array.isArray(internalData)
-                ? (internalData as WidgetRuntimePayload).__widgetRuntime?.provenance
-                : undefined;
         const provenance: ExportProvenance = {
             widgetType,
             widgetTitle: title,
             symbol: displaySymbol || undefined,
-            ...runtimeProvenance,
+            ...publishedProvenance,
         };
 
         switch (format) {
             case 'csv':
-                if (dataToExport) {
-                    const rows = Array.isArray(dataToExport) ? dataToExport : [dataToExport];
+                if (dataToExport !== undefined && dataToExport !== null) {
+                    const rows = Array.isArray(dataToExport)
+                        ? dataToExport
+                        : [typeof dataToExport === 'object' ? dataToExport : { value: dataToExport }];
                     exportToCSV(rows, filename, provenance);
                 }
                 break;
             case 'json':
-                if (dataToExport) {
+                if (dataToExport !== undefined) {
                     exportToJSON(dataToExport, filename, provenance);
                 }
                 break;
@@ -688,7 +720,10 @@ export function WidgetWrapper({
     };
 
     const buildCopilotContext = (): Record<string, unknown> => {
-        const sourceData = exportableInternalData ?? widgetData;
+        // Empty widgets can export an explicit coverage summary, but it is not an observation sample.
+        const sourceData = widgetRuntime?.layoutHint?.empty || (Array.isArray(dataToExport) && dataToExport.length === 0)
+            ? null
+            : dataToExport;
         let dataSample: unknown = null;
 
         if (Array.isArray(sourceData)) {
@@ -709,6 +744,7 @@ export function WidgetWrapper({
             dashboardId,
             widgetConfig: currentWidget?.config || null,
             dataSample,
+            ...(publishedProvenance && { dataProvenance: projectAgentProvenance(publishedProvenance, widgetType) }),
         };
     };
 
@@ -962,7 +998,7 @@ export function WidgetWrapper({
             {widgetHost && !isCollapsed && createPortal(
                 <WidgetHeaderVisibilityProvider hideHeader>
                     <WidgetErrorBoundary widgetName={title} onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}>
-                        {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setInternalData })}
+                        {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setPublishedData })}
                     </WidgetErrorBoundary>
                 </WidgetHeaderVisibilityProvider>, widgetHost
             )}

@@ -1,88 +1,10 @@
 import html2canvas from 'html2canvas';
 import { toast } from 'sonner';
 import { logClientError } from '@/lib/clientLogger';
-import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import { buildExportProvenance, provenanceLines, provenanceToMarkdown, type ExportProvenance } from '@/lib/widgetProvenance';
+
+export { buildExportProvenance, provenanceToMarkdown, type ExportProvenance } from '@/lib/widgetProvenance';
 import { LIGHT_CAPTURE_ATTR, prepareLightCapture } from '@/lib/chartCapture';
-
-/**
- * Source-aware export provenance. Phase 1 (Fincept/Quantcept-inspired) standard:
- * every export should carry where the data came from, which API group produced
- * it, when it was captured, and the adjustment mode where relevant, so exported
- * artifacts remain trustworthy and auditable.
- */
-export interface ExportProvenance {
-  widgetType?: string;
-  widgetTitle?: string;
-  symbol?: string;
-  sourceLabel?: string;
-  apiGroup?: string;
-  endpoint?: string;
-  cached?: boolean;
-  stale?: boolean;
-  warnings?: string[];
-  /** Source observation/as-of only; retrieval belongs in fetchedAt. */
-  updatedAt?: number | string | Date | null;
-  fetchedAt?: number | string | Date | null;
-  coverage?: 'complete' | 'partial' | 'unknown';
-  marketClosed?: boolean;
-  adjustmentMode?: string;
-  /** Reporting period the figures belong to (e.g. 'FY', 'Q2', 'TTM'). */
-  period?: string;
-  localOnly?: boolean;
-  capturedAt?: string;
-  appVersion?: string;
-}
-
-function normalizeTimestamp(value?: number | string | Date | null): string | null {
-  if (value === null || value === undefined || value === '') return null;
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-/**
- * Build a provenance footer object, filling capturedAt automatically.
- */
-export function buildExportProvenance(input: ExportProvenance): ExportProvenance {
-  return {
-    ...input,
-    updatedAt: normalizeTimestamp(input.updatedAt),
-    fetchedAt: normalizeTimestamp(input.fetchedAt),
-    capturedAt: input.capturedAt ?? new Date().toISOString(),
-  };
-}
-
-/**
- * Render provenance as markdown lines (used by both markdown export and the
- * research notebook). Returns an empty string when nothing meaningful is set.
- */
-export function provenanceToMarkdown(provenance?: ExportProvenance): string {
-  if (!provenance) return '';
-  const rows: Array<[string, unknown]> = [
-    ['Widget', provenance.widgetTitle || provenance.widgetType],
-    ['Symbol', provenance.symbol],
-    ['Period', provenance.period],
-    ['Source', provenance.sourceLabel],
-    ['API group', provenance.apiGroup],
-    ['Endpoint', provenance.endpoint],
-    ['Source as of', normalizeTimestamp(provenance.updatedAt) ?? 'unknown'],
-    ['Fetched at', normalizeTimestamp(provenance.fetchedAt)],
-    ['Coverage', provenance.coverage],
-    ['Delivery', provenance.cached === undefined ? null : provenance.cached ? 'cached snapshot' : 'not marked cached'],
-    ['Adjustment mode', provenance.adjustmentMode],
-    ['Warnings', provenance.warnings?.join(' · ') || null],
-    [
-      'Data status',
-      deriveWidgetHealth(provenance)?.label ?? null,
-    ],
-    ['Captured at', provenance.capturedAt ?? new Date().toISOString()],
-  ];
-  const lines = rows
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => `- ${key}: ${value}`);
-  if (!lines.length) return '';
-  return `## Source & provenance\n\n${lines.join('\n')}\n`;
-}
 
 /**
  * Export data to CSV file. When provenance is supplied, a commented header block
@@ -102,34 +24,6 @@ export function rowsToCSV(rows: Array<Record<string, unknown>>): string {
     headers.map(serializeCSVCell).join(','),
     ...rows.map((row) => headers.map((header) => serializeCSVCell(row[header])).join(',')),
   ].join('\n');
-}
-
-/**
- * Provenance as ordered key/value pairs, shared by the CSV header block and the
- * Excel metadata sheet so both formats describe the data the same way.
- */
-function provenanceLines(provenance?: ExportProvenance): Array<[string, string]> {
-  if (!provenance) return [];
-  const resolved = buildExportProvenance(provenance);
-  const provRows: Array<[string, unknown]> = [
-    ['widget', resolved.widgetTitle || resolved.widgetType],
-    ['symbol', resolved.symbol],
-    ['period', resolved.period],
-    ['source', resolved.sourceLabel],
-    ['api_group', resolved.apiGroup],
-    ['endpoint', resolved.endpoint],
-    ['source_as_of', resolved.updatedAt ?? 'unknown'],
-    ['fetched_at', resolved.fetchedAt],
-    ['coverage', resolved.coverage],
-    ['cached', resolved.cached],
-    ['adjustment_mode', resolved.adjustmentMode],
-    ['warnings', resolved.warnings?.join(' · ') || undefined],
-    ['data_status', deriveWidgetHealth(resolved)?.label],
-    ['captured_at', resolved.capturedAt],
-  ];
-  return provRows
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => [key, String(value).replace(/[\r\n]+/g, ' ')]);
 }
 
 export function exportToCSV(data: any, filename: string, provenance?: ExportProvenance) {

@@ -6,7 +6,9 @@ import { createPortal } from 'react-dom';
 import { Switch } from '@/components/ui/switch';
 import { AICopilotTelemetryReview } from '@/components/admin/AICopilotTelemetryReview';
 import { DataSourcesHealthPanel } from '@/components/settings/DataSourcesHealthPanel';
-import { McpToolCatalogPanel } from '@/components/settings/McpToolCatalogPanel';import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
+import { McpToolCatalogPanel } from '@/components/settings/McpToolCatalogPanel';
+import { DesktopAlertControls } from '@/components/settings/DesktopAlertControls';
+import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
 import { useDataSources, type VnstockSource } from '@/contexts/DataSourcesContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -1183,31 +1185,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </div>
             )}
             {activeTab === 'notifications' && (
-              <div className="space-y-4">
-                <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4">
-                  <div className="flex items-start gap-3">
-                    <div className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)]">
-                      <Bell size={16} />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-[var(--text-primary)]">Price alerts are managed from widgets</div>
-                      <div className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                        Use Price Alerts and Alert Settings widgets to create symbol-specific thresholds. This settings tab is reserved for delivery channels, quiet hours, and global alert defaults once notification delivery is enabled.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--text-secondary)]">Available Now</div>
-                    <div className="mt-2 text-xs text-[var(--text-secondary)]">In-workspace price alerts, alert history, and widget-level thresholds.</div>
-                  </div>
-                  <div className="rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-3">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--color-warning)]">Planned</div>
-                    <div className="mt-2 text-xs text-[var(--text-secondary)]">Email, browser push, and default notification policies.</div>
-                  </div>
-                </div>
-              </div>
+              <section aria-labelledby="desktop-alert-settings" className="space-y-3 rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <h4 id="desktop-alert-settings" className="text-sm font-semibold text-[var(--text-primary)]">Desktop alerts</h4>
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">
+                  Opt in on this browser to receive fresh price, saved-screen, and insider alerts observed while VniBB is open. Rules and inbox history work with desktop alerts off. Prediction-market observations stay in the inbox.
+                </p>
+                <DesktopAlertControls />
+                <p className="text-xs leading-5 text-[var(--text-muted)]">No background push, email, SMS, or quiet hours.</p>
+              </section>
             )}
             {activeTab === 'appearance' && (
               <div className="space-y-6">

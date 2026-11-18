@@ -93,6 +93,15 @@ export function isCanonicalQuarterPeriod(period: string | null | undefined): boo
   return normalized ? CANONICAL_QUARTER_REGEX.test(normalized) : false
 }
 
+/** Whether a canonical fiscal identity belongs to the selected statement view. */
+export function matchesFinancialPeriodMode(canonical: string | null, mode: FinancialPeriodMode): boolean {
+  if (!canonical) return false
+  if (mode === 'quarter') return CANONICAL_QUARTER_REGEX.test(canonical)
+  if (mode === 'ttm') return /^TTM(?:-20\d{2})?$/.test(canonical)
+  // Explicit annual roll-ups have their own identity; they never substitute for FY.
+  return /^20\d{2}(?: YTD)?$/.test(canonical)
+}
+
 
 /**
  * Reduce provider rows to at most one row per canonical fiscal period.
@@ -305,6 +314,21 @@ export function latestByFinancialPeriod<T extends { period?: string | null }>(ro
 export function isUnavailableStatementRow(row: { unavailable_reason?: unknown } | null | undefined): boolean {
   const reason = row?.unavailable_reason
   return typeof reason === 'string' && reason.trim().length > 0
+}
+
+/** Read rejection text without copying the underlying provider evidence. */
+export function statementFieldWithheldReason(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== 'object') return null
+  if ('unavailable_reason' in metadata && typeof metadata.unavailable_reason === 'string' && metadata.unavailable_reason.trim()) {
+    return metadata.unavailable_reason.trim()
+  }
+  if ('components' in metadata && Array.isArray(metadata.components)) {
+    for (const component of metadata.components) {
+      const reason = statementFieldWithheldReason(component)
+      if (reason) return reason
+    }
+  }
+  return null
 }
 
 /** Visible row- and field-level withholding reasons, deduplicated across periods. */

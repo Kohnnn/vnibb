@@ -1,0 +1,25 @@
+{
+  "schema_version": "daily-price-eligibility-v2",
+  "partition": {"exchange": "HOSE", "session_date": "2026-11-10", "interval": "1D"},
+  "evidence": {
+    "kind": "fixture",
+    "source": "synthetic-membership-and-trading-status",
+    "revision": "1",
+    "effective_through": "2026-11-10T09:00:00Z",
+    "captured_at": "2026-11-10T09:00:00Z"
+  },
+  "calendar": {
+    "source": "synthetic-session-calendar",
+    "revision": "1",
+    "completed_at": "2026-11-10T08:00:00Z"
+  },
+  "members": [
+    {"symbol": "AAA", "status": "eligible", "reason": "Expected daily bar"},
+    {"symbol": "BBB", "status": "eligible", "reason": "Expected daily bar"},
+    {"symbol": "CCC", "status": "eligible", "reason": "Expected daily bar"},
+    {"symbol": "DDD", "status": "eligible", "reason": "Expected daily bar"},
+    {"symbol": "EEE", "status": "unknown", "reason": "Trading status not established"},
+    {"symbol": "FFF", "status": "excluded", "reason": "Suspended; no daily bar expected"},
+    {"symbol": "GGG", "status": "unsupported", "reason": "Outside source coverage"}
+  ]
+}

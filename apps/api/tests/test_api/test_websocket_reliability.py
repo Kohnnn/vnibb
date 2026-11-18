@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -431,6 +432,70 @@ async def test_cached_delivery_preserves_observation_clock(connection_manager):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("initial_delivery", ["cached", "broadcast"])
+async def test_future_price_remains_rejected_after_clock_catches_up(monkeypatch, connection_manager, initial_delivery):
+    from vnibb.services import websocket_service
+
+    start = datetime(2026, 11, 18, 3, 0, tzinfo=UTC)
+    now = start
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr(websocket_service, "datetime", FrozenDatetime)
+    socket = FakeWebSocket()
+    await connection_manager.connect(socket)
+    connection_manager.subscribe(socket, {"VNM"}, 1, 1)
+    future = start + timedelta(seconds=5)
+    replay = price_update().model_copy(update={"timestamp": future.isoformat()})
+    if initial_delivery == "cached":
+        # A wall-clock correction can put a previously cached observation in the future.
+        connection_manager._price_cache["VNM"] = replay
+        assert await connection_manager.send_update(socket, replay, 0.1)
+    else:
+        await connection_manager.broadcast_price("VNM", replay, 0.1)
+    assert socket.sent == []
+
+    now = start + timedelta(seconds=6)
+    assert await connection_manager.send_update(socket, replay, 0.1)
+    await connection_manager.broadcast_price("VNM", replay, 0.1)
+    assert socket.sent == []
+
+    new_time = now - timedelta(milliseconds=500)
+    fresh = replay.model_copy(update={"timestamp": new_time.isoformat(), "price": 2.0})
+    await connection_manager.broadcast_price("VNM", fresh, 0.1)
+    assert len(socket.sent) == 1
+    assert socket.sent[0]["as_of"] == new_time.isoformat()
+    assert socket.sent[0]["stale"] is False
+
+
+@pytest.mark.asyncio
+async def test_live_equity_uses_source_time_and_future_ticks_do_not_poison_cache(monkeypatch, connection_manager):
+    from vnibb.providers.vnstock.stock_quote import StockQuoteData
+
+    socket = FakeWebSocket()
+    await connection_manager.connect(socket)
+    connection_manager.subscribe(socket, {"FPT"}, 1, 1)
+    monkeypatch.setattr(websocket_api, "manager", connection_manager)
+    now = datetime.now(UTC)
+    observed = now - timedelta(seconds=5)
+    ticks = iter([None, now + timedelta(minutes=1), observed])
+
+    async def fetch(symbol, *_args, **_kwargs):
+        return StockQuoteData(symbol=symbol, price=60000, price_unit="VND", updated_at=now, as_of=next(ticks)), False
+
+    monkeypatch.setattr(websocket_api.VnstockStockQuoteFetcher, "fetch", fetch)
+    for _ in range(3):
+        await websocket_api._fetch_and_broadcast_equity("FPT", asyncio.Semaphore(1))
+
+    (payload,) = socket.sent
+    assert payload["as_of"] == observed.isoformat()
+    assert payload["stale"] is False
+
+
+@pytest.mark.asyncio
 async def test_subscription_wakes_idle_broadcaster(connection_manager):
     websocket = FakeWebSocket()
     connection_manager.active_connections[websocket] = set()
@@ -800,7 +865,7 @@ async def test_public_quote_socket_owns_worker_past_provider_deadline(client, mo
             self.price = price
 
         def to_dict(self, orient):
-            return [{"time": datetime.now().isoformat(), "close": self.price, "volume": 123}]
+            return [{"time": datetime.now(UTC).isoformat(), "close": self.price, "volume": 123}]
 
     class Provider:
         def __init__(self, **kwargs):

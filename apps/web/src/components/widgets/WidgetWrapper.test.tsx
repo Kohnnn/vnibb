@@ -413,7 +413,7 @@ test('wrapper badges use source age while preserving retrieval and cache lineage
   const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
   const payload = buildWidgetRuntime({
     empty: false, apiGroup: '/news', endpoint: '/news/market', sourceLabel: 'Stored published articles',
-    lastDataDate: '2026-09-21T15:00:00Z', fetchedAt: '2026-10-08T03:00:00Z', cached: true,
+    lastDataDate: '2026-09-21', fetchedAt: '2026-10-08T03:00:00Z', cached: true,
   });
   try {
     const user = userEvent.setup();
@@ -424,7 +424,9 @@ test('wrapper badges use source age while preserving retrieval and cache lineage
     expect(screen.queryByRole('button', { name: 'Data status: Live' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Data status: Stale' }));
     expect(screen.getByText('Source as of')).toBeInTheDocument();
+    expect(screen.getByText('2026-09-21', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('Fetched at')).toBeInTheDocument();
+    expect(screen.getByText(/^2026-10-08 \d{2}:\d{2}$/)).toBeInTheDocument();
     expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
   } finally {
     now.mockRestore();
@@ -465,4 +467,227 @@ test('header parameters follow the control the widget is actually rendering', as
   expect(screen.getByRole('button', { name: /Type: Candles/ })).toBeInTheDocument();
   await user.click(await screen.findByRole('button', { name: '3M Area' }, { timeout: 4000 }));
   expect(screen.getByRole('button', { name: /Type: Area/ })).toBeInTheDocument();
+});
+
+function AgentDataPublisher({ payload, onDataChange }: {
+  readonly payload: unknown;
+  readonly onDataChange?: (data: unknown) => void;
+}) {
+  React.useEffect(() => { onDataChange?.(payload); }, [payload, onDataChange]);
+  return <output aria-label="Reported widget data" />;
+}
+
+async function captureWidgetExport(user: ReturnType<typeof userEvent.setup>, title: string, format: 'CSV' | 'JSON') {
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  const downloads: Blob[] = [];
+  URL.createObjectURL = source => {
+    if (source instanceof Blob) downloads.push(source);
+    return 'blob:widget-export';
+  };
+  URL.revokeObjectURL = jest.fn();
+  const click = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  try {
+    await user.click(screen.getByRole('button', { name: `Widget actions for ${title}` }));
+    await user.click(screen.getByRole('menuitem', { name: 'Export' }));
+    await user.click(screen.getByRole('menuitem', { name: `Export as ${format}` }));
+
+    const [download] = downloads;
+    expect(click).toHaveBeenCalledTimes(downloads.length);
+    if (!download) return null;
+    expect(downloads).toHaveLength(1);
+    expect(download.type).toBe(format === 'CSV' ? 'text/csv' : 'application/json');
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(download);
+    });
+  } finally {
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    click.mockRestore();
+  }
+}
+
+async function downloadWidgetCSV(user: ReturnType<typeof userEvent.setup>, title: string) {
+  const text = await captureWidgetExport(user, title, 'CSV');
+  if (text === null) throw new Error('Expected one widget CSV');
+  const lines = text.trimEnd().split('\n');
+  // Split at the first comma; these metadata assertions use scalar CSV cells.
+  const metadata = new Map(lines.filter(line => line.startsWith('# ')).map(line => {
+    const separator = line.indexOf(',');
+    return [line.slice(2, separator), line.slice(separator + 1)];
+  }));
+  return { metadata, rows: lines.filter(line => !line.startsWith('# ')) };
+}
+
+test.each([
+  { name: 'withheld without a projection', empty: true, projection: {}, expected: null, csv: null, sample: null },
+  { name: 'explicit null', empty: false, projection: { exportData: null }, expected: null, csv: null, sample: null },
+  { name: 'explicit empty rows', empty: true, projection: { exportData: [] }, expected: [], csv: null, sample: null },
+  { name: 'observed zero', empty: false, projection: { exportData: 0 }, expected: 0, csv: ['value', '0'], sample: 0 },
+  {
+    name: 'projected coverage summary', empty: true, projection: { exportData: { observation: null } },
+    expected: { observation: null }, csv: ['observation'], sample: null,
+  },
+])('JSON and CSV respect $name instead of raw fallback rows', async ({ empty, projection, expected, csv, sample }) => {
+  const user = userEvent.setup();
+  const onCopilotClick = jest.fn();
+  render(<WidgetWrapper id="screener" title="Cash Flow" widgetType="cash_flow" dashboardId="dashboard" tabId="tab"
+    data={[{ propFallback: 123 }]} onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={{
+      __widgetRuntime: { layoutHint: { empty }, provenance: { period: 'FY' }, ...projection },
+      data: [{ runtimeFallback: 999 }],
+    }} />
+  </WidgetWrapper>);
+
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({ dataSample: sample }));
+  const json = await captureWidgetExport(user, 'Cash Flow', 'JSON');
+  expect(JSON.parse(json ?? '{}')).toEqual({ _provenance: expect.objectContaining({ period: 'FY' }), data: expected });
+  if (csv === null) expect(await captureWidgetExport(user, 'Cash Flow', 'CSV')).toBeNull();
+  else expect((await downloadWidgetCSV(user, 'Cash Flow')).rows).toEqual(csv);
+});
+
+test('the wrapped Heatmap retains partial coverage on a cache hit in its toolbar and CSV', async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-13T05:30:00Z'));
+  mockWidgetType = 'market_heatmap';
+  const user = userEvent.setup();
+  const payload = buildWidgetRuntime({
+    empty: false, apiGroup: '/market', endpoint: '/market/heatmap', sourceLabel: 'Market heatmap',
+    lastDataDate: '2026-11-13', fetchedAt: '2026-11-13T05:00:00Z', coverage: 'partial', cached: true,
+    extra: { groupBy: 'sector', groupCount: 1 },
+  });
+  render(<WidgetWrapper id="screener" title="Market Heatmap" widgetType="market_heatmap" dashboardId="dashboard" tabId="tab">
+    <AgentDataPublisher payload={payload} />
+  </WidgetWrapper>);
+
+  const { metadata, rows } = await downloadWidgetCSV(user, 'Market Heatmap');
+
+  expect(screen.getByRole('button', { name: 'Data status: Partial coverage' })).toBeInTheDocument();
+  expect(metadata.get('data_status')).toBe('Partial coverage');
+  expect(metadata.get('coverage')).toBe('partial');
+  expect(metadata.get('cached')).toBe('true');
+  expect(rows).toEqual(['groupBy,groupCount', 'sector,1']);
+});
+
+test('Open VniAgent sends a bounded admitted sample with its source qualifications', async () => {
+  mockWidgetType = 'cash_flow';
+  const onCopilotClick = jest.fn();
+  const user = userEvent.setup();
+  const partialRow = {
+    period: '2025', operating_cash_flow: 0, investing_cash_flow: -42,
+    depreciation: null, unit_metadata: { depreciation: { unavailable_reason: 'Source unit not verified' } },
+  };
+  const rows = [partialRow, ...['2024', '2023', '2022', '2021', '2020'].map(period => ({ period, operating_cash_flow: 12 }))];
+  const qualifications = {
+    sourceLabel: 'Cash flow', updatedAt: '2025-12-31', fetchedAt: '2026-02-13T03:42:00.000Z',
+    period: 'FY', periodScope: 'shared', units: 'VND', basis: 'Consolidated / annual',
+    warnings: ['2025 depreciation withheld: source unit not verified.'],
+    observationStatus: 'available', refreshStatus: 'failed', cached: true,
+  };
+
+  render(<WidgetWrapper id="screener" title="Cash Flow" widgetType="cash_flow" dashboardId="dashboard" tabId="tab" onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={{
+      __widgetRuntime: {
+        layoutHint: { empty: false },
+        provenance: { ...qualifications, capturedAt: '2026-10-01T00:00:00Z', providerError: 'provider-debug-fixture' },
+        exportData: rows,
+      },
+      data: [{ period: '2025', depreciation: 999, raw: 'provider-debug-fixture' }],
+    }} />
+  </WidgetWrapper>);
+
+  await screen.findByLabelText('Reported widget data');
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+
+  expect(onCopilotClick).toHaveBeenCalledTimes(1);
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({
+    widgetTypeKey: 'cash_flow', symbol: 'VCI', dataProvenance: qualifications, dataSample: rows.slice(0, 5),
+  }));
+  expect(JSON.stringify(onCopilotClick.mock.calls)).not.toMatch(/__widgetRuntime|provider-debug-fixture/);
+});
+
+test('Open VniAgent keeps the verified Foreign Trading coverage window and drops private detail', async () => {
+  mockWidgetType = 'foreign_trading';
+  const user = userEvent.setup();
+  const onCopilotClick = jest.fn();
+  const sourceLabel = `Foreign Trading ${'x'.repeat(500)}`;
+  const observation = { date: '2026-11-13', buy_value: 0, sell_value: null };
+  const coverageDetail = {
+    requestedStart: '2026-08-19', requestedEnd: '2026-11-13', requestedSessions: 60,
+    observedStart: '2026-11-13', observedEnd: '2026-11-13', observedSessions: 1,
+    lastValidatedSession: '2026-11-13', gapSessions: 59, calendarVerified: true,
+  };
+  render(<WidgetWrapper id="screener" title="Foreign Trading" widgetType="foreign_trading"
+    dashboardId="dashboard" tabId="tab" onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={{ __widgetRuntime: {
+      layoutHint: { empty: false }, exportData: [observation],
+      provenance: {
+        sourceLabel, updatedAt: '2026-11-13', coverage: 'partial',
+        coverageDetail: { ...coverageDetail, privateDetail: 'provider-debug-fixture', providerIds: ['internal'] },
+        endpoint: 'internal', warnings: ['provider-debug-fixture'],
+      },
+    } }} />
+  </WidgetWrapper>);
+
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({
+    dataSample: [observation],
+    dataProvenance: { sourceLabel: sourceLabel.slice(0, 500), updatedAt: '2026-11-13', coverage: 'partial', coverageDetail },
+  }));
+});
+
+test.each([
+  { publication: 'explicitly empty admitted rows', exportData: [] },
+  { publication: 'withheld rows with a legacy fallback present', exportData: undefined },
+])('Open VniAgent keeps qualifications without a sample for $publication', async ({ exportData }) => {
+  mockWidgetType = 'cash_flow';
+  const onCopilotClick = jest.fn();
+  const user = userEvent.setup();
+  const qualifications = {
+    sourceLabel: 'Cash flow', updatedAt: null, fetchedAt: '2026-02-13T03:42:00.000Z',
+    period: 'FY', periodScope: 'local', observationStatus: 'unavailable',
+    warnings: ['2025 returned no certified value.'],
+  };
+
+  render(<WidgetWrapper id="screener" title="Cash Flow" widgetType="cash_flow" dashboardId="dashboard" tabId="tab"
+    data={[{ symbol: 'FPT', period: '2025', operating_cash_flow: 123 }]} onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={{
+      __widgetRuntime: { layoutHint: { empty: true }, provenance: qualifications, exportData },
+      data: [{ period: '2025', operating_cash_flow: 999, raw: 'provider-debug-fixture' }],
+    }} />
+  </WidgetWrapper>);
+
+  await screen.findByLabelText('Reported widget data');
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({
+    symbol: 'VCI', dataSample: null, dataProvenance: qualifications,
+  }));
+  expect(JSON.stringify(onCopilotClick.mock.calls)).not.toMatch(/__widgetRuntime|provider-debug-fixture|FPT/);
+});
+
+test('Open VniAgent keeps a legacy sample without forwarding raw provider warning text', async () => {
+  mockWidgetType = 'market_heatmap';
+  const onCopilotClick = jest.fn();
+  const user = userEvent.setup();
+  render(<WidgetWrapper id="screener" title="Market Heatmap" widgetType="market_heatmap" dashboardId="dashboard" tabId="tab" onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={buildWidgetRuntime({
+      empty: false, apiGroup: '/market', endpoint: '/market/heatmap', sourceLabel: 'Market heatmap',
+      lastDataDate: '2026-11-13', cached: true, warnings: ['provider-debug-fixture'],
+      extra: { groupCount: 2 },
+    })} />
+  </WidgetWrapper>);
+
+  await screen.findByLabelText('Reported widget data');
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({
+    dataSample: { groupCount: 2 },
+    dataProvenance: { sourceLabel: 'Market heatmap', updatedAt: '2026-11-13', cached: true },
+  }));
+  expect(JSON.stringify(onCopilotClick.mock.calls)).not.toMatch(/__widgetRuntime|provider-debug-fixture/);
 });

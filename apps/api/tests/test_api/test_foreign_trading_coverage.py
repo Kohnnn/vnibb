@@ -5,13 +5,15 @@ count must never stand in for a calendar window, and a weekend date must never
 be summed as a session.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from vnibb.api.v1 import equity as equity_module
+from vnibb.core.config import settings
 from vnibb.models.trading import ForeignTrading
 from vnibb.providers.vnstock.foreign_trading import ForeignTradingData
 from vnibb.services import foreign_flow_coverage as coverage_module
+from vnibb.services import market_session
 from vnibb.services.foreign_flow_coverage import (
     PROVIDER_ROW_CAP,
     build_foreign_flow_coverage,
@@ -40,6 +42,8 @@ def test_session_windows_skip_weekends_and_closures():
     counted = requested_session_dates(5, end=date(2026, 9, 4))
     assert len(counted) == 5
     assert counted[-1] == date(2026, 9, 4)
+    # The response fixture must match the exchange calendar, not a weekday count.
+    assert len(session_dates_between(date(2026, 8, 24), date(2026, 11, 13))) == 57
 
 
 def test_window_total_excludes_weekend_gap_and_duplicate_rows():
@@ -127,6 +131,52 @@ def test_unwindowed_read_labels_itself_as_retained_rows():
     assert coverage.net_volume == 60.0
 
 
+def _set_market_clock(monkeypatch, now: str):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromisoformat(now).astimezone(tz)
+
+    monkeypatch.setattr(equity_module, "datetime", FrozenDateTime)
+    monkeypatch.setattr(market_session, "datetime", FrozenDateTime)
+
+
+@pytest.mark.parametrize(
+    ("now", "session", "next_open", "extra_closures"),
+    [
+        ("2026-11-14T03:00:00+00:00", "2026-11-13", "2026-11-16T02:00:00+00:00", []),
+        ("2026-11-14T03:00:00+00:00", "2026-11-13", "2026-11-17T02:00:00+00:00", ["2026-11-16"]),
+        ("2026-09-02T06:00:00+00:00", "2026-08-28", "2026-09-03T02:00:00+00:00", []),
+        ("2026-11-16T02:00:00+00:00", "2026-11-13", None, []),
+        ("2026-12-31T09:00:00+00:00", "2026-12-31", None, []),
+        ("2027-11-06T03:00:00+00:00", "2027-11-05", None, []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_endpoint_separates_calendar_close_proof_from_coverage(
+    client, monkeypatch, now, session, next_open, extra_closures,
+):
+    _set_market_clock(monkeypatch, now)
+    monkeypatch.setattr(settings, "market_holiday_dates", extra_closures)
+    monkeypatch.setattr(settings, "vn_timezone", "Asia/Ho_Chi_Minh")
+    monkeypatch.setattr(settings, "intraday_market_open", "09:00")
+    monkeypatch.setattr(settings, "intraday_market_close", "15:00")
+
+    async def fake_fetch(_params):
+        return [ForeignTradingData(symbol="HPG", date=session, buy_volume=1200, sell_volume=1200)]
+
+    monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", fake_fetch)
+    response = await client.get("/api/v1/equity/HPG/foreign-trading?sessions=1")
+
+    assert response.status_code == 200
+    meta = response.json()["meta"]
+    assert meta["requested_end_date"] == meta["last_validated_session"] == session
+    assert meta["coverage_status"] == "complete"
+    assert meta["latest_closed_session"] == (
+        {"date": session, "checked_at": now, "valid_until": next_open} if next_open else None
+    )
+
+
 @pytest.mark.asyncio
 async def test_endpoint_qualifies_a_session_window_and_reports_coverage(client, monkeypatch, test_db):
     expected = requested_session_dates(3)
@@ -173,7 +223,7 @@ async def test_endpoint_qualifies_a_session_window_and_reports_coverage(client, 
 async def test_endpoint_keeps_provider_failure_visible_when_rows_are_retained(
     client, monkeypatch, test_db, caplog
 ):
-    monkeypatch.setattr(coverage_module, "expected_market_session", lambda: date(2026, 5, 29))
+    _set_market_clock(monkeypatch, "2026-05-30T03:00:00+00:00")
     session = requested_session_dates(2)[-1]
     test_db.add(
         ForeignTrading(

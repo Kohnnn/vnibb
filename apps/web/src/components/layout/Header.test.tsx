@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Header } from './Header'
 import { useAuth } from '@/contexts/AuthContext'
 
@@ -10,7 +10,6 @@ jest.mock('@/lib/queries', () => ({
   useMarketOverview: () => ({ data: { data: [] }, isLoading: false }),
   useHistoricalPrices: () => ({ data: { data: [], meta: {} } }),
 }))
-jest.mock('@/lib/backendHealth', () => ({ probeBackendReadiness: jest.fn().mockResolvedValue({ healthOk: true, dataOk: true }) }))
 jest.mock('../widgets/AlertNotificationPanel', () => ({ AlertNotificationPanel: () => <button>Alert activity</button> }))
 
 const mockUseAuth = jest.mocked(useAuth)
@@ -22,10 +21,9 @@ function setAuthUser(user: typeof signedInUser | null, signOut = jest.fn()) {
 }
 
 describe('Header account menu with auth bypass enabled', () => {
-  it('lets signed-in users sign out and keeps the trigger hidden for anonymous users', async () => {
+  it('lets signed-in users sign out and keeps the trigger hidden for anonymous users', () => {
     const signOut = setAuthUser(signedInUser)
     const { rerender } = render(<Header currentSymbol="AAPL" />)
-    await waitFor(() => expect(screen.getByLabelText(/Backend Healthy/)).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Sign out' }))
@@ -36,4 +34,25 @@ describe('Header account menu with auth bypass enabled', () => {
     expect(screen.queryByRole('button', { name: 'Open account menu' })).not.toBeInTheDocument()
   })
 
+  it('keeps display and layout controls keyboard accessible in Dashboard options', () => {
+    setAuthUser(null)
+    const onAutoFitLayout = jest.fn()
+    render(<Header currentSymbol="AAPL" onAutoFitLayout={onAutoFitLayout} />)
+
+    const trigger = screen.getByRole('button', { name: 'Dashboard options' })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    const displaySettings = screen.getByRole('menuitem', { name: 'Display settings' })
+    expect(displaySettings).toHaveFocus()
+    fireEvent.keyDown(displaySettings, { key: 'ArrowRight' })
+    expect(screen.getByRole('menuitem', { name: 'dark' })).toHaveFocus()
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
+    expect(displaySettings).toHaveFocus()
+    fireEvent.keyDown(displaySettings, { key: 'ArrowDown' })
+    const autoFit = screen.getByRole('menuitem', { name: 'Auto-fit layout' })
+    expect(autoFit).toHaveFocus()
+    fireEvent.keyDown(autoFit, { key: 'Enter' })
+    expect(onAutoFitLayout).toHaveBeenCalledTimes(1)
+    expect(trigger).toHaveFocus()
+  })
 })

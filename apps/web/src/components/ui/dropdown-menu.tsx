@@ -26,7 +26,8 @@ const SubmenuContext = createContext<{
 
 function menuItems(menu: HTMLElement) {
     return Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"], [role="menuitemcheckbox"]'))
-        .filter(item => item.closest('[role="menu"]') === menu && item.getAttribute('aria-disabled') !== 'true');
+        .filter(item => item.closest('[role="menu"]') === menu && item.getAttribute('aria-disabled') !== 'true'
+            && getComputedStyle(item).display !== 'none');
 }
 
 function navigateMenu(event: React.KeyboardEvent, menu: HTMLElement) {

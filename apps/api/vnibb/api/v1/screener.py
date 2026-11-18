@@ -217,6 +217,12 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         snapshot_session_coverage(row, expected_market_session(now=now), now)
         if session_declared else None
     )
+    market_session = None
+    if coverage is not None:
+        record = extended_metrics["market_session"]
+        market_session = {key: record[key] for key in ("session_date", "status", "source", "scope")}
+        if coverage == "traded":
+            market_session["match_as_of"] = record["raw"]["matchPrice"]["time"]
 
     def _pick(*values: Any) -> Any:
         for value in values:
@@ -233,10 +239,7 @@ def _to_screener_data_row(row: object) -> ScreenerData:
         price_unit=price_record["price_unit"],
         price_source=price_record.get("price_source"),
         volume=getattr(row, "volume", None),
-        **({"market_session": (
-            {key: extended_metrics["market_session"].get(key) for key in ("session_date", "status", "source", "scope")}
-            if coverage is not None else None
-        )} if session_declared else {}),
+        **({"market_session": market_session} if session_declared else {}),
         trade_date=getattr(row, "trade_date", None),
         change_1d=(
             None if session_declared and coverage != "traded"

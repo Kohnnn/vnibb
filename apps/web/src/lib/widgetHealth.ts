@@ -1,5 +1,7 @@
 'use client'
 
+import type { ExportProvenance } from '@/lib/widgetProvenance'
+
 export type WidgetHealthStatus =
   | 'cached'
   | 'stale'
@@ -15,17 +17,13 @@ export interface WidgetHealthState {
   detail?: string
 }
 
-export interface DeriveHealthInput {
-  cached?: boolean
-  stale?: boolean
-  localOnly?: boolean
+export interface DeriveHealthInput extends Pick<ExportProvenance,
+  'cached' | 'stale' | 'localOnly' | 'updatedAt' | 'coverage' | 'marketClosed' |
+  'expectedClosedSession' | 'observationStatus' | 'refreshStatus' | 'sourceLabel'
+> {
   isFetching?: boolean
-  updatedAt?: number | string | Date | null
-  coverage?: 'complete' | 'partial' | 'unknown'
-  marketClosed?: boolean
   /** Age in seconds beyond which a non-cached snapshot is considered stale. */
   staleThresholdSeconds?: number
-  sourceLabel?: string
 }
 
 const DEFAULT_STALE_THRESHOLD_SECONDS = 60 * 60 * 6
@@ -53,48 +51,64 @@ export function deriveWidgetHealth(input: DeriveHealthInput): WidgetHealthState 
     }
   }
 
-  if (stale) {
+  switch (input.observationStatus) {
+    case 'loading':
+      return { status: 'awaiting_update', label: 'Loading', detail: 'Waiting for source observations.' }
+    case 'empty':
+      return { status: 'coverage_gap', label: 'No observations', detail: 'No observations were returned for the requested scope.' }
+    case 'unavailable':
+      return { status: 'coverage_gap', label: 'Unavailable', detail: 'The source could not supply observations.' }
+    case 'unsupported':
+      return { status: 'limited', label: 'Unsupported', detail: 'This data is not supported for the requested scope.' }
+    case 'available':
+    case undefined:
+      break
+  }
+
+  const now = Date.now()
+  const parsed = toMillis(updatedAt)
+  const updatedMs = parsed !== null && parsed <= now ? parsed : null
+  const unknownDate = updatedMs === null ? ' Source as-of is unknown.' : ''
+  const cacheDetail = cached ? ' Served from a cached snapshot.' : ''
+  const context = [
+    cacheDetail.trim(),
+    input.refreshStatus === 'failed' && 'Refresh failed.',
+    input.coverage === 'partial' && 'Requested coverage is partial.',
+    input.marketClosed && 'Market is closed; closure does not reset source age.',
+  ].filter(Boolean).join(' ')
+  const additionalDetail = context ? ` ${context}` : ''
+  const dateOnly = typeof updatedAt === 'string' && DATE_ONLY_PATTERN.test(updatedAt.trim())
+  const threshold = input.staleThresholdSeconds
+    ?? (dateOnly ? DATE_ONLY_STALE_THRESHOLD_SECONDS : DEFAULT_STALE_THRESHOLD_SECONDS)
+  const aged = updatedMs !== null && (now - updatedMs) / 1000 > threshold
+    && !(input.marketClosed && input.expectedClosedSession)
+
+  if (stale || aged) {
     return {
       status: 'stale',
       label: 'Stale',
-      detail: `Snapshot is marked stale${detailSource}.${cached ? ' Served from a cached snapshot.' : ''}`,
+      detail: `Source observation is outside the freshness window${detailSource}.${unknownDate}${additionalDetail}`,
     }
   }
-
-  const updatedMs = toMillis(updatedAt)
-  if (updatedMs !== null) {
-    const ageSeconds = (Date.now() - updatedMs) / 1000
-    const dateOnly = typeof updatedAt === 'string' && DATE_ONLY_PATTERN.test(updatedAt.trim())
-    const threshold = input.staleThresholdSeconds
-      ?? (dateOnly ? DATE_ONLY_STALE_THRESHOLD_SECONDS : DEFAULT_STALE_THRESHOLD_SECONDS)
-    if (ageSeconds > threshold) {
-      return {
-        status: 'stale',
-        label: 'Stale',
-        detail: `Source observation is older than the freshness window${detailSource}.${cached ? ' Served from a cached snapshot.' : ''}${input.marketClosed ? ' Market is closed; closure does not reset source age.' : ''}`,
-      }
+  if (input.refreshStatus === 'failed' || (cached && input.coverage !== 'partial')) {
+    return {
+      status: 'cached',
+      label: cached ? 'Cached' : 'Refresh failed',
+      detail: `Last available observations retained${detailSource}.${unknownDate}${additionalDetail}`,
     }
   }
   if (input.coverage === 'partial') {
     return {
       status: 'coverage_gap',
       label: 'Partial coverage',
-      detail: `Only part of the requested coverage is available${detailSource}.${updatedMs === null ? ' Source as-of is unknown.' : ''}${cached ? ' Served from a cached snapshot.' : ''}`,
+      detail: `Only part of the requested coverage is available${detailSource}.${unknownDate}${cacheDetail}${input.marketClosed ? ' Market is closed.' : ''}`,
     }
   }
-  if (updatedMs !== null && input.marketClosed) {
+  if (updatedMs !== null && input.marketClosed && input.expectedClosedSession !== false) {
     return {
       status: 'awaiting_update',
       label: 'Market closed',
-      detail: `No new trading observation is expected during the declared market closure${detailSource}.${cached ? ' Served from a cached snapshot.' : ''}`,
-    }
-  }
-
-  if (cached) {
-    return {
-      status: 'cached',
-      label: 'Cached',
-      detail: `Served from a cached snapshot${detailSource}.${updatedMs === null ? ' Source as-of is unknown.' : ''}`,
+      detail: `No new trading observation is expected during the declared market closure${detailSource}.`,
     }
   }
 

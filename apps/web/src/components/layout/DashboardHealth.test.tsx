@@ -1,14 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
-import { FreshnessBanner } from './FreshnessBanner';
+import { DashboardHealth } from './DashboardHealth';
+import { probeBackendReadiness } from '@/lib/backendHealth';
 import { useMarketFreshness } from '@/lib/queries';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { FreshnessResponse } from '@/lib/api';
 
+jest.mock('@/lib/backendHealth', () => ({ probeBackendReadiness: jest.fn() }));
 jest.mock('@/lib/queries', () => ({
   useMarketFreshness: jest.fn(),
 }));
 
+const LOCAL_SYNC = { enabled: false, status: 'idle', loadPaused: false } as const;
+const mockProbe = jest.mocked(probeBackendReadiness);
 const mockUseMarketFreshness = useMarketFreshness as jest.MockedFunction<typeof useMarketFreshness>;
 
 function setFreshness(buckets: Array<{
@@ -35,9 +39,18 @@ function setFreshness(buckets: Array<{
   } as UseQueryResult<FreshnessResponse, Error>);
 }
 
-describe('FreshnessBanner', () => {
+function openDetails() {
+  const trigger = screen.getByRole('button', { name: /^Workspace health:/ });
+  fireEvent.click(trigger);
+  return { trigger, details: screen.getByRole('region', { name: 'Workspace health details' }) };
+}
+
+describe('DashboardHealth', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    mockProbe.mockReset();
+    // Only resolve the periodic probe in tests that assert a settled result.
+    mockProbe.mockImplementation(() => new Promise(() => {}));
   });
 
   it('keeps dated and unknown warnings available in a focusable details region', () => {
@@ -46,15 +59,20 @@ describe('FreshnessBanner', () => {
       { label: 'News', status: 'unknown', age_days: null },
     ]);
 
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
-    const details = screen.getByRole('region', { name: 'Data freshness details' });
-    details.focus();
+    const { trigger, details } = openDetails();
     expect(details).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Prices:')).toBeInTheDocument();
     expect(screen.getByText('as of 2026-07-13 · 2 days old')).toBeInTheDocument();
     expect(screen.getByText('News:')).toBeInTheDocument();
     expect(screen.getByText('unknown age')).toBeInTheDocument();
+
+    fireEvent.keyDown(details, { key: 'Escape' });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(details).not.toBeInTheDocument();
   });
 
   it('distinguishes current unvalidated rows from stale raw data', () => {
@@ -67,8 +85,9 @@ describe('FreshnessBanner', () => {
       reason: 'latest_sync_unsettled',
     }]);
 
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
+    openDetails();
     expect(screen.getByText('current through 2026-08-03; validated through 2026-07-02')).toBeInTheDocument();
   });
 
@@ -79,46 +98,81 @@ describe('FreshnessBanner', () => {
       timestamp_basis: 'published_date', scope: 'published_articles',
     }]);
 
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
+    openDetails();
     expect(screen.getByText('Market news (published articles):')).toBeInTheDocument();
     expect(screen.getByText('as of 2026-09-21 · 17 days old')).toBeInTheDocument();
-    expect(screen.queryByText(/2026-10-08/)).not.toBeInTheDocument();
+    expect(screen.getByText(/2026-10-08/)).toHaveAttribute('datetime', '2026-10-08T03:00:00Z');
+  });
+
+  it('shows backend degradation without replacing the latest source observation', async () => {
+    mockProbe.mockResolvedValue({ healthOk: true, dataOk: false });
+    setFreshness([{ label: 'Prices', status: 'stale', age_days: 2, last_data_date: '2026-07-13' }]);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
+
+    await screen.findByRole('button', { name: 'Workspace health: Backend degraded' });
+    const { details } = openDetails();
+    expect(within(details).getByText('API readiness:')).toBeInTheDocument();
+    expect(within(details).getByText('as of 2026-07-13 · 2 days old')).toBeInTheDocument();
+    fireEvent.click(within(details).getByRole('button', { name: 'Dismiss freshness warning for this session' }));
+    expect(screen.getByRole('button', { name: 'Workspace health: Backend degraded' })).toHaveFocus();
+  });
+
+  it('retains paused pull and migration details within the status disclosure', () => {
+    const dismiss = jest.fn();
+    setFreshness([{ label: 'Prices', status: 'fresh', age_days: 0 }]);
+    render(<DashboardHealth
+      backendSync={{ enabled: true, status: 'synced', loadPaused: true }}
+      migrationNotice={{ tone: 'warning', message: 'Recovered layout', detail: 'Kept the saved workspaces.' }}
+      onDismissMigrationNotice={dismiss}
+    />);
+    const { trigger, details } = openDetails();
+    expect(within(details).getByText('Synced to the cloud')).toBeInTheDocument();
+    fireEvent.click(within(details).getByRole('button', { name: 'Dismiss storage notice' }));
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveFocus();
   });
 
   it('links stale data to the source settings', () => {
     setFreshness([{ label: 'Prices', status: 'stale', age_days: 2 }]);
 
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
+    openDetails();
     expect(screen.getByRole('link', { name: 'View sources' })).toHaveAttribute('href', '/settings');
   });
 
   it('keeps dismissal for the same session and restores changed warnings', () => {
     setFreshness([{ label: 'Prices', status: 'stale', age_days: 2 }]);
 
-    const { unmount } = render(<FreshnessBanner />);
+    const { unmount } = render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
-    const dismissButton = screen.getByRole('button', { name: 'Dismiss banner for this session' });
-    fireEvent.click(dismissButton);
-    expect(screen.queryByText('Prices:')).not.toBeInTheDocument();
+    const dismissName = 'Dismiss freshness warning for this session';
+    const { trigger, details } = openDetails();
+    fireEvent.click(within(details).getByRole('button', { name: dismissName }));
+    expect(trigger).toHaveFocus();
     expect(screen.getByRole('status')).toHaveTextContent(/warning dismissed for this session/i);
-    expect(screen.getByRole('link', { name: 'View sources' })).toHaveAttribute('href', '/settings');
 
     unmount();
-    const { rerender } = render(<FreshnessBanner />);
-    expect(screen.queryByRole('button', { name: 'Dismiss banner for this session' })).not.toBeInTheDocument();
+    const { rerender } = render(<DashboardHealth backendSync={LOCAL_SYNC} />);
+    expect(screen.getByRole('button', { name: 'Workspace health: Dismissed' })).toBeInTheDocument();
+    const reopened = openDetails().details;
+    expect(within(reopened).getByText('Prices:')).toBeInTheDocument();
+    expect(within(reopened).getByRole('link', { name: 'View sources' })).toHaveAttribute('href', '/settings');
+    expect(within(reopened).queryByRole('button', { name: dismissName })).not.toBeInTheDocument();
 
     setFreshness([{ label: 'Prices', status: 'critical', age_days: 8 }]);
-    rerender(<FreshnessBanner />);
-    expect(screen.getByText('Prices:')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss banner for this session' }));
+    rerender(<DashboardHealth backendSync={LOCAL_SYNC} />);
+    expect(screen.getByRole('button', { name: 'Workspace health: Degraded' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: dismissName }));
 
     setFreshness([{
       label: 'Prices', status: 'critical', age_days: 8,
       reason: 'latest_sync_unsettled', raw_last_data_date: '2026-08-03',
     }]);
-    rerender(<FreshnessBanner />);
+    rerender(<DashboardHealth backendSync={LOCAL_SYNC} />);
+    openDetails();
     expect(screen.getByText('current through 2026-08-03; validated through unknown')).toBeInTheDocument();
   });
 
@@ -126,17 +180,17 @@ describe('FreshnessBanner', () => {
     mockUseMarketFreshness.mockReturnValue({
       data: undefined, isLoading: true, isError: false,
     } as UseQueryResult<FreshnessResponse, Error>);
-    const { rerender } = render(<FreshnessBanner />);
+    const { rerender } = render(<DashboardHealth backendSync={LOCAL_SYNC} />);
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent(/checking data freshness/i);
 
     setFreshness([{ label: 'Prices', status: 'fresh', age_days: 0 }]);
-    rerender(<FreshnessBanner />);
+    rerender(<DashboardHealth backendSync={LOCAL_SYNC} />);
     expect(screen.getByRole('status')).toHaveTextContent(/all tracked data sources report fresh data/i);
 
     setFreshness([{ label: 'Prices', status: 'unknown', age_days: null }]);
-    rerender(<FreshnessBanner />);
-    expect(screen.getByText('unknown age')).toBeInTheDocument();
+    rerender(<DashboardHealth backendSync={LOCAL_SYNC} />);
+    expect(screen.getByRole('button', { name: 'Workspace health: Delayed' })).toBeInTheDocument();
     expect(screen.getByRole('status')).not.toHaveTextContent(/report fresh data/i);
   });
 
@@ -148,31 +202,34 @@ describe('FreshnessBanner', () => {
     mockUseMarketFreshness.mockReturnValue({
       ...state, isLoading: false,
     } as UseQueryResult<FreshnessResponse, Error>);
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(/freshness status unavailable/i);
+    openDetails();
     expect(screen.getByRole('link', { name: 'View sources' })).toHaveAttribute('href', '/settings');
-    expect(screen.queryByRole('button', { name: 'Dismiss banner for this session' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss freshness warning for this session' })).not.toBeInTheDocument();
   });
 
   it('does not turn zero-day non-fresh data into an unknown age', () => {
     setFreshness([{ label: 'Prices', status: 'stale', age_days: 0, last_data_date: '2026-07-15' }]);
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
+    openDetails();
     expect(screen.getByText('as of 2026-07-15 · 0 days old')).toBeInTheDocument();
   });
 
   it('retains last reported warnings when a refresh fails without claiming current status is known', () => {
     setFreshness([{ label: 'Prices', status: 'critical', age_days: 8, last_data_date: '2026-07-07' }], true);
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
-    expect(screen.getByText(/freshness status unavailable; last reported warnings/i)).toBeInTheDocument();
+    const { details } = openDetails();
+    expect(within(details).getByText(/freshness status unavailable; last reported warnings/i)).toBeInTheDocument();
     expect(screen.getByText('as of 2026-07-07 · 8 days old')).toBeInTheDocument();
   });
 
   it('does not report cached fresh data as current after a refresh error', () => {
     setFreshness([{ label: 'Prices', status: 'fresh', age_days: 0 }], true);
-    render(<FreshnessBanner />);
+    render(<DashboardHealth backendSync={LOCAL_SYNC} />);
 
     expect(screen.getByRole('status')).toHaveTextContent(/freshness status unavailable/i);
     expect(screen.getByRole('status')).not.toHaveTextContent(/report fresh data/i);
@@ -187,7 +244,7 @@ describe('FreshnessBanner', () => {
       isError: false,
     } as unknown as UseQueryResult<FreshnessResponse, Error>);
 
-    expect(() => render(<FreshnessBanner />)).not.toThrow();
+    expect(() => render(<DashboardHealth backendSync={LOCAL_SYNC} />)).not.toThrow();
     expect(screen.getByRole('status')).toHaveTextContent(/freshness status unavailable/i);
   });
 });

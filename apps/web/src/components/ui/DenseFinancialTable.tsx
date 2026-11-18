@@ -113,6 +113,7 @@ export function DenseFinancialTable({
 }: DenseFinancialTableProps) {
   const visibleColumns = useMemo(() => columns.slice(0, Math.max(1, maxYears)), [columns, maxYears])
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const latestColumn = useRef({ following: true, offset: 0 })
   const metricColumnWidth = 168
   const yearColumnWidth = 104
   const trendColumnWidth = 88
@@ -179,23 +180,35 @@ export function DenseFinancialTable({
   }, [expandedGroups, storageKey])
 
   useEffect(() => {
+    latestColumn.current = { following: true, offset: scrollRef.current?.scrollLeft ?? 0 }
+  }, [initialScrollPosition, storageKey])
+
+  useEffect(() => {
     if (initialScrollPosition !== 'end') return
 
     const scrollElement = scrollRef.current
     if (!scrollElement) return
 
     const scrollToEnd = () => {
+      const position = latestColumn.current
+      if (!position.following) return
+
       const target = scrollElement.scrollWidth - scrollElement.clientWidth
+      // A narrower scroll range can clamp the old offset without user input.
+      if (scrollElement.scrollLeft < Math.min(position.offset, target) - 1) {
+        position.following = false
+        return
+      }
       if (target > 0 && scrollElement.scrollLeft !== target) {
         scrollElement.scrollLeft = target
       }
+      position.offset = scrollElement.scrollLeft
     }
 
     // Three-stage retry covers the layout passes that can finish after
     // mount: rAF (next paint), short timer (after column widths settle),
-    // long timer (after virtualization / lazy chunks finish). Plus a
-    // ResizeObserver so the table re-snaps to the latest period if its
-    // container resizes - common when the right sidebar opens/closes.
+    // long timer (after lazy content settles). The observer keeps the latest
+    // period in view through container resizes until the reader scrolls away.
     const frame = window.requestAnimationFrame(scrollToEnd)
     const shortTimer = window.setTimeout(scrollToEnd, 100)
     const longTimer = window.setTimeout(scrollToEnd, 400)
@@ -317,6 +330,10 @@ export function DenseFinancialTable({
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === 'Escape') onSelectionClear?.()
+          if (initialScrollPosition === 'end' && event.target === event.currentTarget && event.key === 'ArrowLeft' && !event.defaultPrevented) {
+            // Native arrow scrolling may start on a later frame than the key event.
+            if (event.currentTarget.scrollLeft > 0) latestColumn.current.following = false
+          }
         }}
       >
       <table className="data-table financial-dense freeze-first-col min-w-max w-full border-separate border-spacing-0 text-[10px] text-left leading-4" style={{ minWidth: `${tableMinWidth}px` }}>

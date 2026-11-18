@@ -66,7 +66,7 @@ describe('ATR regime availability', () => {
   it('marks old observations stale and prefers backend freshness over receipt time', () => {
     showATR({ ...certified, freshness_as_of: '2024-02-09', last_data_date: '2026-10-05' });
 
-    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date('2024-02-09'))}`)).toBeInTheDocument();
+    expect(screen.getByText('As of 2024-02-09')).toBeInTheDocument();
     expect(screen.getByText('Stale')).toBeInTheDocument();
     expect(screen.getByText(`Fetched ${formatAbsoluteTimestamp(new Date(receivedAt))}`)).toBeInTheDocument();
   });
@@ -74,13 +74,13 @@ describe('ATR regime availability', () => {
   it('uses last_data_date when freshness_as_of is absent', () => {
     showATR({ ...certified, last_data_date: '2024-02-08' });
 
-    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date('2024-02-08'))}`)).toBeInTheDocument();
+    expect(screen.getByText('As of 2024-02-08')).toBeInTheDocument();
   });
 
   it('uses the final returned bar when metadata dates are absent or invalid', () => {
     showATR({ ...certified, freshness_as_of: 'invalid', last_data_date: null });
 
-    expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date('2024-02-09'))}`)).toBeInTheDocument();
+    expect(screen.getByText('As of 2024-02-09')).toBeInTheDocument();
   });
 
   it('does not present the receipt time as a source observation date', () => {

@@ -344,7 +344,7 @@ describe('ForeignTradingWidget volumes', () => {
 
     render(<ForeignTradingWidget id="foreign-stale" symbol="FPT" />);
 
-    expect(await screen.findByText(/^Stale · last sync/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Stale · source as of/)).toBeInTheDocument();
     // Sparse retained sample: the range is disclosed but not the window total.
     expect(screen.getByText(/2\/20 sessions/)).toBeInTheDocument();
     expect(screen.getByText('2026-10-27')).toBeInTheDocument();

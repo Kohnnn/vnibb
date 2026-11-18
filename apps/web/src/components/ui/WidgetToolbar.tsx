@@ -221,8 +221,8 @@ export function WidgetToolbar({
         {!isCompact && guide}
         {!isCompact && parameters && <div className="ml-1 flex items-center gap-1">{parameters}</div>}
       </div>
-      <div ref={trailingRef} className="flex shrink-0 items-center gap-1">
-        {!isCompact && healthChip}
+      <div ref={trailingRef} className={`flex shrink-0 items-center gap-1 ${isCompact ? 'max-w-[60%]' : ''}`}>
+        {healthChip}
         {isEditing && <div className="widget-drag-handle cursor-grab p-1 text-[var(--text-muted)] active:cursor-grabbing" aria-label="Drag widget" title="Drag widget"><Move size={12} /></div>}
         {!isCompact && refresh}
         {!isCompact && agent}
@@ -235,7 +235,7 @@ export function WidgetToolbar({
       {isCompact && isPanelOpen && typeof document !== 'undefined' && createPortal(
         <div ref={compactPanelRef} id={panelId} role="dialog" aria-label={`${title} controls`} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onTouchStart={event => event.stopPropagation()} style={{ top: panelPosition.top, right: panelPosition.right }} className="fixed z-[120] max-h-[min(70vh,32rem)] w-[min(20rem,calc(100vw-1rem))] overflow-y-auto rounded-md border border-[var(--border-strong)] bg-[var(--bg-modal)] p-3 text-[var(--text-primary)] shadow-lg">
           <div className="mb-2 flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-2"><span className="truncate text-xs font-semibold" title={title}>{title}</span><button type="button" aria-label="Close widget controls" onClick={() => { setIsPanelOpen(false); compactTriggerRef.current?.focus(); }}><X size={14} /></button></div>
-          <div className="flex flex-wrap items-center gap-2">{group}{ticker}{guide}{healthChip}</div>
+          <div className="flex flex-wrap items-center gap-2">{group}{ticker}{guide}</div>
           {(compactParameters || parameters) && <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-2">{compactParameters || parameters}</div>}
           <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border-subtle)] pt-2">{refresh}{agent}{settings}{close}{actions}</div>
         </div>, document.body

@@ -256,7 +256,7 @@ async def _fetch_and_broadcast_equity(symbol: str, semaphore: asyncio.Semaphore)
             stock, _ = await VnstockStockQuoteFetcher.fetch(
                 symbol, settings.vnstock_source, wait_for_completion=True,
             )
-            if not is_market_open() or stock.price is None or stock.price_unit != "VND" or stock.updated_at is None:
+            if not is_market_open() or stock.price is None or stock.price_unit != "VND" or stock.as_of is None:
                 return
             await manager.broadcast_price(
                 symbol,
@@ -266,7 +266,7 @@ async def _fetch_and_broadcast_equity(symbol: str, semaphore: asyncio.Semaphore)
                     change=stock.change,
                     change_pct=stock.change_pct,
                     volume=stock.volume,
-                    timestamp=stock.updated_at.isoformat(),
+                    timestamp=stock.as_of.isoformat(),
                     price_unit=stock.price_unit,
                     source=f"vnstock:{settings.vnstock_source}:quote.history",
                 ),

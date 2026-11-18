@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { ScreenerResponse } from '@/types/screener'
 import { useScreenerData } from '@/lib/queries'
-import { recordAlertActivity } from '@/lib/alertActivity'
+import { markAlertActivityRead, readAlertActivity, recordAlertActivity } from '@/lib/alertActivity'
+import { enableDesktopAlerts } from '@/lib/desktopAlertPreferences'
 import { ScreenerWidget } from './ScreenerWidget'
 import { useDashboard } from '@/contexts/DashboardContext'
 import userEvent from '@testing-library/user-event'
@@ -11,7 +12,10 @@ jest.mock('@/lib/queries', () => ({
   useScreenerData: jest.fn(),
   useVnstockSource: () => 'VCI',
 }))
-jest.mock('@/lib/alertActivity', () => ({ recordAlertActivity: jest.fn() }))
+jest.mock('@/lib/alertActivity', () => {
+  const activity = jest.requireActual<typeof import('@/lib/alertActivity')>('@/lib/alertActivity')
+  return { ...activity, recordAlertActivity: jest.fn(activity.recordAlertActivity) }
+})
 jest.mock('@/contexts/DashboardContext', () => ({ useDashboard: jest.fn() }))
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }))
 jest.mock('@/components/ui/WidgetContainer', () => ({ WidgetContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }))
@@ -191,20 +195,40 @@ function watchlistDashboard(id: string, symbols: string[] = []): Dashboard {
 const mockedScreenerQuery = jest.mocked(useScreenerData)
 const mockedRecordAlertActivity = jest.mocked(recordAlertActivity)
 
-function setScan(data: ScreenerResponse) {
+function setScan(data: ScreenerResponse, dataUpdatedAt = 0, refetch = jest.fn()) {
   mockedScreenerQuery.mockReturnValue({
     data,
     error: null,
     isLoading: false,
     isFetching: false,
-    dataUpdatedAt: 0,
-    refetch: jest.fn(),
+    dataUpdatedAt,
+    refetch,
   } as unknown as UseQueryResult<ScreenerResponse, Error>)
+}
+
+function alertScan(
+  matches: { ticker: string; price_as_of?: string }[], overrides: NonNullable<ScreenerResponse['meta']> = {},
+): ScreenerResponse {
+  return {
+    data: matches.map(({ ticker, price_as_of }) => ({
+      ticker,
+      updated_at: new Date().toISOString(),
+      market_session: price_as_of ? {
+        session_date: '2026-11-18', status: 'traded', source: 'vietcap', scope: 'vietcap_board', match_as_of: price_as_of,
+      } : undefined,
+    })),
+    meta: {
+      availability: 'available', source: 'cache', stale: false, last_data_date: '2026-11-18',
+      screen_scope: 'universe', matched_count: matches.length, fundamental_enrichment: 'skipped',
+      ...overrides,
+    },
+  }
 }
 
 describe('screener availability', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    window.localStorage.clear()
     dashboardContext.state.dashboards = []
     dashboardContext.activeDashboard = null
     dashboardContext.activeTab = null
@@ -327,8 +351,191 @@ describe('screener availability', () => {
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument()
   })
 
+  test('enables a saved-screen rule without prompting and records changes with desktop alerts off', async () => {
+    const saved = { ...savedScreen, alertEnabled: false }
+    const config = {
+      savedScreens: [saved], activeScreenId: saved.id, quickFilters: saved.quickFilters,
+      sortField: saved.sortField, sortOrder: saved.sortOrder, market: saved.market,
+    }
+    const native = Object.assign(jest.fn(), {
+      permission: 'default',
+      requestPermission: jest.fn(async () => 'default' as const),
+    })
+    const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+    window.localStorage.clear()
+    Object.defineProperty(window, 'Notification', { configurable: true, value: native })
+    try {
+      setScan(alertScan([{ ticker: 'VNM' }]))
+      const view = render(<ScreenerWidget id="screen-alert" config={config} />)
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Enable alerts for Quality' }))
+      expect(await screen.findByRole('button', { name: 'Disable alerts for Quality' })).toBeEnabled()
+      expect(mockedRecordAlertActivity).not.toHaveBeenCalled()
+
+      Object.assign(native, { permission: 'granted' })
+      setScan({ data: [{ ticker: 'VNM' }, { ticker: 'FPT' }], meta: { availability: 'available' } })
+      view.rerender(<ScreenerWidget id="screen-alert" config={config} />)
+      expect(mockedRecordAlertActivity).toHaveBeenCalledTimes(1)
+      expect(mockedRecordAlertActivity).toHaveBeenCalledWith(expect.objectContaining({ source: 'saved_screen', detail: 'FPT' }))
+      expect(native.requestPermission).not.toHaveBeenCalled()
+      expect(native).not.toHaveBeenCalled()
+    } finally {
+      if (original) Object.defineProperty(window, 'Notification', original)
+      else Reflect.deleteProperty(window, 'Notification')
+    }
+  })
+
+  test.each(['stale cache', 'aged observation', 'future clock', 'unknown clock', 'duplicate clock'] as const)(
+    'does not interrupt on reconnect with a saved-screen %s',
+    async (replay) => {
+      const start = Date.parse('2026-11-18T03:00:00Z')
+      jest.useFakeTimers({ now: start })
+      const network = jest.spyOn(navigator, 'onLine', 'get').mockReturnValue(true)
+      const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+      const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() })
+      window.localStorage.clear()
+      Object.defineProperty(window, 'Notification', { configurable: true, value: native })
+      const observed = new Date(start - 1000).toISOString()
+      const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'], alertMatchBaselineComplete: true }
+      const config = { ...saved, savedScreens: [saved], activeScreenId: saved.id }
+      const refetch = jest.fn()
+      const scan = (matches: Parameters<typeof alertScan>[0], stale = false) => alertScan(matches, {
+        source: stale ? 'stale_cache' : 'cache', stale,
+      })
+      const baseline = { ticker: 'VNM', price_as_of: observed }
+      const oldMatch = { ticker: 'FPT', price_as_of: observed }
+      try {
+        setScan(scan(replay === 'duplicate clock' ? [baseline, oldMatch] : [baseline]), start, refetch)
+        const widget = <ScreenerWidget id="screen-alert" config={config} />
+        const view = render(widget)
+        const update = (response: ScreenerResponse, receipt: number) => {
+          setScan(response, receipt, refetch)
+          view.rerender(<ScreenerWidget id="screen-alert" config={config} />)
+        }
+        if (replay === 'duplicate clock') {
+          expect(mockedRecordAlertActivity).toHaveBeenCalledWith(expect.objectContaining({ detail: 'FPT' }))
+          markAlertActivityRead(readAlertActivity()[0].id)
+          update(scan([baseline]), start)
+        }
+        mockedRecordAlertActivity.mockClear()
+        expect(await enableDesktopAlerts()).toBe(true)
+        network.mockReturnValue(false)
+        act(() => window.dispatchEvent(new Event('offline')))
+        await act(async () => { await jest.advanceTimersByTimeAsync(10_000) })
+        expect(refetch).not.toHaveBeenCalled()
+
+        let receipt = start + 40_000
+        const replayTime = {
+          'stale cache': new Date(receipt - 1000).toISOString(),
+          'aged observation': new Date(start - 120_000).toISOString(),
+          'future clock': new Date(receipt + 1000).toISOString(),
+          'unknown clock': undefined,
+          'duplicate clock': observed.replace('.000Z', '+00:00'),
+        }[replay]
+        refetch.mockImplementationOnce(async () => update(scan([baseline, { ticker: 'FPT', price_as_of: replayTime }], replay === 'stale cache'), receipt))
+        network.mockReturnValue(true)
+        act(() => window.dispatchEvent(new Event('online')))
+        await act(async () => { await jest.advanceTimersByTimeAsync(30_000) })
+        expect(refetch).toHaveBeenCalledTimes(1)
+        if (replay === 'future clock') {
+          receipt += 2000
+          jest.setSystemTime(receipt)
+          update(scan([baseline, { ticker: 'FPT', price_as_of: replayTime }]), receipt)
+        }
+        expect(native).not.toHaveBeenCalled()
+        if (replay === 'unknown clock' || replay === 'aged observation') {
+          expect(mockedRecordAlertActivity).toHaveBeenCalledWith(expect.objectContaining({
+            detail: 'FPT', triggerTime: replayTime ?? '',
+          }))
+        } else {
+          expect(readAlertActivity()).toEqual(replay === 'duplicate clock'
+            ? [expect.objectContaining({ detail: 'FPT', triggerTime: observed, read: true })] : [])
+        }
+
+        // A new member on a verified source tick can notify even with the exact same query receipt time.
+        mockedRecordAlertActivity.mockClear()
+        const freshTime = new Date(receipt - 500).toISOString()
+        const freshScan = (time: string) => scan([baseline, {
+          ticker: replay === 'unknown clock' || replay === 'aged observation' ? 'HPG' : 'FPT', price_as_of: time,
+        }])
+        update(freshScan(freshTime), receipt)
+        update(freshScan(freshTime.replace('Z', '+00:00')), receipt + 2000)
+        expect(native).toHaveBeenCalledTimes(1)
+        expect(mockedRecordAlertActivity).toHaveBeenCalledTimes(1)
+        expect(mockedRecordAlertActivity).toHaveBeenCalledWith(expect.objectContaining({
+          source: 'saved_screen', triggerTime: freshTime,
+        }))
+        expect(native.requestPermission).not.toHaveBeenCalled()
+        expect(readAlertActivity()).toEqual([
+          expect.objectContaining({ triggerTime: freshTime, read: false }),
+          ...(['aged observation', 'unknown clock', 'duplicate clock'].includes(replay)
+            ? [expect.objectContaining({ detail: 'FPT', read: replay === 'duplicate clock' })] : []),
+        ])
+      } finally {
+        network.mockRestore()
+        if (original) Object.defineProperty(window, 'Notification', original)
+        else Reflect.deleteProperty(window, 'Notification')
+        window.localStorage.clear()
+        jest.useRealTimers()
+      }
+    },
+  )
+
+  test.each(['complete empty', 'page scope', 'truncated universe', 'unavailable enrichment'] as const)(
+    'keeps a saved-screen observation through %s and delivers one genuine re-entry', async (transition) => {
+      const start = Date.parse('2026-11-18T03:00:00Z')
+      jest.useFakeTimers({ now: start })
+      const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+      const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() })
+      Object.defineProperty(window, 'Notification', { configurable: true, value: native })
+      const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['FPT'] }
+      const config = { ...saved, savedScreens: [saved], activeScreenId: saved.id }
+      const widget = () => <ScreenerWidget id="screen-alert" config={config} limit={1} />
+      const match = (symbol: string, offset: number) => ({ ticker: symbol, price_as_of: new Date(start + offset).toISOString() })
+      const originalMatch = match('FPT', 1000)
+      try {
+        expect(await enableDesktopAlerts()).toBe(true)
+        jest.setSystemTime(start + 1500)
+        setScan(alertScan([originalMatch]))
+        const view = render(widget())
+        const update = (response: ScreenerResponse, offset: number) => {
+          jest.setSystemTime(start + offset)
+          setScan(response, start + offset)
+          view.rerender(widget())
+        }
+        const vnm = [match('VNM', 1000)]
+        const missing = {
+          'complete empty': alertScan([]),
+          'page scope': alertScan(vnm, { screen_scope: 'page' }),
+          'truncated universe': alertScan(vnm, { matched_count: 2 }),
+          'unavailable enrichment': alertScan([], { fundamental_enrichment: 'unavailable' }),
+        }[transition]
+        update(missing, 3000)
+        const replay = transition === 'complete empty' ? originalMatch : match('FPT', 3500)
+        const returnScan = transition === 'page scope' || transition === 'truncated universe'
+          ? { ...missing, data: alertScan([replay]).data }
+          : alertScan([replay])
+        update(returnScan, 4000)
+        expect(readAlertActivity().filter((event) => event.symbol === 'FPT')).toEqual([])
+        expect(native.mock.calls.filter(([, options]) => options?.body === 'FPT')).toEqual([])
+
+        update(alertScan([]), 5000)
+        const fresh = match('FPT', 5500)
+        update(alertScan([fresh]), 6000)
+        update(alertScan([fresh]), 7000)
+        expect(readAlertActivity().filter((event) => event.symbol === 'FPT')).toEqual([
+          expect.objectContaining({ triggerTime: fresh.price_as_of, read: false }),
+        ])
+        expect(native.mock.calls.filter(([, options]) => options?.body === 'FPT')).toHaveLength(1)
+      } finally {
+        if (original) Object.defineProperty(window, 'Notification', original)
+        else Reflect.deleteProperty(window, 'Notification')
+        jest.useRealTimers()
+      }
+    },
+  )
+
   test('does not replace a saved-screen baseline during outage', async () => {
-    const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'] }
+    const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'], alertMatchBaselineComplete: true }
     const config = {
       savedScreens: [saved],
       activeScreenId: saved.id,

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { config } from '@/lib/config';
 import { logClientError, logClientWarn } from '@/lib/clientLogger';
+import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation, rejectFuturePriceObservation } from '@/lib/marketAlertObservation';
 
 const WS_URL = config.wsPriceUrl;
 const MAX_RECONNECT_ATTEMPTS = config.isProd ? 10 : 3;
@@ -68,6 +69,7 @@ export function useWebSocket({
     const sentSymbolsRef = useRef(new Set<string>());
     const receiptsRef = useRef<Map<string, number>>(new Map());
     const observationTimesRef = useRef<Map<string, number>>(new Map());
+    const futureObservationsRef = useRef(new Map<string, Set<number>>());
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<ReconnectTimer | null>(null);
     const reconnectAttemptRef = useRef(0);
@@ -147,17 +149,22 @@ export function useWebSocket({
                     }
                     if (!symbolsRef.current.includes(data.symbol) || !Number.isFinite(data.price)
                         || data.price <= 0 || !['VND', 'index_points'].includes(data.price_unit)
-                        || !data.source || !data.as_of || typeof data.stale !== 'boolean'
-                        || !Number.isFinite(Date.parse(data.as_of))) return;
-                    const observedAt = Date.parse(data.as_of);
-                    if (observedAt < (observationTimesRef.current.get(data.symbol) ?? -Infinity)) return;
+                        || !data.source || typeof data.as_of !== 'string' || typeof data.stale !== 'boolean') return;
+                    const observedAt = parseMarketObservationTime(data.as_of);
+                    const now = Date.now();
+                    if (observedAt === null) return;
+                    const rejected = data.price_unit === 'VND'
+                        ? rejectFuturePriceObservation(data.symbol, observedAt, now)
+                        : rejectFutureMarketObservation(futureObservationsRef.current, data.symbol, observedAt, now);
+                    if (rejected
+                        || observedAt < (observationTimesRef.current.get(data.symbol) ?? -Infinity)) return;
                     observationTimesRef.current.set(data.symbol, observedAt);
                     subscribedRef.current.add(data.symbol);
                     pendingRef.current.delete(data.symbol);
-                    if (!data.stale) receiptsRef.current.set(data.symbol, Date.now());
+                    if (!data.stale && isFreshMarketObservation(observedAt, now)) receiptsRef.current.set(data.symbol, now);
                     else receiptsRef.current.delete(data.symbol);
                     const receiving = symbolsRef.current.every(symbol => subscribedRef.current.has(symbol)
-                        && Date.now() - (receiptsRef.current.get(symbol) ?? 0) <= 15_000);
+                        && now - (receiptsRef.current.get(symbol) ?? 0) <= 15_000);
                     setIsReceiving(receiving);
                     if (receiving) setProtocolError(null);
 

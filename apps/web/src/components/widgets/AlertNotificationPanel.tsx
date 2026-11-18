@@ -1,36 +1,40 @@
-// Alert Notification Panel - Bell icon with dropdown for insider alerts
-
 'use client';
 
-import { useState, useEffect, useCallback, useId } from 'react';
+import { useState, useEffect, useEffectEvent, useCallback, useId, useRef } from 'react';
 import { Bell, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getInsiderAlerts, markAlertRead } from '@/lib/api';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
-import { formatTimestamp } from '@/lib/formatDate';
 import { markAlertActivityRead, readAlertActivity, recordAlertActivity, subscribeAlertActivity, type AlertActivity } from '@/lib/alertActivity';
 import { useWidgetSymbolLink } from '@/hooks/useWidgetSymbolLink';
 import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
+import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
+import { DesktopAlertControls } from '@/components/settings/DesktopAlertControls';
+import { AlertInbox, useAlertRelevance } from './AlertInbox';
 
 interface AlertNotificationPanelProps {
-  userId?: number;
-  onDataChange?: (data: WidgetDataPayload) => void;
+  readonly userId?: number;
+  readonly onDataChange?: (data: WidgetDataPayload) => void;
 }
 
+const EMPTY_ALERTS: Awaited<ReturnType<typeof getInsiderAlerts>> = [];
 
 export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotificationPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(true);
   const [activity, setActivity] = useState<AlertActivity[]>([]);
+  const [readSyncError, setReadSyncError] = useState(false);
   const panelId = useId();
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const filterRef = useRef<HTMLButtonElement>(null);
   const closePanel = useCallback(() => setIsOpen(false), []);
-  const panelRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen, onClose: closePanel });
+  const panelRef = useDialogFocusTrap<HTMLDivElement>({ enabled: isOpen, onClose: closePanel, returnFocusTo: bellRef });
   const queryClient = useQueryClient();
   const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'alert_notification_panel' });
 
-  const { data: alerts = [], isLoading, isError, isFetching, refetch, dataUpdatedAt } = useQuery({
+  const { data: alerts = EMPTY_ALERTS, isLoading, isError, isFetching, refetch, dataUpdatedAt } = useQuery({
     queryKey: ['insider-alerts', userId, showUnreadOnly],
     queryFn: () => getInsiderAlerts({ userId, unreadOnly: showUnreadOnly, limit: 50 }),
     refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.alerts),
@@ -40,13 +44,12 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
 
   const markReadMutation = useMutation({
     mutationFn: (alertId: number) => markAlertRead(alertId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['insider-alerts'] });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['insider-alerts', userId] }),
+    onError: () => setReadSyncError(true),
   });
 
   const unreadCount = activity.filter((item) => !item.read).length;
-  const visibleActivity = showUnreadOnly ? activity.filter((item) => !item.read) : activity;
+  const relevance = useAlertRelevance();
 
   useEffect(() => {
     const refresh = () => setActivity(readAlertActivity());
@@ -54,7 +57,23 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
     return subscribeAlertActivity(refresh);
   }, []);
 
+  // Read current follows when a response arrives; changing the drawer scope or
+  // watchlist must not itself replay a response already in the query cache.
+  const deliverInsiderAlerts = useEffectEvent((newAlerts: typeof alerts) => {
+    // Show all can load already-read rows, and later responses can carry stale read flags.
+    const readIds = new Set(readAlertActivity().filter((item) => item.source === 'insider' && item.read).map((item) => item.id));
+    sendDesktopAlerts(newAlerts.filter((alert) => (
+      !alert.read && !readIds.has(`insider:${alert.id}`) && relevance.followsInsider(alert.symbol)
+    )).map((alert) => ({
+      id: `insider:${userId}:${alert.id}`,
+      triggerTime: alert.timestamp,
+      title: alert.title,
+      detail: alert.description,
+    })));
+  });
+
   useEffect(() => {
+    if (alerts.length === 0) return;
     for (const alert of alerts) {
       recordAlertActivity({
         id: `insider:${alert.id}`,
@@ -68,7 +87,9 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
         read: alert.read,
       });
     }
-  }, [alerts]);
+
+    deliverInsiderAlerts(alerts);
+  }, [alerts, userId]);
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
@@ -86,50 +107,33 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
     }));
   }, [activity, dataUpdatedAt, onDataChange, unreadCount]);
 
-  // Request browser notification permission
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+  const markActivityRead = (items: readonly AlertActivity[]) => {
+    setReadSyncError(false);
+    markAlertActivityRead(...items.map((item) => item.id));
+    for (const item of items) {
+      if (item.source !== 'insider' || !item.serverBacked) continue;
+      const id = Number(/^insider:([1-9]\d*)$/.exec(item.id)?.[1]);
+      if (Number.isSafeInteger(id)) markReadMutation.mutate(id);
     }
-  }, []);
-
-  // Show browser notification for new alerts
-  useEffect(() => {
-    if (alerts.length > 0 && 'Notification' in window && Notification.permission === 'granted') {
-      const latestUnread = alerts.find((a) => !a.read);
-      if (latestUnread) {
-        // Only show notification if alert is very recent (< 1 minute)
-        const alertTime = new Date(latestUnread.timestamp).getTime();
-        const now = Date.now();
-        if (now - alertTime < 60000) {
-          new Notification(latestUnread.title, {
-            body: latestUnread.description,
-            tag: `alert-${latestUnread.id}`,
-          });
-        }
-      }
-    }
-  }, [alerts]);
+  };
 
   const openActivity = (item: AlertActivity) => {
-    markAlertActivityRead(item.id);
-    if (item.source === 'insider' && item.serverBacked) {
-      const alertId = Number(item.id.replace('insider:', ''));
-      if (Number.isInteger(alertId)) markReadMutation.mutate(alertId);
-    }
+    if (showUnreadOnly && !item.read) filterRef.current?.focus();
+    markActivityRead([item]);
     const symbol = normalizeTickerSymbol(item.symbol);
     if (symbol) setLinkedSymbol(symbol);
   };
 
   const handleMarkAllAsRead = () => {
-    activity.filter((item) => !item.read).forEach((item) => markAlertActivityRead(item.id));
-    alerts.filter((alert) => !alert.read).forEach((alert) => markReadMutation.mutate(alert.id));
+    filterRef.current?.focus();
+    markActivityRead(activity.filter((item) => !item.read));
   };
 
   return (
     <div className="relative">
       {/* Bell Icon Button */}
       <button
+        ref={bellRef}
         type="button"
         onClick={() => setIsOpen((open) => !open)}
         aria-label={`Alert activity${unreadCount ? `, ${unreadCount} unread` : ''}`}
@@ -172,7 +176,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
                 <h3 id={`${panelId}-title`} className="text-sm font-medium text-[var(--text-primary)]">Alerts</h3>
                 {unreadCount > 0 && (
                   <span className="px-1.5 py-0.5 text-[10px] font-medium bg-[var(--color-negative-bg)] text-[var(--color-negative)] rounded">
-                    {unreadCount} new
+                    {unreadCount} unread
                   </span>
                 )}
               </div>
@@ -189,20 +193,24 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
             {/* Filter Toggle */}
             <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] p-3">
               <button
-                onClick={() => setShowUnreadOnly(!showUnreadOnly)}
-                className="text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] transition-colors"
+                ref={filterRef}
+                type="button"
+                onClick={() => setShowUnreadOnly((only) => !only)}
+                className="min-h-9 rounded px-1 text-xs text-[var(--color-accent-primary)] hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
               >
                 {showUnreadOnly ? 'Show all' : 'Show unread only'}
               </button>
               {unreadCount > 0 && (
                 <button
+                  type="button"
                   onClick={handleMarkAllAsRead}
-                  className="text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+                  className="min-h-9 rounded px-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
                 >
                   Mark all as read
                 </button>
               )}
             </div>
+            {readSyncError && <p role="status" className="shrink-0 px-3 py-2 text-xs text-[var(--text-secondary)]">Marked read here. Some insider records could not sync.</p>}
             {isError && (
               <div role="alert" className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--color-negative-bg)] p-3">
                 <p className="text-sm text-[var(--color-negative)]">Unable to load insider alerts.</p>
@@ -218,48 +226,11 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
               </div>
             )}
 
-            {/* Alerts List */}
-            <div role="region" aria-label="Alert activity list" tabIndex={0} className="min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring-color)]">
-              {isLoading && visibleActivity.length === 0 ? (
-                <div className="p-4 space-y-3">
-                  {[...Array(3)].map((_, i) => (
-                    <div key={i} className="animate-pulse">
-                      <div className="mb-2 h-4 w-3/4 rounded bg-[var(--bg-tertiary)]" />
-                      <div className="h-3 w-1/2 rounded bg-[var(--bg-tertiary)]" />
-                    </div>
-                  ))}
-                </div>
-              ) : visibleActivity.length === 0 ? isError ? null : (
-                <div className="flex h-40 flex-col items-center justify-center text-[var(--text-muted)]">
-                  <Bell size={32} className="mb-2 opacity-30" />
-                  <p className="text-sm">No alert activity</p>
-                  <p className="text-xs mt-1">No observed {showUnreadOnly ? 'unread ' : ''}triggers.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-[var(--border-subtle)]">
-                  {visibleActivity.map((item) => {
-                    const symbol = normalizeTickerSymbol(item.symbol);
-                    return <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => openActivity(item)}
-                      aria-label={symbol ? `Open ${symbol} from ${item.title}` : `Mark ${item.title} read`}
-                      className={`min-h-11 w-full p-3 text-left transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)] ${!item.read ? 'bg-[var(--color-state-bg)]' : ''}`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-sm font-medium text-[var(--text-primary)]">{item.title}</span>
-                        {!item.read && <span className="shrink-0 text-[10px] text-[var(--color-accent-primary)]">Unread</span>}
-                      </div>
-                      {item.detail && <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">{item.detail}</p>}
-                      <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                        {symbol && <span className="font-medium text-[var(--color-accent-primary)]">{symbol} ·</span>}
-                        <span>{item.source.replace('_', ' ')} · {item.serverBacked ? 'server-backed record; delivery unverified' : `${item.deliveryClass.replace('_', ' ')} browser observation`} · {formatTimestamp(item.triggerTime)}</span>
-                      </div>
-                    </button>;
-                  })}
-                </div>
-              )}
+            <div className="shrink-0 border-b border-[var(--border-subtle)] px-3 py-2">
+              <DesktopAlertControls />
             </div>
+
+            <AlertInbox activity={activity} relevance={relevance} unreadOnly={showUnreadOnly} isLoading={isLoading} isError={isError} onOpen={openActivity} />
           </div>
         </>
       )}

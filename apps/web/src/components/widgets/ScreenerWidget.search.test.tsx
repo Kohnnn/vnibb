@@ -68,7 +68,7 @@ test('shows the observation date separately from fetch time after a fresh reques
 
   render(<ScreenerWidget id="screener-1" config={widgetConfig} />);
 
-  expect(screen.getByText(`As of ${formatAbsoluteTimestamp(new Date(observationDate))}`)).toBeInTheDocument();
+  expect(screen.getByText(`As of ${observationDate}`)).toBeInTheDocument();
   expect(screen.getByText(`Fetched ${formatAbsoluteTimestamp(new Date(fetchedAt))}`)).toBeInTheDocument();
 });
 

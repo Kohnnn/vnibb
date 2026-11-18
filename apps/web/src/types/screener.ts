@@ -7,7 +7,13 @@ export interface ScreenerData {
     symbol?: string;
     updated_at?: string | null;
     trade_date?: string | null;
-    market_session?: { session_date: string; status: 'traded' | 'no_trade' | 'suspended'; source: string; scope: 'vietcap_board' } | null;
+    market_session?: {
+        session_date: string;
+        status: 'traded' | 'no_trade' | 'suspended';
+        source: string;
+        scope: 'vietcap_board';
+        match_as_of?: string;
+    } | null;
 
     company_name?: string;
     organ_name?: string | null;
@@ -72,6 +78,9 @@ export interface ScreenerResponse {
         cached?: boolean;
         stale?: boolean;
         fallback?: boolean;
+        screen_scope?: 'page' | 'universe';
+        matched_count?: number | null;
+        fundamental_enrichment?: 'skipped' | 'ok' | 'unavailable' | 'failed';
         cache_age_seconds?: number | null;
         visible_field_coverage?: Record<string, number>;
         visible_field_values?: number;

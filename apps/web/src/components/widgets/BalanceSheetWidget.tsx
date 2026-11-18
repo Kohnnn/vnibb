@@ -4,6 +4,7 @@
 import { useState, useMemo, useEffect, memo } from 'react';
 import { Scale, Table, BarChart3 } from 'lucide-react';
 import { useBalanceSheet } from '@/lib/queries';
+import type { BalanceSheetData } from '@/types/equity';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
@@ -27,7 +28,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { cn } from '@/lib/utils';
-import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_OPTIONS, FUNDAMENTAL_PERIOD_SYNC_GROUP, isCanonicalQuarterPeriod, isUnavailableStatementRow, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
+import { canonicalPeriodRows, describeUnavailableStatementRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_OPTIONS, FUNDAMENTAL_PERIOD_SYNC_GROUP, isUnavailableStatementRow, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, statementFieldWithheldReason, type FinancialPeriodMode } from '@/lib/financialPeriods';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 
 interface BalanceSheetWidgetProps {
@@ -41,7 +42,7 @@ interface BalanceSheetWidgetProps {
 
 type ViewMode = 'table' | 'chart';
 
-const labels: Record<string, string> = {
+const labels = {
     total_assets: 'Total Assets',
     current_assets: 'Current Assets',
     fixed_assets: 'Fixed Assets',
@@ -59,6 +60,36 @@ const labels: Record<string, string> = {
     cash: 'Cash',
     inventory: 'Inventory',
 };
+
+const balanceFields = [
+    ...(Object.keys(labels) as Array<keyof typeof labels>), 'cash_and_equivalents', 'receivables', 'goodwill', 'intangible_assets',
+    'non_current_assets', 'short_term_investments', 'book_value_per_share',
+] as const;
+type BalanceField = typeof balanceFields[number];
+const balanceAliases = [
+    ['cash', 'cash_and_equivalents', 'cash_and_cash_equivalents'],
+    ['total_equity', 'equity'],
+    ['accounts_receivable', 'receivables'],
+];
+
+function projectBalanceSheet(item: BalanceSheetData) {
+    const { symbol, period, source, currency, value_unit, consolidation_basis, aggregation_basis, source_periods, unit_metadata } = item;
+    const record = item as unknown as Record<string, unknown>;
+    const withheld: Record<string, { unavailable_reason: string }> = {};
+    const values = Object.fromEntries(balanceFields.map((field) => {
+        const aliases = balanceAliases.find((group) => group.includes(field)) ?? [field];
+        const reason = statementFieldWithheldReason(unit_metadata?.basis)
+            ?? aliases.map((key) => statementFieldWithheldReason(unit_metadata?.[key])).find(Boolean);
+        if (reason) withheld[field] = { unavailable_reason: reason };
+        const value = record[field];
+        return [field, !reason && typeof value === 'number' && Number.isFinite(value) ? value : null] as const;
+    })) as Record<BalanceField, number | null>;
+    return {
+        symbol, period, source, currency, value_unit, consolidation_basis, aggregation_basis, source_periods,
+        ...values,
+        withheld_fields: describeUnavailableStatementRows([{ period, unit_metadata: withheld }]),
+    };
+}
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
@@ -115,16 +146,8 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
         () => [...canonicalItems].sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalItems]
     );
-    // The TTM branch returns a single TTM row today (financial_service
-    // .build_ttm_statement_rows), and this filter guarantees the TTM view can
-    // never render a quarter row under a TTM header if a payload carries one
-    // (issue #101).
     const periodItems = useMemo(
-        () => periodMode === 'quarter'
-            ? orderedItems.filter((item) => isCanonicalQuarterPeriod(item.period))
-            : periodMode === 'ttm'
-                ? orderedItems.filter((item) => String(item.period ?? '').toUpperCase().includes('TTM'))
-                : orderedItems,
+        () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
     // A row the API returned without certification carries every numeric field as
@@ -134,7 +157,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
     // valid partial row and stays (issue #103).
     const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
     const displayItems = useMemo(
-        () => periodItems.filter((item) => !isUnavailableStatementRow(item)),
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)).map(projectBalanceSheet),
         [periodItems]
     );
     const duplicatePeriodNote = useMemo(() => {
@@ -168,10 +191,14 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
-                extra: hasData ? { periods: displayItems.length } : undefined,
+                period,
+                periodScope: periodSyncGroup ? 'shared' : 'local',
+                warnings: statementNote ? [statementNote] : undefined,
+                exportData: displayItems,
+                extra: hasData ? { periods: displayItems.length, data: displayItems } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, displayItems.length]);
+    }, [onDataChange, hasData, isFallback, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems, statementNote]);
 
     // One FX conversion boundary: values below are ALREADY in display units. The
     // axis and tooltip format these without converting again (issue #100), and a
@@ -243,7 +270,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
     );
 
     const tableRows = useMemo<DenseTableRow[]>(() => {
-        const valueFor = (entry: (typeof items)[number], metricKey: string): number | null | undefined => {
+        const valueFor = (entry: (typeof displayItems)[number], metricKey: string): number | null | undefined => {
             if (metricKey === 'total_equity') return entry.total_equity ?? entry.equity
             if (metricKey === 'accounts_receivable') return entry.accounts_receivable ?? entry.receivables
             return (entry as unknown as Record<string, number | null | undefined>)[metricKey]
@@ -267,7 +294,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
             hasMetricData(metricKey)
                 ? {
                     id: metricKey,
-                    label: labels[metricKey] || metricKey,
+                    label: labels[metricKey as keyof typeof labels] || metricKey,
                     parentId: groupId,
                     indent: 12,
                     values: mapValues(metricKey),
@@ -463,7 +490,7 @@ function BalanceSheetWidgetComponent({ id, symbol, config, isEditing, onRemove, 
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={orderedItems}
+            exportData={displayItems}
         >
             <div className="h-full flex flex-col px-2 py-1.5">
                 <div className="pb-1 border-b border-[var(--border-subtle)]">
