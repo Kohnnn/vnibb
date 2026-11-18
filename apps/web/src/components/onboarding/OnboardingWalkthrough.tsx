@@ -104,8 +104,8 @@ const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
   },
   scan_market: {
     icon: BarChart3,
-    result: 'Market overview',
-    detail: 'Breadth, heatmap, sectors, index comparison, and movers.',
+    result: 'Market Scan',
+    detail: 'Breadth, heatmap, top movers, and the stock screener.',
     requiresTicker: false,
     steps: [
       {
@@ -122,9 +122,9 @@ const GOAL_PRESENTATION: Record<OnboardingGoalId, GoalPresentation> = {
       },
       {
         id: 'market-movers',
-        title: 'Open the shortlist',
-        description: 'Top movers turns the broad scan into concrete symbols for the next company or ticker review.',
-        targets: ['[data-widget-type="top_movers"]'],
+        title: 'Filter the shortlist',
+        description: 'Use the screener to narrow the market by exchange or other filters before reviewing a ticker.',
+        targets: ['[data-widget-type="screener"]'],
       },
     ],
     finalTitle: 'Your market scan is ready',

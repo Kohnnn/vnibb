@@ -1,15 +1,20 @@
 import type { ComponentType, ReactNode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import DashboardPage, { DashboardSyncStatusMessage } from './DashboardClient';
-import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import DashboardPage from './DashboardClient';
+import { consumeCopilotStream, openCopilotChatStream, type FreshnessResponse } from '@/lib/api';
 import type { ResearchStarter, StarterPromptKey } from '@/lib/researchStarters';
 import type { Dashboard, DashboardTab } from '@/types/dashboard';
+import type { DashboardContextValue } from '@/contexts/DashboardContext/types';
 
 let mockWalkthroughEligible = false;
 let mockActiveDashboard: Dashboard | null = null;
 let mockActiveTab: DashboardTab | null = null;
 let mockDashboards: Dashboard[] = [];
 let mockCatalogueReady = true;
+let mockFreshness: FreshnessResponse | undefined;
+const LOCAL_SYNC = { enabled: false, status: 'idle', loadPaused: false } as const;
+let mockBackendSync: DashboardContextValue['backendSync'] = LOCAL_SYNC;
 const mockSetActiveDashboard = jest.fn();
 const mockSetActiveTab = jest.fn();
 const mockCreateDashboard = jest.fn((input: { name: string }) => ({
@@ -47,7 +52,7 @@ jest.mock('@/contexts/DashboardContext', () => ({
     createTab: mockCreateTab,
     addWidget: mockAddWidget,
     updateSyncGroupSymbol: mockUpdateSyncGroupSymbol,
-    backendSync: { enabled: false, status: 'idle' },
+    backendSync: mockBackendSync,
   }),
 }));
 jest.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'owner' }, isAdmin: false }) }));
@@ -63,11 +68,13 @@ jest.mock('@/lib/userPreferences', () => ({
   shouldShowDashboardWalkthrough: () => mockWalkthroughEligible,
   dispatchOnboardingMeaningfulAction: jest.fn(),
 }));
+jest.mock('@/lib/backendHealth', () => ({ probeBackendReadiness: jest.fn().mockResolvedValue({ healthOk: true, dataOk: true }) }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
 jest.mock('@/lib/queries', () => ({
   useProfile: () => ({ data: undefined }),
   useStockQuote: () => ({ data: undefined }),
   useFinancialRatios: () => ({ data: undefined }),
+  useMarketFreshness: () => ({ data: mockFreshness, isLoading: false, isError: false }),
 }));
 jest.mock('@/lib/api', () => ({
   openCopilotChatStream: jest.fn(),
@@ -76,11 +83,15 @@ jest.mock('@/lib/api', () => ({
 }));
 jest.mock('@/components/layout', () => ({
   Sidebar: ({ onOpenTemplateSelector }: { onOpenTemplateSelector: () => void }) => <button onClick={onOpenTemplateSelector}>Open templates</button>,
-  Header: ({ isAIOpen, onAIClick }: { isAIOpen: boolean; onAIClick: () => void }) => <button onClick={onAIClick}>{isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}</button>,
+  Header: ({ isAIOpen, onAIClick, globalStatus }: {
+    isAIOpen: boolean;
+    onAIClick: () => void;
+    globalStatus?: ReactNode;
+  }) => <header><button onClick={onAIClick}>{isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}</button>{globalStatus}</header>,
   RightSidebar: ({ children, overlay }: { children: ReactNode; overlay: boolean }) => <aside aria-label={overlay ? 'Mobile copilot' : 'Desktop copilot'}>{children}</aside>,
   TabBar: () => null,
   MobileNav: () => null,
-  FreshnessBanner: () => null,
+  DashboardHealth: jest.requireActual('@/components/layout/DashboardHealth').DashboardHealth,
   WhatsNewPanel: () => null,
 }));
 jest.mock('@/components/layout/DashboardGrid', () => ({
@@ -146,12 +157,66 @@ function setViewport(width: number) {
   });
 }
 
-describe('DashboardSyncStatusMessage', () => {
-  it('labels local-only persistence as saved on this device', () => {
-    render(<DashboardSyncStatusMessage enabled status="local" />);
+describe('DashboardPage global freshness', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    setViewport(1440);
+  });
 
-    expect(screen.getByRole('status')).toHaveTextContent('Saved on this device');
-    expect(screen.queryByText('Cloud sync failed. Check your connection and refresh to try again.')).not.toBeInTheDocument();
+  afterEach(() => {
+    mockFreshness = undefined;
+    mockBackendSync = LOCAL_SYNC;
+    jest.restoreAllMocks();
+  });
+
+  function report(status: 'fresh' | 'critical'): FreshnessResponse {
+    return {
+      timestamp: '2026-11-17T00:00:00Z',
+      overall: status,
+      buckets: [{ label: 'Prices', status, last_data_date: status === 'fresh' ? '2026-11-17' : '2026-11-10', age_days: status === 'fresh' ? 0 : 7, detail: null }],
+    };
+  }
+
+  it('uses the existing header instead of a dedicated row for routine freshness', async () => {
+    mockFreshness = report('fresh');
+    await act(async () => { render(<DashboardPage />); });
+
+    expect(screen.getByRole('banner')).toContainElement(
+      screen.getByText(/all tracked data sources report fresh data/i),
+    );
+    expect(screen.queryByRole('region', { name: 'Workspace health details' })).not.toBeInTheDocument();
+  });
+
+  it('returns a dismissed warning to the header without leaving a dedicated row', async () => {
+    mockFreshness = report('critical');
+    await act(async () => { render(<DashboardPage />); });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace health: Degraded' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss freshness warning for this session' }));
+
+    expect(screen.getByRole('banner')).toContainElement(
+      screen.getByText(/freshness warning dismissed for this session/i),
+    );
+    expect(screen.queryByRole('region', { name: 'Workspace health details' })).not.toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: 'Workspace health: Dismissed' });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.setup().keyboard('{Enter}');
+    const details = screen.getByRole('region', { name: 'Workspace health details' });
+    expect(details).toHaveFocus();
+    expect(within(details).getByRole('link', { name: 'View sources' })).toHaveAttribute('href', '/settings');
+  });
+
+  it('shows local persistence only inside workspace health in local mode', async () => {
+    mockFreshness = report('fresh');
+    mockBackendSync = { enabled: true, status: 'local', loadPaused: false };
+    await act(async () => { render(<DashboardPage />); });
+
+    expect(screen.queryByText('Saved on this device')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace health: Fresh' }));
+    const details = screen.getByRole('region', { name: 'Workspace health details' });
+    expect(within(details).getByText('Saved on this device')).toBeInTheDocument();
   });
 });
 

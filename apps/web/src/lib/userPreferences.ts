@@ -11,7 +11,7 @@ export type OnboardingMeaningfulActionId = 'view_open' | 'symbol_change' | 'widg
 export const ONBOARDING_GOALS: Array<{ id: OnboardingGoalId; label: string; description: string }> = [
   { id: 'follow_ticker', label: 'Follow a ticker', description: 'Open a ticker view with a VniAgent starter prompt.' },
   { id: 'evaluate_company', label: 'Evaluate a company', description: 'Open the financial view with a VniAgent starter prompt.' },
-  { id: 'scan_market', label: 'Scan the market', description: 'Open the existing market overview workspace.' },
+  { id: 'scan_market', label: 'Scan the market', description: 'Create a workspace with market breadth, movers, heatmap, and the stock screener.' },
 ]
 
 const ONBOARDING_MEANINGFUL_ACTION_IDS = new Set<OnboardingMeaningfulActionId>([

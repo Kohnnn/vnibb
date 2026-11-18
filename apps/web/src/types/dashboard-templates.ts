@@ -77,6 +77,8 @@ export interface DashboardTemplate {
  * a guard for custom/imported templates, and the regression suite asserts every
  * template here against it.
  */
+export const MARKET_SCAN_TEMPLATE_ID = 'market-scan';
+
 export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
   {
     id: 'global-markets',
@@ -134,6 +136,19 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'market_news', layout: { x: 14, y: 0, w: 10, h: 6 } },
       { type: 'price_chart', layout: { x: 0, y: 6, w: 12, h: 8 } },
       { type: 'screener', layout: { x: 12, y: 6, w: 12, h: 8 } },
+    ],
+  },
+  {
+    id: MARKET_SCAN_TEMPLATE_ID,
+    name: 'Market Scan',
+    description: 'Read Vietnamese market breadth and movers, then filter stocks in the native screener.',
+    category: 'market',
+    widgets: [
+      { type: 'market_overview', layout: { x: 0, y: 0, w: 8, h: 7 } },
+      { type: 'market_breadth', layout: { x: 8, y: 0, w: 8, h: 7 } },
+      { type: 'top_movers', layout: { x: 16, y: 0, w: 8, h: 7 } },
+      { type: 'screener', layout: { x: 0, y: 7, w: 14, h: 12 } },
+      { type: 'market_heatmap', layout: { x: 14, y: 7, w: 10, h: 12 } },
     ],
   },
   {

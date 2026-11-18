@@ -1,16 +1,14 @@
-// Header component with market status and workspace controls
+// Header component with market context and workspace controls
 
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   LogOut,
   Search,
   User,
   MoreHorizontal,
-  Settings2,
-  LayoutGrid,
   Lock,
   Sparkles,
   Unlock,
@@ -21,7 +19,6 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useAuth, type AuthUser } from '@/contexts/AuthContext'
 import { env } from '@/lib/env'
 import { useHistoricalPrices, useMarketOverview, useStockQuote } from '@/lib/queries'
-import { probeBackendReadiness } from '@/lib/backendHealth'
 import { formatPercent, type UnitDisplay } from '@/lib/units'
 import { priceArrow, priceColorClass } from '@/lib/priceColor'
 import { cn } from '@/lib/utils'
@@ -29,7 +26,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
@@ -41,10 +42,6 @@ const UNIT_OPTIONS: Array<{ value: UnitDisplay; label: string }> = [
   { value: 'USD', label: 'USD' },
   { value: 'raw', label: 'Raw' },
 ]
-
-const MARKET_TIMEZONE = 'Asia/Ho_Chi_Minh'
-
-type ConnectionState = 'checking' | 'online' | 'offline' | 'degraded'
 
 function getShortcutModifierLabel(): string {
   if (typeof navigator === 'undefined') return 'Ctrl'
@@ -87,32 +84,6 @@ function getUserInitials(name: string): string {
     .join('') || 'U'
 }
 
-function getVietnamMarketStatus(reference = new Date()): { label: string; isOpen: boolean } {
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: MARKET_TIMEZONE,
-    weekday: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-
-  const parts = formatter.formatToParts(reference)
-  const weekday = parts.find((part) => part.type === 'weekday')?.value ?? 'Mon'
-  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0')
-  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0')
-
-  const isBusinessDay = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(weekday)
-  const totalMinutes = hour * 60 + minute
-  const morningSession = totalMinutes >= 9 * 60 && totalMinutes <= 11 * 60 + 30
-  const afternoonSession = totalMinutes >= 13 * 60 && totalMinutes <= 15 * 60
-  const isOpen = isBusinessDay && (morningSession || afternoonSession)
-
-  return {
-    isOpen,
-    label: isOpen ? 'Market Open (HOSE)' : 'Market Closed (HOSE)',
-  }
-}
-
 interface HeaderProps {
   currentSymbol: string
   isEditing?: boolean
@@ -125,6 +96,7 @@ interface HeaderProps {
   onExpandAll?: () => void
   unitDisplay?: UnitDisplay
   onUnitDisplayChange?: (value: UnitDisplay) => void
+  globalStatus?: ReactNode
 }
 
 export function Header({
@@ -139,13 +111,12 @@ export function Header({
   onExpandAll,
   unitDisplay = 'auto',
   onUnitDisplayChange,
+  globalStatus,
 }: HeaderProps) {
   const hasActionMenu = Boolean(onResetLayout || onCollapseAll || onExpandAll)
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user, loading: authLoading, provider, isAdmin, isGuest, signOut } = useAuth()
   const shortcutModifier = getShortcutModifierLabel()
-  const [marketClock, setMarketClock] = useState(() => Date.now())
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('checking')
 
   const quoteQuery = useStockQuote(currentSymbol, Boolean(currentSymbol))
   const marketOverviewQuery = useMarketOverview(true)
@@ -187,7 +158,6 @@ export function Header({
   // These adapt to light theme and colorblind mode automatically; the arrow
   // glyph and sign carry direction when hue is unavailable.
   const quoteChangeClass = priceColorClass(displayQuoteChangePct)
-  const marketStatus = useMemo(() => getVietnamMarketStatus(new Date(marketClock)), [marketClock])
   const getIndexChangeClass = useCallback(
     (changePct: number | null | undefined) => priceColorClass(changePct),
     [],
@@ -208,94 +178,6 @@ export function Header({
   const userInitials = getUserInitials(userDisplayName)
   const userRoleLabel = isAdmin ? 'Admin' : isGuest ? 'Guest' : user ? 'Member' : 'Signed out'
 
-  // Backend connection state is a system state (saved/loading/warning/failed):
-  // neutral/blue with a text label, never red/green — those mean financial
-  // direction (#197). The dot only reinforces the label.
-  const healthBadge = useMemo(() => {
-    if (connectionStatus === 'online') {
-      return {
-        label: 'Healthy',
-        className: cn(
-          'border-[var(--color-state-border)] bg-[var(--color-state-bg)]',
-          'text-[var(--color-text-secondary)]'
-        ),
-        dotClassName: 'bg-[var(--color-info)]',
-      }
-    }
-    if (connectionStatus === 'degraded' || connectionStatus === 'checking') {
-      return {
-        label: connectionStatus === 'checking' ? 'Checking' : 'Degraded',
-        className: cn(
-          'border-[var(--color-state-border)] bg-[var(--color-state-bg)]',
-          'text-[var(--color-warning)]'
-        ),
-        dotClassName: 'bg-[var(--color-warning)]',
-      }
-    }
-    return {
-      label: 'Offline',
-      className: cn(
-        'border-[var(--color-state-border)] bg-[var(--color-state-bg)]',
-        'text-[var(--color-error)]'
-      ),
-      dotClassName: 'bg-[var(--color-error)]',
-    }
-  }, [connectionStatus])
-
-  const healthTitle = `${marketStatus.label} • Backend ${healthBadge.label}`
-  const marketBadge = useMemo(() => {
-    if (marketStatus.isOpen) {
-      return healthBadge
-    }
-
-    return {
-      className: cn(
-        'border-[var(--border-strong)] bg-[var(--bg-secondary)]',
-        'text-[var(--text-secondary)]'
-      ),
-      dotClassName: 'bg-[var(--text-muted)]',
-    }
-  }, [healthBadge, marketStatus.isOpen])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setMarketClock(Date.now())
-    }, 60 * 1000)
-
-    return () => window.clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    let mounted = true
-
-    const checkConnection = async () => {
-      try {
-        const { healthOk, dataOk } = await probeBackendReadiness(8000)
-        if (!mounted) return
-
-        if (healthOk && dataOk) {
-          setConnectionStatus('online')
-        } else if (healthOk) {
-          setConnectionStatus('degraded')
-        } else {
-          setConnectionStatus('offline')
-        }
-      } catch {
-        if (mounted) {
-          setConnectionStatus('offline')
-        }
-      }
-    }
-
-    checkConnection()
-    const interval = window.setInterval(checkConnection, 60 * 1000)
-
-    return () => {
-      mounted = false
-      window.clearInterval(interval)
-    }
-  }, [])
-
   const openHeaderSearch = useCallback(() => {
     window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
       detail: { source: 'header_search' },
@@ -310,8 +192,8 @@ export function Header({
           AlertNotificationPanel) inside the header's paint order; the blur was
           retired in #199 (glass). */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[var(--dashboard-shell-bg)]" />
-      <div className="px-2 py-2 pl-[3.25rem] pr-0 sm:pl-14 sm:pr-2 lg:px-4 lg:pl-4">
-        <div data-tour="header-bar" className="flex min-h-11 min-w-0 flex-wrap items-center sm:flex-nowrap sm:gap-1">
+      <div className="px-2 py-2 pl-[3.25rem] sm:pl-14 lg:px-4">
+        <div data-tour="header-bar" className="flex min-h-11 min-w-0 flex-wrap items-center gap-1 sm:flex-nowrap">
           {/* Below lg the sidebar is off-canvas, so the wordmark lives here. */}
           <Link
             href="/"
@@ -382,7 +264,7 @@ export function Header({
             </button>
           </div>
 
-          <div data-tour="header-tools" className="ml-auto flex min-w-0 max-w-full flex-nowrap shrink-0 items-center justify-end sm:gap-1">
+          <div data-tour="header-tools" className="ml-auto flex min-w-0 max-w-full shrink-0 items-center justify-end gap-1">
 
           {onAIClick && (
             <button
@@ -403,171 +285,102 @@ export function Header({
             </button>
           )}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
-                title="Display settings"
-                aria-label="Display settings"
-              >
-                <Settings2 size={14} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-[180px]">
-              <DropdownMenuItem className="text-xs text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
-                Theme
-              </DropdownMenuItem>
-              {(['dark', 'light'] as const).map((option) => (
-                <DropdownMenuItem
-                  key={option}
-                  onClick={() => setTheme(option)}
-                  className={cn(
-                    'text-xs capitalize',
-                    theme === option ? 'font-semibold text-[var(--color-info)]' : 'text-[var(--text-secondary)]'
-                  )}
-                >
-                  {option}
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuItem className="text-[10px] text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
-                Active: {resolvedTheme}
-              </DropdownMenuItem>
-              {onUnitDisplayChange && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] focus:bg-transparent focus:text-[var(--text-muted)]">
-                    Unit display ({unitDisplay})
-                  </DropdownMenuItem>
-                  {UNIT_OPTIONS.map((option) => (
-                    <DropdownMenuItem
-                      key={option.value}
-                      onClick={() => onUnitDisplayChange(option.value)}
-                      className={cn(
-                        'text-xs',
-                        unitDisplay === option.value
-                          ? 'font-semibold text-[var(--color-info)]'
-                          : 'text-[var(--text-secondary)]'
-                      )}
-                    >
-                      {option.label}
-                    </DropdownMenuItem>
-                  ))}
-                </>
+          {onEditToggle && (
+            <button
+              type="button"
+              onClick={onEditToggle}
+              aria-pressed={isEditing}
+              className={cn(
+                'hidden h-11 items-center gap-1.5 rounded-md border px-2 text-xs font-semibold transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)] xl:inline-flex',
+                isEditing
+                  ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
+                  : 'border-[var(--border-strong)] text-[var(--text-secondary)]',
               )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          {(onAutoFitLayout || onEditToggle) && (
-            <div className="hidden items-center gap-1 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] p-1 xl:inline-flex">
-              {onAutoFitLayout && (
-                <button
-                  type="button"
-                  onClick={onAutoFitLayout}
-                  className="inline-flex items-center gap-1.5 rounded border border-[var(--border-strong)] px-3 py-1.5 text-[11px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
-                  title="Automatically arrange widgets to fill gaps"
-                  aria-label="Auto-fit layout"
-                >
-                  <LayoutGrid size={13} />
-                  <span className="hidden lg:inline">Auto-Fit</span>
-                </button>
-              )}
-
-              {onEditToggle && (
-                <button
-                  type="button"
-                  onClick={onEditToggle}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-[11px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]',
-                    isEditing
-                      ? 'border-[var(--color-accent-primary)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
-                      : 'border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                  )}
-                  title="Lock or unlock dashboard layout for editing"
-                  aria-pressed={isEditing}
-                  aria-label={isEditing ? 'Editing enabled' : 'Layout locked'}
-                >
-                  {isEditing ? <Unlock size={13} className="animate-pulse" /> : <Lock size={13} />}
-                  <span className="hidden lg:inline">{isEditing ? 'Editing' : 'Layout Locked'}</span>
-                </button>
-              )}
-            </div>
+            >
+              {isEditing ? <Unlock size={13} aria-hidden="true" /> : <Lock size={13} aria-hidden="true" />}
+              {isEditing ? 'Lock layout' : 'Edit layout'}
+            </button>
           )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
-                  title="Dashboard actions"
-                  aria-label="Dashboard actions"
-                >
-                  <MoreHorizontal size={14} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[180px]">
-                <DropdownMenuItem
-                  onClick={() => window.dispatchEvent(new CustomEvent('vnibb:open-command-palette', {
-                    detail: { source: 'header_button' },
-                  }))}
-                  className="text-xs"
-                >
-                  Open command palette
+              <button
+                type="button"
+                className="grid size-11 place-items-center rounded-md border border-[var(--border-strong)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
+                title="Dashboard options"
+                aria-label="Dashboard options"
+              >
+                <MoreHorizontal size={16} aria-hidden="true" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[200px]">
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className="text-xs">Display settings</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuLabel className="text-xs text-[var(--text-muted)]">Theme</DropdownMenuLabel>
+                  {(['dark', 'light'] as const).map((option) => (
+                    <DropdownMenuItem
+                      key={option}
+                      onClick={() => setTheme(option)}
+                      className={cn(
+                        'text-xs capitalize',
+                        theme === option ? 'font-semibold text-[var(--color-info)]' : 'text-[var(--text-secondary)]'
+                      )}
+                    >
+                      {option}
+                    </DropdownMenuItem>
+                  ))}
+                  <div className="px-2 py-1 text-[10px] text-[var(--text-muted)]">Active: {resolvedTheme}</div>
+                  {onUnitDisplayChange && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-[var(--text-muted)]">Unit display ({unitDisplay})</DropdownMenuLabel>
+                      {UNIT_OPTIONS.map((option) => (
+                        <DropdownMenuItem
+                          key={option.value}
+                          onClick={() => onUnitDisplayChange(option.value)}
+                          className={cn(
+                            'text-xs',
+                            unitDisplay === option.value
+                              ? 'font-semibold text-[var(--color-info)]'
+                              : 'text-[var(--text-secondary)]'
+                          )}
+                        >
+                          {option.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              {onAIClick && (
+                <DropdownMenuItem onClick={onAIClick} className="text-xs sm:hidden">
+                  {isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}
                 </DropdownMenuItem>
-                {onAIClick && (
-                  <DropdownMenuItem onClick={onAIClick} className="text-xs">
-                    {isAIOpen ? 'Close VniAgent' : 'Open VniAgent'}
-                  </DropdownMenuItem>
-                )}
-                {onAutoFitLayout && (
-                  <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs">
-                    Auto-fit layout
-                  </DropdownMenuItem>
-                )}
-                {onEditToggle && (
-                  <DropdownMenuItem onClick={onEditToggle} className="text-xs">
-                    {isEditing ? 'Lock layout' : 'Edit layout'}
-                  </DropdownMenuItem>
-                )}
-                {hasActionMenu && <DropdownMenuSeparator />}
-                {onResetLayout && (
-                  <DropdownMenuItem onClick={onResetLayout} className="text-xs">
-                    Reset layout
-                  </DropdownMenuItem>
-                )}
-                {(onCollapseAll || onExpandAll) && <DropdownMenuSeparator />}
-                {onCollapseAll && (
-                  <DropdownMenuItem onClick={onCollapseAll} className="text-xs">
-                    Collapse all widgets
-                  </DropdownMenuItem>
-                )}
-                {onExpandAll && (
-                  <DropdownMenuItem onClick={onExpandAll} className="text-xs">
-                    Expand all widgets
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              )}
+              {onEditToggle && (
+                <DropdownMenuItem onClick={onEditToggle} className="text-xs xl:hidden">
+                  {isEditing ? 'Lock layout' : 'Edit layout'}
+                </DropdownMenuItem>
+              )}
+              {onAutoFitLayout && (
+                <DropdownMenuItem onClick={onAutoFitLayout} className="text-xs">Auto-fit layout</DropdownMenuItem>
+              )}
+              {hasActionMenu && <DropdownMenuSeparator />}
+              {onResetLayout && (
+                <DropdownMenuItem onClick={onResetLayout} className="text-xs">Reset layout</DropdownMenuItem>
+              )}
+              {onCollapseAll && (
+                <DropdownMenuItem onClick={onCollapseAll} className="text-xs">Collapse all widgets</DropdownMenuItem>
+              )}
+              {onExpandAll && (
+                <DropdownMenuItem onClick={onExpandAll} className="text-xs">Expand all widgets</DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
 
           <AlertNotificationPanel />
-
-          <div
-            className={cn(
-              'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold 2xl:inline-flex',
-              marketBadge.className,
-            )}
-            title={healthTitle}
-            aria-label={healthTitle}
-          >
-            <span
-              className={cn(
-                'h-2 w-2 rounded-full',
-                marketBadge.dotClassName,
-                marketStatus.isOpen && connectionStatus === 'online' ? 'animate-pulse' : '',
-              )}
-            />
-            <span>{marketStatus.isOpen ? 'HOSE Open' : 'HOSE Closed'}</span>
-          </div>
+          {globalStatus}
 
           {(!authBypassEnabled || user) && (
            <DropdownMenu>

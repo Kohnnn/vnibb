@@ -2,7 +2,7 @@
 
 import { Clock, RefreshCw, Database, AlertTriangle, ShieldAlert, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatAbsoluteTimestamp, formatTime } from '@/lib/formatDate';
+import { formatAbsoluteTimestamp, formatSourceObservation } from '@/lib/formatDate';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 const fetchingBadgeStyle = {
@@ -84,9 +84,7 @@ export function WidgetMeta({
   align = 'left',
   className,
 }: WidgetMetaProps) {
-  const updatedDate = toDate(updatedAt);
-  const updatedLabel = updatedDate ? formatAbsoluteTimestamp(updatedDate) : null;
-  const exactTime = updatedDate ? formatTime(updatedDate, true) : null;
+  const updatedLabel = formatSourceObservation(updatedAt);
   const fetchedDate = toDate(fetchedAt);
   const fetchedLabel = fetchedDate ? formatAbsoluteTimestamp(fetchedDate) : null;
 
@@ -100,7 +98,7 @@ export function WidgetMeta({
         className
       )}
     >
-      <span className="inline-flex items-center gap-1" title={exactTime ? `As of ${exactTime}` : undefined}>
+      <span className="inline-flex items-center gap-1">
         <Clock size={10} className="text-[var(--text-muted)]" />
         <span suppressHydrationWarning>{updatedLabel ? `As of ${updatedLabel}` : 'As-of unknown'}</span>
       </span>

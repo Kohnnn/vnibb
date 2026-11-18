@@ -2,7 +2,8 @@
 
 import { Clock, Database, AlertTriangle, ShieldAlert, Activity } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { formatAbsoluteTimestamp, formatTime } from '@/lib/formatDate';
+import { formatAbsoluteTimestamp, formatSourceObservation, formatTime } from '@/lib/formatDate';
+import type { ExportProvenance } from '@/lib/exportWidget';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 
 /* System states are neutral/blue only (#197): saved, loading, warning and
@@ -46,20 +47,9 @@ function getPresentation(status: WidgetHealthState['status']) {
   }
 }
 
-export interface WidgetHealthChipDetails {
-  sourceLabel?: string;
-  apiGroup?: string;
-  endpoint?: string;
-  updatedAt?: number | string | Date | null;
-  fetchedAt?: number | string | Date | null;
-  cached?: boolean;
-  coverage?: 'complete' | 'partial' | 'unknown';
-  adjustmentMode?: string;
-}
-
 interface WidgetHealthChipProps {
   health: WidgetHealthState;
-  details?: WidgetHealthChipDetails;
+  details?: Partial<ExportProvenance>;
 }
 
 function toDate(value?: number | string | Date | null): Date | null {
@@ -77,21 +67,21 @@ function toDate(value?: number | string | Date | null): Date | null {
 export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
   const presentation = getPresentation(health.status);
   const Icon = presentation.icon;
-  const updatedDate = toDate(details?.updatedAt);
+  const observation = formatSourceObservation(details?.updatedAt);
   const fetchedDate = toDate(details?.fetchedAt);
 
   return (
-    <Popover>
+    <Popover className="min-w-0">
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-medium transition-opacity hover:opacity-80"
+          className="inline-flex min-h-6 max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]"
           style={presentation.style}
-          title={health.detail}
+          title={health.label}
           aria-label={`Data status: ${health.label}`}
         >
-          <Icon size={9} />
-          <span className="hidden sm:inline">{health.label}</span>
+          <Icon size={10} aria-hidden="true" className="shrink-0" />
+          <span className="min-w-0 truncate">{health.label}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -126,8 +116,8 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
           )}
           <div className="flex justify-between gap-2">
             <span className="text-[var(--text-muted)]">Source as of</span>
-            <span className="text-right text-[var(--text-primary)]" suppressHydrationWarning title={updatedDate ? formatTime(updatedDate, true) : undefined}>
-              {updatedDate ? formatAbsoluteTimestamp(updatedDate) : 'Unknown'}
+            <span className="text-right text-[var(--text-primary)]" suppressHydrationWarning>
+              {observation ?? 'Unknown'}
             </span>
           </div>
           {fetchedDate && (
@@ -148,6 +138,12 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
             <div className="flex justify-between gap-2">
               <span className="text-[var(--text-muted)]">Coverage</span>
               <span>{details.coverage}</span>
+            </div>
+          )}
+          {details?.period && (
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Period</span>
+              <span>{details.period}</span>
             </div>
           )}
           {details?.adjustmentMode && (

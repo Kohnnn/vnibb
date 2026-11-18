@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Sparkles, X, ChevronRight, BookOpen } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
@@ -8,9 +8,6 @@ import remarkGfm from 'remark-gfm';
 
 import CHANGELOG_MARKDOWN from '@/data/changelog.generated';
 import { CURRENT_RELEASE, WHATS_NEW_REOPEN_EVENT } from '@/lib/version';
-
-const STORAGE_KEY = 'vnibb:whats-new-acknowledged:v1';
-const AUTO_DISMISS_MS = 5_000;
 
 interface ReleaseNote {
   version: string;
@@ -42,144 +39,20 @@ const CURRENT_RELEASE_NOTES: ReleaseNote = {
       detail: 'TradingView wrappers retry once on script-load failure and fall back to a clear card with a deep-link.',
     },
     {
-      label: 'This panel grew up',
-      detail: 'Auto-dismisses in 5 seconds, closes when you switch tabs, and the full changelog is just below.',
+      label: 'Release notes on demand',
+      detail: 'Open the version label in the sidebar whenever you want to read the changelog.',
     },
   ],
 };
 
-function isBrowser() {
-  return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-}
-
-function loadAcknowledgedVersion(): string | null {
-  if (!isBrowser()) return null;
-  try {
-    return window.localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function persistAcknowledgedVersion(version: string): void {
-  if (!isBrowser()) return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, version);
-  } catch {
-    // ignore
-  }
-}
-
-function clearAcknowledgedVersion(): void {
-  if (!isBrowser()) return;
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Lightweight "What's new" panel that appears once per release version.
- *
- * Behavior contract:
- * - Auto-shows on mount unless the user has already acknowledged
- *   the current release.
- * - Auto-dismisses after 5 seconds. Hover or focus pauses the countdown so
- *   the user can read without the panel disappearing under them.
- * - Dismissed when the browser tab loses focus (`visibilitychange`).
- * - Re-opens on demand via the `vnibb:whats-new:reopen` window event,
- *   dispatched from the sidebar version label and the Settings modal.
- * - Renders the inline changelog from `CHANGELOG.md` (synced via
- *   `apps/web/scripts/generate-changelog.mjs`).
- */
+/** The sidebar version and Settings can open this without interrupting dashboard entry. */
 export function WhatsNewPanel() {
   const [open, setOpen] = useState(false);
-  const [showFullLog, setShowFullLog] = useState(false);
-  const dismissTimerRef = useRef<number | null>(null);
-  const isPausedRef = useRef(false);
+  const [showFullLog, setShowFullLog] = useState(true);
+  const handleClose = useCallback(() => setOpen(false), []);
 
-  const dismiss = useCallback((persist = true) => {
-    setOpen(false);
-    setShowFullLog(false);
-    if (persist) persistAcknowledgedVersion(CURRENT_RELEASE);
-    if (dismissTimerRef.current !== null) {
-      window.clearTimeout(dismissTimerRef.current);
-      dismissTimerRef.current = null;
-    }
-  }, []);
-
-  const armAutoDismiss = useCallback(() => {
-    if (!isBrowser()) return;
-    if (dismissTimerRef.current !== null) {
-      window.clearTimeout(dismissTimerRef.current);
-    }
-    dismissTimerRef.current = window.setTimeout(() => {
-      if (!isPausedRef.current) {
-        dismiss(true);
-      }
-    }, AUTO_DISMISS_MS);
-  }, [dismiss]);
-
-  // Auto-show on first mount per release.
   useEffect(() => {
-    if (!isBrowser()) return;
-    const acknowledged = loadAcknowledgedVersion();
-    if (acknowledged !== CURRENT_RELEASE) {
-      setOpen(true);
-    }
-  }, []);
-
-  // Arm the auto-dismiss timer whenever the panel opens. Re-arming on
-  // `showFullLog` toggle keeps the user from being surprised mid-scroll.
-  useEffect(() => {
-    if (!open) return;
-    if (showFullLog) {
-      // While the user is reading the full changelog, do not auto-dismiss.
-      if (dismissTimerRef.current !== null) {
-        window.clearTimeout(dismissTimerRef.current);
-        dismissTimerRef.current = null;
-      }
-      return;
-    }
-    armAutoDismiss();
-    return () => {
-      if (dismissTimerRef.current !== null) {
-        window.clearTimeout(dismissTimerRef.current);
-        dismissTimerRef.current = null;
-      }
-    };
-  }, [open, showFullLog, armAutoDismiss]);
-
-  // Keyboard close.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        dismiss(true);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, dismiss]);
-
-  // Dismiss when the user switches browser tabs.
-  useEffect(() => {
-    if (!open) return;
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        dismiss(true);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [open, dismiss]);
-
-  // Manual reopen handler.
-  useEffect(() => {
-    if (!isBrowser()) return;
     const onReopen = () => {
-      clearAcknowledgedVersion();
       setShowFullLog(true);
       setOpen(true);
     };
@@ -187,26 +60,21 @@ export function WhatsNewPanel() {
     return () => window.removeEventListener(WHATS_NEW_REOPEN_EVENT, onReopen);
   }, []);
 
-  const handleClose = useCallback(() => {
-    dismiss(true);
-  }, [dismiss]);
-
-  const handlePauseAutoDismiss = useCallback(() => {
-    isPausedRef.current = true;
-    if (dismissTimerRef.current !== null) {
-      window.clearTimeout(dismissTimerRef.current);
-      dismissTimerRef.current = null;
-    }
-  }, []);
-
-  const handleResumeAutoDismiss = useCallback(() => {
-    isPausedRef.current = false;
-    if (open && !showFullLog) {
-      armAutoDismiss();
-    }
-  }, [open, showFullLog, armAutoDismiss]);
-
-  const fullLogMarkdown = useMemo(() => CHANGELOG_MARKDOWN, []);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) handleClose();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [open, handleClose]);
 
   return (
     <AnimatePresence>
@@ -216,11 +84,7 @@ export function WhatsNewPanel() {
           animate={{ opacity: 1, x: 0, y: 0 }}
           exit={{ opacity: 0, x: 24, y: 24 }}
           transition={{ duration: 0.25 }}
-          className={`fixed bottom-5 right-5 z-[150] ${showFullLog ? 'w-[480px]' : 'w-[360px]'} max-w-[calc(100vw-40px)] rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-lg`}
-          onMouseEnter={handlePauseAutoDismiss}
-          onMouseLeave={handleResumeAutoDismiss}
-          onFocusCapture={handlePauseAutoDismiss}
-          onBlurCapture={handleResumeAutoDismiss}
+          className={`fixed bottom-5 right-5 z-[150] ${showFullLog ? 'w-[480px]' : 'w-[360px]'} max-h-[calc(100dvh-40px)] max-w-[calc(100vw-40px)] overflow-y-auto overscroll-contain rounded-md border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-lg`}
           role="dialog"
           aria-label="What's new"
         >
@@ -259,7 +123,7 @@ export function WhatsNewPanel() {
               <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-muted)]">Full Changelog</div>
               <div className="mt-1 max-h-[50vh] overflow-y-auto pr-2">
                 <article className="prose prose-invert prose-sm max-w-none text-[12px] leading-5 [&_h1]:text-sm [&_h2]:text-[13px] [&_h2]:mt-3 [&_h3]:text-[12px] [&_h3]:mt-2 [&_ul]:my-1 [&_li]:my-0.5">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{fullLogMarkdown}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{CHANGELOG_MARKDOWN}</ReactMarkdown>
                 </article>
               </div>
             </div>
