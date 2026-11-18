@@ -30,8 +30,8 @@ import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
-import { logClientError } from '@/lib/clientLogger';
 import { recordAlertActivity } from '@/lib/alertActivity';
+import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
 import { parseWatchlistSymbols } from './WatchlistWidget';
 import { findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
@@ -603,35 +603,25 @@ export function ScreenerWidget({
         if (previousSymbols) {
             const newMatches = getNewScreenerMatchSymbols(previousSymbols, dataWithPassReasons);
             if (newMatches.length > 0) {
-                const triggerTime = new Date().toISOString();
-                recordAlertActivity({
+                // Use the scan's observation time, not the effect's render time.
+                // This keeps an identical cached result stable and prevents replay.
+                const triggerTime = new Date(dataUpdatedAt).toISOString();
+                const event = {
                     id: buildSavedScreenAlertId(activeSavedScreen.id, newMatches, triggerTime),
-                    source: 'saved_screen',
                     triggerTime,
-                    deliveryClass: 'polled',
-                    serverBacked: false,
                     title: `${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`,
                     detail: newMatches.slice(0, 8).join(', '),
-                });
-            }
-            if (newMatches.length > 0 && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                try {
-                    const notification = new Notification(`${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`, {
-                        body: newMatches.slice(0, 8).join(', '),
-                        tag: `screener-${id}-${activeSavedScreen.id}`,
-                    });
-                    setTimeout(() => notification.close(), 10_000);
-                } catch (notificationError) {
-                    logClientError('Failed to show screener alert notification:', notificationError);
-                }
+                };
+                recordAlertActivity({ ...event, source: 'saved_screen', deliveryClass: 'polled', serverBacked: false });
+                sendDesktopAlerts([event]);
             }
         }
 
-        if (JSON.stringify(previousSymbols ?? []) === JSON.stringify(currentSymbols)) return;
+        if (previousSymbols && JSON.stringify(previousSymbols) === JSON.stringify(currentSymbols)) return;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? { ...screen, alertMatchSymbols: currentSymbols }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataWithPassReasons, id, isScanUnavailable, screenerData?.data]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataUpdatedAt, dataWithPassReasons, isScanUnavailable, screenerData?.data]);
 
     useEffect(() => {
 
@@ -773,12 +763,9 @@ export function ScreenerWidget({
         }
     }, [activeScreenId]);
 
-    const handleToggleScreenAlert = useCallback(async () => {
+    const handleToggleScreenAlert = useCallback(() => {
         if (!activeSavedScreen || !activeSavedScreenIsCurrent) return;
         const nextEnabled = !activeSavedScreen.alertEnabled;
-        if (nextEnabled && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-            await Notification.requestPermission();
-        }
         const currentSymbols = !isScanUnavailable ? getScreenerMatchSymbols(dataWithPassReasons) : activeSavedScreen.alertMatchSymbols;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? {
@@ -852,7 +839,7 @@ export function ScreenerWidget({
                             onClick={handleToggleScreenAlert}
                             disabled={!activeSavedScreenIsCurrent}
                             aria-label={activeScreenAlertEnabled ? `Disable alerts for ${activeSavedScreen.name}` : `Enable alerts for ${activeSavedScreen.name}`}
-                            title={activeSavedScreenIsCurrent ? 'Notify when new stocks enter this saved screen' : 'Re-select the saved screen before enabling alerts'}
+                            title={activeSavedScreenIsCurrent ? 'Track new matches in the alert inbox' : 'Re-select the saved screen before enabling alerts'}
                             className={cn(
                                 'flex h-8 items-center gap-1.5 rounded-lg border px-2 text-[10px] font-bold uppercase transition-all',
                                 activeScreenAlertEnabled

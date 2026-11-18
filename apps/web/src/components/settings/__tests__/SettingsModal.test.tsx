@@ -23,14 +23,30 @@ jest.mock('@/contexts/WidgetGroupContext', () => {
   return { useWidgetGroups: () => value }
 })
 jest.mock('@/contexts/DashboardContext', () => {
+  const { createContext } = jest.requireActual<typeof import('react')>('react')
   const value = { state: { dashboards: [], folders: [] }, activeDashboard: null, setActiveDashboard: jest.fn(), setActiveTab: jest.fn() }
-  return { useDashboard: () => value }
+  return { DashboardContext: createContext(null), useDashboard: () => value }
 })
+jest.mock('@/lib/hooks/useWebSocket', () => ({ useWebSocket: jest.fn() }))
+jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }))
+jest.mock('@/lib/api', () => ({
+  ...jest.requireActual<typeof import('@/lib/api')>('@/lib/api'),
+  getInsiderAlerts: jest.fn(),
+  getScreenerData: jest.fn(),
+  markAlertRead: jest.fn(),
+}))
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
 
 import { SettingsModal } from '../SettingsModal'
+import { AlertNotificationPanel } from '@/components/widgets/AlertNotificationPanel'
+import { PriceAlertsWidget } from '@/components/widgets/PriceAlertsWidget'
+import { ScreenerWidget } from '@/components/widgets/ScreenerWidget'
 import { UiPreferencesProvider, useUiPreferences } from '@/contexts/UiPreferencesContext'
+import { getInsiderAlerts, getScreenerData } from '@/lib/api'
+import { useWebSocket } from '@/lib/hooks/useWebSocket'
 
 function ColorblindModeProbe() {
   const { colorblindMode, setColorblindMode } = useUiPreferences()
@@ -105,6 +121,132 @@ describe('UiPreferencesProvider — colorblind mode (BUG-01)', () => {
     expect(localStorage.getItem('vnibb-colorblind-mode')).toBe('true')
     expect(document.documentElement).toHaveAttribute('data-color-mode', 'colorblind')
   })
+})
+
+describe('SettingsModal desktop alerts', () => {
+  test('offers an explicit browser-local opt-in and saves the off switch independently of browser permission', async () => {
+    window.localStorage.clear()
+    const requestPermission = jest.fn()
+    const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+    const notification = Object.assign(jest.fn(), { permission: 'granted', requestPermission })
+    Object.defineProperty(window, 'Notification', { configurable: true, value: notification })
+    const openNotifications = () => fireEvent.change(screen.getByRole('combobox', { name: 'Settings section' }), { target: { value: 'notifications' } })
+
+    try {
+      const first = render(<SettingsModal isOpen onClose={() => {}} />)
+      openNotifications()
+      fireEvent.click(screen.getByRole('button', { name: 'Enable desktop alerts' }))
+      expect(await screen.findByRole('button', { name: 'Turn off desktop alerts' })).toBeEnabled()
+      first.unmount()
+
+      const second = render(<SettingsModal isOpen onClose={() => {}} />)
+      openNotifications()
+      fireEvent.click(screen.getByRole('button', { name: 'Turn off desktop alerts' }))
+      expect(screen.getByRole('button', { name: 'Enable desktop alerts' })).toBeEnabled()
+      second.unmount()
+
+      render(<SettingsModal isOpen onClose={() => {}} />)
+      openNotifications()
+      expect(screen.queryByRole('button', { name: 'Turn off desktop alerts' })).not.toBeInTheDocument()
+      expect(requestPermission).not.toHaveBeenCalled()
+      expect(notification).not.toHaveBeenCalled()
+    } finally {
+      if (original) Object.defineProperty(window, 'Notification', original)
+      else Reflect.deleteProperty(window, 'Notification')
+      window.localStorage.clear()
+    }
+  })
+})
+
+test('turning desktop alerts off in workspace Settings silences all three senders without losing new unread activity', async () => {
+  window.localStorage.clear()
+  const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+  const notification = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() })
+  Object.defineProperty(window, 'Notification', { configurable: true, value: notification })
+  const insider = jest.mocked(getInsiderAlerts)
+  const screener = jest.mocked(getScreenerData)
+  const socket = jest.mocked(useWebSocket)
+  insider.mockResolvedValue([])
+  const setScan = (...symbols: readonly string[]) => screener.mockResolvedValue({
+    data: symbols.map((ticker) => ({ ticker })), meta: { availability: 'available' },
+  })
+  setScan('VCI')
+  socket.mockReturnValue({ isConnected: true, isReceiving: true, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() })
+  const rules = { alerts: ['FPT', 'VNM'].map((symbol) => ({
+    id: symbol, symbol, condition: 'above', threshold: 100, isActive: true, createdAt: '2026-11-17T00:00:00Z', notificationSent: false,
+  })) }
+  const quality = {
+    id: 'quality', name: 'Quality', quickFilters: [{ id: 'roe', value: { gte: 15 }, displayValue: 'ROE >= 15%' }],
+    advancedFilters: null, columns: ['ticker'], sortField: 'roe', sortOrder: 'desc', market: 'HOSE', alertEnabled: true, alertMatchSymbols: ['VCI'],
+  }
+  const scan = { ...quality, activeScreenId: quality.id, savedScreens: [quality] }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+  function Workspace() {
+    const [isOpen, setOpen] = useState(false)
+    return <QueryClientProvider client={client}>
+      <button type="button" onClick={() => setOpen(true)}>Workspace settings</button>
+      <SettingsModal isOpen={isOpen} onClose={() => setOpen(false)} />
+      <AlertNotificationPanel />
+      <PriceAlertsWidget id="price" config={rules} />
+      <ScreenerWidget id="screener" config={scan} />
+    </QueryClientProvider>
+  }
+
+  function openNotifications() {
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace settings' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Settings section' }), { target: { value: 'notifications' } })
+  }
+
+  async function publish(id: number, title: string, priceSymbol: string, ...matches: readonly string[]) {
+    insider.mockResolvedValue([{ id, alert_type: 'INSIDER_BUY', severity: 'low', symbol: 'VCI', title,
+      description: 'Synthetic insider fixture', timestamp: new Date().toISOString(), read: false, read_at: null }])
+    setScan('VCI', ...matches)
+    const onUpdate = socket.mock.lastCall?.[0].onUpdate
+    expect(onUpdate).toBeDefined()
+    await act(async () => {
+      onUpdate?.({ symbol: priceSymbol, price: 105 })
+      await Promise.all([client.refetchQueries({ queryKey: ['insider-alerts'] }), client.refetchQueries({ queryKey: ['screener'] })])
+    })
+  }
+
+  const view = render(<Workspace />)
+  try {
+    await waitFor(() => {
+      expect(client.getQueryState(['insider-alerts', 1, true])?.status).toBe('success')
+      expect(client.getQueriesData({ queryKey: ['screener'], predicate: (query) => query.state.status === 'success' })).toHaveLength(1)
+    })
+    openNotifications()
+    fireEvent.click(screen.getByRole('button', { name: 'Enable desktop alerts' }))
+    await screen.findByRole('button', { name: 'Turn off desktop alerts' })
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+
+    await publish(101, 'Insider before off', 'FPT', 'FPT')
+    await screen.findByRole('button', { name: 'Alert activity, 3 unread' })
+    const delivered = ['FPT price alert triggered', 'Insider before off', 'Quality: 1 new match'].sort()
+    expect(notification.mock.calls.map(([title]) => title).sort()).toEqual(delivered)
+
+    openNotifications()
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off desktop alerts' }))
+    expect(screen.getByRole('button', { name: 'Enable desktop alerts' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }))
+
+    await publish(102, 'Insider after off', 'VNM', 'FPT', 'HPG')
+    fireEvent.click(await screen.findByRole('button', { name: 'Alert activity, 6 unread' }))
+    const inbox = within(screen.getByRole('dialog', { name: 'Alerts' }))
+    expect(inbox.getByRole('button', { name: /Insider after off/ })).toBeVisible()
+    expect(inbox.getByRole('button', { name: /VNM price alert triggered/ })).toBeVisible()
+    expect(inbox.getAllByRole('button', { name: /Quality: 1 new match/ })).toHaveLength(2)
+    expect(inbox.getAllByText('Unread', { exact: true })).toHaveLength(6)
+    expect(notification.mock.calls.map(([title]) => title).sort()).toEqual(delivered)
+    expect(notification.requestPermission).not.toHaveBeenCalled()
+  } finally {
+    view.unmount()
+    client.clear()
+    if (original) Object.defineProperty(window, 'Notification', original)
+    else Reflect.deleteProperty(window, 'Notification')
+    window.localStorage.clear()
+  }
 })
 
 describe('SettingsModal default ticker contract', () => {

@@ -3,20 +3,20 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Bell, Plus, X, ArrowUp, ArrowDown, Check, Percent, BellOff, BellRing, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Bell, Plus, X, ArrowUp, ArrowDown, Check, Percent, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { config } from '@/lib/config';
 import { formatTimestamp } from '@/lib/formatDate';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { WidgetEmpty } from '@/components/ui/widget-states';
-import { logClientError, logClientWarn } from '@/lib/clientLogger';
+import { logClientWarn } from '@/lib/clientLogger';
 import { fetchStockQuote, quoteQueryKey } from '@/lib/queries';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { recordAlertActivity } from '@/lib/alertActivity';
+import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 import { EMPTY_VALUE } from '@/lib/units';
 
@@ -46,62 +46,6 @@ interface PriceAlertsWidgetProps {
 // ============ Constants ============
 
 const STORAGE_KEY = 'vnibb_price_alerts';
-const PERMISSION_KEY = 'vnibb_notification_permission';
-
-// ============ Notification Service ============
-
-class NotificationService {
-    private static instance: NotificationService;
-    private permission: NotificationPermission = 'default';
-
-    static getInstance(): NotificationService {
-        if (!NotificationService.instance) {
-            NotificationService.instance = new NotificationService();
-        }
-        return NotificationService.instance;
-    }
-
-    async requestPermission(): Promise<boolean> {
-        if (!('Notification' in window)) {
-            logClientWarn('Browser does not support notifications');
-            return false;
-        }
-
-        try {
-            this.permission = await Notification.requestPermission();
-            localStorage.setItem(PERMISSION_KEY, this.permission);
-            return this.permission === 'granted';
-        } catch (error) {
-            logClientError('Failed to request notification permission:', error);
-            return false;
-        }
-    }
-
-    getPermission(): NotificationPermission {
-        if (!('Notification' in window)) return 'denied';
-        return Notification.permission;
-    }
-
-    isGranted(): boolean {
-        return this.getPermission() === 'granted';
-    }
-
-    show(title: string, options?: NotificationOptions): Notification | null {
-        if (!this.isGranted()) return null;
-
-        try {
-            const notification = new Notification(title, options);
-
-            // Auto-close after 10 seconds
-            setTimeout(() => notification.close(), 10000);
-
-            return notification;
-        } catch (error) {
-            logClientError('Failed to show notification:', error);
-            return null;
-        }
-    }
-}
 
 // ============ Alert Storage ============
 
@@ -191,25 +135,24 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
     const queryClient = useQueryClient();
     const [alerts, setAlerts] = useState<PriceAlert[]>(() => parsePersistedAlerts(widgetConfig));
     const [showAdd, setShowAdd] = useState(false);
-    const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
     const [newAlert, setNewAlert] = useState({
         symbol: initialSymbol || '',
         condition: 'above' as PriceAlert['condition'],
         threshold: '',
     });
 
-    const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Feed ticks can arrive in a batch before React commits. Update the rules
+    // synchronously, without putting storage or delivery inside a React updater.
+    const alertsRef = useRef(alerts);
     const priceCacheRef = useRef<Record<string, number>>({});
-    const notificationServiceRef = useRef(NotificationService.getInstance());
-    // Stable callback ref so the shared useWebSocket onUpdate can call the latest
-    // handlePriceUpdate (declared later) without re-subscribing the socket.
-    const handlePriceUpdateRef = useRef<(symbol: string, price: number) => void>(() => {});
+    const replaceAlerts = useCallback((next: PriceAlert[]) => {
+        alertsRef.current = next;
+        setAlerts(next);
+    }, []);
 
-    // Load alerts and check permission on mount
     useEffect(() => {
-        setAlerts(parsePersistedAlerts(widgetConfig));
-        setNotificationPermission(notificationServiceRef.current.getPermission());
-    }, [widgetConfig]);
+        replaceAlerts(parsePersistedAlerts(widgetConfig));
+    }, [replaceAlerts, widgetConfig]);
 
     // Persist alerts in widget config so they follow dashboard sync instead of separate browser-only storage.
     useEffect(() => {
@@ -233,148 +176,87 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         });
     }, [alerts, id, updateWidget, widgetLocation]);
 
-    // Get unique symbols from active alerts
-    const activeSymbols = [...new Set(
-        alerts.filter(a => a.isActive && !a.triggeredAt).map(a => a.symbol)
-    )];
+    const handlePriceUpdate = useCallback((symbol: string, price: number, deliveryClass: 'browser_local' | 'polled') => {
+        if (!Number.isFinite(price)) return;
+        const previousPrice = priceCacheRef.current[symbol];
+        priceCacheRef.current[symbol] = price;
+        const matches = alertsRef.current.filter((alert) => alert.symbol === symbol && checkAlert(alert, price, previousPrice));
+        if (matches.length === 0) return;
+
+        const triggerTime = new Date().toISOString();
+        const events = matches.map((alert) => ({
+            // A price rule fires just once; a recreated rule has a new ID.
+            id: `price:${alert.id}`,
+            triggerTime,
+            title: `${alert.symbol} price alert triggered`,
+            detail: `${formatCondition(alert.condition)} ${formatThreshold(alert)} at ${price.toLocaleString()}`,
+        }));
+        for (const [index, event] of events.entries()) {
+            recordAlertActivity({
+                ...event,
+                source: 'price',
+                deliveryClass,
+                serverBacked: false,
+                symbol: matches[index].symbol,
+            });
+        }
+        const notificationSent = sendDesktopAlerts(events);
+        const matchedIds = new Set(matches.map((alert) => alert.id));
+        replaceAlerts(alertsRef.current.map((alert) => matchedIds.has(alert.id)
+            ? { ...alert, triggeredAt: triggerTime, notificationSent, lastPrice: price }
+            : alert));
+    }, [replaceAlerts]);
+
+    const activeSymbols = [...new Set(alerts.filter((alert) => alert.isActive && !alert.triggeredAt).map((alert) => alert.symbol))];
+    const activeSymbolsKey = activeSymbols.join(',');
 
     // Only fresh admitted observations suppress the existing HTTP fallback.
     const { isReceiving: wsConnected } = useWebSocket({
         symbols: activeSymbols,
         enabled: activeSymbols.length > 0,
         onUpdate: (update) => {
-            if (!update.stale && update.symbol && typeof update.price === 'number') {
-                handlePriceUpdateRef.current(update.symbol, update.price);
-            }
+            if (!update.stale && update.symbol) handlePriceUpdate(update.symbol, update.price, 'browser_local');
         },
     });
 
-    // Fallback polling when WebSocket is not connected
     useEffect(() => {
-        if (wsConnected || activeSymbols.length === 0) {
-            if (pollIntervalRef.current) {
-                clearTimeout(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-            }
-            return;
-        }
+        if (wsConnected || !activeSymbolsKey) return;
+        const symbols = activeSymbolsKey.split(',');
+        let cancelled = false;
+        let timer: ReturnType<typeof setTimeout> | undefined;
 
         const pollPrices = async () => {
-            if (typeof document !== 'undefined' && document.hidden) {
-                return;
-            }
-
-            if (typeof navigator !== 'undefined' && !navigator.onLine) {
-                return;
-            }
-
-            for (const symbol of activeSymbols) {
+            if (document.hidden || !navigator.onLine) return;
+            for (const symbol of symbols) {
+                if (cancelled) return;
                 try {
                     const quote = await queryClient.fetchQuery({
                         queryKey: quoteQueryKey(symbol),
                         queryFn: ({ signal }) => fetchStockQuote(symbol, signal),
                         staleTime: 30 * 1000,
                     });
-
-                    if (quote.price !== null && quote.price_unit === 'VND') {
-                        handlePriceUpdate(symbol, quote.price);
+                    if (!cancelled && !quote.stale && quote.price !== null && quote.price_unit === 'VND') {
+                        handlePriceUpdate(symbol, quote.price, 'polled');
                     }
                 } catch (error) {
-                    logClientWarn(`Failed to poll price for ${symbol}:`, error);
+                    if (!cancelled) logClientWarn(`Failed to poll price for ${symbol}:`, error);
                 }
             }
         };
 
-        const scheduleNextPoll = () => {
-            const nextInterval = getAdaptiveRefetchInterval(POLLING_PRESETS.alerts);
-            const delay = nextInterval === false ? 60_000 : nextInterval;
-
-            pollIntervalRef.current = setTimeout(async () => {
-                await pollPrices();
-                scheduleNextPoll();
-            }, delay);
+        const pollAndSchedule = async () => {
+            await pollPrices();
+            if (cancelled) return;
+            const interval = getAdaptiveRefetchInterval(POLLING_PRESETS.alerts);
+            timer = setTimeout(pollAndSchedule, interval === false ? 60_000 : interval);
         };
-
-        pollPrices();
-        scheduleNextPoll();
+        void pollAndSchedule();
 
         return () => {
-            if (pollIntervalRef.current) {
-                clearTimeout(pollIntervalRef.current);
-                pollIntervalRef.current = null;
-            }
+            cancelled = true;
+            clearTimeout(timer);
         };
-    }, [wsConnected, activeSymbols.join(','), queryClient]);
-
-    // Trigger browser notification for alert
-    const triggerAlertNotification = useCallback((alert: PriceAlert, currentPrice: number) => {
-        const conditionText = alert.condition === 'above' ? 'exceeded' :
-            alert.condition === 'below' ? 'dropped below' :
-            alert.condition === 'change_up' ? 'increased by' : 'decreased by';
-
-        const thresholdText = alert.condition.includes('change') 
-            ? `${alert.threshold}%` 
-            : alert.threshold.toLocaleString();
-
-        notificationServiceRef.current.show(`${alert.symbol} Alert Triggered`, {
-            body: `Price ${conditionText} ${thresholdText}. Current: ${currentPrice.toLocaleString()}`,
-            tag: alert.id,
-            requireInteraction: true,
-        });
-    }, []);
-
-    // Handle price update and check alerts
-    const handlePriceUpdate = useCallback((symbol: string, price: number) => {
-        const previousPrice = priceCacheRef.current[symbol];
-        priceCacheRef.current[symbol] = price;
-        
-        // Check alerts for this symbol
-        setAlerts(currentAlerts => {
-            let hasChanges = false;
-            const updatedAlerts = currentAlerts.map(alert => {
-                if (alert.symbol !== symbol || !alert.isActive || alert.triggeredAt) {
-                    return alert;
-                }
-
-                const triggered = checkAlert(alert, price, previousPrice);
-                if (triggered) {
-                    hasChanges = true;
-                    // Trigger notification
-                    triggerAlertNotification(alert, price);
-                    const triggerTime = new Date().toISOString();
-                    recordAlertActivity({
-                        id: `price:${alert.id}:${triggerTime}`,
-                        source: 'price',
-                        triggerTime,
-                        deliveryClass: wsConnected ? 'browser_local' : 'polled',
-                        serverBacked: false,
-                        title: `${alert.symbol} price alert triggered`,
-                        detail: `${formatCondition(alert.condition)} ${formatThreshold(alert)} at ${price.toLocaleString()}`,
-                        symbol: alert.symbol,
-                    });
-                    return {
-                        ...alert,
-                        triggeredAt: triggerTime,
-                        notificationSent: notificationServiceRef.current.isGranted(),
-                        lastPrice: price,
-                    };
-                }
-                return { ...alert, lastPrice: price };
-            });
-
-            return hasChanges ? updatedAlerts : currentAlerts;
-        });
-    }, [triggerAlertNotification, wsConnected]);
-
-    // Keep the stable ref pointed at the latest handlePriceUpdate so the
-    // useWebSocket onUpdate callback always invokes current alert-checking logic.
-    handlePriceUpdateRef.current = handlePriceUpdate;
-
-    // Request notification permission
-    const handleRequestPermission = async () => {
-        const granted = await notificationServiceRef.current.requestPermission();
-        setNotificationPermission(granted ? 'granted' : 'denied');
-    };
+    }, [activeSymbolsKey, handlePriceUpdate, queryClient, wsConnected]);
 
     const openAddForm = () => {
         if (showAdd) {
@@ -406,31 +288,20 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
             notificationSent: false,
         };
 
-        setAlerts(prev => prev.some(existing =>
+        if (alertsRef.current.some((existing) =>
             normalizeTickerSymbol(existing.symbol) === symbol
             && existing.condition === alert.condition
             && existing.threshold === alert.threshold
-        ) ? prev : [...prev, alert]);
+        )) return;
+        replaceAlerts([...alertsRef.current, alert]);
         setNewAlert({ symbol: '', condition: 'above', threshold: '' });
         setShowAdd(false);
     };
 
-    // Remove alert
-    const removeAlert = (id: string) => {
-        setAlerts(prev => prev.filter(a => a.id !== id));
-    };
-
-    // Toggle alert active state
-    const toggleAlert = (id: string) => {
-        setAlerts(prev => prev.map(a => 
-            a.id === id ? { ...a, isActive: !a.isActive } : a
-        ));
-    };
-
-    // Clear all triggered alerts
-    const clearTriggered = () => {
-        setAlerts(prev => prev.filter(a => !a.triggeredAt));
-    };
+    const removeAlert = (id: string) => replaceAlerts(alertsRef.current.filter((alert) => alert.id !== id));
+    const toggleAlert = (id: string) => replaceAlerts(alertsRef.current.map((alert) =>
+        alert.id === id ? { ...alert, isActive: !alert.isActive } : alert));
+    const clearTriggered = () => replaceAlerts(alertsRef.current.filter((alert) => !alert.triggeredAt));
 
     const activeAlerts = alerts.filter(a => a.isActive && !a.triggeredAt);
     const triggeredAlerts = alerts.filter(a => a.triggeredAt);
@@ -466,17 +337,6 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                 </div>
                 <div className="flex items-center gap-2">
                     <WidgetMeta note={wsConnected ? 'Live stream' : 'Polling'} align="right" />
-                    {notificationPermission !== 'granted' && (
-                        <button
-                            type="button"
-                            onClick={handleRequestPermission}
-                            aria-label="Enable browser alert notifications"
-                            className="min-h-11 min-w-11 rounded p-2 text-[var(--color-accent-primary)] hover:bg-[var(--bg-hover)] hover:text-[var(--color-accent-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]"
-                            title="Enable notifications"
-                        >
-                            <BellOff size={12} />
-                        </button>
-                    )}
                     <button
                         type="button"
                         onClick={openAddForm}
@@ -488,21 +348,8 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                 </div>
             </div>
             <p className="px-2 py-1.5 text-[10px] text-[var(--text-muted)]">
-                Browser-local alert checks. Rules are saved in this dashboard. Checks run only while this page is open and market data is available. Browser notifications require permission; not server, email, or SMS delivery.
+                Browser-local alert checks. Rules are saved in this dashboard. Checks run only while this page is open and market data is available. Matches appear in the alert inbox. Desktop alerts are optional in Settings &gt; Notifications; not server, email, or SMS delivery.
             </p>
-
-            {/* Notification Permission Banner */}
-            {notificationPermission === 'default' && (
-                <div className="px-2 py-1.5 bg-[var(--color-state-bg)] border-b border-[var(--color-state-border)]">
-                    <button
-                        onClick={handleRequestPermission}
-                        className="flex items-center gap-2 text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] w-full"
-                    >
-                        <BellRing size={12} />
-                        <span>Enable browser notifications for alerts</span>
-                    </button>
-                </div>
-            )}
 
             {/* Add Form */}
             {showAdd && (

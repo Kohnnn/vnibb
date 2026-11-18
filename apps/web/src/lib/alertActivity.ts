@@ -52,15 +52,17 @@ export function recordAlertActivity(activity: Omit<AlertActivity, 'read'> & { re
     const items = readAlertActivity();
     const existing = items.find((item) => item.id === activity.id);
     if (existing) {
-        if (activity.read === undefined || activity.read === existing.read) return;
-        writeAlertActivity(items.map((item) => item.id === activity.id ? { ...item, read: activity.read as boolean } : item));
+        if (activity.read === true && !existing.read) markAlertActivityRead(activity.id);
         return;
     }
     writeAlertActivity([{ ...activity, read: activity.read ?? false }, ...items]);
 }
 
-export function markAlertActivityRead(id: string): void {
-    writeAlertActivity(readAlertActivity().map((item) => item.id === id ? { ...item, read: true } : item));
+export function markAlertActivityRead(...ids: readonly string[]): void {
+    const requested = new Set(ids);
+    const activity = readAlertActivity();
+    if (!activity.some((item) => !item.read && requested.has(item.id))) return;
+    writeAlertActivity(activity.map((item) => requested.has(item.id) ? { ...item, read: true } : item));
 }
 
 export function subscribeAlertActivity(listener: () => void): () => void {

@@ -2,8 +2,9 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Settings, Save, Bell, Mail, Volume2, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useId } from 'react';
+import { Settings, Save } from 'lucide-react';
+import { DesktopAlertControls, useDesktopAlertStatus } from '@/components/settings/DesktopAlertControls';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAlertSettings, updateAlertSettings } from '@/lib/api';
 import type { AlertSettings } from '@/types/insider';
@@ -39,22 +40,15 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
     queryFn: () => getAlertSettings(userId),
   });
 
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
+  const { enabled, permission } = useDesktopAlertStatus();
+  const fieldId = useId();
   const [formData, setFormData] = useState<Partial<AlertSettings>>({
     block_trade_threshold: 10,
     enable_insider_buy_alerts: true,
     enable_insider_sell_alerts: true,
     enable_ownership_change_alerts: true,
     ownership_change_threshold: 5,
-    enable_browser_notifications: true,
-    enable_email_notifications: false,
-    enable_sound_alerts: true,
-    notification_email: '',
   });
-
-  useEffect(() => {
-    setNotificationPermission(typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported');
-  }, []);
 
   useEffect(() => {
     if (!settings) return;
@@ -64,10 +58,6 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
       enable_insider_sell_alerts: settings.enable_insider_sell_alerts,
       enable_ownership_change_alerts: settings.enable_ownership_change_alerts,
       ownership_change_threshold: settings.ownership_change_threshold,
-      enable_browser_notifications: settings.enable_browser_notifications,
-      enable_email_notifications: settings.enable_email_notifications,
-      enable_sound_alerts: settings.enable_sound_alerts,
-      notification_email: settings.notification_email || '',
     });
   }, [settings]);
 
@@ -82,12 +72,6 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
     updateMutation.mutate(formData);
   };
 
-  const handleRequestNotificationPermission = async () => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    const permission = await Notification.requestPermission();
-    setNotificationPermission(permission);
-  };
-
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
       empty: !settings,
@@ -99,14 +83,12 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
         stale: Boolean(error && settings),
         extra: {
           feedState: error ? (settings ? 'stale' : 'unavailable') : settings ? 'loaded' : 'loading',
-          browserPermission: notificationPermission,
-          browserPreferenceEnabled: Boolean(formData.enable_browser_notifications),
-          browserDeliveryAvailable: hasEffectiveBrowserNotifications(Boolean(formData.enable_browser_notifications), notificationPermission),
-          emailPreferenceOnly: Boolean(settings?.enable_email_notifications),
-          emailVerified: false,
+          browserPermission: permission,
+          browserPreferenceEnabled: enabled,
+          browserDeliveryAvailable: hasEffectiveBrowserNotifications(enabled, permission),
         },
     }));
-  }, [error, formData.enable_browser_notifications, notificationPermission, onDataChange, settings, userId, dataUpdatedAt]);
+  }, [error, enabled, permission, onDataChange, settings, userId, dataUpdatedAt]);
 
   if (isLoading && !settings) {
     return <WidgetSkeleton lines={6} />;
@@ -189,10 +171,11 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           <h4 className="text-xs font-medium uppercase text-[var(--text-secondary)]">Thresholds</h4>
           
           <div className="rounded bg-[var(--bg-secondary)] p-2">
-            <label className="mb-1 block text-sm text-[var(--text-primary)]">
+            <label htmlFor={fieldId + '-block'} className="mb-1 block text-sm text-[var(--text-primary)]">
               Block Trade Threshold (VND billions)
             </label>
             <input
+              id={fieldId + '-block'}
               type="number"
               value={formData.block_trade_threshold}
               onChange={(e) => setFormData({ ...formData, block_trade_threshold: Number(e.target.value) })}
@@ -206,10 +189,11 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           </div>
 
           <div className="rounded bg-[var(--bg-secondary)] p-2">
-            <label className="mb-1 block text-sm text-[var(--text-primary)]">
+            <label htmlFor={fieldId + '-ownership'} className="mb-1 block text-sm text-[var(--text-primary)]">
               Ownership Change Threshold (%)
             </label>
             <input
+              id={fieldId + '-ownership'}
               type="number"
               value={formData.ownership_change_threshold}
               onChange={(e) => setFormData({ ...formData, ownership_change_threshold: Number(e.target.value) })}
@@ -224,84 +208,10 @@ export function AlertSettingsPanel({ userId = 1, onDataChange }: AlertSettingsPa
           </div>
         </div>
 
-        {/* Notification Methods */}
         <div className="space-y-2">
-          <h4 className="text-xs font-medium uppercase text-[var(--text-secondary)]">Notification Methods</h4>
-          
-          <div className="rounded bg-[var(--bg-secondary)] p-2">
-            <label className="flex items-center justify-between cursor-pointer">
-              <div className="flex items-center gap-2">
-                <Bell size={14} className="text-[var(--color-accent-primary)]" />
-                <span className="text-sm text-[var(--text-primary)]">Browser Notifications</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={Boolean(formData.enable_browser_notifications)}
-                disabled={notificationPermission !== 'granted'}
-                onChange={(e) => setFormData({ ...formData, enable_browser_notifications: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)] disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </label>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Preference: {formData.enable_browser_notifications ? 'on' : 'off'} · Delivery: {hasEffectiveBrowserNotifications(Boolean(formData.enable_browser_notifications), notificationPermission) ? 'available' : 'unavailable'} · Permission: {notificationPermission === 'unsupported' ? 'not supported' : notificationPermission}
-            </p>
-            {notificationPermission === 'denied' && (
-              <p role="status" className="mt-1 flex items-start gap-1 text-xs text-[var(--text-secondary)]">
-                <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
-                Browser notifications are blocked. Enable them in browser settings.
-              </p>
-            )}
-            {notificationPermission === 'default' && (
-              <button
-                onClick={handleRequestNotificationPermission}
-                className="text-xs text-[var(--color-accent-primary)] hover:text-[var(--color-accent-primary)] mt-1"
-              >
-                Request permission
-              </button>
-            )}
-          </div>
-
-          <div className="rounded bg-[var(--bg-secondary)] p-2">
-            <label className="flex items-center justify-between cursor-pointer">
-              <div className="flex items-center gap-2">
-                <Volume2 size={14} className="text-[var(--color-accent-primary)]" />
-                <span className="text-sm text-[var(--text-primary)]">Sound Alerts</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={formData.enable_sound_alerts}
-                onChange={(e) => setFormData({ ...formData, enable_sound_alerts: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
-              />
-            </label>
-          </div>
-
-          <div className="rounded bg-[var(--bg-secondary)] p-2">
-            <label className="flex items-center justify-between mb-2 cursor-pointer">
-              <div className="flex items-center gap-2">
-                <Mail size={14} className="text-[var(--color-accent-primary)]" />
-                <span className="text-sm text-[var(--text-primary)]">Email Notifications</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={formData.enable_email_notifications}
-                onChange={(e) => setFormData({ ...formData, enable_email_notifications: e.target.checked })}
-                className="h-4 w-4 rounded border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--color-accent-primary)] focus:ring-[var(--focus-ring-color)]"
-              />
-            </label>
-            {formData.enable_email_notifications && (
-              <>
-                <input
-                  type="email"
-                  value={formData.notification_email || ''}
-                  onChange={(e) => setFormData({ ...formData, notification_email: e.target.value })}
-                  placeholder="your@email.com"
-                  className="w-full rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm text-[var(--text-primary)] focus:border-[var(--color-state-border)] focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-[var(--color-warning)]">Preference only · email delivery is unverified.</p>
-              </>
-            )}
-          </div>
+          <h4 className="text-xs font-medium uppercase text-[var(--text-secondary)]">Desktop alerts</h4>
+          <p className="text-xs text-[var(--text-secondary)]">This browser only. Changes apply immediately and do not change your insider rules.</p>
+          <DesktopAlertControls />
         </div>
       </div>
 
