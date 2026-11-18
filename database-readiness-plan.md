@@ -63,3 +63,11 @@ GitHub parent: [#129](https://github.com/Kohnnn/vnibb/issues/129). Integration b
 - **Ticket status unchanged.** #168 and #171–#173 stay open and #129 stays open; nothing in this section closes or accepts production recovery, and no license or acceptance is asserted.
 
 
+
+## Offline daily-price key audit (#274)
+
+Use `python3 -I -B apps/api/scripts/daily_price_key_audit.py MANIFEST.json OBSERVATIONS.json` with independent, bounded local inputs. The v2 examples in `apps/api/tests/test_scripts/fixtures/daily_price_{manifest,observations}.json` are synthetic. The tool checks one exchange, one completed session and the `1D` interval, up to 100 entries per array and 64 KiB per file.
+
+Both producers attest that their view includes changes through `effective_through`, inclusive. The instants must agree across the two inputs and be at or after the session close. `captured_at` records when each view was obtained. It may differ between files. Supply a known offset and at most six fractional digits. An extract whose boundary or cutoff is unknown requires new producer evidence. The command rejects incomparable inputs with exit 2 and an empty stdout.
+
+In a complete declared scope, absent eligible keys count as missing. Outside that scope, or when a partial extract omits them, they count as unscanned. The synthetic complete fixture covers four eligible keys, with two seen, one missing and one unscanned. No production partitions were scanned for this audit. The next inputs are a permitted price extract, dated membership and session finality at a comparable cutoff, followed by admission and consumer observations. The [dataset inventory](https://github.com/Kohnnn/vnibb/issues/274#issuecomment-6975002662) records the other datasets and their owners.
