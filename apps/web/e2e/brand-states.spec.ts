@@ -202,7 +202,7 @@ test('ratio empty state is an explanatory empty, not an error', async ({ page })
   await expect(widget.getByRole('button', { name: /try again/i })).toHaveCount(0);
 });
 
-test('partial freshness shows the bucket line and keeps critical styling neutral', async ({ page }) => {
+test('workspace health discloses partial freshness and the validated price date', async ({ page }) => {
   await mount(page, [{ type: 'key_metrics' }]);
   await baseRoutes(page, {
     '/market/freshness': (route) => route.fulfill(json({
@@ -217,12 +217,14 @@ test('partial freshness shows the bucket line and keeps critical styling neutral
   });
 
   await page.goto('/dashboard?dashboard=states-dashboard&tab=states-tab');
-  const banner = page.getByRole('status').filter({ hasText: 'Prices' });
-  await expect(banner).toBeVisible({ timeout: 30_000 });
-  // The banner renders `current through …; validated through …` as visible text;
-  // `bucket.detail` is only the title attribute. Assert what is on screen.
-  await expect(banner.getByText(/current through 2026-11-01; validated through 2026-10-31/)).toBeVisible();
-  await expect(banner.getByText(/Prices \(hose quotes\):/)).toBeVisible();
+  const health = page.getByRole('button', { name: /^Workspace health:/ });
+  await health.click();
+  const details = page.getByRole('region', { name: 'Workspace health details' });
+  const prices = details.getByRole('listitem').filter({ hasText: 'Prices (hose quotes):' });
+  await expect(prices.getByText(/current through 2026-11-01; validated through 2026-10-31/)).toBeVisible();
+  await expect(prices.getByText('settling window')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(health).toBeFocused();
 });
 
 test('empty dataset keeps the shell alive instead of tripping the route error boundary', async ({ page }) => {
@@ -842,7 +844,7 @@ test('maximized embedded chart permits keyboard-only forward and reverse exit', 
   await expect(opener).toBeFocused();
 });
 
-test('compact ticker exposes price and freshness through keyboard scrolling', async ({ page }) => {
+test('compact ticker keeps the price and freshness within the keyboard-accessible row', async ({ page }) => {
   test.setTimeout(90_000);
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
@@ -861,7 +863,7 @@ test('compact ticker exposes price and freshness through keyboard scrolling', as
   await expect(region).toBeVisible({ timeout: 45_000 });
   await expect(row.getByText('57,300.00')).toBeVisible();
   await expect(row.getByText('Stale data')).toBeAttached();
-  // Traverse from the document and use only keyboard keys for both scroll axes.
+  // Reach both the scrolling card and its compact quote using the keyboard.
   for (let i = 0; i < 150 && !(await region.evaluate(el => el === document.activeElement)); i++) {
     await page.keyboard.press('Tab');
   }
@@ -871,9 +873,16 @@ test('compact ticker exposes price and freshness through keyboard scrolling', as
   await expect.poll(() => region.evaluate(el => el.scrollTop)).toBeGreaterThan(beforeY);
   await page.keyboard.press('Tab');
   await expect(row).toBeFocused();
-  const beforeX = await row.evaluate(el => el.scrollLeft);
-  for (let i = 0; i < 12; i++) await page.keyboard.press('ArrowRight');
-  await expect.poll(() => row.evaluate(el => el.scrollLeft)).toBeGreaterThan(beforeX);
+  expect(await row.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  const bounds = await row.boundingBox();
+  expect(bounds).toBeTruthy();
+  for (const text of ['57,300.00', 'Stale data']) {
+    const label = row.getByText(text, { exact: true });
+    await expect(label).toBeVisible();
+    const box = await label.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(bounds!.x - 1);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1);
+  }
 });
 
 test('maximized Matrix inspector owns Escape before its parent', async ({ page }) => {
