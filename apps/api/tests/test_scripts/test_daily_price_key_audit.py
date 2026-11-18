@@ -105,6 +105,16 @@ def test_rejects_unrepresentable_or_unknown_cutoff(offset: str, tmp_path: Path) 
     assert (result.returncode, result.stdout) == (2, "")
 
 
+def test_compares_equivalent_cutoffs_across_offsets(tmp_path: Path) -> None:
+    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    payload["evidence"]["effective_through"] = "2026-11-10T16:00:00+07:00"
+    changed = tmp_path / MANIFEST.name
+    changed.write_text(json.dumps(payload), encoding="utf-8")
+    result = run_audit(changed, OBSERVATIONS)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["witnesses"]["missing_eligible_symbols"] == ["BBB"]
+
+
 def test_rejects_a_shared_cutoff_before_session_completion(tmp_path: Path) -> None:
     for source in (MANIFEST, OBSERVATIONS):
         payload = json.loads(source.read_text(encoding="utf-8"))
