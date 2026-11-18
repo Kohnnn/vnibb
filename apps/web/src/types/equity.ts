@@ -612,6 +612,7 @@ export interface CashFlowResponse {
   symbol: string;
   count: number;
   data: CashFlowData[];
+  error?: string | null;
 }
 
 export interface MarketIndexData {

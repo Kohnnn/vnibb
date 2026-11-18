@@ -125,72 +125,44 @@ function toNumeric(value: unknown): number | null {
  * the raw provider alias (issue #245).
  */
 export function fieldWithheldReason(entry: CashFlowData, metricKey: string): string | null {
-    return unitReason({ ...entry }, metricKey)
-}
-
-/** The rejection recorded for one key, in any evidence location. */
-function unitReason(record: Record<string, unknown>, key: string): string | null {
-    const raw = record.raw_data && typeof record.raw_data === 'object'
-        ? (record.raw_data as Record<string, unknown>)
-        : {}
-    const lineage = raw._financial_lineage && typeof raw._financial_lineage === 'object'
-        ? (raw._financial_lineage as Record<string, unknown>)
-        : {}
-    const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
-        ? (lineage.canonical_data as Record<string, unknown>)
-        : {}
-    for (const source of [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata]) {
-        if (!source || typeof source !== 'object') continue
-        const metadata = (source as Record<string, unknown>)[key]
-        if (metadata && typeof metadata === 'object') {
-            const reason = (metadata as Record<string, unknown>).unavailable_reason
-            if (typeof reason === 'string' && reason.trim()) return reason
-        }
+    for (const evidence of unitEvidence(entry, metricKey)) {
+        const reason = evidence.unavailable_reason;
+        if (typeof reason === 'string' && reason.trim()) return reason;
     }
-    return null
-}
-
-/**
- * A raw provider alias, only as the evidence it is: never a monetary value.
- *
- * Raw evidence is promoted to the table's currency scale only when the API
- * affirmatively admitted the metric. Absence of a recorded rejection is not
- * admission: an unadmitted metric stays raw (#245).
- */
-export function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
-    const rawData = entry.raw_data;
-    if (!rawData || typeof rawData !== 'object') return null;
-    if (!isRawMetricAdmitted(entry, metricKey)) return null;
-
-    for (const alias of RAW_CASHFLOW_ALIASES[metricKey] || []) {
-        const direct = toNumeric((rawData as Record<string, unknown>)[alias]);
-        if (direct !== null) return direct;
-
-        const loweredAlias = alias.toLowerCase();
-        for (const [rawKey, rawValue] of Object.entries(rawData)) {
-            if (rawKey.toLowerCase() === loweredAlias) {
-                const numeric = toNumeric(rawValue);
-                if (numeric !== null) return numeric;
-            }
-        }
-    }
-
     return null;
 }
 
-/**
- * Whether the API admitted this metric under its own row basis and unit
- * evidence. A per-field rejection, an explicit monetary rejection, or an
- * unverified row basis all keep the raw alias out of the table.
- */
-export function isRawMetricAdmitted(entry: CashFlowData, metricKey: string): boolean {
-    const record: Record<string, unknown> = { ...entry };
-    const keys = [metricKey, ...(RAW_CASHFLOW_ALIASES[metricKey] || [])];
-    if (cashFlowWithholding(record, keys)) return false;
-    if (typeof record.unavailable_reason === 'string' && record.unavailable_reason) return false;
-    // Affirmative per-field evidence for this metric, under its own currency.
-    if (!keys.some((key) => hasUnitEvidence(record, key))) return false;
-    return declaredVndBasis(record);
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function unitEvidence(entry: CashFlowData, key: string) {
+    const lineage = entry.raw_data?._financial_lineage;
+    const canonical = isRecord(lineage) ? lineage.canonical_data : undefined;
+    return [entry.unit_metadata, isRecord(canonical) ? canonical.unit_metadata : undefined,
+        isRecord(lineage) ? lineage.unit_metadata : undefined]
+        .map((source) => isRecord(source) && Object.hasOwn(source, key) ? source[key] : undefined)
+        .filter(isRecord);
+}
+
+/** A raw fallback needs its own evidence that this exact value is already in VND (#245). */
+export function getRawMetric(entry: CashFlowData, metricKey: string): number | null {
+    const raw = entry.raw_data;
+    if (!isRecord(raw) || isUnavailableStatementRow(entry) || entry.currency !== 'VND' || entry.value_unit !== 'VND') return null;
+
+    const aliases = RAW_CASHFLOW_ALIASES[metricKey] ?? [];
+    const fields = Object.keys(raw);
+    const candidates = aliases.flatMap((alias) => [alias, ...fields.filter((field) => field !== alias && field.toLowerCase() === alias)]);
+    if (cashFlowWithholding(entry, [metricKey, ...candidates])) return null;
+
+    for (const field of candidates) {
+        const value = Object.hasOwn(raw, field) ? toNumeric(raw[field]) : null;
+        if (value === null) continue;
+        const [evidence] = unitEvidence(entry, field);
+        if (evidence && rawAmountIsVnd(evidence, field, value)) return value;
+    }
+
+    return null;
 }
 
 /** The currency family a unit label names, ignoring scale (API `_unit_currency`). */
@@ -210,9 +182,8 @@ function unitCurrency(value: unknown): string | null {
  * target refuses the evidence, `unit`/`value_unit` must name the target
  * exactly, and every component must admit recursively.
  *
- * A certified *converted* source is accepted: `source_unit` records the
- * provider's original scale (`Bn. VND`, `million_VND`) while the value is
- * already normalized to VND. A source naming another currency still is not.
+ * This checks a declaration, not whether a separate raw number is already
+ * normalized. The raw fallback must also pass `rawAmountIsVnd`.
  */
 function monetaryEvidenceAdmitted(metadata: unknown, unit: string): boolean {
     if (!metadata || typeof metadata !== 'object') return false
@@ -234,33 +205,20 @@ function monetaryEvidenceAdmitted(metadata: unknown, unit: string): boolean {
     return declared === unit && Boolean(entry.source_unit || entry.unitEvidence)
 }
 
-/** The API admitted this metric as VND on its declared and original units. */
-function hasUnitEvidence(record: Record<string, unknown>, key: string): boolean {
-    const raw = record.raw_data && typeof record.raw_data === 'object'
-        ? (record.raw_data as Record<string, unknown>)
-        : {}
-    const lineage = raw._financial_lineage && typeof raw._financial_lineage === 'object'
-        ? (raw._financial_lineage as Record<string, unknown>)
-        : {}
-    const canonical = lineage.canonical_data && typeof lineage.canonical_data === 'object'
-        ? (lineage.canonical_data as Record<string, unknown>)
-        : {}
-    return [record.unit_metadata, canonical.unit_metadata, lineage.unit_metadata].some((source) => {
-        if (!source || typeof source !== 'object') return false
-        return monetaryEvidenceAdmitted((source as Record<string, unknown>)[key], 'VND')
-    })
+function rawAmountIsVnd(evidence: Readonly<Record<string, unknown>>, field: string, value: number): boolean {
+    const label = evidence.label ?? evidence.source_label;
+    if (label != null && label !== field) return false;
+    const sourceUnit = evidence.source_unit ?? evidence.unitEvidence;
+    if (typeof sourceUnit !== 'string' || !['vnd', 'đồng', 'dong'].includes(sourceUnit.trim().toLowerCase())) return false;
+    if ((evidence.unit ?? evidence.value_unit) !== 'VND' || !monetaryEvidenceAdmitted(evidence, 'VND')) return false;
+    if (evidence.normalization_multiplier != null && evidence.normalization_multiplier !== 1) return false;
+    // A certificate for a blank or different value is not evidence for this amount.
+    if (Object.hasOwn(evidence, 'provider_value')) return toNumeric(evidence.provider_value) === value;
+    return !Object.hasOwn(evidence, 'raw_value') || toNumeric(evidence.raw_value) === value;
 }
 
-/** The row declares the VND basis the table would format under. */
-function declaredVndBasis(record: Record<string, unknown>): boolean {
-    const currency = typeof record.currency === 'string' ? record.currency : null;
-    const valueUnit = typeof record.value_unit === 'string' ? record.value_unit : null;
-    if (!currency || !valueUnit) return false;
-    return currency === 'VND' && valueUnit === 'VND';
-}
-
-function cashFlowWithholding(record: Record<string, unknown>, keys: readonly string[]): string | null {
-    return unitReason(record, 'basis') ?? keys.map((key) => unitReason(record, key)).find((reason) => reason !== null) ?? null;
+function cashFlowWithholding(entry: CashFlowData, keys: readonly string[]): string | null {
+    return fieldWithheldReason(entry, 'basis') ?? keys.map((key) => fieldWithheldReason(entry, key)).find((reason) => reason !== null) ?? null;
 }
 
 /** The same admitted, source-unit observations drive the table, charts and downstream consumers. */
@@ -269,7 +227,7 @@ function projectCashFlow(entry: CashFlowData) {
     const withheld: CashFlowData['unit_metadata'] = {};
     const values = Object.fromEntries(cashFlowMetrics.map((metric): [CashFlowMetric, number | null] => {
         const wireKeys = wireFields[metric] ?? [];
-        const reason = cashFlowWithholding(record, [metric, ...wireKeys, ...(RAW_CASHFLOW_ALIASES[metric] ?? [])]);
+        const reason = cashFlowWithholding(entry, [metric, ...wireKeys, ...(RAW_CASHFLOW_ALIASES[metric] ?? [])]);
         if (reason) {
             withheld[metric] = { unavailable_reason: reason };
             return [metric, null];
@@ -363,17 +321,15 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
-    // A row the API returned without certification carries every numeric field as
-    // null plus `unavailable_reason`. Rendering it as a column of dashes reads as a
-    // reported zero, so reason-bearing rows are held out of the table/chart and
-    // disclosed in the note instead; a row that merely has some null fields is a
-    // valid partial row and stays (issue #103).
     const projectedItems = useMemo(() => periodItems.map((entry) => ({ entry, ...projectCashFlow(entry) })), [periodItems]);
     const unavailableNote = useMemo(() => describeUnavailableStatementRows(projectedItems.map(({ entry, reportedMetadata }) => ({
         period: entry.period, unavailable_reason: entry.unavailable_reason, unit_metadata: reportedMetadata,
     }))), [projectedItems]);
+    // Field-level withholding can leave a period with no admitted amount and no row-level reason.
+    // Keep its diagnostics above, but publish only periods with an observation (including zero).
     const displayItems = useMemo(
-        () => projectedItems.filter(({ entry }) => !isUnavailableStatementRow(entry)).map(({ row }) => row),
+        () => projectedItems.filter(({ entry, row }) => !isUnavailableStatementRow(entry)
+            && cashFlowMetrics.some((metric) => row[metric] != null)).map(({ row }) => row),
         [projectedItems]
     );
     const duplicatePeriodNote = useMemo(() => {
@@ -394,7 +350,9 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         [duplicatePeriodNote, unavailableNote]
     );
     const hasData = displayItems.length > 0;
-    const isFallback = Boolean(error && hasData);
+    const responseFailed = Boolean(data?.error?.trim());
+    const refreshFailed = Boolean(error) || responseFailed;
+    const isFallback = refreshFailed && hasData;
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
 
 
@@ -485,8 +443,8 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             lastDataDate: null,
             fetchedAt: dataUpdatedAt,
             cached: isFallback,
-            observationStatus: hasData ? 'available' : isLoading ? 'loading' : error || statementNote ? 'unavailable' : 'empty',
-            refreshStatus: isFetching ? 'refreshing' : error ? 'failed' : dataUpdatedAt ? 'succeeded' : undefined,
+            observationStatus: hasData ? 'available' : isLoading ? 'loading' : refreshFailed || statementNote ? 'unavailable' : 'empty',
+            refreshStatus: isFetching ? 'refreshing' : refreshFailed ? 'failed' : dataUpdatedAt ? 'succeeded' : undefined,
             period,
             periodScope: periodSyncGroup ? 'shared' : 'local',
             units,
@@ -495,7 +453,7 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
             exportData: displayItems,
             extra: { periods: displayItems.length, data: displayItems, ...(hasData ? { tableInsight: chartInsight } : {}) },
         }));
-    }, [onDataChange, hasData, isFallback, isLoading, error, isFetching, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems, statementNote, chartInsight]);
+    }, [onDataChange, hasData, isFallback, isLoading, refreshFailed, isFetching, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, displayItems, statementNote, chartInsight]);
     // A metric selection is a series selection: the shared contract charts one
     // series only for a `column` selection whose key is a series key. Table row
     // ids are the raw statement metric names while the chart series are
@@ -827,8 +785,8 @@ const CHART_SERIES_BY_METRIC: Record<string, string> = {
                         />
                     ) : isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
+                    ) : refreshFailed && !hasData ? (
+                        <WidgetError error={error ?? new Error('Cash flow refresh failed.')} onRetry={() => refetch()} />
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={unavailableNote
