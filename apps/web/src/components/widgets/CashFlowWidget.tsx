@@ -241,24 +241,25 @@ function projectCashFlow(entry: CashFlowData) {
         return [metric, RAW_CASHFLOW_ALIASES[metric] ? getRawMetric(entry, metric) : null];
     }));
     const metrics: Readonly<Partial<Record<CashFlowMetric, number | null>>> = values;
-    const source = typeof record.source === 'string' ? record.source : null;
+    const reasons = Object.entries({ ...entry.unit_metadata, ...withheld })
+        .flatMap(([metric, metadata]) => typeof metadata?.unavailable_reason === 'string' && metadata.unavailable_reason.trim()
+            ? [[metric, { unavailable_reason: metadata.unavailable_reason.trim() }]] as const : [])
+        .sort(([left], [right]) => left.localeCompare(right));
     return {
-        row: {
-            symbol: entry.symbol,
-            period: entry.period,
-            source,
-            currency: entry.currency ?? null,
-            value_unit: entry.value_unit ?? null,
-            consolidation_basis: entry.consolidation_basis ?? null,
-            flow_basis: entry.flow_basis ?? null,
-            aggregation_basis: entry.aggregation_basis ?? null,
-            source_periods: entry.source_periods ?? null,
-            withheld_fields: describeUnavailableStatementRows([{ period: entry.period, unit_metadata: withheld }]),
-            ...metrics,
-            net_cash_flow: metrics.net_change_in_cash ?? null,
-            capital_expenditure: metrics.capex ?? null,
-        },
-        reportedMetadata: { ...entry.unit_metadata, ...withheld },
+        symbol: entry.symbol,
+        period: entry.period,
+        source: typeof entry.source === 'string' ? entry.source : null,
+        currency: entry.currency ?? null,
+        value_unit: entry.value_unit ?? null,
+        consolidation_basis: entry.consolidation_basis ?? null,
+        flow_basis: entry.flow_basis ?? null,
+        aggregation_basis: entry.aggregation_basis ?? null,
+        source_periods: entry.source_periods ?? null,
+        unavailable_reason: entry.unavailable_reason?.trim() || null,
+        unit_metadata: Object.fromEntries(reasons),
+        ...metrics,
+        net_cash_flow: metrics.net_change_in_cash ?? null,
+        capital_expenditure: metrics.capex ?? null,
     };
 }
 
@@ -308,9 +309,10 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
     // identity at all. `canonicalPeriodRows` never picks between conflicting rows
     // (nothing in the payload proves which basis is authoritative) - it excludes
     // them and reports the reason, so a duplicate is disclosed rather than shown as
-    // two columns labelled "2020" (issue #103).
+    // two columns labelled "2020" (issue #103). Compare after admitting raw aliases
+    // so different certified amounts cannot collapse to whichever row arrived first.
     const { rows: canonicalItems, issues: periodIssues, invalidPeriodCount } = useMemo(
-        () => canonicalPeriodRows(items ?? []),
+        () => canonicalPeriodRows(items?.map(projectCashFlow)),
         [items]
     );
     const orderedItems = useMemo(
@@ -321,16 +323,16 @@ function CashFlowWidgetComponent({ id, symbol, config, isEditing, onRemove, onDa
         () => orderedItems.filter((item) => matchesFinancialPeriodMode(normalizeFinancialPeriod(item.period), periodMode)),
         [orderedItems, periodMode]
     );
-    const projectedItems = useMemo(() => periodItems.map((entry) => ({ entry, ...projectCashFlow(entry) })), [periodItems]);
-    const unavailableNote = useMemo(() => describeUnavailableStatementRows(projectedItems.map(({ entry, reportedMetadata }) => ({
-        period: entry.period, unavailable_reason: entry.unavailable_reason, unit_metadata: reportedMetadata,
-    }))), [projectedItems]);
+    const unavailableNote = useMemo(() => describeUnavailableStatementRows(periodItems), [periodItems]);
     // Field-level withholding can leave a period with no admitted amount and no row-level reason.
     // Keep its diagnostics above, but publish only periods with an observation (including zero).
     const displayItems = useMemo(
-        () => projectedItems.filter(({ entry, row }) => !isUnavailableStatementRow(entry)
-            && cashFlowMetrics.some((metric) => row[metric] != null)).map(({ row }) => row),
-        [projectedItems]
+        () => periodItems.filter((item) => !isUnavailableStatementRow(item)
+            && cashFlowMetrics.some((metric) => item[metric] != null)).map(({ unavailable_reason, unit_metadata, ...item }) => ({
+                ...item,
+                withheld_fields: describeUnavailableStatementRows([{ period: item.period, unit_metadata }]),
+            })),
+        [periodItems]
     );
     const duplicatePeriodNote = useMemo(() => {
         const notes: string[] = [];
