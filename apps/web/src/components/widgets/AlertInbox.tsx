@@ -19,22 +19,23 @@ const SOURCE_LABELS = {
 const DAY_MS = 86_400_000;
 const filterClass = 'min-h-9 w-full min-w-0 rounded border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-xs text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]';
 
-function useAlertRelevance() {
+export function useAlertRelevance() {
   const dashboard = useContext(DashboardContext);
   const { watchlist: markets } = usePredictionMarketWatchlist();
-  const symbols = new Set<string>();
+  const followedSymbols = new Set<string>();
+  const priceSymbols = new Set<string>();
   const screens = new Set<string>();
 
   for (const board of dashboard?.state.dashboards ?? []) {
     for (const tab of board.tabs) {
       for (const { type, config } of tab.widgets) {
         if (type === 'watchlist') {
-          for (const symbol of parseWatchlistSymbols(config)) symbols.add(symbol);
+          for (const symbol of parseWatchlistSymbols(config)) followedSymbols.add(symbol);
         } else if (type === 'price_alerts' && Array.isArray(config.alerts)) {
           for (const rule of config.alerts) {
             if (!rule || typeof rule !== 'object' || !('symbol' in rule) || typeof rule.symbol !== 'string') continue;
             const symbol = normalizeTickerSymbol(rule.symbol);
-            if (symbol) symbols.add(symbol);
+            if (symbol) priceSymbols.add(symbol);
           }
         } else if (type === 'screener' && Array.isArray(config.savedScreens)) {
           for (const screen of config.savedScreens) {
@@ -45,11 +46,19 @@ function useAlertRelevance() {
     }
   }
 
+  // Insider rows expose no saved-rule match. A price or screen rule is not an insider subscription.
+  function followsInsider(symbol: string | undefined) {
+    const ticker = normalizeTickerSymbol(symbol);
+    return ticker !== null && followedSymbols.has(ticker);
+  }
+
   return {
-    configured: Boolean(symbols.size || screens.size || markets.size),
+    configured: Boolean(followedSymbols.size || priceSymbols.size || screens.size || markets.size),
+    followsInsider,
     matches(item: AlertActivity) {
+      if (item.source === 'insider') return followsInsider(item.symbol);
       const symbol = normalizeTickerSymbol(item.symbol);
-      if (symbol && symbols.has(symbol)) return true;
+      if (symbol && (followedSymbols.has(symbol) || priceSymbols.has(symbol))) return true;
       if (item.source === 'prediction_market') {
         const market = /^prediction:(.+?):\d+h:/.exec(item.id)?.[1];
         return market !== undefined && markets.has(market);
@@ -108,14 +117,14 @@ function AlertInboxRow({ item, time, now, onOpen }: {
   );
 }
 
-export function AlertInbox({ activity, unreadOnly, isLoading, isError, onOpen }: {
+export function AlertInbox({ activity, relevance, unreadOnly, isLoading, isError, onOpen }: {
   readonly activity: readonly AlertActivity[];
+  readonly relevance: ReturnType<typeof useAlertRelevance>;
   readonly unreadOnly: boolean;
   readonly isLoading: boolean;
   readonly isError: boolean;
   readonly onOpen: (item: AlertActivity) => void;
 }) {
-  const relevance = useAlertRelevance();
   const [selectedScope, setSelectedScope] = useState<string | null>(null);
   const [source, setSource] = useState('all');
   const [range, setRange] = useState('all');

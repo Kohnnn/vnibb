@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId, useRef } from 'react';
+import { useState, useEffect, useEffectEvent, useCallback, useId, useRef } from 'react';
 import { Bell, X } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getInsiderAlerts, markAlertRead } from '@/lib/api';
@@ -12,7 +12,7 @@ import { useDialogFocusTrap } from '@/hooks/useDialogFocusTrap';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
 import { DesktopAlertControls } from '@/components/settings/DesktopAlertControls';
-import { AlertInbox } from './AlertInbox';
+import { AlertInbox, useAlertRelevance } from './AlertInbox';
 
 interface AlertNotificationPanelProps {
   readonly userId?: number;
@@ -49,12 +49,28 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
   });
 
   const unreadCount = activity.filter((item) => !item.read).length;
+  const relevance = useAlertRelevance();
 
   useEffect(() => {
     const refresh = () => setActivity(readAlertActivity());
     refresh();
     return subscribeAlertActivity(refresh);
   }, []);
+
+  // Read current follows when a response arrives; changing the drawer scope or
+  // watchlist must not itself replay a response already in the query cache.
+  const deliverInsiderAlerts = useEffectEvent((newAlerts: typeof alerts) => {
+    // Show all can load already-read rows, and later responses can carry stale read flags.
+    const readIds = new Set(readAlertActivity().filter((item) => item.source === 'insider' && item.read).map((item) => item.id));
+    sendDesktopAlerts(newAlerts.filter((alert) => (
+      !alert.read && !readIds.has(`insider:${alert.id}`) && relevance.followsInsider(alert.symbol)
+    )).map((alert) => ({
+      id: `insider:${userId}:${alert.id}`,
+      triggerTime: alert.timestamp,
+      title: alert.title,
+      detail: alert.description,
+    })));
+  });
 
   useEffect(() => {
     if (alerts.length === 0) return;
@@ -72,14 +88,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
       });
     }
 
-    // Show all can load already-read rows, and a later response can carry stale read flags.
-    const readIds = new Set(readAlertActivity().filter((item) => item.source === 'insider' && item.read).map((item) => item.id));
-    sendDesktopAlerts(alerts.filter((alert) => !alert.read && !readIds.has(`insider:${alert.id}`)).map((alert) => ({
-      id: `insider:${userId}:${alert.id}`,
-      triggerTime: alert.timestamp,
-      title: alert.title,
-      detail: alert.description,
-    })));
+    deliverInsiderAlerts(alerts);
   }, [alerts, userId]);
 
   useEffect(() => {
@@ -221,7 +230,7 @@ export function AlertNotificationPanel({ userId = 1, onDataChange }: AlertNotifi
               <DesktopAlertControls />
             </div>
 
-            <AlertInbox activity={activity} unreadOnly={showUnreadOnly} isLoading={isLoading} isError={isError} onOpen={openActivity} />
+            <AlertInbox activity={activity} relevance={relevance} unreadOnly={showUnreadOnly} isLoading={isLoading} isError={isError} onOpen={openActivity} />
           </div>
         </>
       )}

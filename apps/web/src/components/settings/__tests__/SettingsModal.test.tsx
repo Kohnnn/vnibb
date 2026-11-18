@@ -38,12 +38,13 @@ jest.mock('@/lib/api', () => ({
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ContextType } from 'react'
 
 import { SettingsModal } from '../SettingsModal'
 import { AlertNotificationPanel } from '@/components/widgets/AlertNotificationPanel'
 import { PriceAlertsWidget } from '@/components/widgets/PriceAlertsWidget'
 import { ScreenerWidget } from '@/components/widgets/ScreenerWidget'
+import { DashboardContext } from '@/contexts/DashboardContext'
 import { UiPreferencesProvider, useUiPreferences } from '@/contexts/UiPreferencesContext'
 import { getInsiderAlerts, getScreenerData } from '@/lib/api'
 import { useWebSocket } from '@/lib/hooks/useWebSocket'
@@ -181,15 +182,20 @@ test('turning desktop alerts off in workspace Settings silences all three sender
   }
   const scan = { ...quality, activeScreenId: quality.id, savedScreens: [quality] }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const dashboard = {
+    state: { dashboards: [{ tabs: [{ widgets: [{ type: 'watchlist', config: { watchlistSymbols: ['VCI'] } }] }] }] },
+  } as ContextType<typeof DashboardContext>
 
   function Workspace() {
     const [isOpen, setOpen] = useState(false)
     return <QueryClientProvider client={client}>
-      <button type="button" onClick={() => setOpen(true)}>Workspace settings</button>
-      <SettingsModal isOpen={isOpen} onClose={() => setOpen(false)} />
-      <AlertNotificationPanel />
-      <PriceAlertsWidget id="price" config={rules} />
-      <ScreenerWidget id="screener" config={scan} />
+      <DashboardContext.Provider value={dashboard}>
+        <button type="button" onClick={() => setOpen(true)}>Workspace settings</button>
+        <SettingsModal isOpen={isOpen} onClose={() => setOpen(false)} />
+        <AlertNotificationPanel />
+        <PriceAlertsWidget id="price" config={rules} />
+        <ScreenerWidget id="screener" config={scan} />
+      </DashboardContext.Provider>
     </QueryClientProvider>
   }
 
@@ -234,6 +240,7 @@ test('turning desktop alerts off in workspace Settings silences all three sender
     await publish(102, 'Insider after off', 'VNM', 'FPT', 'HPG')
     fireEvent.click(await screen.findByRole('button', { name: 'Alert activity, 6 unread' }))
     const inbox = within(screen.getByRole('dialog', { name: 'Alerts' }))
+    fireEvent.change(inbox.getByRole('combobox', { name: 'Alert scope' }), { target: { value: 'all' } })
     expect(inbox.getByRole('button', { name: /Insider after off/ })).toBeVisible()
     expect(inbox.getByRole('button', { name: /VNM price alert triggered/ })).toBeVisible()
     expect(inbox.getAllByRole('button', { name: /Quality: 1 new match/ })).toHaveLength(2)

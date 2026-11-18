@@ -1,8 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ContextType } from 'react';
 
 import { AlertNotificationPanel } from './AlertNotificationPanel';
-import { getInsiderAlerts } from '@/lib/api';
+import { DashboardContext } from '@/contexts/DashboardContext';
+import { getInsiderAlerts, markAlertRead } from '@/lib/api';
 import type { InsiderAlert } from '@/types/insider';
 
 jest.mock('@/lib/api', () => ({ getInsiderAlerts: jest.fn(), markAlertRead: jest.fn() }));
@@ -18,9 +20,19 @@ const nativeNotification = jest.fn();
 const requestPermission = jest.fn<Promise<NotificationPermission>, []>();
 let permission: NotificationPermission;
 
-function renderPanel() {
+function renderPanel(extraWidgets: { type: string; config: Record<string, unknown> }[] = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = render(<QueryClientProvider client={client}><AlertNotificationPanel /></QueryClientProvider>);
+  const dashboard = {
+    state: { dashboards: [{ tabs: [{ widgets: [
+      { type: 'watchlist', config: { watchlistSymbols: ['VNM'] } },
+      ...extraWidgets,
+    ] }] }] },
+  } as ContextType<typeof DashboardContext>;
+  const view = render(
+    <QueryClientProvider client={client}>
+      <DashboardContext.Provider value={dashboard}><AlertNotificationPanel /></DashboardContext.Provider>
+    </QueryClientProvider>,
+  );
   return { ...view, client };
 }
 
@@ -106,6 +118,45 @@ it('keeps desktop delivery off before opting in and after turning it off, even w
   await publish(3);
   expect(nativeNotification).toHaveBeenCalledTimes(1);
   expect(requestPermission).not.toHaveBeenCalled();
+});
+
+it('delivers a followed insider ticker only, without discarding unrelated unread history', async () => {
+  const start = Date.parse('2026-11-18T04:00:00Z');
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(start);
+  try {
+    // The unrelated ticker has a live price rule and is in a saved scan. Neither matches an insider event.
+    const { client } = renderPanel([
+      { type: 'price_alerts', config: { alerts: [{
+        id: 'hpg-price', symbol: 'HPG', condition: 'above', threshold: 100,
+        createdAt: new Date(start - 1000).toISOString(), isActive: true, notificationSent: false,
+      }] } },
+      { type: 'screener', config: { savedScreens: [{ id: 'quality', alertEnabled: true, alertMatchSymbols: ['HPG'] }] } },
+    ]);
+    await waitFor(() => expect(getAlerts).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Alert activity' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Enable desktop alerts' }));
+    await screen.findByRole('button', { name: 'Turn off desktop alerts' });
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+
+    clock.mockReturnValue(start + 2000);
+    const timestamp = new Date(start + 1000).toISOString();
+    const followed = { ...serverAlert, symbol: 'vnm', timestamp, title: 'Followed insider event' };
+    const unrelated = { ...serverAlert, id: 8, symbol: 'HPG', timestamp, title: 'Unrelated insider event' };
+    getAlerts.mockResolvedValue([followed, unrelated]);
+    await act(async () => { await client.refetchQueries({ queryKey: ['insider-alerts'] }); });
+
+    const drawer = within(screen.getByRole('dialog', { name: 'Alerts' }));
+    expect(await drawer.findByText(followed.title)).toBeVisible();
+    expect(drawer.queryByText(unrelated.title)).not.toBeInTheDocument();
+    fireEvent.change(drawer.getByRole('combobox', { name: 'Alert scope' }), { target: { value: 'all' } });
+    expect(drawer.getByText(followed.title)).toBeVisible();
+    expect(drawer.getByText(unrelated.title)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Alert activity, 2 unread' })).toBeInTheDocument();
+    expect(markAlertRead).not.toHaveBeenCalled();
+    expect(nativeNotification.mock.calls.map(([title]) => title)).toEqual([followed.title]);
+  } finally {
+    clock.mockRestore();
+  }
 });
 
 it('delivers a stable event once across changed payloads, polling and reconnect after remount', async () => {
