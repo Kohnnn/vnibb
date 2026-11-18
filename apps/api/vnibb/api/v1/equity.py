@@ -9,7 +9,7 @@ import math
 import re
 import unicodedata
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Literal, Optional
 from zoneinfo import ZoneInfo
 
@@ -4469,12 +4469,16 @@ async def get_quote(
 
 def _quote_response_meta(quote: StockQuoteData, source: str) -> MetaData:
     observed = quote.as_of
+    market_timezone = ZoneInfo("Asia/Ho_Chi_Minh")
     if observed is not None and observed.tzinfo is None:
-        observed = observed.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        observed = observed.replace(tzinfo=market_timezone)
+    age = (datetime.now(observed.tzinfo) - observed).total_seconds() if observed else None
+    # Stored daily bars can be represented as midnight tokens. That clock carries no trade time.
+    date_only = observed is not None and observed.astimezone(market_timezone).time() == time.min
     return MetaData(
         count=1, source=source, upstream_source=quote.upstream_source,
         as_of=observed.isoformat() if observed else None,
-        stale=(datetime.now(observed.tzinfo) - observed).total_seconds() > 60 if observed else None,
+        stale=date_only or not 0 <= age < 60 if age is not None else None,
     )
 
 

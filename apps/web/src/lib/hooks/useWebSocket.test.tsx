@@ -36,6 +36,7 @@ class MockWebSocket {
     }
 }
 
+const streamStart = Date.parse('2026-10-22T10:00:00+07:00');
 const admittedPrice = (symbol: string, price: number) => ({
     symbol, price, price_unit: 'VND', source: 'fixture',
     as_of: '2026-10-22T10:00:00+07:00', stale: false,
@@ -61,7 +62,7 @@ function exhaustReconnects() {
 
 describe('useWebSocket recovery', () => {
     beforeEach(() => {
-        jest.useFakeTimers();
+        jest.useFakeTimers({ now: streamStart });
         MockWebSocket.instances = [];
         Object.defineProperty(window, 'WebSocket', { configurable: true, value: MockWebSocket });
     });
@@ -282,6 +283,30 @@ describe('useWebSocket recovery', () => {
         expect(screen.getByText('true:43')).toBeInTheDocument();
         expect(screen.getByText('true:ok')).toBeInTheDocument();
         expect(socket.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a future observation without preventing the next real tick', () => {
+        const now = Date.parse('2026-10-22T03:00:00Z');
+        jest.setSystemTime(now);
+        const onUpdate = jest.fn();
+        render(<WebSocketHarness symbols={['VCI']} onUpdate={onUpdate} />);
+        const socket = MockWebSocket.instances[0];
+        act(() => {
+            socket.open();
+            socket.message({ ...admittedPrice('VCI', 99), as_of: new Date(now + 60_000).toISOString() });
+        });
+        expect(onUpdate).not.toHaveBeenCalled();
+        expect(screen.getByText('false:ok')).toBeInTheDocument();
+
+        act(() => socket.message(admittedPrice('VCI', 42)));
+        expect(onUpdate.mock.calls).toEqual([[42]]);
+        expect(screen.getByText('true:ok')).toBeInTheDocument();
+
+        jest.setSystemTime(now + 60_001);
+        act(() => socket.message({ ...admittedPrice('VCI', 99), as_of: new Date(now + 60_000).toISOString() }));
+        expect(onUpdate.mock.calls).toEqual([[42]]);
+        act(() => socket.message({ ...admittedPrice('VCI', 43), as_of: new Date(now + 60_001).toISOString() }));
+        expect(onUpdate.mock.calls).toEqual([[42], [43]]);
     });
 
     it('degrades rejected and stalled sockets without treating transport as delivery', () => {

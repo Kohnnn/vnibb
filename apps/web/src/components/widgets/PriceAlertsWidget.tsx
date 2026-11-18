@@ -17,6 +17,8 @@ import { useDashboardWidget } from '@/hooks/useDashboardWidget';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { recordAlertActivity } from '@/lib/alertActivity';
 import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
+import { parseAlertTime } from '@/lib/alertTime';
+import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation } from '@/lib/marketAlertObservation';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
 import { EMPTY_VALUE } from '@/lib/units';
 
@@ -144,7 +146,8 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
     // Feed ticks can arrive in a batch before React commits. Update the rules
     // synchronously, without putting storage or delivery inside a React updater.
     const alertsRef = useRef(alerts);
-    const priceCacheRef = useRef<Record<string, number>>({});
+    const priceCacheRef = useRef(new Map<string, { price: number; observedAt: number }>());
+    const futureObservationsRef = useRef(new Map<string, Set<number>>());
     const replaceAlerts = useCallback((next: PriceAlert[]) => {
         alertsRef.current = next;
         setAlerts(next);
@@ -176,14 +179,24 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         });
     }, [alerts, id, updateWidget, widgetLocation]);
 
-    const handlePriceUpdate = useCallback((symbol: string, price: number, deliveryClass: 'browser_local' | 'polled') => {
-        if (!Number.isFinite(price)) return;
-        const previousPrice = priceCacheRef.current[symbol];
-        priceCacheRef.current[symbol] = price;
-        const matches = alertsRef.current.filter((alert) => alert.symbol === symbol && checkAlert(alert, price, previousPrice));
+    const handlePriceUpdate = useCallback((symbol: string, price: number, asOf: string | null | undefined, stale: boolean | null | undefined, deliveryClass: 'browser_local' | 'polled') => {
+        const now = Date.now();
+        const observedAt = parseMarketObservationTime(asOf);
+        if (!navigator.onLine || !Number.isFinite(price) || price <= 0 || observedAt === null
+            || rejectFutureMarketObservation(futureObservationsRef.current, symbol, observedAt, now)
+            || stale !== false || !isFreshMarketObservation(observedAt, now)) return;
+        const previous = priceCacheRef.current.get(symbol);
+        if (previous && observedAt <= previous.observedAt) return;
+        const previousPrice = previous && isFreshMarketObservation(previous.observedAt, now) ? previous.price : undefined;
+        priceCacheRef.current.set(symbol, { price, observedAt });
+        const matches = alertsRef.current.filter((alert) => {
+            if (normalizeTickerSymbol(alert.symbol) !== symbol) return false;
+            const createdAt = parseAlertTime(alert.createdAt);
+            return createdAt !== null && observedAt >= createdAt && checkAlert(alert, price, previousPrice);
+        });
         if (matches.length === 0) return;
 
-        const triggerTime = new Date().toISOString();
+        const triggerTime = new Date(observedAt).toISOString();
         const events = matches.map((alert) => ({
             // A price rule fires just once; a recreated rule has a new ID.
             id: `price:${alert.id}`,
@@ -200,14 +213,17 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                 symbol: matches[index].symbol,
             });
         }
-        const notificationSent = sendDesktopAlerts(events);
+        const notificationSent = sendDesktopAlerts(events, now);
         const matchedIds = new Set(matches.map((alert) => alert.id));
         replaceAlerts(alertsRef.current.map((alert) => matchedIds.has(alert.id)
             ? { ...alert, triggeredAt: triggerTime, notificationSent, lastPrice: price }
             : alert));
     }, [replaceAlerts]);
 
-    const activeSymbols = [...new Set(alerts.filter((alert) => alert.isActive && !alert.triggeredAt).map((alert) => alert.symbol))];
+    const activeSymbols = [...new Set(alerts.flatMap((alert) => {
+        const symbol = normalizeTickerSymbol(alert.symbol);
+        return alert.isActive && !alert.triggeredAt && symbol ? [symbol] : [];
+    }))];
     const activeSymbolsKey = activeSymbols.join(',');
 
     // Only fresh admitted observations suppress the existing HTTP fallback.
@@ -215,7 +231,9 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
         symbols: activeSymbols,
         enabled: activeSymbols.length > 0,
         onUpdate: (update) => {
-            if (!update.stale && update.symbol) handlePriceUpdate(update.symbol, update.price, 'browser_local');
+            if (update.price_unit === 'VND') {
+                handlePriceUpdate(update.symbol, update.price, update.as_of, update.stale, 'browser_local');
+            }
         },
     });
 
@@ -235,8 +253,8 @@ export function PriceAlertsWidget({ id, symbol: initialSymbol, config: widgetCon
                         queryFn: ({ signal }) => fetchStockQuote(symbol, signal),
                         staleTime: 30 * 1000,
                     });
-                    if (!cancelled && !quote.stale && quote.price !== null && quote.price_unit === 'VND') {
-                        handlePriceUpdate(symbol, quote.price, 'polled');
+                    if (!cancelled && quote.price !== null && quote.price_unit === 'VND' && normalizeTickerSymbol(quote.symbol) === symbol) {
+                        handlePriceUpdate(symbol, quote.price, quote.asOf, quote.stale, 'polled');
                     }
                 } catch (error) {
                     if (!cancelled) logClientWarn(`Failed to poll price for ${symbol}:`, error);

@@ -143,13 +143,15 @@ class ConnectionManager:
             return
         try:
             payload = price_data.delivery_payload()
+            observed = datetime.fromisoformat(payload["as_of"])
         except (ValueError, TypeError):
+            return
+        if observed > datetime.now(VN_TZ):
             return
         if symbol not in self.get_all_subscribed_symbols():
             return
         previous = self._price_cache.get(symbol)
         if previous:
-            observed = datetime.fromisoformat(payload["as_of"])
             previous_observed = datetime.fromisoformat(previous.delivery_payload()["as_of"])
             if observed < previous_observed or (
                 observed == previous_observed and price_data.stale and not previous.stale

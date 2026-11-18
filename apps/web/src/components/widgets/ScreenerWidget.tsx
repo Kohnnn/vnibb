@@ -30,8 +30,9 @@ import { PerformanceTable } from './screener/PerformanceTable';
 import { ChartGridCard } from './screener/ChartGridCard';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
-import { recordAlertActivity } from '@/lib/alertActivity';
+import { readAlertActivity, recordAlertActivity } from '@/lib/alertActivity';
 import { sendDesktopAlerts } from '@/lib/desktopAlertDelivery';
+import { isFreshMarketObservation, parseMarketObservationTime, rejectFutureMarketObservation } from '@/lib/marketAlertObservation';
 import { parseWatchlistSymbols } from './WatchlistWidget';
 import { findNextAvailableLayout, getWidgetDefaultLayout } from '@/lib/dashboardLayout';
 import { normalizeTickerSymbol } from '@/lib/defaultTicker';
@@ -353,6 +354,7 @@ export function ScreenerWidget({
     const [watchlistStatus, setWatchlistStatus] = useState('');
     const alertPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const alertPollInFlightRef = useRef(false);
+    const futureAlertObservationsRef = useRef(new Map<string, Set<number>>());
 
     const { getActiveColumns, setColumns } = useColumnPresets();
 
@@ -532,6 +534,10 @@ export function ScreenerWidget({
     const activeScreenAlertEnabled = Boolean(activeSavedScreen?.alertEnabled);
     const hasData = filteredData.length > 0;
     const isScanUnavailable = Boolean(error || screenerData?.meta?.availability === 'unavailable' || screenerData?.error);
+    const scanMeta = screenerData?.meta;
+    const canUpdateAlertMatches = !isScanUnavailable && !scanMeta?.stale && !scanMeta?.fallback
+        && scanMeta?.source !== 'stale_cache' && scanMeta?.source !== 'fallback_cache'
+        && !scanMeta?.membership_stale && scanMeta?.membership_available !== false;
 
     const isFallback = Boolean(error && hasData && !screenerData?.error);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData);
@@ -593,35 +599,62 @@ export function ScreenerWidget({
     }, [activeSavedScreen?.id, activeSavedScreenIsCurrent, activeScreenAlertEnabled, refetch]);
 
     useEffect(() => {
-        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent || isScanUnavailable || !screenerData?.data) return;
+        if (!activeSavedScreen || !activeScreenAlertEnabled || !activeSavedScreenIsCurrent
+            || !canUpdateAlertMatches || !screenerData?.data) return;
         const isHidden = typeof document !== 'undefined' && document.hidden;
         const isOnline = typeof navigator === 'undefined' || navigator.onLine;
         if (!canProcessScreenerAlert(isHidden, isOnline)) return;
 
-        const currentSymbols = getScreenerMatchSymbols(dataWithPassReasons);
+        const now = Date.now();
         const previousSymbols = activeSavedScreen.alertMatchSymbols;
-        if (previousSymbols) {
-            const newMatches = getNewScreenerMatchSymbols(previousSymbols, dataWithPassReasons);
-            if (newMatches.length > 0) {
-                // Use the scan's observation time, not the effect's render time.
-                // This keeps an identical cached result stable and prevents replay.
-                const triggerTime = new Date(dataUpdatedAt).toISOString();
-                const event = {
-                    id: buildSavedScreenAlertId(activeSavedScreen.id, newMatches, triggerTime),
-                    triggerTime,
-                    title: `${activeSavedScreen.name}: ${newMatches.length} new match${newMatches.length === 1 ? '' : 'es'}`,
-                    detail: newMatches.slice(0, 8).join(', '),
-                };
+        const previous = new Set(previousSymbols?.map((symbol) => symbol.toUpperCase()));
+        const current = new Set<string>();
+        const desktopEvents: Parameters<typeof sendDesktopAlerts>[0][number][] = [];
+        let activityIds: Set<string> | undefined;
+        for (const row of screenerData.data) {
+            const symbol = String(row.ticker ?? row.symbol ?? '').trim().toUpperCase();
+            if (!symbol || current.has(symbol)) continue;
+            const session = row.market_session;
+            const observedAt = session?.status === 'traded' && session.source === 'vietcap' && session.scope === 'vietcap_board'
+                ? parseMarketObservationTime(session.match_as_of) : null;
+            const future = observedAt !== null && rejectFutureMarketObservation(
+                futureAlertObservationsRef.current, `${activeSavedScreen.id}:${symbol}`, observedAt, now,
+            );
+            if (!previousSymbols || previous.has(symbol)) {
+                if (!future || previous.has(symbol)) current.add(symbol);
+                continue;
+            }
+
+            // A match has the same identity regardless of which other rows arrived with it.
+            const triggerTime = observedAt === null ? '' : new Date(observedAt).toISOString();
+            const event = {
+                id: buildSavedScreenAlertId(activeSavedScreen.id, [symbol], triggerTime),
+                triggerTime,
+                title: `${activeSavedScreen.name}: 1 new match`,
+                detail: symbol,
+                symbol,
+            };
+            activityIds ??= new Set(readAlertActivity().map((item) => item.id));
+            // Replaying a match that already left the screen must not consume its next entry.
+            if (observedAt !== null && activityIds.has(event.id)) continue;
+            if (!future) {
+                current.add(symbol);
                 recordAlertActivity({ ...event, source: 'saved_screen', deliveryClass: 'polled', serverBacked: false });
-                sendDesktopAlerts([event]);
+            }
+            if (observedAt !== null && (observedAt > now || (!future && scanMeta?.availability === 'available'
+                && scanMeta.stale === false && isFreshMarketObservation(observedAt, now)))) {
+                // Keep future candidates in the delivery ledger so they stay quiet after remount.
+                desktopEvents.push(event);
             }
         }
+        sendDesktopAlerts(desktopEvents, now);
 
+        const currentSymbols = [...current].sort();
         if (previousSymbols && JSON.stringify(previousSymbols) === JSON.stringify(currentSymbols)) return;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? { ...screen, alertMatchSymbols: currentSymbols }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, dataUpdatedAt, dataWithPassReasons, isScanUnavailable, screenerData?.data]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, activeScreenAlertEnabled, canUpdateAlertMatches, scanMeta, screenerData?.data]);
 
     useEffect(() => {
 
@@ -766,7 +799,8 @@ export function ScreenerWidget({
     const handleToggleScreenAlert = useCallback(() => {
         if (!activeSavedScreen || !activeSavedScreenIsCurrent) return;
         const nextEnabled = !activeSavedScreen.alertEnabled;
-        const currentSymbols = !isScanUnavailable ? getScreenerMatchSymbols(dataWithPassReasons) : activeSavedScreen.alertMatchSymbols;
+        const currentSymbols = canUpdateAlertMatches && screenerData?.data
+            ? getScreenerMatchSymbols(dataWithPassReasons) : activeSavedScreen.alertMatchSymbols;
         setCustomScreens((screens) => screens.map((screen) => screen.id === activeSavedScreen.id
             ? {
                 ...screen,
@@ -774,7 +808,7 @@ export function ScreenerWidget({
                 alertMatchSymbols: nextEnabled ? currentSymbols : screen.alertMatchSymbols,
             }
             : screen));
-    }, [activeSavedScreen, activeSavedScreenIsCurrent, dataWithPassReasons, isScanUnavailable]);
+    }, [activeSavedScreen, activeSavedScreenIsCurrent, canUpdateAlertMatches, dataWithPassReasons, screenerData?.data]);
 
     const handleResetFilters = useCallback(() => {
         captureAnalyticsEvent(ANALYTICS_EVENTS.widgetAction, {

@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import suppress
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -27,6 +27,27 @@ def counting_client(on_arrival):
         base_url="http://test",
         headers={"X-Admin-Key": "test-admin-key"},
     )
+
+
+@pytest.mark.parametrize(("as_of", "stale"), [
+    ("2026-11-18T00:00:00+07:00", True),
+    ("2026-11-18T00:01:00+07:00", True),
+    ("2026-11-18T00:00:10+07:00", False),
+])
+def test_quote_freshness_excludes_daily_and_future_clocks(monkeypatch, as_of, stale):
+    now = datetime.fromisoformat("2026-11-18T00:00:11+07:00")
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr(equity, "datetime", FrozenDatetime)
+    quote = StockQuoteData(symbol="FPT", price=60_000, price_unit="VND", updated_at=now,
+                           as_of=datetime.fromisoformat(as_of))
+    meta = equity._quote_response_meta(quote, "fixture")
+    assert meta.as_of == as_of
+    assert meta.stale is stale
 
 
 @pytest.fixture(autouse=True)

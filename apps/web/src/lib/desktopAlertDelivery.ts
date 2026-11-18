@@ -14,11 +14,10 @@ type DesktopAlertEvent = {
   readonly triggerTime: string;
 };
 
-export function sendDesktopAlerts(events: readonly DesktopAlertEvent[]): boolean {
+export function sendDesktopAlerts(events: readonly DesktopAlertEvent[], now = Date.now()): boolean {
   if (events.length === 0) return false;
   const optedInAt = readDesktopAlertOptIn();
   const maySend = optedInAt !== null && readDesktopAlertPermission() === 'granted';
-  const now = Date.now();
   try {
     const raw: unknown = JSON.parse(window.localStorage.getItem(LEDGER_KEY) ?? '[]');
     if (!Array.isArray(raw)) return false;

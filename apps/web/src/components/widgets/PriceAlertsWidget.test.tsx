@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { isValidAlertThreshold, PriceAlertsWidget } from './PriceAlertsWidget';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
 import { readAlertActivity } from '@/lib/alertActivity';
+import { enableDesktopAlerts } from '@/lib/desktopAlertPreferences';
+import { fetchStockQuote, type StockQuoteView } from '@/lib/queries';
 
 const updateWidget = jest.fn();
 let widgetLocation: { dashboardId: string; tabId: string; widget: { config: Record<string, unknown> } } | undefined;
@@ -27,6 +29,7 @@ jest.mock('@/components/ui/widget-states', () => ({
 jest.mock('@/lib/widgetRuntime', () => ({ buildWidgetRuntime: jest.fn((value) => value) }));
 
 const socket = jest.mocked(useWebSocket);
+const socketState = { isConnected: false, isReceiving: false, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() };
 
 function renderWidget(symbol = 'FPT', alerts: Array<Record<string, unknown>> = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,7 +43,7 @@ describe('PriceAlertsWidget', () => {
     jest.clearAllMocks();
     window.localStorage.clear();
     widgetLocation = undefined;
-    socket.mockReturnValue({ isConnected: false, isReceiving: false, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() });
+    socket.mockReturnValue(socketState);
     Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'denied', requestPermission: jest.fn() } });
   });
 
@@ -55,15 +58,100 @@ describe('PriceAlertsWidget', () => {
     const onUpdate = socket.mock.lastCall?.[0].onUpdate;
     expect(onUpdate).toBeDefined();
 
+    const quote = { symbol: 'FPT', price_unit: 'VND', source: 'fixture', as_of: new Date().toISOString(), stale: false } as const;
     act(() => {
-      onUpdate?.({ symbol: 'FPT', price: 105 });
-      onUpdate?.({ symbol: 'FPT', price: 108 });
+      onUpdate?.({ ...quote, price: 105 });
+      onUpdate?.({ ...quote, price: 108 });
     });
 
     expect(screen.getByRole('button', { name: 'Delete triggered FPT alert' })).toBeInTheDocument();
     expect(readAlertActivity()).toEqual([expect.objectContaining({ source: 'price', symbol: 'FPT', read: false })]);
     expect(native.requestPermission).not.toHaveBeenCalled();
     expect(native).not.toHaveBeenCalled();
+  });
+
+  it.each(['stale replay', 'future timestamp', 'unknown timestamp', 'duplicate observation'] as const)(
+    'does not consume a price rule on reconnect after %s',
+    async (replay) => {
+      jest.useFakeTimers();
+      const start = Date.parse('2026-11-18T03:00:00Z');
+      jest.setSystemTime(start);
+      const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() });
+      Object.defineProperty(window, 'Notification', { configurable: true, value: native });
+      const network = jest.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+      socket.mockReturnValue({ ...socketState, isConnected: true, isReceiving: true });
+      try {
+        expect(await enableDesktopAlerts()).toBe(true);
+        renderWidget('FPT', [{ id: 'reconnect', symbol: 'FPT', condition: 'above', threshold: 100,
+          createdAt: new Date(start - 1000).toISOString(), isActive: true, notificationSent: false }]);
+        const tick = { symbol: 'FPT', price_unit: 'VND', source: 'fixture', stale: false } as const;
+        const initial = new Date(start + 1000).toISOString();
+        jest.setSystemTime(start + 2000);
+        const emit = (price: number, as_of?: string) => act(() => socket.mock.lastCall?.[0].onUpdate?.({ ...tick, price, as_of }));
+        emit(90, initial);
+
+        network.mockReturnValue(false);
+        act(() => window.dispatchEvent(new Event('offline')));
+        let receivedAt = start + (replay === 'stale replay' ? 90_000 : 4000);
+        jest.setSystemTime(receivedAt);
+        network.mockReturnValue(true);
+        act(() => window.dispatchEvent(new Event('online')));
+        const replayAt = {
+          'stale replay': initial,
+          'future timestamp': new Date(receivedAt + 30_000).toISOString(),
+          'unknown timestamp': undefined,
+          'duplicate observation': initial.replace('.000Z', '+00:00'),
+        }[replay];
+        emit(105, replayAt);
+        if (replay === 'future timestamp') {
+          receivedAt += 31_000;
+          jest.setSystemTime(receivedAt);
+          emit(105, replayAt);
+        }
+
+        expect(native).not.toHaveBeenCalled();
+        expect(readAlertActivity()).toEqual([]);
+        expect(screen.getByRole('button', { name: 'Pause FPT alert' })).toBeInTheDocument();
+        const observedAt = new Date(receivedAt + 1000).toISOString();
+        jest.setSystemTime(receivedAt + 2000);
+        emit(105, observedAt);
+        emit(105, observedAt);
+
+        expect(native).toHaveBeenCalledTimes(1);
+        expect(native.requestPermission).not.toHaveBeenCalled();
+        expect(readAlertActivity()).toEqual([expect.objectContaining({ id: 'price:reconnect', triggerTime: observedAt, read: false })]);
+      } finally {
+        network.mockRestore();
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  it('uses the source time of a cached REST quote, not when fallback polling receives it', async () => {
+    const start = Date.parse('2026-11-18T03:00:00Z');
+    jest.useFakeTimers({ now: start });
+    const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() });
+    Object.defineProperty(window, 'Notification', { configurable: true, value: native });
+    const quote = jest.mocked(fetchStockQuote);
+    const observedAt = new Date(start - 90_000).toISOString();
+    quote.mockResolvedValue({ symbol: 'FPT', price: 105, price_unit: 'VND', asOf: observedAt, stale: false } as StockQuoteView);
+    try {
+      expect(await enableDesktopAlerts()).toBe(true);
+      await act(async () => { renderWidget('FPT', [{ id: 'rest', symbol: 'FPT', condition: 'above', threshold: 100,
+        createdAt: new Date(start - 120_000).toISOString(), isActive: true, notificationSent: false }]); });
+      expect(quote).toHaveBeenCalled();
+      expect(native).not.toHaveBeenCalled();
+      expect(readAlertActivity()).toEqual([]);
+
+      const freshAt = new Date(start + 29_000).toISOString();
+      quote.mockResolvedValue({ symbol: 'FPT', price: 105, price_unit: 'VND', asOf: freshAt, stale: false } as StockQuoteView);
+      await act(async () => { await jest.advanceTimersByTimeAsync(30_000); });
+      expect(native).toHaveBeenCalledTimes(1);
+      expect(readAlertActivity()).toEqual([expect.objectContaining({ id: 'price:rest', triggerTime: freshAt, read: false })]);
+    } finally {
+      quote.mockImplementation(() => new Promise(() => undefined));
+      jest.useRealTimers();
+    }
   });
 
   it('accepts only positive finite thresholds', () => {
