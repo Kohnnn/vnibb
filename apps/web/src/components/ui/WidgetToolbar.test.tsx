@@ -64,6 +64,22 @@ test('compact controls retain parameter edits and settings access, returning foc
   expect(screen.queryByRole('button', { name: 'More controls for Long company price history' })).not.toBeInTheDocument();
 });
 
+test('keeps its source status reachable outside the compact action panel', async () => {
+  const user = userEvent.setup();
+  render(<WidgetToolbar title="Price history" healthChip={<button type="button">Source status</button>} onSettings={() => {}} />);
+
+  const more = screen.getByRole('button', { name: 'More controls for Price history' });
+  const status = screen.getByRole('button', { name: 'Source status' });
+  expect(status).toBeVisible();
+  status.focus();
+  await user.tab();
+  expect(more).toHaveFocus();
+  await user.keyboard('{Enter}');
+  const panel = screen.getByRole('dialog', { name: 'Price history controls' });
+  expect(within(panel).queryByRole('button', { name: 'Source status' })).not.toBeInTheDocument();
+  expect(within(panel).getByRole('button', { name: 'Widget settings' })).toBeVisible();
+});
+
 test('ticker popup escapes a compact panel, stays viewport-bound, and closes before its parent', () => {
   jest.useFakeTimers();
   jest.replaceProperty(window, 'innerWidth', 390);

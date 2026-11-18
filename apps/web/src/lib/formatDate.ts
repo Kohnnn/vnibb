@@ -104,6 +104,15 @@ export function formatAbsoluteTimestamp(
   return `${yyyy}-${mm}-${dd} ${hh}:${min}`
 }
 
+/** Format an as-of observation without promoting a session date to an instant. */
+export function formatSourceObservation(value: Date | string | number | null | undefined): string | null {
+  if (value === null || value === undefined || value === '') return null
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const source = typeof value === 'string' ? value.trim() : ''
+  return /^\d{4}-\d{2}-\d{2}$/.test(source) ? source : formatAbsoluteTimestamp(date)
+}
+
 /** Alias kept for callers that ask for a generic timestamp. */
 export function formatTimestamp(
   date: Date | string | number | null | undefined,

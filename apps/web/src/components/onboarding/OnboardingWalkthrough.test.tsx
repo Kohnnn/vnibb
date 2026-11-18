@@ -88,9 +88,10 @@ describe('OnboardingWalkthrough', () => {
     marketOverview.dataset.widgetType = 'market_overview'
     const marketHeatmap = document.createElement('div')
     marketHeatmap.dataset.widgetType = 'market_heatmap'
-    const topMovers = document.createElement('div')
-    topMovers.dataset.widgetType = 'top_movers'
-    document.body.append(marketOverview, marketHeatmap, topMovers)
+    const screener = document.createElement('div')
+    screener.dataset.widgetType = 'screener'
+    const scrollToScreener = jest.spyOn(screener, 'scrollIntoView')
+    document.body.append(marketOverview, marketHeatmap, screener)
 
     render(<OnboardingWalkthrough {...defaultProps} onComplete={onComplete} />)
     await user.click(screen.getByRole('button', { name: /Scan the market/ }))
@@ -99,15 +100,14 @@ describe('OnboardingWalkthrough', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }))
     expect(screen.getByText('Find concentrated strength')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Open the shortlist')).toBeInTheDocument()
+    expect(scrollToScreener).toHaveBeenCalledTimes(1)
     await user.click(screen.getByRole('button', { name: 'Next' }))
-    expect(screen.getByText('Your market scan is ready')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Explore the market' }))
 
     expect(onComplete).toHaveBeenCalledWith('scan_market', false)
     marketOverview.remove()
     marketHeatmap.remove()
-    topMovers.remove()
+    screener.remove()
   })
 
   it('closes on Escape and restores opener focus before routing', async () => {

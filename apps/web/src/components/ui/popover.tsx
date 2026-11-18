@@ -40,11 +40,12 @@ export const PopoverTrigger = ({ children, asChild }: any) => {
 
     if (asChild && React.isValidElement(children)) {
         return React.cloneElement(children as React.ReactElement<any>, {
-            onClick: handleClick
+            onClick: handleClick,
+            'aria-expanded': context.isOpen,
         });
     }
 
-    return <button onClick={handleClick}>{children}</button>;
+    return <button type="button" onClick={handleClick} aria-expanded={context.isOpen}>{children}</button>;
 };
 
 export const PopoverContent = ({ children, className = '', align = 'center' }: any) => {

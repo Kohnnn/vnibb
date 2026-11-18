@@ -62,14 +62,47 @@ import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@
 import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
 import { getWidgetExportData } from '@/lib/widgetRuntime';
+import type { WidgetRuntimeLayoutHint } from './types';
 
 interface WidgetRuntimePayload {
-    __widgetRuntime?: {
-        provenance?: Partial<ExportProvenance>;
-        exportData?: unknown;
+    readonly __widgetRuntime?: {
+        readonly layoutHint?: WidgetRuntimeLayoutHint;
+        readonly provenance?: Partial<ExportProvenance>;
+        readonly exportData?: unknown;
     };
 }
 
+// Outgoing context allowlist, not another runtime schema. The additive fields
+// can be forwarded when published without making older producers supply them.
+const agentProvenanceFields = new Set([
+    'sourceLabel', 'updatedAt', 'fetchedAt', 'period', 'periodScope', 'units', 'basis',
+    'coverage', 'adjustmentMode', 'cached', 'stale', 'localOnly', 'expectedClosedSession',
+    'observationStatus', 'refreshStatus',
+]);
+const MAX_AGENT_QUALIFIER_LENGTH = 500;
+const MAX_AGENT_WARNINGS = 5;
+
+function projectAgentProvenance(provenance: Partial<ExportProvenance>, widgetType: WidgetType) {
+    const publicFields: Record<string, string | number | boolean | null | string[]> = {};
+    const entries: [string, unknown][] = Object.entries(provenance);
+    for (const [key, value] of entries) {
+        if (!agentProvenanceFields.has(key)) continue;
+        if (typeof value === 'string') publicFields[key] = value.slice(0, MAX_AGENT_QUALIFIER_LENGTH);
+        else if (value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+            publicFields[key] = value;
+        } else if (value instanceof Date && (key === 'updatedAt' || key === 'fetchedAt')) {
+            publicFields[key] = value.toJSON();
+        }
+    }
+
+    // Cash Flow publishes admission/withholding notices here. Other publishers
+    // can put raw refresh errors in the same field; don't forward those messages.
+    if (widgetType === 'cash_flow' && provenance.warnings?.length) {
+        publicFields.warnings = provenance.warnings.slice(0, MAX_AGENT_WARNINGS)
+            .map(warning => warning.slice(0, MAX_AGENT_QUALIFIER_LENGTH));
+    }
+    return publicFields;
+}
 
 // Multi-select parameter interface
 export interface WidgetMultiSelectParam {
@@ -97,7 +130,7 @@ export interface WidgetWrapperProps {
     showGroupLabels?: boolean; // Controls visibility of sync badge
     parameters?: WidgetParameter[]; // Inline parameter controls (OpenBB-style)
     multiSelectParams?: WidgetMultiSelectParam[]; // Multi-select params (for indicators)
-    data?: any; // Data for export (CSV/JSON)
+    data?: unknown; // Fallback data for export (CSV/JSON) and agent context
     onRemove?: () => void;
 
     onMaximize?: () => void;
@@ -167,7 +200,10 @@ export function WidgetWrapper({
     const [isTickerDropdownOpen, setIsTickerDropdownOpen] = useState(false);
     const [showCapabilities, setShowCapabilities] = useState(false);
     const [widgetGroup, setWidgetGroup] = useState<WidgetGroupId>(initialWidgetGroup);
-    const [internalData, setInternalData] = useState<any>(widgetData);
+    const [publishedData, setPublishedData] = useState<unknown>();
+    // A mount-time prop effect can overwrite the child's first publication.
+    // Keep the fallback separate so the child's current empty/withheld state wins.
+    const internalData = publishedData === undefined ? widgetData : publishedData;
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
     const tickerTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -201,12 +237,6 @@ export function WidgetWrapper({
     useEffect(() => {
         setWidgetGroup(initialWidgetGroup);
     }, [initialWidgetGroup]);
-
-    // Sync internal data with prop if provided
-    useEffect(() => {
-        if (widgetData) setInternalData(widgetData);
-    }, [widgetData]);
-
 
     useEffect(() => {
         setIsCollapsed(initialCollapsed);
@@ -351,48 +381,19 @@ export function WidgetWrapper({
         [currentWidget]
     );
 
-    // Dashboard-wide source-health chip. Widgets opt in by publishing a
-    // `provenance` object through their runtime payload (onDataChange). When a
-    // widget does not publish provenance, no chip is shown, so this stays a
-    // progressive enhancement rather than a forced UI change.
-    const publishedProvenance = useMemo<Partial<ExportProvenance> | undefined>(() => {
-        if (
-            internalData &&
-            typeof internalData === 'object' &&
-            !Array.isArray(internalData)
-        ) {
-            return (internalData as WidgetRuntimePayload).__widgetRuntime?.provenance;
-        }
-        return undefined;
-    }, [internalData]);
+    const widgetRuntime = internalData && typeof internalData === 'object' && !Array.isArray(internalData)
+        ? (internalData as WidgetRuntimePayload).__widgetRuntime
+        : undefined;
+    const publishedProvenance = widgetRuntime?.provenance;
 
-    const widgetHealth = useMemo(() => {
-        if (!publishedProvenance) return null;
-        return deriveWidgetHealth({
-            cached: publishedProvenance.cached,
-            stale: publishedProvenance.stale,
-            localOnly: publishedProvenance.localOnly,
-            updatedAt: publishedProvenance.updatedAt,
-            coverage: publishedProvenance.coverage,
-            marketClosed: publishedProvenance.marketClosed,
-            sourceLabel: publishedProvenance.sourceLabel,
-        });
-    }, [publishedProvenance]);
-
+    // Keep the whole runtime provenance intact so the shared helper, not the
+    // toolbar, decides the precedence of observation, delivery, and refresh.
+    const widgetHealth = useMemo(
+        () => publishedProvenance ? deriveWidgetHealth(publishedProvenance) : null,
+        [publishedProvenance]
+    );
     const healthChip = widgetHealth ? (
-        <WidgetHealthChip
-            health={widgetHealth}
-            details={{
-                sourceLabel: publishedProvenance?.sourceLabel,
-                apiGroup: publishedProvenance?.apiGroup,
-                endpoint: publishedProvenance?.endpoint,
-                updatedAt: publishedProvenance?.updatedAt,
-                fetchedAt: publishedProvenance?.fetchedAt,
-                cached: publishedProvenance?.cached,
-                coverage: publishedProvenance?.coverage,
-                adjustmentMode: publishedProvenance?.adjustmentMode,
-            }}
-        />
+        <WidgetHealthChip health={widgetHealth} details={publishedProvenance} />
     ) : null;
 
     const trackWidgetAction = (action: string, properties?: Record<string, string | number | boolean | string[] | null | undefined>) => {
@@ -656,17 +657,11 @@ export function WidgetWrapper({
         // Source-aware provenance: combine what the wrapper knows (widget type,
         // title, symbol) with any provenance the child widget published through
         // its runtime payload, so every export remains self-describing.
-        const runtimeProvenance =
-            internalData &&
-            typeof internalData === 'object' &&
-            !Array.isArray(internalData)
-                ? (internalData as WidgetRuntimePayload).__widgetRuntime?.provenance
-                : undefined;
         const provenance: ExportProvenance = {
             widgetType,
             widgetTitle: title,
             symbol: displaySymbol || undefined,
-            ...runtimeProvenance,
+            ...publishedProvenance,
         };
 
         switch (format) {
@@ -688,7 +683,12 @@ export function WidgetWrapper({
     };
 
     const buildCopilotContext = (): Record<string, unknown> => {
-        const sourceData = exportableInternalData ?? widgetData;
+        const admittedData = widgetRuntime?.exportData;
+        // An empty publication is authoritative. Legacy publishers without an
+        // explicit projection can still use their existing exportable payload.
+        const sourceData = widgetRuntime?.layoutHint?.empty || (Array.isArray(admittedData) && admittedData.length === 0)
+            ? null
+            : admittedData !== undefined ? admittedData : exportableInternalData ?? getWidgetExportData(widgetData);
         let dataSample: unknown = null;
 
         if (Array.isArray(sourceData)) {
@@ -709,6 +709,7 @@ export function WidgetWrapper({
             dashboardId,
             widgetConfig: currentWidget?.config || null,
             dataSample,
+            ...(publishedProvenance && { dataProvenance: projectAgentProvenance(publishedProvenance, widgetType) }),
         };
     };
 
@@ -962,7 +963,7 @@ export function WidgetWrapper({
             {widgetHost && !isCollapsed && createPortal(
                 <WidgetHeaderVisibilityProvider hideHeader>
                     <WidgetErrorBoundary widgetName={title} onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}>
-                        {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setInternalData })}
+                        {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setPublishedData })}
                     </WidgetErrorBoundary>
                 </WidgetHeaderVisibilityProvider>, widgetHost
             )}

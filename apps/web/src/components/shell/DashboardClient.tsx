@@ -5,7 +5,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
-import { Sidebar, Header, TabBar, RightSidebar, MobileNav, FreshnessBanner, WhatsNewPanel } from '@/components/layout';
+import { Sidebar, Header, TabBar, RightSidebar, MobileNav, DashboardHealth, WhatsNewPanel } from '@/components/layout';
 import { ResponsiveDashboardGrid, type LayoutItem } from '@/components/layout/DashboardGrid';
 import { useDashboard } from '@/contexts/DashboardContext';
 import { canEditDashboard } from '@/contexts/DashboardContext/helpers';
@@ -66,10 +66,10 @@ import {
 } from '@/lib/userPreferences';
 import type { WidgetInstance, WidgetType, WidgetConfig, Dashboard } from '@/types/dashboard';
 import type { WidgetGroupId } from '@/types/widget';
-import { DASHBOARD_TEMPLATES, type DashboardTemplate } from '@/types/dashboard-templates';
+import { DASHBOARD_TEMPLATES, MARKET_SCAN_TEMPLATE_ID, type DashboardTemplate } from '@/types/dashboard-templates';
 import { getStarterForTemplate } from '@/lib/researchStarters';
 import type { ResearchStarter, StarterPromptKey } from '@/lib/researchStarters';
-import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield, X } from 'lucide-react';
+import { AlertCircle, Grid3X3, PlusCircle, RefreshCw, Shield } from 'lucide-react';
 
 const WidgetLibrary = dynamic(() => import('@/components/widgets').then((m) => ({ default: m.WidgetLibrary as unknown as React.ComponentType<{ isOpen: boolean; onClose: () => void }> })), { ssr: false });
 const WidgetSettingsModal = dynamic(() => import('@/components/modals').then((m) => ({ default: m.WidgetSettingsModal })), { ssr: false });
@@ -100,27 +100,10 @@ const TECHNICAL_DASHBOARD_ID = 'default-technical';
 const QUANT_DASHBOARD_ID = 'default-quant';
 const GLOBAL_MARKETS_DASHBOARD_ID = 'default-global-markets';
 const FUNDAMENTALS_TAB_NAME = 'Fundamentals';
-// One shared key for the banner and every widget it advertises (issue #101).
-const FUNDAMENTALS_PERIOD_SYNC_GROUP = FUNDAMENTAL_PERIOD_SYNC_GROUP;
 type TemplateApplyStatus = {
     message: string;
     tone: 'success' | 'warning';
 };
-
-type DashboardSyncStatus = 'idle' | 'syncing' | 'synced' | 'local' | 'error';
-
-export function DashboardSyncStatusMessage({ enabled, status }: { enabled: boolean; status: DashboardSyncStatus }) {
-    if (status === 'syncing') {
-        return <div role="status" className="mx-3 mt-2 text-xs text-[var(--text-secondary)]">Syncing dashboard changes…</div>;
-    }
-    if (status === 'error') {
-        return <div role="alert" className="mx-3 mt-2 text-xs text-[var(--color-warning)]">Cloud sync failed. Check your connection and refresh to try again.</div>;
-    }
-    if (!enabled || status === 'idle' || status === 'local') {
-        return <div role="status" className="mx-3 mt-2 text-xs text-[var(--text-secondary)]">Saved on this device</div>;
-    }
-    return null;
-}
 
 const ADMIN_MANAGED_SYSTEM_IDS = new Set([
     MAIN_FUNDAMENTAL_DASHBOARD_ID,
@@ -219,15 +202,11 @@ function DashboardContent() {
     });
 
     const starterTemplates = useMemo(() => {
-        const preferredIds = ['getting-started', 'fundamental-analyst', 'global-markets', 'earnings-season'];
+        const preferredIds = [MARKET_SCAN_TEMPLATE_ID, 'fundamental-analyst', 'global-markets', 'earnings-season'];
         return preferredIds
             .map((id) => DASHBOARD_TEMPLATES.find((template) => template.id === id))
             .filter((template): template is DashboardTemplate => Boolean(template));
     }, []);
-    const migrationNoticeClass = migrationNotice?.tone === 'warning'
-        ? 'border-[var(--color-state-border)] bg-[var(--color-state-bg)] text-[var(--text-primary)]'
-        : 'border-[var(--border-strong)] bg-[var(--bg-secondary)] text-[var(--text-primary)]';
-
     const updateViewport = useCallback(() => {
         if (typeof window !== 'undefined') {
             setViewportWidth(window.innerWidth);
@@ -564,7 +543,7 @@ function DashboardContent() {
         activeDashboard?.id === MAIN_FUNDAMENTAL_DASHBOARD_ID &&
         activeTab?.name === FUNDAMENTALS_TAB_NAME;
     const sharedFundamentalPeriodKey = isSystemFundamentalsTab
-        ? `${FUNDAMENTALS_PERIOD_SYNC_GROUP}:${stockGlobalSymbol.toUpperCase()}`
+        ? `${FUNDAMENTAL_PERIOD_SYNC_GROUP}:${stockGlobalSymbol.toUpperCase()}`
         : undefined;
     const { period: sharedFundamentalPeriod, setPeriod: setSharedFundamentalPeriod } = usePeriodState({
         widgetId: `dashboard-period-${activeDashboard?.id ?? 'none'}-${activeTab?.id ?? 'none'}`,
@@ -827,57 +806,6 @@ function DashboardContent() {
         }
     }, [activeDashboard?.id, canEditCurrentDashboard, isEditing]);
 
-    // One-time discoverability hint: editing is locked by default and the only
-    // affordance is the header Lock/Unlock toggle, which users miss. Surface a
-    // single dismissible toast the first time someone lands on an editable,
-    // populated dashboard while not editing.
-    // DEF-05: edit-hint toast.
-    //
-    // Shown exactly once per browser after a dashboard renders its first set
-    // of widgets, and only when:
-    //   * the dashboard is editable by the current user
-    //   * the user is NOT already in edit mode
-    //   * the active tab has at least one widget (no point hinting on an empty tab)
-    //   * the dashboard walkthrough is not currently open
-    //
-    // The hint surfaces a Toast that names the header "Layout Locked" / "Layout Unlocked"
-    // toggle; the exact label is rendered as "Click "Layout Locked" in the header to drag,
-    // resize, and rearrange widgets." and the action button immediately enables edit mode
-    // by calling handleEditToggle(). The flag persists in localStorage so the hint never
-    // reappears after the first dismissal; failures to read/write localStorage are
-    // deliberately swallowed so the hint may show again rather than blocking.
-    useEffect(() => {
-        if (!mounted || typeof window === 'undefined') return;
-        if (isWalkthroughOpen || shouldShowDashboardWalkthrough()) return;
-        if (!canEditCurrentDashboard || isEditing) return;
-        if (!activeTab?.widgets?.length) return;
-
-        const EDIT_HINT_KEY = 'vnibb-edit-hint-seen';
-        try {
-            if (localStorage.getItem(EDIT_HINT_KEY) === 'true') return;
-        } catch {
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            toast('Customize this dashboard', {
-                description: 'Click "Layout Locked" in the header to drag, resize, and rearrange widgets.',
-                duration: 8000,
-                action: {
-                    label: 'Edit now',
-                    onClick: () => handleEditToggle(),
-                },
-            });
-            try {
-                localStorage.setItem(EDIT_HINT_KEY, 'true');
-            } catch {
-                // ignore persistence failure; hint simply may show again
-            }
-        }, 1800);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [mounted, isWalkthroughOpen, canEditCurrentDashboard, isEditing, activeTab?.widgets?.length, handleEditToggle]);
-
     // Nudge container-measuring embeds to re-measure after dashboard/tab/widget
     // changes. Shared implementation with DashboardGrid via useResizeNudge.
     useResizeNudge([activeDashboard?.id, activeTab?.id, activeTab?.widgets, mounted], 140);
@@ -1060,7 +988,7 @@ function DashboardContent() {
 
     const handleOnboardingGoalSelect = useCallback((goalId: OnboardingGoalId, symbol?: string): boolean => {
         if (goalId === 'scan_market') {
-            const template = DASHBOARD_TEMPLATES.find((item) => item.id === 'market-overview');
+            const template = DASHBOARD_TEMPLATES.find((item) => item.id === MARKET_SCAN_TEMPLATE_ID);
             if (!template || template.widgets.length === 0) return false;
             try {
                 const dashboard = createDashboard({ name: `${template.name} Workspace` });
@@ -1073,7 +1001,7 @@ function DashboardContent() {
                 return true;
             } catch (err) {
                 console.error('[handleOnboardingGoalSelect] failed', err);
-                setTemplateApplyStatus({ message: 'Could not open the market overview.', tone: 'warning' });
+                setTemplateApplyStatus({ message: 'Could not open Market Scan.', tone: 'warning' });
                 return false;
             }
         }
@@ -1346,53 +1274,18 @@ function DashboardContent() {
                     onExpandAll={canEditCurrentDashboard ? handleExpandAll : undefined}
                     unitDisplay={unitConfig.display}
                     onUnitDisplayChange={setUnit}
+                    globalStatus={(
+                        <DashboardHealth
+                            backendSync={backendSync}
+                            migrationNotice={migrationNotice}
+                            onDismissMigrationNotice={dismissMigrationNotice}
+                        />
+                    )}
                 />
 
                 <OfflineBanner />
-
-                <FreshnessBanner />
-
-                <DashboardSyncStatusMessage enabled={backendSync.enabled} status={backendSync.status} />
-
-                {backendSync.loadPaused && (
-                    <div
-                        role="status"
-                        className="mx-3 mt-2 rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
-                    >
-                        Cross-device sync is one-way while you have custom workspaces: changes here are
-                        saved to the cloud, but this device won&apos;t auto-pull layouts from other devices.
-                    </div>
-                )}
-
                 <TabBar symbol={stockGlobalSymbol} />
-
                 <WhatsNewPanel />
-
-                {migrationNotice ? (
-                    <div
-                        role={migrationNotice.tone === 'warning' ? 'alert' : 'status'}
-                        className={`mx-2 mt-2 flex items-start gap-2 rounded-md border px-3 py-2 text-xs sm:mx-3 lg:mx-4 ${migrationNoticeClass}`}
-                    >
-                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <div className="min-w-0 flex-1">
-                            <div className="font-bold uppercase tracking-[0.14em]">
-                                {migrationNotice.message}
-                            </div>
-                            <div className="mt-1 leading-5 opacity-85">
-                                {migrationNotice.detail}
-                            </div>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={dismissMigrationNotice}
-                            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-current/20 text-current/80 hover:bg-white/10 hover:text-current"
-                            aria-label="Dismiss dashboard storage notice"
-                            title="Dismiss"
-                        >
-                            <X size={14} />
-                        </button>
-                    </div>
-                ) : null}
 
                 <div className="relative flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)] p-2 sm:p-3 lg:p-4">
                     {showAdminSystemLayoutControls && activeDashboard ? (
@@ -1484,22 +1377,16 @@ function DashboardContent() {
                                 </div>
                             ) : null}
                             {isSystemFundamentalsTab ? (
-                                <div className="mb-2 flex flex-col gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2.5">
-                                    <div className="flex flex-wrap items-center justify-between gap-2">
-                                        <div>
-                                            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
-                                                Financial Period View
-                                            </div>
-                                            <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                                                Syncs Financial Ratios, Income Statement, Balance Sheet, and Cash Flow for {stockGlobalSymbol}.
-                                            </div>
-                                        </div>
-                                        <PeriodToggle
-                                            value={sharedFundamentalPeriod}
-                                            onChange={setSharedFundamentalPeriod}
-                                            options={['FY', 'Q', 'TTM']}
-                                        />
-                                    </div>
+                                <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-[var(--border-subtle)] px-1 pb-2">
+                                    <span className="text-xs font-medium text-[var(--text-secondary)]">
+                                        Shared financial period <span className="text-[var(--text-muted)]">· {stockGlobalSymbol}</span>
+                                    </span>
+                                    <PeriodToggle
+                                        label="Shared financial period"
+                                        value={sharedFundamentalPeriod}
+                                        onChange={setSharedFundamentalPeriod}
+                                        options={['FY', 'Q', 'TTM']}
+                                    />
                                 </div>
                             ) : null}
                             {isEditing && canEditCurrentDashboard && !isGridEditable ? (
