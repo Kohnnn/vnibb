@@ -477,7 +477,7 @@ function AgentDataPublisher({ payload, onDataChange }: {
   return <output aria-label="Reported widget data" />;
 }
 
-async function downloadWidgetCSV(user: ReturnType<typeof userEvent.setup>, title: string) {
+async function captureWidgetExport(user: ReturnType<typeof userEvent.setup>, title: string, format: 'CSV' | 'JSON') {
   const createObjectURL = URL.createObjectURL;
   const revokeObjectURL = URL.revokeObjectURL;
   const downloads: Blob[] = [];
@@ -490,31 +490,65 @@ async function downloadWidgetCSV(user: ReturnType<typeof userEvent.setup>, title
   try {
     await user.click(screen.getByRole('button', { name: `Widget actions for ${title}` }));
     await user.click(screen.getByRole('menuitem', { name: 'Export' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Export as CSV' }));
+    await user.click(screen.getByRole('menuitem', { name: `Export as ${format}` }));
 
-    expect(click).toHaveBeenCalledTimes(1);
     const [download] = downloads;
-    if (downloads.length !== 1 || !download) throw new Error(`Expected one widget CSV, got ${downloads.length}`);
-    expect(download.type).toBe('text/csv');
-    const text = await new Promise<string>((resolve, reject) => {
+    expect(click).toHaveBeenCalledTimes(downloads.length);
+    if (!download) return null;
+    expect(downloads).toHaveLength(1);
+    expect(download.type).toBe(format === 'CSV' ? 'text/csv' : 'application/json');
+    return await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
       reader.onerror = () => reject(reader.error);
       reader.readAsText(download);
     });
-    const lines = text.trimEnd().split('\n');
-    // Split at the first comma; these metadata assertions use scalar CSV cells.
-    const metadata = new Map(lines.filter(line => line.startsWith('# ')).map(line => {
-      const separator = line.indexOf(',');
-      return [line.slice(2, separator), line.slice(separator + 1)];
-    }));
-    return { metadata, rows: lines.filter(line => !line.startsWith('# ')) };
   } finally {
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
     click.mockRestore();
   }
 }
+
+async function downloadWidgetCSV(user: ReturnType<typeof userEvent.setup>, title: string) {
+  const text = await captureWidgetExport(user, title, 'CSV');
+  if (text === null) throw new Error('Expected one widget CSV');
+  const lines = text.trimEnd().split('\n');
+  // Split at the first comma; these metadata assertions use scalar CSV cells.
+  const metadata = new Map(lines.filter(line => line.startsWith('# ')).map(line => {
+    const separator = line.indexOf(',');
+    return [line.slice(2, separator), line.slice(separator + 1)];
+  }));
+  return { metadata, rows: lines.filter(line => !line.startsWith('# ')) };
+}
+
+test.each([
+  { name: 'withheld without a projection', empty: true, projection: {}, expected: null, csv: null, sample: null },
+  { name: 'explicit null', empty: false, projection: { exportData: null }, expected: null, csv: null, sample: null },
+  { name: 'explicit empty rows', empty: true, projection: { exportData: [] }, expected: [], csv: null, sample: null },
+  { name: 'observed zero', empty: false, projection: { exportData: 0 }, expected: 0, csv: ['value', '0'], sample: 0 },
+  {
+    name: 'projected coverage summary', empty: true, projection: { exportData: { observation: null } },
+    expected: { observation: null }, csv: ['observation'], sample: null,
+  },
+])('JSON and CSV respect $name instead of raw fallback rows', async ({ empty, projection, expected, csv, sample }) => {
+  const user = userEvent.setup();
+  const onCopilotClick = jest.fn();
+  render(<WidgetWrapper id="screener" title="Cash Flow" widgetType="cash_flow" dashboardId="dashboard" tabId="tab"
+    data={[{ propFallback: 123 }]} onCopilotClick={onCopilotClick}>
+    <AgentDataPublisher payload={{
+      __widgetRuntime: { layoutHint: { empty }, provenance: { period: 'FY' }, ...projection },
+      data: [{ runtimeFallback: 999 }],
+    }} />
+  </WidgetWrapper>);
+
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({ dataSample: sample }));
+  const json = await captureWidgetExport(user, 'Cash Flow', 'JSON');
+  expect(JSON.parse(json ?? '{}')).toEqual({ _provenance: expect.objectContaining({ period: 'FY' }), data: expected });
+  if (csv === null) expect(await captureWidgetExport(user, 'Cash Flow', 'CSV')).toBeNull();
+  else expect((await downloadWidgetCSV(user, 'Cash Flow')).rows).toEqual(csv);
+});
 
 test('the wrapped Heatmap retains partial coverage on a cache hit in its toolbar and CSV', async () => {
   jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-13T05:30:00Z'));

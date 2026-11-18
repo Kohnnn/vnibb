@@ -72,6 +72,17 @@ interface WidgetRuntimePayload {
     };
 }
 
+function readWidgetRuntime(data: unknown) {
+    return data && typeof data === 'object' && !Array.isArray(data)
+        ? (data as WidgetRuntimePayload).__widgetRuntime
+        : undefined;
+}
+
+function readAdmittedWidgetData(data: unknown, runtime = readWidgetRuntime(data)) {
+    if (runtime?.layoutHint?.empty && runtime.exportData === undefined) return null;
+    return getWidgetExportData(data);
+}
+
 // Outgoing context allowlist, not another runtime schema. The additive fields
 // can be forwarded when published without making older producers supply them.
 const agentProvenanceFields = new Set([
@@ -372,18 +383,17 @@ export function WidgetWrapper({
         rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
             ? rawExchangeBadge
             : null;
-    const exportableInternalData = useMemo(
-        () => getWidgetExportData(internalData),
-        [internalData],
-    );
+    const widgetRuntime = readWidgetRuntime(internalData);
+    const dataToExport = useMemo(() => {
+        const data = readAdmittedWidgetData(internalData, widgetRuntime);
+        // An older publisher may supply only metadata in its runtime envelope.
+        return data === undefined && internalData !== widgetData ? readAdmittedWidgetData(widgetData) : data;
+    }, [internalData, widgetData, widgetRuntime]);
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]
     );
 
-    const widgetRuntime = internalData && typeof internalData === 'object' && !Array.isArray(internalData)
-        ? (internalData as WidgetRuntimePayload).__widgetRuntime
-        : undefined;
     const publishedProvenance = widgetRuntime?.provenance;
 
     // Keep the whole runtime provenance intact so the shared helper, not the
@@ -648,7 +658,6 @@ export function WidgetWrapper({
 
     const handleExport = async (format: 'csv' | 'json' | 'png') => {
         const filename = `${title.replace(/\s+/g, '_')}_${displaySymbol}_${new Date().toISOString().split('T')[0]}`;
-        const dataToExport = exportableInternalData || widgetData;
 
         trackWidgetAction('export', {
             export_format: format,
@@ -666,13 +675,15 @@ export function WidgetWrapper({
 
         switch (format) {
             case 'csv':
-                if (dataToExport) {
-                    const rows = Array.isArray(dataToExport) ? dataToExport : [dataToExport];
+                if (dataToExport !== undefined && dataToExport !== null) {
+                    const rows = Array.isArray(dataToExport)
+                        ? dataToExport
+                        : [typeof dataToExport === 'object' ? dataToExport : { value: dataToExport }];
                     exportToCSV(rows, filename, provenance);
                 }
                 break;
             case 'json':
-                if (dataToExport) {
+                if (dataToExport !== undefined) {
                     exportToJSON(dataToExport, filename, provenance);
                 }
                 break;
@@ -683,12 +694,10 @@ export function WidgetWrapper({
     };
 
     const buildCopilotContext = (): Record<string, unknown> => {
-        const admittedData = widgetRuntime?.exportData;
-        // An empty publication is authoritative. Legacy publishers without an
-        // explicit projection can still use their existing exportable payload.
-        const sourceData = widgetRuntime?.layoutHint?.empty || (Array.isArray(admittedData) && admittedData.length === 0)
+        // Empty widgets can export an explicit coverage summary, but it is not an observation sample.
+        const sourceData = widgetRuntime?.layoutHint?.empty || (Array.isArray(dataToExport) && dataToExport.length === 0)
             ? null
-            : admittedData !== undefined ? admittedData : exportableInternalData ?? getWidgetExportData(widgetData);
+            : dataToExport;
         let dataSample: unknown = null;
 
         if (Array.isArray(sourceData)) {
