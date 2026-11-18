@@ -23,25 +23,30 @@ const fridayClosure = {
   checked_at: '2026-11-13T10:01:00Z',
   valid_until: '2026-11-16T02:00:00Z',
 };
+const coverageWarning = '1 of 60 requested sessions observed';
 
-function fridayWindow(observation: string, warning: string | null = null) {
+function fridayWindow(observation: string, refreshWarning?: string) {
+  const warnings = refreshWarning ? [refreshWarning, coverageWarning] : [coverageWarning];
   const meta = {
     count: 1, last_data_date: observation,
-    // 57 exchange sessions: the Aug 31–Sep 2 closures are not sessions.
-    requested_start_date: '2026-08-24', requested_end_date: friday, requested_session_count: 57,
+    // Default 3M request: 60 exchange sessions ending Friday, excluding the Aug 31 through Sep 2 closures.
+    requested_start_date: '2026-08-19', requested_end_date: friday, requested_session_count: 60,
     observed_start_date: observation, observed_end_date: observation, observed_session_count: 1,
-    last_validated_session: observation, gap_session_count: 56, coverage_status: 'partial',
-    window_contract: 'sessions', calendar_verified: true, latest_closed_session: fridayClosure,
-    warnings: warning ? [warning] : [],
+    last_validated_session: observation, gap_session_count: 59, coverage_status: 'partial',
+    window_contract: 'sessions', calendar_verified: true, latest_closed_session: fridayClosure, window_net_volume: 0,
+    warnings,
   } as const;
   return {
-    symbol: 'HPG', count: 1, error: warning, meta,
+    symbol: 'HPG', count: 1, error: warnings.join('; '), meta,
     data: [{ symbol: 'HPG', date: observation, buy_volume: 1200, sell_volume: 1200 }],
   } satisfies ForeignTradingResponse;
 }
 
 describe('Foreign Trading weekend provenance (#270)', () => {
-  beforeEach(() => jest.useFakeTimers());
+  beforeEach(() => {
+    jest.mocked(getForeignTrading).mockReset();
+    jest.useFakeTimers();
+  });
   afterEach(() => {
     jest.restoreAllMocks();
     jest.useRealTimers();
@@ -52,7 +57,7 @@ describe('Foreign Trading weekend provenance (#270)', () => {
       case: 'a failed refresh on Saturday retains Friday',
       now: '2026-11-14T06:00:00Z',
       observation: '2026-11-13',
-      warning: 'live foreign trading feed timed out; using cached database fallback',
+      refreshWarning: 'live foreign trading feed timed out; using cached database fallback',
       bodyStatus: /^Cached snapshot/,
       status: 'cached',
       cached: true,
@@ -64,7 +69,6 @@ describe('Foreign Trading weekend provenance (#270)', () => {
       case: 'a Thursday observation misses the Friday session on Sunday',
       now: '2026-11-15T06:00:00Z',
       observation: '2026-11-12',
-      warning: null,
       bodyStatus: /^Stale/,
       status: 'stale',
       cached: false,
@@ -76,7 +80,6 @@ describe('Foreign Trading weekend provenance (#270)', () => {
       case: 'the envelope contains only a coverage warning on Saturday',
       now: '2026-11-14T06:00:00Z',
       observation: '2026-11-13',
-      warning: '56 requested market sessions are missing',
       bodyStatus: /^Partial coverage/,
       status: 'coverage_gap',
       cached: false,
@@ -85,12 +88,13 @@ describe('Foreign Trading weekend provenance (#270)', () => {
       refreshStatus: 'succeeded',
     },
   ])('keeps source health and coverage when $case', async ({
-    now, observation, warning, bodyStatus, status, cached, stale, expectedClosedSession, refreshStatus,
+    now, observation, refreshWarning, bodyStatus, status, cached, stale, expectedClosedSession, refreshStatus,
   }) => {
     const receiptTime = Date.parse(now);
     jest.setSystemTime(receiptTime);
     jest.spyOn(Date, 'now').mockReturnValue(receiptTime);
-    const response = fridayWindow(observation, warning);
+    jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(300);
+    const response = fridayWindow(observation, refreshWarning);
     jest.mocked(getForeignTrading).mockResolvedValue(response);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const onDataChange = jest.fn<void, [WidgetDataPayload]>();
@@ -103,19 +107,22 @@ describe('Foreign Trading weekend provenance (#270)', () => {
 
     try {
       expect(await screen.findByText(bodyStatus)).toBeVisible();
+      expect(getForeignTrading).toHaveBeenCalledWith('HPG', { limit: undefined, sessions: 60 });
+      expect(screen.getByText(/1\/60 sessions.*59 gaps/)).toBeVisible();
+      expect(screen.getByText('Unavailable')).toBeVisible();
+      expect(screen.getByText('Flat 0')).toBeVisible();
       const payload = onDataChange.mock.lastCall?.[0];
       const provenance = payload?.__widgetRuntime?.provenance;
-      expect(screen.getByText(/1\/57 sessions/)).toBeVisible();
       expect(provenance).toMatchObject({
         cached, stale, expectedClosedSession, refreshStatus,
         updatedAt: observation, fetchedAt: receiptTime, marketClosed: true, coverage: 'partial',
         observationStatus: 'available',
         coverageDetail: {
-          requestedStart: '2026-08-24', requestedEnd: friday, requestedSessions: 57,
+          requestedStart: '2026-08-19', requestedEnd: friday, requestedSessions: 60,
           observedStart: observation, observedEnd: observation, observedSessions: 1,
-          lastValidatedSession: observation, gapSessions: 56, calendarVerified: true,
+          lastValidatedSession: observation, gapSessions: 59, calendarVerified: true,
         },
-        warnings: warning ? [warning] : [],
+        warnings: response.meta.warnings,
       });
       if (!provenance) throw new Error('Missing widget provenance');
       const health = deriveWidgetHealth(provenance);

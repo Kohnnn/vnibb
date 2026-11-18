@@ -26,8 +26,8 @@ jest.mock('@/components/ui/WidgetContainer', () => ({
 
 const symbol = 'FPT';
 const published = { periodSyncGroup: 'fundamental-core', hidePeriodToggle: true };
-const response = <T,>(data: T[]) => ({
-  data: { symbol, count: data.length, data }, error: null, isLoading: false, isFetching: false,
+const response = <T,>(data: T[], ticker = symbol) => ({
+  data: { symbol: ticker, count: data.length, data }, error: null, isLoading: false, isFetching: false,
   isError: false, refetch: jest.fn(), dataUpdatedAt: 1780000000000,
 });
 const basis = { symbol, source: 'synthetic-controlled', currency: 'VND', value_unit: 'VND', consolidation_basis: 'consolidated' };
@@ -38,8 +38,8 @@ const fyIncome = { ...basis, period: '2025', flow_basis: 'annual', revenue: 98_4
 const qIncome = { ...basis, period: 'Q3-2026', flow_basis: 'single_quarter', revenue: 26_002_944_000_000,
   unit_metadata: { revenue: vnd } };
 
-function PublishedPeriodControl() {
-  const { period, setPeriod } = usePeriodState({ widgetId: 'published-fundamental-period', sharedKey: 'fundamental-core:FPT' });
+function PublishedPeriodControl({ ticker = symbol }: { ticker?: string }) {
+  const { period, setPeriod } = usePeriodState({ widgetId: 'published-fundamental-period', sharedKey: `fundamental-core:${ticker}` });
   return <PeriodToggle label="Published period" value={period} onChange={setPeriod} options={['FY', 'Q', 'TTM']} />;
 }
 
@@ -138,32 +138,35 @@ function renderPublishedGroup(responseMode: 'mixed' | 'quarter-only' = 'mixed') 
   const [ratios, , balance, cash] = tiles;
   const selectRows = <Annual, Quarter>(annual: readonly Annual[], quarter: Quarter): Array<Annual | Quarter> =>
     responseMode === 'mixed' ? [...annual, quarter] : [quarter];
-  jest.mocked(useFinancialRatios).mockReturnValue(response(selectRows(
+  const forSymbol = (ticker: string, rows: object[]) => response(rows.map(row => ({ ...row, symbol: ticker })), ticker) as never;
+  jest.mocked(useFinancialRatios).mockImplementation(ticker => forSymbol(ticker, selectRows(
     [{ period: '2025', pe: ratios.fy[0] }], { period: 'Q3-2026', pe: ratios.q[0] },
-  )) as never);
-  jest.mocked(useIncomeStatement).mockReturnValue(response(selectRows([fyIncome], qIncome)) as never);
-  jest.mocked(useBalanceSheet).mockReturnValue(response(selectRows([
+  )));
+  jest.mocked(useIncomeStatement).mockImplementation(ticker => forSymbol(ticker, selectRows([fyIncome], qIncome)));
+  jest.mocked(useBalanceSheet).mockImplementation(ticker => forSymbol(ticker, selectRows([
     { ...basis, period: '2025', total_assets: balance.fy[0], unit_metadata: { total_assets: vnd, cash: rejection }, raw_data: { cash: withheldRawCash } },
     noAnnualRow,
-  ], { ...basis, period: 'Q3-2026', total_assets: balance.q[0], unit_metadata: { total_assets: vnd } })) as never);
-  jest.mocked(useCashFlow).mockReturnValue(response(selectRows([
+  ], { ...basis, period: 'Q3-2026', total_assets: balance.q[0], unit_metadata: { total_assets: vnd } })));
+  jest.mocked(useCashFlow).mockImplementation(ticker => forSymbol(ticker, selectRows([
     { ...basis, period: '2025', flow_basis: 'annual', operating_cash_flow: cash.fy[0], unit_metadata: { operating_cash_flow: vnd, depreciation: rejection }, raw_data: { depreciation: 7_123_456 } },
     noAnnualRow,
-  ], { ...basis, period: 'Q3-2026', flow_basis: 'single_quarter', operating_cash_flow: cash.q[0], unit_metadata: { operating_cash_flow: vnd } })) as never);
+  ], { ...basis, period: 'Q3-2026', flow_basis: 'single_quarter', operating_cash_flow: cash.q[0], unit_metadata: { operating_cash_flow: vnd } })));
 
   const instances = tiles.map((tile, index) => ({
     ...tile, id: `default-fundamental-tab-1-${tile.key}-${index + 1}`, publish: jest.fn(),
   }));
   instances.forEach(({ id }) => window.localStorage.setItem(`vnibb_period_v3_${id}`, 'Q'));
-  render(<ThemeProvider><PublishedPeriodControl />{instances.map(({ name, id, Widget, publish }) => (
-    <section key={id} aria-label={name}><Widget id={id} symbol={symbol} config={published} onDataChange={publish} /></section>
-  ))}</ThemeProvider>);
-  return () => instances.map(({ name, publish, metric, field, fy, q }) => ({
+  const group = (ticker: string) => <ThemeProvider><PublishedPeriodControl ticker={ticker} />{instances.map(({ name, id, Widget, publish }) => (
+    <section key={id} aria-label={name}><Widget id={id} symbol={ticker} config={published} onDataChange={publish} /></section>
+  ))}</ThemeProvider>;
+  const { rerender } = render(group(symbol));
+  const readGroup = () => instances.map(({ name, publish, metric, field, fy, q }) => ({
     name, metric, field, fy, q, ...readTile(name, publish),
   }));
+  return { readGroup, switchSymbol: (ticker: string) => rerender(group(ticker)) };
 }
 
-function assertPublishedRows(readGroup: ReturnType<typeof renderPublishedGroup>, period: 'FY' | 'Q') {
+function assertPublishedRows(readGroup: ReturnType<typeof renderPublishedGroup>['readGroup'], period: 'FY' | 'Q', ticker = symbol) {
   const rendered = readGroup();
   const heading = period === 'FY' ? '2025' : 'Q3 2026';
   const reportedPeriod = period === 'FY' ? '2025' : 'Q3-2026';
@@ -174,28 +177,46 @@ function assertPublishedRows(readGroup: ReturnType<typeof renderPublishedGroup>,
     expect(row.tile.queryByRole('group', { name: 'Financial period' })).not.toBeInTheDocument();
     expect(row.containerRows).toEqual([expect.objectContaining({ period: reportedPeriod, [row.field]: value })]);
     expect(row.exportRows).toEqual(row.containerRows);
-    expect(row.payload).toMatchObject({ data: row.containerRows, __widgetRuntime: { provenance: { period, periodScope: 'shared' } } });
+    expect(row.payload).toMatchObject({ data: row.containerRows, __widgetRuntime: { provenance: {
+      period, periodScope: 'shared', endpoint: expect.stringContaining(`/equity/${ticker}/`),
+    } } });
     expect(JSON.stringify(row.containerRows)).not.toContain(String(withheldRawCash));
   }
 }
 
 describe('published FPT Fundamentals with mixed inputs', () => {
   it('starts every linked widget on FY despite stale private quarter settings', () => {
-    const readGroup = renderPublishedGroup();
+    const { readGroup } = renderPublishedGroup();
     expect(within(screen.getByRole('group', { name: 'Published period' })).getByRole('button', { name: 'FY' })).toHaveAttribute('aria-pressed', 'true');
     assertPublishedRows(readGroup, 'FY');
   });
 
   it('switches the four tables and their export inputs to Q and back to FY', () => {
-    const readGroup = renderPublishedGroup();
+    const { readGroup } = renderPublishedGroup();
     choosePublishedPeriod('Q');
     assertPublishedRows(readGroup, 'Q');
     choosePublishedPeriod('FY');
     assertPublishedRows(readGroup, 'FY');
   });
 
+  it('starts an unseen symbol on FY and restores the previous symbol’s shared Q setting', () => {
+    const { readGroup, switchSymbol } = renderPublishedGroup();
+    choosePublishedPeriod('Q');
+    assertPublishedRows(readGroup, 'Q');
+
+    switchSymbol('HPG');
+    expect(screen.getByRole('button', { name: 'FY' })).toHaveAttribute('aria-pressed', 'true');
+    assertPublishedRows(readGroup, 'FY', 'HPG');
+
+    switchSymbol('FPT');
+    expect(screen.getByRole('button', { name: 'Q' })).toHaveAttribute('aria-pressed', 'true');
+    assertPublishedRows(readGroup, 'Q');
+    choosePublishedPeriod('FY');
+    assertPublishedRows(readGroup, 'FY');
+  });
+
   it('leaves the four FY tables and exports empty when only quarters exist', () => {
-    const rendered = renderPublishedGroup('quarter-only')();
+    const rendered = renderPublishedGroup('quarter-only').readGroup();
     expect(rendered.map(({ name, headings }) => [name, headings])).toEqual(tiles.map(({ name }) => [name, []]));
     for (const row of rendered) {
       expect(row.containerRows).toEqual([]);
