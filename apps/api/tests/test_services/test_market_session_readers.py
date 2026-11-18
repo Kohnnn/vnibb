@@ -511,15 +511,19 @@ async def test_api_session_projection_qualifies_quote_before_certification_and_r
     expected_change = 4.5 if case in {"traded", "legacy"} else None
     certified = case in {"traded", "no_trade", "suspended", "unknown_price"}
 
-    for result, change in (
-        (projected.model_dump(), projected.change_1d),
-        (normalized, normalized["change_pct"]),
-        (loaded, loaded["change_pct"]),
+    for reader, result, change in (
+        ("screener", projected.model_dump(), projected.change_1d),
+        ("market", normalized, normalized["change_pct"]),
+        ("snapshot", loaded, loaded["change_pct"]),
     ):
         assert change == expected_change
         assert (result["market_session"] is not None) is certified
         if certified:
-            assert set(result["market_session"]) == {"session_date", "status", "source", "scope"}
+            expected_fields = {"session_date", "status", "source", "scope"}
+            if reader == "screener" and case == "traded":
+                expected_fields.add("match_as_of")
+                assert result["market_session"]["match_as_of"] == "2026-10-26T08:00:00Z"
+            assert set(result["market_session"]) == expected_fields
             assert result["market_session"]["scope"] == "vietcap_board"
         assert result["price"] == row.price
 
