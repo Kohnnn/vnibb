@@ -90,13 +90,39 @@ const agentProvenanceFields = new Set([
     'coverage', 'adjustmentMode', 'cached', 'stale', 'localOnly', 'expectedClosedSession',
     'observationStatus', 'refreshStatus',
 ]);
+const agentCoverageDateFields = new Set([
+    'requestedStart', 'requestedEnd', 'observedStart', 'observedEnd', 'lastValidatedSession',
+]);
+const agentCoverageCountFields = new Set(['requestedSessions', 'observedSessions', 'gapSessions']);
 const MAX_AGENT_QUALIFIER_LENGTH = 500;
 const MAX_AGENT_WARNINGS = 5;
 
+function projectAgentCoverageDetail(detail: unknown) {
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
+
+    const fields: Record<string, string | number | boolean | null> = {};
+    for (const [key, value] of Object.entries(detail)) {
+        if (agentCoverageDateFields.has(key)) {
+            if (value === null || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+                && new Date(value).toJSON()?.slice(0, 10) === value)) fields[key] = value;
+        } else if (agentCoverageCountFields.has(key)) {
+            if (value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)) fields[key] = value;
+        } else if (key === 'calendarVerified' && (value === null || typeof value === 'boolean')) {
+            fields[key] = value;
+        }
+    }
+    return Object.keys(fields).length ? fields : undefined;
+}
+
 function projectAgentProvenance(provenance: Partial<ExportProvenance>, widgetType: WidgetType) {
     const publicFields: Record<string, string | number | boolean | null | string[]> = {};
+    let coverageDetail: ReturnType<typeof projectAgentCoverageDetail>;
     const entries: [string, unknown][] = Object.entries(provenance);
     for (const [key, value] of entries) {
+        if (key === 'coverageDetail') {
+            coverageDetail = projectAgentCoverageDetail(value);
+            continue;
+        }
         if (!agentProvenanceFields.has(key)) continue;
         if (typeof value === 'string') publicFields[key] = value.slice(0, MAX_AGENT_QUALIFIER_LENGTH);
         else if (value === null || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
@@ -112,7 +138,7 @@ function projectAgentProvenance(provenance: Partial<ExportProvenance>, widgetTyp
         publicFields.warnings = provenance.warnings.slice(0, MAX_AGENT_WARNINGS)
             .map(warning => warning.slice(0, MAX_AGENT_QUALIFIER_LENGTH));
     }
-    return publicFields;
+    return coverageDetail ? { ...publicFields, coverageDetail } : publicFields;
 }
 
 // Multi-select parameter interface
