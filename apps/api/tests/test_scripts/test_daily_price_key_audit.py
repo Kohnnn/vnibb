@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 HERE: Final = Path(__file__).resolve().parent
 CLI: Final = HERE.parents[1] / "scripts" / "daily_price_key_audit.py"
 MANIFEST: Final = HERE / "fixtures" / "daily_price_manifest.json"
@@ -25,6 +27,13 @@ def test_complete_symbol_scope_reconciles_eligible_keys_and_duplicate_rows() -> 
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
+    assert (
+        report["manifest_evidence"]["captured_at"] != report["observation_evidence"]["captured_at"]
+    )
+    assert (
+        report["manifest_evidence"]["effective_at"]
+        == report["observation_evidence"]["effective_at"]
+    )
     assert report["counts"] == {
         "eligible_keys": 4,
         "observed_distinct_eligible_keys": 2,
@@ -49,6 +58,50 @@ def test_complete_symbol_scope_reconciles_eligible_keys_and_duplicate_rows() -> 
         "extra_symbols_outside_manifest": ["ZZZ"],
         "duplicate_symbols": ["CCC", "ZZZ"],
     }
+
+
+def test_rejects_eligibility_correction_after_price_snapshot(tmp_path: Path) -> None:
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    bbb = next(member for member in manifest["members"] if member["symbol"] == "BBB")
+    bbb.update(status="unknown", reason="Eligibility decision pending")
+    original = tmp_path / "original.json"
+    original.write_text(json.dumps(manifest), encoding="utf-8")
+    baseline = run_audit(original, OBSERVATIONS)
+    assert baseline.returncode == 0, baseline.stderr
+    assert json.loads(baseline.stdout)["counts"]["missing_eligible_keys"] == 0
+
+    manifest["evidence"].update(
+        revision="2", effective_at="2026-11-13T09:00:00Z", captured_at="2026-11-14T09:00:00Z"
+    )
+    bbb.update(status="eligible", reason="First classified by the November 13 correction")
+    corrected = tmp_path / "corrected.json"
+    corrected.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = run_audit(corrected, OBSERVATIONS)
+
+    assert result.returncode == 2, result.stdout
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("side", ["membership", "prices"])
+def test_rejects_unknown_effective_cutoff(side: str, tmp_path: Path) -> None:
+    manifest, prices = MANIFEST, OBSERVATIONS
+    source = manifest if side == "membership" else prices
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    del payload["evidence"]["effective_at"]
+    changed = tmp_path / source.name
+    changed.write_text(json.dumps(payload), encoding="utf-8")
+    result = run_audit(changed, prices) if side == "membership" else run_audit(manifest, changed)
+    assert (result.returncode, result.stdout) == (2, "")
+
+
+def test_rejects_a_shared_cutoff_before_session_completion(tmp_path: Path) -> None:
+    for source in (MANIFEST, OBSERVATIONS):
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        payload["evidence"]["effective_at"] = "2026-11-10T07:59:59Z"
+        (tmp_path / source.name).write_text(json.dumps(payload), encoding="utf-8")
+    result = run_audit(tmp_path / MANIFEST.name, tmp_path / OBSERVATIONS.name)
+    assert (result.returncode, result.stdout) == (2, "")
 
 
 def test_partial_scope_does_not_claim_missing_eligible_keys(tmp_path: Path) -> None:
@@ -81,7 +134,7 @@ def test_rejects_observations_for_another_exchange(tmp_path: Path) -> None:
 
 def test_rejects_an_extract_captured_before_session_completion(tmp_path: Path) -> None:
     payload = json.loads(OBSERVATIONS.read_text(encoding="utf-8"))
-    payload["evidence"]["as_of"] = "2026-11-10T07:59:59Z"
+    payload["evidence"]["captured_at"] = "2026-11-10T07:59:59Z"
     early = tmp_path / "early.json"
     early.write_text(json.dumps(payload), encoding="utf-8")
 

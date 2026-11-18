@@ -62,7 +62,8 @@ class Evidence:
     kind: str
     source: str
     revision: str
-    as_of: datetime
+    effective_at: datetime
+    captured_at: datetime
     sha256: str
 
 
@@ -135,21 +136,25 @@ def load_document(path: Path, version: str, content_fields: str) -> Document:
         raise AuditInputError("expected one exchange: HOSE, HNX, or UPCOM")
     if partition["interval"] != INTERVAL:
         raise AuditInputError("expected the 1D interval")
-    evidence = fields(root["evidence"], "kind source revision as_of")
+    evidence = fields(root["evidence"], "kind source revision effective_at captured_at")
     kind = identifier(evidence["kind"], "evidence kind")
     if kind not in ("fixture", "bounded_extract"):
         raise AuditInputError("evidence kind must be fixture or bounded_extract")
     source = identifier(evidence["source"], "evidence source")
     revision = identifier(evidence["revision"], "evidence revision")
+    effective_at = timestamp(evidence["effective_at"])
+    captured_at = timestamp(evidence["captured_at"])
+    if effective_at > captured_at:
+        raise AuditInputError("evidence cannot apply after its capture")
     provenance = Evidence(
-        kind, source, revision, timestamp(evidence["as_of"]), sha256(data).hexdigest()
+        kind, source, revision, effective_at, captured_at, sha256(data).hexdigest()
     )
     return Document(Partition(exchange, market_date(partition["session_date"])), provenance, root)
 
 
 def build_report(manifest_path: Path, observations_path: Path) -> str:
-    manifest = load_document(manifest_path, "daily-price-eligibility-v1", "calendar members")
-    extract = load_document(observations_path, "daily-price-observations-v1", "scope rows")
+    manifest = load_document(manifest_path, "daily-price-eligibility-v2", "calendar members")
+    extract = load_document(observations_path, "daily-price-observations-v2", "scope rows")
     partition = manifest.partition
     if partition != extract.partition:
         raise AuditInputError("manifest and observation partitions differ")
@@ -159,7 +164,9 @@ def build_report(manifest_path: Path, observations_path: Path) -> str:
         raise AuditInputError("manifest and observations must name separate evidence sources")
     calendar = fields(manifest.fields["calendar"], "source revision completed_at")
     completed_at = timestamp(calendar["completed_at"])
-    evidence_cutoff = min(manifest.evidence.as_of, extract.evidence.as_of)
+    evidence_cutoff = manifest.evidence.effective_at
+    if evidence_cutoff != extract.evidence.effective_at:
+        raise AuditInputError("membership and prices must have the same effective cutoff")
     if (
         completed_at > evidence_cutoff
         or completed_at.astimezone(MARKET_ZONE).date() != partition.session_date
@@ -221,7 +228,7 @@ def build_report(manifest_path: Path, observations_path: Path) -> str:
         "duplicate_symbols": duplicates,
     }
     report = {
-        "schema_version": "daily-price-key-report-v1",
+        "schema_version": "daily-price-key-report-v2",
         "mode": "offline",
         "table": "stock_prices",
         "natural_key": ["symbol", "time", "interval"],
