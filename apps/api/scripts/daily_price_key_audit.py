@@ -6,7 +6,11 @@
 # ─── How to run ───
 # python3 -I -B daily_price_key_audit.py MANIFEST.json OBSERVATIONS.json
 # ──────────────────
-"""Reconcile one completed session's SQL price keys against independent local evidence."""
+"""Reconcile one completed session's SQL price keys against independent local evidence.
+
+Each v2 input attests to all in-scope changes effective through its stated cutoff,
+including changes at that instant. captured_at records when that view was obtained.
+"""
 
 import json
 import re
@@ -62,7 +66,7 @@ class Evidence:
     kind: str
     source: str
     revision: str
-    effective_at: datetime
+    effective_through: datetime
     captured_at: datetime
     sha256: str
 
@@ -105,11 +109,19 @@ def market_date(value: JsonValue) -> date:
 
 
 def timestamp(value: JsonValue) -> datetime:
-    if isinstance(value, str):
-        parsed = datetime.fromisoformat(value)
-        if parsed.utcoffset() is not None:
-            return parsed
-    raise AuditInputError("evidence timestamps must have a UTC offset")
+    if (
+        isinstance(value, str)
+        and re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+            r"(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])",
+            value,
+        )
+        and not value.endswith("-00:00")
+    ):
+        return datetime.fromisoformat(value)
+    raise AuditInputError(
+        "expected a timestamp with a known UTC offset and at most six fraction digits"
+    )
 
 
 def unique_json_fields(pairs: list[tuple[str, JsonValue]]) -> Fields:
@@ -136,18 +148,18 @@ def load_document(path: Path, version: str, content_fields: str) -> Document:
         raise AuditInputError("expected one exchange: HOSE, HNX, or UPCOM")
     if partition["interval"] != INTERVAL:
         raise AuditInputError("expected the 1D interval")
-    evidence = fields(root["evidence"], "kind source revision effective_at captured_at")
+    evidence = fields(root["evidence"], "kind source revision effective_through captured_at")
     kind = identifier(evidence["kind"], "evidence kind")
     if kind not in ("fixture", "bounded_extract"):
         raise AuditInputError("evidence kind must be fixture or bounded_extract")
     source = identifier(evidence["source"], "evidence source")
     revision = identifier(evidence["revision"], "evidence revision")
-    effective_at = timestamp(evidence["effective_at"])
+    effective_through = timestamp(evidence["effective_through"])
     captured_at = timestamp(evidence["captured_at"])
-    if effective_at > captured_at:
+    if effective_through > captured_at:
         raise AuditInputError("evidence cannot apply after its capture")
     provenance = Evidence(
-        kind, source, revision, effective_at, captured_at, sha256(data).hexdigest()
+        kind, source, revision, effective_through, captured_at, sha256(data).hexdigest()
     )
     return Document(Partition(exchange, market_date(partition["session_date"])), provenance, root)
 
@@ -164,8 +176,8 @@ def build_report(manifest_path: Path, observations_path: Path) -> str:
         raise AuditInputError("manifest and observations must name separate evidence sources")
     calendar = fields(manifest.fields["calendar"], "source revision completed_at")
     completed_at = timestamp(calendar["completed_at"])
-    evidence_cutoff = manifest.evidence.effective_at
-    if evidence_cutoff != extract.evidence.effective_at:
+    evidence_cutoff = manifest.evidence.effective_through
+    if evidence_cutoff != extract.evidence.effective_through:
         raise AuditInputError("membership and prices must have the same effective cutoff")
     if (
         completed_at > evidence_cutoff

@@ -5,7 +5,7 @@
     "kind": "fixture",
     "source": "synthetic-membership-and-trading-status",
     "revision": "1",
-    "effective_at": "2026-11-10T09:00:00Z",
+    "effective_through": "2026-11-10T09:00:00Z",
     "captured_at": "2026-11-10T09:00:00Z"
   },
   "calendar": {

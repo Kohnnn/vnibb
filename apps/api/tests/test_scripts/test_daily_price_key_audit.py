@@ -31,8 +31,8 @@ def test_complete_symbol_scope_reconciles_eligible_keys_and_duplicate_rows() -> 
         report["manifest_evidence"]["captured_at"] != report["observation_evidence"]["captured_at"]
     )
     assert (
-        report["manifest_evidence"]["effective_at"]
-        == report["observation_evidence"]["effective_at"]
+        report["manifest_evidence"]["effective_through"]
+        == report["observation_evidence"]["effective_through"]
     )
     assert report["counts"] == {
         "eligible_keys": 4,
@@ -71,7 +71,7 @@ def test_rejects_eligibility_correction_after_price_snapshot(tmp_path: Path) -> 
     assert json.loads(baseline.stdout)["counts"]["missing_eligible_keys"] == 0
 
     manifest["evidence"].update(
-        revision="2", effective_at="2026-11-13T09:00:00Z", captured_at="2026-11-14T09:00:00Z"
+        revision="2", effective_through="2026-11-13T09:00:00Z", captured_at="2026-11-14T09:00:00Z"
     )
     bbb.update(status="eligible", reason="First classified by the November 13 correction")
     corrected = tmp_path / "corrected.json"
@@ -88,17 +88,27 @@ def test_rejects_unknown_effective_cutoff(side: str, tmp_path: Path) -> None:
     manifest, prices = MANIFEST, OBSERVATIONS
     source = manifest if side == "membership" else prices
     payload = json.loads(source.read_text(encoding="utf-8"))
-    del payload["evidence"]["effective_at"]
+    del payload["evidence"]["effective_through"]
     changed = tmp_path / source.name
     changed.write_text(json.dumps(payload), encoding="utf-8")
     result = run_audit(changed, prices) if side == "membership" else run_audit(manifest, changed)
     assert (result.returncode, result.stdout) == (2, "")
 
 
+@pytest.mark.parametrize("offset", [".000000900Z", "-00:00"])
+def test_rejects_unrepresentable_or_unknown_cutoff(offset: str, tmp_path: Path) -> None:
+    payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    payload["evidence"]["effective_through"] = "2026-11-10T09:00:00" + offset
+    changed = tmp_path / MANIFEST.name
+    changed.write_text(json.dumps(payload), encoding="utf-8")
+    result = run_audit(changed, OBSERVATIONS)
+    assert (result.returncode, result.stdout) == (2, "")
+
+
 def test_rejects_a_shared_cutoff_before_session_completion(tmp_path: Path) -> None:
     for source in (MANIFEST, OBSERVATIONS):
         payload = json.loads(source.read_text(encoding="utf-8"))
-        payload["evidence"]["effective_at"] = "2026-11-10T07:59:59Z"
+        payload["evidence"]["effective_through"] = "2026-11-10T07:59:59Z"
         (tmp_path / source.name).write_text(json.dumps(payload), encoding="utf-8")
     result = run_audit(tmp_path / MANIFEST.name, tmp_path / OBSERVATIONS.name)
     assert (result.returncode, result.stdout) == (2, "")
