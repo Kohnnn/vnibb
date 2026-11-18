@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { isValidAlertThreshold, PriceAlertsWidget } from './PriceAlertsWidget';
 import { useWebSocket } from '@/lib/hooks/useWebSocket';
+import { readAlertActivity } from '@/lib/alertActivity';
 
 const updateWidget = jest.fn();
 let widgetLocation: { dashboardId: string; tabId: string; widget: { config: Record<string, unknown> } } | undefined;
@@ -28,15 +30,40 @@ const socket = jest.mocked(useWebSocket);
 
 function renderWidget(symbol = 'FPT', alerts: Array<Record<string, unknown>> = []) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><PriceAlertsWidget id="alerts" symbol={symbol} config={{ alerts }} /></QueryClientProvider>);
+  return render(<PriceAlertsWidget id="alerts" symbol={symbol} config={{ alerts }} />, {
+    wrapper: ({ children }) => <StrictMode><QueryClientProvider client={client}>{children}</QueryClientProvider></StrictMode>,
+  });
 }
 
 describe('PriceAlertsWidget', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    window.localStorage.clear();
     widgetLocation = undefined;
     socket.mockReturnValue({ isConnected: false, isReceiving: false, protocolError: null, prices: new Map(), lastUpdate: null, marketStatus: null, reconnect: jest.fn() });
     Object.defineProperty(window, 'Notification', { configurable: true, value: { permission: 'denied', requestPermission: jest.fn() } });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'Notification');
+  });
+
+  it('records one unread price trigger for repeated ticks without sending on browser permission alone', () => {
+    const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() });
+    Object.defineProperty(window, 'Notification', { configurable: true, value: native });
+    renderWidget('FPT', [{ id: 'one', symbol: 'FPT', condition: 'above', threshold: 100, createdAt: '2026-07-20T00:00:00Z', isActive: true, notificationSent: false }]);
+    const onUpdate = socket.mock.lastCall?.[0].onUpdate;
+    expect(onUpdate).toBeDefined();
+
+    act(() => {
+      onUpdate?.({ symbol: 'FPT', price: 105 });
+      onUpdate?.({ symbol: 'FPT', price: 108 });
+    });
+
+    expect(screen.getByRole('button', { name: 'Delete triggered FPT alert' })).toBeInTheDocument();
+    expect(readAlertActivity()).toEqual([expect.objectContaining({ source: 'price', symbol: 'FPT', read: false })]);
+    expect(native.requestPermission).not.toHaveBeenCalled();
+    expect(native).not.toHaveBeenCalled();
   });
 
   it('accepts only positive finite thresholds', () => {
@@ -54,7 +81,7 @@ describe('PriceAlertsWidget', () => {
     expect(screen.getByPlaceholderText('Symbol')).toHaveValue('FPT');
     fireEvent.change(screen.getByPlaceholderText('Symbol'), { target: { value: 'VNM' } });
 
-    view.rerender(<QueryClientProvider client={new QueryClient()}><PriceAlertsWidget id="alerts" symbol="VCI" config={{ alerts: [] }} /></QueryClientProvider>);
+    view.rerender(<PriceAlertsWidget id="alerts" symbol="VCI" config={{ alerts: [] }} />);
     expect(screen.getByPlaceholderText('Symbol')).toHaveValue('VNM');
   });
 
@@ -96,8 +123,9 @@ describe('PriceAlertsWidget', () => {
   });
   it('names threshold fields and icon controls for keyboard use', () => {
     renderWidget();
-    expect(screen.getByRole('button', { name: 'Enable browser alert notifications' })).toHaveClass('min-h-11', 'focus-visible:ring-2');
-    fireEvent.click(screen.getByRole('button', { name: 'Add price alert' }));
+    const addAlert = screen.getByRole('button', { name: 'Add price alert' });
+    expect(addAlert).toHaveClass('min-h-11', 'focus-visible:ring-2');
+    fireEvent.click(addAlert);
     expect(screen.getByRole('textbox', { name: 'Alert symbol' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Alert condition' })).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: 'Alert threshold' })).toBeInTheDocument();

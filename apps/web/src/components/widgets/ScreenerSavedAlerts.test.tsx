@@ -327,6 +327,39 @@ describe('screener availability', () => {
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument()
   })
 
+  test('enables a saved-screen rule without prompting and records changes with desktop alerts off', async () => {
+    const saved = { ...savedScreen, alertEnabled: false }
+    const config = {
+      savedScreens: [saved], activeScreenId: saved.id, quickFilters: saved.quickFilters,
+      sortField: saved.sortField, sortOrder: saved.sortOrder, market: saved.market,
+    }
+    const native = Object.assign(jest.fn(), {
+      permission: 'default',
+      requestPermission: jest.fn(async () => 'default' as const),
+    })
+    const original = Object.getOwnPropertyDescriptor(window, 'Notification')
+    window.localStorage.clear()
+    Object.defineProperty(window, 'Notification', { configurable: true, value: native })
+    try {
+      setScan({ data: [{ ticker: 'VNM' }], meta: { availability: 'available' } })
+      const view = render(<ScreenerWidget id="screen-alert" config={config} />)
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Enable alerts for Quality' }))
+      expect(await screen.findByRole('button', { name: 'Disable alerts for Quality' })).toBeEnabled()
+      expect(mockedRecordAlertActivity).not.toHaveBeenCalled()
+
+      Object.assign(native, { permission: 'granted' })
+      setScan({ data: [{ ticker: 'VNM' }, { ticker: 'FPT' }], meta: { availability: 'available' } })
+      view.rerender(<ScreenerWidget id="screen-alert" config={config} />)
+      expect(mockedRecordAlertActivity).toHaveBeenCalledTimes(1)
+      expect(mockedRecordAlertActivity).toHaveBeenCalledWith(expect.objectContaining({ source: 'saved_screen', detail: 'FPT' }))
+      expect(native.requestPermission).not.toHaveBeenCalled()
+      expect(native).not.toHaveBeenCalled()
+    } finally {
+      if (original) Object.defineProperty(window, 'Notification', original)
+      else Reflect.deleteProperty(window, 'Notification')
+    }
+  })
+
   test('does not replace a saved-screen baseline during outage', async () => {
     const saved = { ...savedScreen, alertEnabled: true, alertMatchSymbols: ['VNM'] }
     const config = {

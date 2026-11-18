@@ -3,6 +3,17 @@ import { markAlertActivityRead, readAlertActivity, recordAlertActivity } from '.
 describe('alert activity', () => {
     beforeEach(() => window.localStorage.clear());
 
+    it('does not turn read history unread when the next poll carries a stale flag', () => {
+        const observed = {
+            id: 'insider:17', source: 'insider', triggerTime: '2026-10-22T09:00:00Z',
+            deliveryClass: 'server_backed', serverBacked: true, title: 'Retained insider event', read: false,
+        } as const;
+        recordAlertActivity(observed);
+        markAlertActivityRead(observed.id);
+        recordAlertActivity(observed);
+        expect(readAlertActivity()).toEqual([expect.objectContaining({ id: observed.id, read: true })]);
+    });
+
     it('labels source and delivery, retains read state, and keeps last-good activity after malformed storage', () => {
         recordAlertActivity({
             id: 'price-1',
