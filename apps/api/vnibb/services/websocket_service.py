@@ -8,7 +8,7 @@ Extracted from api/v1/websocket.py to avoid circular imports.
 import asyncio
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 from fastapi import WebSocket
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Vietnam timezone
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+PRICE_FRESHNESS = timedelta(seconds=60)
 
 
 class PriceUpdate(BaseModel):
@@ -36,13 +37,14 @@ class PriceUpdate(BaseModel):
     timestamp_timezone: str = "Asia/Ho_Chi_Minh"
     stale: bool = False
 
-    def delivery_payload(self) -> dict:
+    def delivery_payload(self, *, now: datetime | None = None) -> dict:
         observed = datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
         if observed.tzinfo is None:
             observed = pytz.timezone(self.timestamp_timezone).localize(observed)
-        age = (datetime.now(VN_TZ) - observed).total_seconds()
+        age = (now or datetime.now(VN_TZ)) - observed
         return {**self.model_dump(), "as_of": observed.isoformat(),
-                "observation_age_seconds": max(0, age), "stale": self.stale or age > 60}
+                "observation_age_seconds": max(0, age.total_seconds()),
+                "stale": self.stale or not timedelta(0) <= age < PRICE_FRESHNESS}
 
 
 class ConnectionManager:
@@ -51,6 +53,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[WebSocket, set[str]] = {}
         self._price_cache: dict[str, PriceUpdate] = {}
+        self._future_prices: set[tuple[str, str, datetime]] = set()
         self._send_locks: dict[WebSocket, asyncio.Lock] = {}
         self.subscriptions_changed = asyncio.Event()
 
@@ -129,9 +132,29 @@ class ConnectionManager:
                     logger.debug("Failed to close evicted WebSocket: %s", close_error)
             return False
 
+    def _price_payload(self, update: PriceUpdate, now: datetime) -> tuple[dict, datetime] | None:
+        try:
+            payload = update.delivery_payload(now=now)
+            observed = datetime.fromisoformat(payload["as_of"])
+        except (ValueError, TypeError):
+            return None
+        if self._future_prices:
+            self._future_prices = {key for key in self._future_prices if now - key[2] < PRICE_FRESHNESS}
+        key = (update.symbol, update.source, observed)
+        if observed > now:
+            self._future_prices.add(key)
+        if key in self._future_prices:
+            return None
+        return payload, observed
+
     async def send_update(self, websocket: WebSocket, update: PriceUpdate, timeout: float) -> bool:
         """Send price update to a connection."""
-        return await self.send_json(websocket, update.delivery_payload(), timeout)
+        admitted = self._price_payload(update, datetime.now(VN_TZ))
+        if admitted is None:
+            if self._price_cache.get(update.symbol) is update:
+                del self._price_cache[update.symbol]
+            return websocket in self.active_connections
+        return await self.send_json(websocket, admitted[0], timeout)
 
     async def _broadcast(self, clients: list[WebSocket], payload: dict, timeout: float) -> None:
         await asyncio.gather(*(self.send_json(ws, payload, timeout) for ws in clients))
@@ -141,18 +164,17 @@ class ConnectionManager:
         if (not math.isfinite(price_data.price) or price_data.price <= 0
                 or price_data.price_unit not in {"VND", "index_points"}):
             return
-        try:
-            payload = price_data.delivery_payload()
-            observed = datetime.fromisoformat(payload["as_of"])
-        except (ValueError, TypeError):
-            return
-        if observed > datetime.now(VN_TZ):
-            return
         if symbol not in self.get_all_subscribed_symbols():
             return
+        now = datetime.now(VN_TZ)
+        admitted = self._price_payload(price_data, now)
+        if admitted is None:
+            return
+        payload, observed = admitted
         previous = self._price_cache.get(symbol)
-        if previous:
-            previous_observed = datetime.fromisoformat(previous.delivery_payload()["as_of"])
+        previous_admitted = self._price_payload(previous, now) if previous else None
+        if previous_admitted is not None:
+            _, previous_observed = previous_admitted
             if observed < previous_observed or (
                 observed == previous_observed and price_data.stale and not previous.stale
             ):

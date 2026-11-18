@@ -127,6 +127,54 @@ describe('PriceAlertsWidget', () => {
     },
   );
 
+  it('quarantines a future quote across a widget remount and admits a different source tick', async () => {
+    const start = Date.parse('2026-11-18T03:00:00Z');
+    jest.useFakeTimers({ now: start });
+    const native = Object.assign(jest.fn(), { permission: 'granted', requestPermission: jest.fn() });
+    Object.defineProperty(window, 'Notification', { configurable: true, value: native });
+    socket.mockReturnValue({ ...socketState, isConnected: true, isReceiving: true });
+    const symbol = 'MSN';
+    const rule = { id: 'remount', symbol, condition: 'above', threshold: 100,
+      createdAt: new Date(start - 1000).toISOString(), isActive: true, notificationSent: false };
+    const emit = (as_of: string) => act(() => socket.mock.lastCall?.[0].onUpdate?.({
+      symbol, price: 105, price_unit: 'VND', source: 'fixture', stale: false, as_of,
+    }));
+    try {
+      expect(await enableDesktopAlerts()).toBe(true);
+      const first = renderWidget(symbol, [rule]);
+      const futureTime = start + 5000;
+      const future = new Date(futureTime).toISOString();
+      emit(future);
+      expect(readAlertActivity()).toEqual([]);
+      first.unmount();
+
+      jest.setSystemTime(start + 6000);
+      jest.isolateModules(() => {
+        const { rejectFuturePriceObservation } = jest.requireActual<typeof import('@/lib/marketAlertObservation')>('@/lib/marketAlertObservation');
+        expect(rejectFuturePriceObservation(symbol, futureTime, Date.now())).toBe(true);
+      });
+      renderWidget(symbol, [rule]);
+      emit(future.replace('Z', '+00:00'));
+      expect(readAlertActivity()).toEqual([]);
+      expect(native).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Pause MSN alert' })).toBeInTheDocument();
+
+      const fresh = new Date(start + 5500).toISOString();
+      emit(fresh);
+      emit(fresh);
+      expect(readAlertActivity()).toEqual([expect.objectContaining({ id: 'price:remount', triggerTime: fresh })]);
+      expect(native).toHaveBeenCalledTimes(1);
+
+      jest.isolateModules(() => {
+        const { rejectFuturePriceObservation } = jest.requireActual<typeof import('@/lib/marketAlertObservation')>('@/lib/marketAlertObservation');
+        expect(rejectFuturePriceObservation(symbol, futureTime, futureTime + 60_000)).toBe(false);
+        expect(window.localStorage.getItem(`vnibb-future-price-observations-v1:${symbol}`)).toBeNull();
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('uses the source time of a cached REST quote, not when fallback polling receives it', async () => {
     const start = Date.parse('2026-11-18T03:00:00Z');
     jest.useFakeTimers({ now: start });

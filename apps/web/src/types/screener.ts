@@ -78,6 +78,9 @@ export interface ScreenerResponse {
         cached?: boolean;
         stale?: boolean;
         fallback?: boolean;
+        screen_scope?: 'page' | 'universe';
+        matched_count?: number | null;
+        fundamental_enrichment?: 'skipped' | 'ok' | 'unavailable' | 'failed';
         cache_age_seconds?: number | null;
         visible_field_coverage?: Record<string, number>;
         visible_field_values?: number;
