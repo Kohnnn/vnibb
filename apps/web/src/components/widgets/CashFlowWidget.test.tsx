@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useCashFlow } from '@/lib/queries';
 import { WidgetHeaderVisibilityProvider } from '@/components/ui/WidgetContainer';
+import { ThemeProvider } from '@/contexts/ThemeContext';
+import { getWidgetExportData } from '@/lib/widgetRuntime';
+import { provenanceToMarkdown, rowsToCSV } from '@/lib/exportWidget';
+import { buildVniAgentWorkspaceContext } from '@/lib/vniagentWorkspace';
 import {
   CashFlowWidget,
   RAW_CASHFLOW_ALIASES,
@@ -24,7 +28,6 @@ jest.mock('@/contexts/SymbolLinkContext', () => ({
 jest.mock('@/contexts/WidgetGroupContext', () => ({
   useWidgetGroups: () => ({ globalSymbol: 'HPG', setGlobalSymbol: jest.fn() }),
 }));
-jest.mock('@/components/ui/ChartMountGuard', () => ({ ChartMountGuard: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 jest.mock('@/contexts/UnitContext', () => ({
   useUnit: () => ({
     config: { display: 'raw', decimals: 0, usdVndRate: 25000, usdVndRatesByYear: {} },
@@ -57,7 +60,7 @@ const admittedRow = {
   raw_data: { depreciation: 8_470_680_000_000 },
 };
 
-function renderWith(rows: object[]) {
+function renderWith(rows: object[], symbol = 'HPG', onDataChange?: (payload: unknown) => void) {
   cashFlow.mockReturnValue({
     data: { data: rows },
     error: null,
@@ -66,7 +69,7 @@ function renderWith(rows: object[]) {
     refetch: jest.fn(),
     dataUpdatedAt: 1750000000000,
   } as never);
-  return render(<CashFlowWidget id="cash_flow" symbol="HPG" />);
+  return render(<CashFlowWidget id="cash_flow" symbol={symbol} onDataChange={onDataChange} />, { wrapper: ThemeProvider });
 }
 
 describe('cash flow raw alias admission', () => {
@@ -256,6 +259,57 @@ describe('cash flow table rendering', () => {
     // formatted under the statement's currency scale.
     expect(screen.queryByText('Depreciation')).toBeNull();
     expect(screen.queryByText(/8,470\.68/)).toBeNull();
+  });
+});
+
+describe('cash flow admitted data', () => {
+  it.each(['HPG', 'FPT'])('keeps withheld values out of %s table, charts, exports and agent context', (symbol) => {
+    const publish = jest.fn();
+    const fixture = {
+      ...admittedRow, symbol, operating_cash_flow: 1000, investing_cash_flow: -620,
+      financing_cash_flow: 120, net_cash_flow: 250, depreciation: 847068,
+      free_cash_flow: 194181, capital_expenditure: -555333, interest_paid: 334707,
+      unit_metadata: {
+        ...admittedRow.unit_metadata,
+        free_cash_flow: { unavailable_reason: 'unverified_monetary_unit' },
+        capital_expenditure: { unavailable_reason: 'unverified_monetary_unit' },
+        taxes_paid: { source_unit: 'VND', value_unit: 'VND' },
+      },
+      raw_data: { depreciation: 847068, taxes_paid: 0, withheld_raw_sentinel: 8675309 },
+    };
+    renderWith([fixture], symbol, publish);
+
+    expect(screen.getByText('Operating CF').closest('tr')).toHaveTextContent('1,000');
+    expect(screen.getByText('Taxes Paid').closest('tr')).toHaveTextContent(/0$/);
+    expect(screen.queryByText('Depreciation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Free Cash Flow')).not.toBeInTheDocument();
+    expect(screen.queryByText('CapEx')).not.toBeInTheDocument();
+    expect(screen.queryByText('Interest Paid')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Chart View' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Cash flow chart mode' }), { target: { value: 'waterfall' } });
+    expect(screen.getByText('Reported Free Cash Flow').parentElement).toHaveTextContent('n/a');
+    expect(screen.getByText('CapEx').parentElement).toHaveTextContent('n/a');
+    expect(screen.getByText('Net Change', { selector: 'div' }).parentElement).toHaveTextContent('250');
+
+    const [payload] = publish.mock.lastCall ?? [];
+    const rows = getWidgetExportData(payload);
+    if (!Array.isArray(rows)) throw new TypeError('Cash Flow must publish export rows');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ symbol, period: '2025', currency: 'VND', value_unit: 'VND',
+      operating_cash_flow: 1000, investing_cash_flow: -620, financing_cash_flow: 120,
+      net_change_in_cash: 250, net_cash_flow: 250, taxes_paid: 0, depreciation: null, free_cash_flow: null,
+      capex: null, capital_expenditure: null, interest_paid: null, consolidation_basis: 'consolidated', flow_basis: 'annual' });
+    expect(payload).toMatchObject({ data: rows, __widgetRuntime: { provenance: {
+      period: 'FY', periodScope: 'shared', units: 'VND', basis: 'consolidated / annual',
+      updatedAt: null, fetchedAt: 1750000000000, observationStatus: 'available', refreshStatus: 'succeeded',
+    } } });
+    const csv = rowsToCSV(rows);
+    expect(csv).not.toMatch(/raw_data|847068|194181|555333|8675309|334707/);
+    expect(provenanceToMarkdown(payload.__widgetRuntime?.provenance)).toContain('unverified_monetary_unit');
+    const request = buildVniAgentWorkspaceContext({ widgetTypeKey: 'cash_flow', symbol,
+      widgetPayload: { symbol, dataSample: rows.slice(0, 5) } });
+    expect(request.widgetPayload.dataSample).toEqual(rows);
+    expect(JSON.stringify(request)).not.toMatch(/raw_data|847068|194181|555333|8675309|334707/);
   });
 });
 

@@ -1,6 +1,6 @@
 import { calculatePercentChange } from '@/lib/units';
 import { periodSortKey } from '@/lib/financialPeriods';
-import type { CashFlowData, IncomeStatementData } from '@/types/equity';
+import type { IncomeStatementData } from '@/types/equity';
 
 export interface FinancialFlowNode {
   id: string;
@@ -307,7 +307,12 @@ export function buildIncomeSankeyModel(rows: IncomeStatementData[]): IncomeSanke
   };
 }
 
-export function buildCashFlowWaterfallModel(rows: CashFlowData[]): CashFlowWaterfallModel | null {
+type CashFlowWaterfallInput = { readonly period?: string } & Readonly<Partial<Record<
+  'operating_cash_flow' | 'investing_cash_flow' | 'financing_cash_flow' | 'net_change_in_cash' | 'net_cash_flow'
+  | 'free_cash_flow' | 'capex' | 'capital_expenditure' | 'dividends_paid', number | null
+>>>;
+
+export function buildCashFlowWaterfallModel(rows: CashFlowWaterfallInput[]): CashFlowWaterfallModel | null {
   const ordered = sortByPeriod(rows).filter((row) => row.period);
   const latest = ordered.at(-1);
   if (!latest) return null;
