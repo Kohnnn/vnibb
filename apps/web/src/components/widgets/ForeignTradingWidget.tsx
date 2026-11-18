@@ -76,6 +76,7 @@ function getNetFlowClass(net: number | null): string {
 
 function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: ForeignTradingWidgetProps) {
     const [flowWindow, setFlowWindow] = useState<WindowOption>('3M');
+    const [lastClosureCheck, setLastClosureCheck] = useState(0);
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useForeignTrading(symbol, {
         sessions: WINDOW_SESSIONS[flowWindow],
     });
@@ -167,14 +168,24 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     ], []);
 
     const hasData = trades.length > 0;
-    const provenance = useMemo(() => describeForeignFlow({
-        response: data,
-        fetchedAt: dataUpdatedAt,
-        requestedSessions: WINDOW_SESSIONS[flowWindow],
-        requestFailed: Boolean(error),
-        isLoading,
-        isFetching,
-    }), [data, dataUpdatedAt, error, flowWindow, isLoading, isFetching]);
+    const { provenance, closureExpiresAt } = useMemo(() => {
+        const { closureExpiresAt, ...provenance } = describeForeignFlow({
+            response: data,
+            fetchedAt: dataUpdatedAt,
+            requestedSessions: WINDOW_SESSIONS[flowWindow],
+            requestFailed: Boolean(error),
+            isLoading,
+            isFetching,
+        }, Math.max(lastClosureCheck, Date.now()));
+        return { provenance, closureExpiresAt };
+    }, [data, dataUpdatedAt, error, flowWindow, isLoading, isFetching, lastClosureCheck]);
+
+    useEffect(() => {
+        if (closureExpiresAt === undefined) return;
+        const delay = Math.min(Math.max(0, closureExpiresAt - Date.now()), 2 ** 31 - 1);
+        const timer = window.setTimeout(() => setLastClosureCheck(Date.now()), delay);
+        return () => window.clearTimeout(timer);
+    }, [closureExpiresAt, lastClosureCheck]);
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
     const coverageWarning = [
         ...(provenance.warnings ?? []),

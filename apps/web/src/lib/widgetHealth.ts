@@ -69,8 +69,9 @@ export function deriveWidgetHealth(input: DeriveHealthInput): WidgetHealthState 
   const parsed = toMillis(updatedAt)
   const updatedMs = parsed !== null && parsed <= now ? parsed : null
   const unknownDate = updatedMs === null ? ' Source as-of is unknown.' : ''
+  const cacheDetail = cached ? ' Served from a cached snapshot.' : ''
   const context = [
-    cached && 'Served from a cached snapshot.',
+    cacheDetail.trim(),
     input.refreshStatus === 'failed' && 'Refresh failed.',
     input.coverage === 'partial' && 'Requested coverage is partial.',
     input.marketClosed && 'Market is closed; closure does not reset source age.',
@@ -89,7 +90,7 @@ export function deriveWidgetHealth(input: DeriveHealthInput): WidgetHealthState 
       detail: `Source observation is outside the freshness window${detailSource}.${unknownDate}${additionalDetail}`,
     }
   }
-  if (cached || input.refreshStatus === 'failed') {
+  if (input.refreshStatus === 'failed' || (cached && input.coverage !== 'partial')) {
     return {
       status: 'cached',
       label: cached ? 'Cached' : 'Refresh failed',
@@ -100,7 +101,7 @@ export function deriveWidgetHealth(input: DeriveHealthInput): WidgetHealthState 
     return {
       status: 'coverage_gap',
       label: 'Partial coverage',
-      detail: `Only part of the requested coverage is available${detailSource}.${unknownDate}${input.marketClosed ? ' Market is closed.' : ''}`,
+      detail: `Only part of the requested coverage is available${detailSource}.${unknownDate}${cacheDetail}${input.marketClosed ? ' Market is closed.' : ''}`,
     }
   }
   if (updatedMs !== null && input.marketClosed && input.expectedClosedSession !== false) {

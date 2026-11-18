@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from math import isfinite
-from typing import Any
+from typing import Any, TypedDict
 from zoneinfo import ZoneInfo
 
 from vnibb.core.config import settings
-from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS
+from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
 
 _ICT = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -69,6 +69,36 @@ def market_session_date(value: Any) -> date | None:
 
 def _is_market_business_day(anchor: date, holidays: set[date]) -> bool:
     return anchor.weekday() < 5 and anchor not in holidays
+
+
+class LatestClosedSession(TypedDict):
+    date: str
+    checked_at: str
+    valid_until: str
+
+
+def verified_market_closure(*, now: datetime, latest_session: date) -> LatestClosedSession | None:
+    """Prove the closure following the expected session, not an observation date."""
+    if not market_calendar_metadata(latest_session)["verified"]:
+        return None
+
+    holidays = _market_holidays()
+    next_session = latest_session + timedelta(days=1)
+    while market_calendar_metadata(next_session)["verified"]:
+        if _is_market_business_day(next_session, holidays):
+            next_open = datetime.combine(
+                next_session, time.fromisoformat(settings.intraday_market_open),
+                tzinfo=ZoneInfo(settings.vn_timezone),
+            )
+            if now >= next_open:
+                return None
+            return {
+                "date": latest_session.isoformat(),
+                "checked_at": now.astimezone(UTC).isoformat(),
+                "valid_until": next_open.astimezone(UTC).isoformat(),
+            }
+        next_session += timedelta(days=1)
+    return None  # The interval cannot certify a reopening in an unverified year.
 
 
 def market_sessions_are_adjacent(earlier: Any, later: Any) -> bool:
