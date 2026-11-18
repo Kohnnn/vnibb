@@ -55,9 +55,14 @@ function normalizeTimestamp(value?: number | string | Date | null): string | nul
 }
 
 export function buildExportProvenance(input: ExportProvenance): ExportProvenance {
+  const observation = typeof input.updatedAt === 'string' ? input.updatedAt.trim() : input.updatedAt;
+  const timestamp = normalizeTimestamp(observation);
+  // ISO session dates carry no source time. Round-trip the date so impossible days are not exported.
+  const sourceDate = typeof observation === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(observation);
+  const updatedAt = sourceDate ? (timestamp?.slice(0, 10) === observation ? observation : null) : timestamp;
   return {
     ...input,
-    updatedAt: normalizeTimestamp(input.updatedAt),
+    updatedAt,
     fetchedAt: normalizeTimestamp(input.fetchedAt),
     capturedAt: input.capturedAt ?? new Date().toISOString(),
   };
