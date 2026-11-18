@@ -22,13 +22,13 @@ from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
 from typing import Final, NewType, TypeAlias, assert_never
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 MAX_BYTES: Final = 64 * 1024
 MAX_ITEMS: Final = 100
 MAX_WITNESSES: Final = 10
 INTERVAL: Final = "1D"
-MARKET_ZONE: Final = ZoneInfo("Asia/Ho_Chi_Minh")
+MARKET_ZONE_KEY: Final = "Asia/Ho_Chi_Minh"
 Symbol = NewType("Symbol", str)
 JsonValue: TypeAlias = "str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]"
 Fields: TypeAlias = dict[str, JsonValue]
@@ -165,6 +165,7 @@ def load_document(path: Path, version: str, content_fields: str) -> Document:
 
 
 def build_report(manifest_path: Path, observations_path: Path) -> str:
+    market_zone = ZoneInfo(MARKET_ZONE_KEY)
     manifest = load_document(manifest_path, "daily-price-eligibility-v2", "calendar members")
     extract = load_document(observations_path, "daily-price-observations-v2", "scope rows")
     partition = manifest.partition
@@ -181,7 +182,7 @@ def build_report(manifest_path: Path, observations_path: Path) -> str:
         raise AuditInputError("membership and prices must have the same effective cutoff")
     if (
         completed_at > evidence_cutoff
-        or completed_at.astimezone(MARKET_ZONE).date() != partition.session_date
+        or completed_at.astimezone(market_zone).date() != partition.session_date
     ):
         raise AuditInputError("both inputs must attest to the same completed session")
 
@@ -287,11 +288,23 @@ def build_report(manifest_path: Path, observations_path: Path) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: daily_price_key_audit.py MANIFEST.json OBSERVATIONS.json", file=sys.stderr)
+    args = sys.argv[1:]
+    usage = "usage: daily_price_key_audit.py MANIFEST.json OBSERVATIONS.json"
+    if args in (["-h"], ["--help"]):
+        print(usage)
+        return 0
+    if len(args) != 2:
+        print(usage, file=sys.stderr)
         return 2
     try:
-        report = build_report(Path(sys.argv[1]), Path(sys.argv[2]))
+        report = build_report(Path(args[0]), Path(args[1]))
+    except ZoneInfoNotFoundError:
+        print(
+            f"missing IANA timezone data for {MARKET_ZONE_KEY}; install system tzdata "
+            "or the Python tzdata package for this interpreter",
+            file=sys.stderr,
+        )
+        return 2
     except AuditInputError as exc:
         print(f"invalid audit input: {exc}", file=sys.stderr)
         return 2
