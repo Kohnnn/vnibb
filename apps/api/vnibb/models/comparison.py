@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Any, List, Dict, Optional
+from typing import Any, List, Dict, Literal, Optional
 from enum import Enum
 
 class RatioCategory(str, Enum):
@@ -17,10 +17,26 @@ class ComparisonMetric(BaseModel):
     category: RatioCategory
     format: str = "number"  # number, percent, currency, ratio
 
+ValuationOrigin = Literal["screener", "persisted_ratio", "provider_ratio"]
+ValuationKey = Literal["ps_ratio", "ev_ebitda"]
+
+
+class ValuationEvidence(BaseModel):
+    origin: ValuationOrigin
+    source: str | None = None
+    fiscal_period: str | None = None
+    valuation_as_of: str | None = None
+    denominator_basis: str | None = None
+
+
+ValuationBasis = dict[ValuationKey, ValuationEvidence]
+
+
 class StockComparison(BaseModel):
     symbol: str
     company_name: str
     metrics: Dict[str, Optional[float]]  # metric_id -> value
+    valuation_basis: ValuationBasis = Field(default_factory=dict)
     market_cap_provenance: Dict[str, Any] = Field(default_factory=dict)
 
 class ComparisonResponse(BaseModel):

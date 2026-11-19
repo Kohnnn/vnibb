@@ -447,6 +447,19 @@ class LlmService:
         else:
             context_blob = json.dumps(context, ensure_ascii=True, default=str)
             if len(context_blob) > MAX_CONTEXT_CHARS:
+                if widget_type_key == "financial_ratios" and isinstance(client_context, dict):
+                    widget_payload = client_context.get("widget_payload")
+                    if isinstance(widget_payload, dict) and widget_payload.get("dataSample"):
+                        # Keep ratio observations and their qualifiers ahead of the larger FY snapshot.
+                        sample_fields = ("dataProvenance", "dataSampleOmissions", "dataSample")
+                        ordered_payload = {key: widget_payload[key] for key in sample_fields if key in widget_payload}
+                        ordered_payload.update(widget_payload)
+                        ordered_client = {**client_context, "widget_payload": ordered_payload}
+                        if "data" in ordered_client:
+                            ordered_client["data"] = ordered_client.pop("data")
+                        context_blob = json.dumps(
+                            {**context, "client_context": ordered_client}, ensure_ascii=True, default=str
+                        )
                 context_blob = f"{context_blob[:MAX_CONTEXT_CHARS]}..."
 
         system_prompt = (

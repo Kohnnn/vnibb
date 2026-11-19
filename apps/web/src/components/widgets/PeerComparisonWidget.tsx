@@ -18,6 +18,8 @@ import {
     Grid3X3,
     ArrowUpDown
 } from 'lucide-react';
+import { ValuationCaption, ValuationCell, valuationKey } from './comparison/ValuationCell';
+import type { ValuationBasis } from '@/lib/api';
 import { useComparison, usePeers } from '@/hooks/useComparison';
 import { ExportButton } from '@/components/common/ExportButton';
 import { exportToCSV, exportToXLSX, type ExportProvenance } from '@/lib/exportWidget';
@@ -59,6 +61,13 @@ interface PeerComparisonWidgetProps {
 
 type TabMode = 'table' | 'radar' | 'performance';
 type SortDirection = 'asc' | 'desc';
+
+interface PeerStock {
+    name: string;
+    metrics: Record<string, number | null>;
+    marketCap: MarketCapResult;
+    basis?: ValuationBasis | null;
+}
 
 interface ComparisonSet {
     id: string;
@@ -245,13 +254,13 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
     const { setLinkedSymbol } = useWidgetSymbolLink(undefined, { widgetType: 'peer_comparison' });
 
     const comparisonData = useMemo(() => {
-        if (!compData?.stocks) return {} as Record<string, { name: string; metrics: Record<string, number | null>; marketCap: MarketCapResult }>;
-        return compData.stocks.reduce<Record<string, { name: string; metrics: Record<string, number | null>; marketCap: MarketCapResult }>>((acc, stock) => {
+        return (compData?.stocks ?? []).reduce<Record<string, PeerStock>>((acc, stock) => {
             const marketCap = stock.market_cap_result ?? resolveMarketCap({ label: stock.symbol, value: stock.metrics?.market_cap, provenance: stock.market_cap_provenance });
             acc[stock.symbol] = {
                 name: stock.company_name || stock.name || stock.symbol,
                 metrics: { ...stock.metrics, market_cap: marketCap.value },
                 marketCap,
+                basis: stock.valuation_basis,
             };
             return acc;
         }, {});
@@ -450,7 +459,10 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
         
         return (
             <div className="flex-1 overflow-auto">
-                        <table className="data-table w-full text-[10px] border-collapse">
+                <table className="data-table w-full text-[10px] border-collapse">
+                    {normalizedMetrics.some(metric => valuationKey(metric.key)) && (
+                        <ValuationCaption periods={peers.flatMap(sym => Object.values(comparisonData[sym]?.basis ?? {}).map(field => field?.fiscal_period))} />
+                    )}
                     <thead className="text-[var(--text-muted)] sticky top-0 bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
                         <tr>
                             <th className="text-left py-2 px-2 font-medium bg-[var(--bg-secondary)] sticky left-0 z-10 min-w-[148px] border-r border-[var(--border-subtle)]">
@@ -493,6 +505,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                     <tbody className="divide-y divide-[var(--border-subtle)]">
                         {sortedMetrics.map(metric => {
                             const sectorValue = sectorAvg[metric.key];
+                            const field = valuationKey(metric.key);
                             return (
                                 <tr key={metric.key} className="hover:bg-[var(--bg-hover)]">
                                     <td className="py-1.5 px-2 text-[var(--text-secondary)] border-r border-[var(--border-subtle)] sticky left-0 bg-[var(--bg-secondary)] min-w-[148px]">
@@ -509,7 +522,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                         let cellClass = "text-right px-2 font-mono";
                                         let cellStyle = {};
                                         
-                                        if (isNumeric) {
+                                        if (isNumeric && !field) {
                                             if (heatmapEnabled) {
                                                 cellStyle = { backgroundColor: getHeatmapColor(metric.key, value) };
                                             } else {
@@ -524,7 +537,9 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
 
                                         return (
                                             <td key={`${sym}-${index}`} className={cellClass} style={cellStyle}>
-                                                {metric.key === 'market_cap' && comparisonData[sym] ? (
+                                                {field && isNumeric ? (
+                                                    <ValuationCell label={formatCellValue(value, metric.format, unitConfig)} ticker={sym} metric={field} evidence={comparisonData[sym]?.basis?.[field]} />
+                                                ) : metric.key === 'market_cap' && comparisonData[sym] ? (
                                                     <details>
                                                         <summary className="cursor-pointer">{comparisonData[sym].marketCap.status === 'available' ? formatCellValue(value, metric.format, unitConfig) : comparisonData[sym].marketCap.status === 'conflict' ? 'Conflict' : 'Unavailable'}</summary>
                                                         <span className="text-left text-[10px]">{marketCapExplanation(comparisonData[sym].marketCap)}</span>
@@ -536,6 +551,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                                     })}
                                     <td className="text-right px-2 font-mono text-[var(--text-secondary)] border-l border-[var(--border-subtle)]">
                                         {sectorValue !== undefined ? formatCellValue(sectorValue, metric.format, unitConfig) : EMPTY_VALUE}
+                                        {field && sectorValue != null && <span className="block text-[10px] font-sans">Descriptive only</span>}
                                         {sectorAverageCounts?.[metric.key] ? (
                                             <span className="ml-1 text-[8px] text-[var(--text-muted)]">(n={sectorAverageCounts[metric.key]})</span>
                                         ) : null}
@@ -707,7 +723,7 @@ export function PeerComparisonWidget({ id, symbol, config, isEditing, onRemove, 
                         fetchedAt={dataUpdatedAt || null}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={`Period ${period}`}
+                        note={`Requested horizon: ${period}`}
                         align="right"
                     />
                     {/* Saved Sets Menu */}

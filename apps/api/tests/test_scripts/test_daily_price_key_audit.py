@@ -12,14 +12,69 @@ MANIFEST: Final = HERE / "fixtures" / "daily_price_manifest.json"
 OBSERVATIONS: Final = HERE / "fixtures" / "daily_price_observations.json"
 
 
-def run_audit(manifest: Path, observations: Path) -> subprocess.CompletedProcess[str]:
+def run_cli(
+    args: tuple[str, ...], *, without_iana: bool = False
+) -> subprocess.CompletedProcess[str]:
+    # An empty PYTHONTZPATH hides system data; -S hides the fallback tzdata package.
+    flags = ["-I", "-B", "-S"] if without_iana else ["-I", "-B"]
     return subprocess.run(
-        [sys.executable, "-B", str(CLI), str(manifest), str(observations)],
+        [sys.executable, *flags, str(CLI), *args],
+        env={"PYTHONTZPATH": ""} if without_iana else None,
         capture_output=True,
         text=True,
         check=False,
         timeout=5,
     )
+
+
+def run_audit(manifest: Path, observations: Path) -> subprocess.CompletedProcess[str]:
+    return run_cli((str(manifest), str(observations)))
+
+
+@pytest.mark.parametrize("flag", ["-h", "--help"])
+def test_help_works_without_iana_data(flag: str) -> None:
+    result = run_cli((flag,), without_iana=True)
+
+    assert (result.returncode, result.stderr) == (0, "")
+    assert "MANIFEST.json" in result.stdout
+    assert "OBSERVATIONS.json" in result.stdout
+
+
+def test_audit_reports_missing_iana_prerequisite_without_a_report() -> None:
+    result = run_cli((str(MANIFEST), str(OBSERVATIONS)), without_iana=True)
+
+    assert (result.returncode, result.stdout) == (2, ""), result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Asia/Ho_Chi_Minh" in result.stderr
+    assert "tzdata" in result.stderr
+    assert "install" in result.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    ("completed_at", "session_date"),
+    [("1975-06-11T16:30:00Z", "1975-06-12"), ("1975-06-13T16:30:00Z", "1975-06-13")],
+    ids=["utc-plus-eight", "utc-plus-seven"],
+)
+def test_session_date_uses_historical_iana_rules(
+    completed_at: str, session_date: str, tmp_path: Path
+) -> None:
+    # At 16:30 UTC, the local date changes only under the pre-transition UTC+08 rule.
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    observations = json.loads(OBSERVATIONS.read_text(encoding="utf-8"))
+    for evidence in (manifest, observations):
+        evidence["partition"]["session_date"] = session_date
+        evidence["evidence"].update(effective_through=completed_at, captured_at=completed_at)
+    manifest["calendar"]["completed_at"] = completed_at
+    for row in observations["rows"]:
+        row["time"] = session_date
+    manifest_path, observations_path = tmp_path / MANIFEST.name, tmp_path / OBSERVATIONS.name
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    observations_path.write_text(json.dumps(observations), encoding="utf-8")
+
+    result = run_audit(manifest_path, observations_path)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["partition"]["session_date"] == session_date
 
 
 def test_complete_symbol_scope_reconciles_eligible_keys_and_duplicate_rows() -> None:

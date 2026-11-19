@@ -23,6 +23,8 @@ export interface ExportProvenance {
   sourceLabel?: string;
   apiGroup?: string;
   endpoint?: string;
+  /** A route name, not the complete request or the lineage of the displayed data. */
+  endpointKind?: 'route_summary';
   cached?: boolean;
   stale?: boolean;
   warnings?: string[];
@@ -77,7 +79,9 @@ function provenanceEntries(input: ExportProvenance) {
     ['period_scope', 'Period scope', resolved.periodScope],
     ['source', 'Source', resolved.sourceLabel],
     ['api_group', 'API group', resolved.apiGroup],
-    ['endpoint', 'Endpoint', resolved.endpoint],
+    resolved.endpointKind === 'route_summary'
+      ? ['route_summary', 'Route summary', resolved.endpoint]
+      : ['endpoint', 'Endpoint', resolved.endpoint],
     ['source_as_of', 'Source as of', resolved.updatedAt == null ? 'unknown' : String(resolved.updatedAt)],
     ['fetched_at', 'Fetched at', resolved.fetchedAt == null ? null : String(resolved.fetchedAt)],
     ['units', 'Units', resolved.units],

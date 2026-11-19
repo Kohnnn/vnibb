@@ -26,6 +26,7 @@ from vnibb.core.ratio_units import (
     FRACTION_RATIO_FIELDS, PERCENT_RATIO_FIELDS, admitted_ratio_value, declared_ratio_value,
 )
 from vnibb.core.vn_sectors import VN_SECTORS
+from vnibb.models.comparison import ValuationBasis, ValuationEvidence, ValuationOrigin
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
@@ -487,6 +488,33 @@ class MetricDefinition(BaseModel):
     format: str  # "currency", "percent", "ratio", "large_number", "number"
 
 
+def _valuation_evidence(record: Any, key: str, origin: ValuationOrigin) -> ValuationEvidence:
+    """Read only the supplier row, never a quote, fetch time or request default."""
+    payload = record
+    column = "ps_ratio" if key == "ps" else key
+    if origin == "screener" and _record_value(record, key) is None:
+        key = "ps_ratio" if key == "ps" else "evEbitda"
+    if origin == "persisted_ratio" and getattr(record, column, None) is None:
+        # _metric_from_ratio_row used the JSON fallback, not the stored column.
+        payload = record.raw_data or {}
+        if _record_value(payload, key) is None:
+            key = column
+
+    def text(row: Any, *fields: str) -> str | None:
+        value = _record_value(row, *fields)
+        return (value.strip() or None) if isinstance(value, str) else None
+
+    return ValuationEvidence(
+        origin=origin,
+        source=text(payload, f"{key}_source") or text(record, "source"),
+        fiscal_period=text(payload, f"{key}_fiscal_period") or (
+            text(record, "period") if origin != "screener" else None
+        ),
+        valuation_as_of=text(payload, f"{key}_valuation_as_of"),
+        denominator_basis=text(payload, f"{key}_denominator_basis"),
+    )
+
+
 class StockMetrics(BaseModel):
     """Metrics for a single stock."""
 
@@ -494,6 +522,7 @@ class StockMetrics(BaseModel):
     name: Optional[str] = None
     industry: Optional[str] = None
     exchange: Optional[str] = None
+    valuation_basis: ValuationBasis = Field(default_factory=dict)
     # Flexible metrics dictionary to hold all 84+ fields
     metrics: Dict[str, Any] = Field(default_factory=dict)
     market_cap_provenance: Dict[str, Any] = Field(
@@ -695,7 +724,11 @@ class ComparisonService:
                         }
                         for key in PERCENT_RATIO_FIELDS.intersection(metrics_dict):
                             metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratios_dict.get("ratio_units"))
-                        return StockMetrics(symbol=symbol, metrics=metrics_dict)
+                        return StockMetrics(
+                            symbol=symbol, metrics=metrics_dict,
+                            valuation_basis={"ps_ratio": _valuation_evidence(ratios_dict, "ps", "provider_ratio")}
+                            if metrics_dict["ps"] is not None else {},
+                        )
                 except Exception as ratio_err:
                     logger.warning(f"Ratio fallback failed for {symbol}: {ratio_err}")
 
@@ -731,6 +764,11 @@ class ComparisonService:
                 "dividend_yield": _record_value(data, "dividend_yield", "dividendYield"),
                 "foreign_ownership": _record_value(data, "foreign_ownership", "foreignOwnership"),
             }
+            valuation_basis: ValuationBasis = {}
+            if metrics_dict["ps"] is not None:
+                valuation_basis["ps_ratio"] = _valuation_evidence(data, "ps", "screener")
+            if metrics_dict["ev_ebitda"] is not None:
+                valuation_basis["ev_ebitda"] = _valuation_evidence(data, "ev_ebitda", "screener")
             ratio_units = _record_value(data, "ratio_units") or (_record_value(data, "extended_metrics") or {}).get("ratio_units", {})
             for key in PERCENT_RATIO_FIELDS.intersection(metrics_dict):
                 metrics_dict[key] = admitted_ratio_value(metrics_dict[key], key, ratio_units=ratio_units)
@@ -811,7 +849,10 @@ class ComparisonService:
                 for key, value in ratio_fallbacks.items():
                     if metrics_dict.get(key) is None and value is not None:
                         metrics_dict[key] = value
-
+                        if key in ("ps", "ev_ebitda"):
+                            valuation_basis["ps_ratio" if key == "ps" else "ev_ebitda"] = _valuation_evidence(
+                                ratio_row, key, "persisted_ratio",
+                            )
 
             normalized_metrics: Dict[str, float] = {}
             for key, value in metrics_dict.items():
@@ -835,6 +876,7 @@ class ComparisonService:
                 industry=industry,
                 exchange=exchange,
                 metrics=metrics_dict,
+                valuation_basis=valuation_basis,
                 market_cap_provenance=market_cap_provenance,
             )
         except Exception as e:
@@ -1675,6 +1717,8 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
         market_cap = provenance["value"] if provenance["status"] == "available" else None
 
         ratio_snapshot: dict[str, Any] = {}
+        snapshot_record = None
+        snapshot_origin: ValuationOrigin = "persisted_ratio"
         derived_metrics = await _build_comparison_backfill(
             symbol,
             period,
@@ -1728,6 +1772,7 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
 
                 if db_rows:
                     latest = db_rows[0]
+                    snapshot_record = latest
                     ratio_snapshot = {
                         "pe": _metric_from_ratio_row(latest, "pe"),
                         "pb": _metric_from_ratio_row(latest, "pb"),
@@ -1780,6 +1825,8 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
                         ratio_snapshot = (
                             latest.model_dump() if hasattr(latest, "model_dump") else {}
                         )
+                        snapshot_record = ratio_snapshot.copy()
+                        snapshot_origin = "provider_ratio"
                         # DB snapshots above are already admitted row by row; a
                         # provider model carries these fraction-format metrics
                         # outside `PERCENT_RATIO_FIELDS` with no unit, so they are
@@ -1797,6 +1844,20 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
             except Exception as ratio_err:
                 logger.warning(f"Ratio backfill failed for {symbol}: {ratio_err}")
 
+        valuation_basis: ValuationBasis = {}
+        reported_multiples = {}
+        for key, public_key in (("ps", "ps_ratio"), ("ev_ebitda", "ev_ebitda")):
+            value = _normalize_comparison_metric(key, stock_metrics.metrics.get(key))
+            if value is not None:
+                evidence = stock_metrics.valuation_basis.get(public_key)
+                if evidence is not None:
+                    valuation_basis[public_key] = evidence
+            else:
+                value = _normalize_comparison_metric(key, ratio_snapshot.get(key))
+                if value is not None and snapshot_record is not None:
+                    valuation_basis[public_key] = _valuation_evidence(snapshot_record, key, snapshot_origin)
+            reported_multiples[public_key] = value
+
         # Map existing metrics to the new structure
         metrics_map = {
             "pe_ratio": _first_metric_value(
@@ -1805,14 +1866,7 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
             "pb_ratio": _first_metric_value(
                 "pb", stock_metrics.metrics.get("pb"), ratio_snapshot.get("pb")
             ),
-            "ps_ratio": _first_metric_value(
-                "ps", stock_metrics.metrics.get("ps"), ratio_snapshot.get("ps")
-            ),
-            "ev_ebitda": _first_metric_value(
-                "ev_ebitda",
-                stock_metrics.metrics.get("ev_ebitda"),
-                ratio_snapshot.get("ev_ebitda"),
-            ),
+            **reported_multiples,
             "market_cap": market_cap,
             "roe": _first_metric_value(
                 "roe", stock_metrics.metrics.get("roe"), ratio_snapshot.get("roe")
@@ -1913,7 +1967,7 @@ async def get_comparison_data(symbols: List[str], period: str = "FY"):
         results.append(
             StockComparison(
                 symbol=symbol, company_name=stock_metrics.name or symbol, metrics=metrics_map,
-                market_cap_provenance=provenance,
+                market_cap_provenance=provenance, valuation_basis=valuation_basis,
             )
         )
 

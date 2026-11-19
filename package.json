@@ -37,6 +37,9 @@
                     }
                 }
             }
+        },
+        "patchedDependencies": {
+            "@testing-library/react@16.3.2": "patches/@testing-library__react@16.3.2.patch"
         }
     },
     "engines": {

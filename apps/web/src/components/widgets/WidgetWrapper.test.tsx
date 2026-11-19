@@ -5,6 +5,7 @@ import { WidgetWrapper } from './WidgetWrapper';
 import { NotesWidget } from './NotesWidget';
 import { DEFAULT_GROUPS } from '@/types/widget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 let mockTickerOverride: string | null = null;
 let mockWidgetConfig: Record<string, unknown> = {};
 let mockWidgetType = 'screener';
@@ -410,10 +411,11 @@ test('the widget menu opens scoped requirements and limitations and closes again
 });
 
 test('wrapper badges use source age while preserving retrieval and cache lineage', async () => {
-  const now = jest.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-08T03:00:00Z').getTime());
+  const fetchedAt = '2026-10-08T03:00:00Z';
+  const now = jest.spyOn(Date, 'now').mockReturnValue(new Date(fetchedAt).getTime());
   const payload = buildWidgetRuntime({
     empty: false, apiGroup: '/news', endpoint: '/news/market', sourceLabel: 'Stored published articles',
-    lastDataDate: '2026-09-21', fetchedAt: '2026-10-08T03:00:00Z', cached: true,
+    lastDataDate: '2026-09-21', fetchedAt, cached: true,
   });
   try {
     const user = userEvent.setup();
@@ -426,7 +428,7 @@ test('wrapper badges use source age while preserving retrieval and cache lineage
     expect(screen.getByText('Source as of')).toBeInTheDocument();
     expect(screen.getByText('2026-09-21', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('Fetched at')).toBeInTheDocument();
-    expect(screen.getByText(/^2026-10-08 \d{2}:\d{2}$/)).toBeInTheDocument();
+    expect(screen.getByText(formatAbsoluteTimestamp(fetchedAt), { exact: true })).toBeInTheDocument();
     expect(screen.getByText('Cached snapshot')).toBeInTheDocument();
   } finally {
     now.mockRestore();

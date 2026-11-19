@@ -82,3 +82,55 @@ test('distinguishes exact symbol evidence, uncertain sector scores, zero fallbac
         globalThis.fetch = originalFetch;
     }
 });
+
+describe('Company News association', () => {
+    const base = { source: 'QA fixture only', published_date: '2026-11-16T04:15:00Z', related_symbols: [], sectors: [] };
+    const direct = { ...base, id: 'direct', title: 'HPG publishes a fixture update', association_class: 'direct_company', match_reason: 'exact_symbol_title', matched_symbols: ['HPG'] };
+    const peer = { ...base, id: 'peer', title: 'QAP publishes a fixture update', association_class: 'verified_peer', match_reason: 'peer_mentions', matched_symbols: ['QAP'], relevance_score: 0.68 };
+    const sector = { ...base, id: 'sector', title: 'Steel production fixture', association_class: 'verified_sector', match_reason: 'sector_keyword', relevance_score: null };
+    const market = { ...base, id: 'market', title: 'Russian tourist deportation', association_class: 'general_market', is_market_wide_fallback: true };
+    const unverified = { ...base, id: 'unknown', title: 'Unverified fixture', association_class: 'none' };
+    const originalFetch = globalThis.fetch;
+    let client: QueryClient;
+
+    beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-11-18T02:00:00Z') });
+        client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    });
+
+    afterEach(() => {
+        client.clear();
+        globalThis.fetch = originalFetch;
+        jest.useRealTimers();
+    });
+
+    function show(articles: readonly object[], fallback_used = false) {
+        globalThis.fetch = jest.fn(async (input: RequestInfo | URL) => ({
+            ok: true,
+            json: async () => new URL(String(input)).pathname.endsWith('/news/feed') ? { articles, fallback_used } : {},
+        } as Response));
+        render(<QueryClientProvider client={client}><NewsFeedWidget symbol="HPG" /></QueryClientProvider>);
+    }
+
+    test('names the verified peer without calling it an HPG mention', async () => {
+        show([peer]);
+        expect(await screen.findByText('Verified peer: QAP')).toBeVisible();
+        expect(screen.queryByText('Symbol mention: HPG')).not.toBeInTheDocument();
+    });
+
+    test('labels an all-market response as fallback and does not chart ticker momentum', async () => {
+        show([{ ...direct, title: market.title, relevance_score: 1 }], true);
+        expect(await screen.findByRole('heading', { name: market.title })).toBeVisible();
+        expect(screen.queryByText('HPG related feed')).not.toBeInTheDocument();
+        expect(screen.getAllByText('Market-wide fallback')).toHaveLength(2);
+        expect(screen.getByTitle(/matched symbols: none; score: unavailable; class: general_market/)).toBeVisible();
+        expect(screen.queryByText(/news momentum|articles in 7d/i)).not.toBeInTheDocument();
+    });
+
+    test('counts only admitted direct, peer, and sector articles in a mixed feed', async () => {
+        show([direct, peer, sector, market, unverified]);
+        expect(await screen.findByText('3/3 articles in 7d')).toBeVisible();
+        expect(screen.getByText('HPG news momentum')).toBeVisible();
+        expect(screen.getByText('Showing 5 of 5 articles')).toBeVisible();
+    });
+});

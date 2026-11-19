@@ -47,7 +47,18 @@ type NewsFlowItem = {
 type NewsFlowPage = {
   items: NewsFlowItem[];
   has_more?: boolean;
+  fallback_used?: boolean;
+  mode?: 'all' | 'related';
 };
+
+function isMarketWide(item: NewsFlowItem) {
+  return item.is_market_wide_fallback === true || item.association_class === 'general_market';
+}
+
+function hasTickerEvidence(item: NewsFlowItem) {
+  return !isMarketWide(item) && (item.association_class === 'direct_company'
+    || item.association_class === 'verified_peer' || item.association_class === 'verified_sector');
+}
 
 /** Shape check for the `/news/flow` envelope before it reaches rendering. */
 function isNewsFlowPage(payload: unknown): payload is NewsFlowPage {
@@ -106,9 +117,24 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
     staleTime: 5 * 60 * 1000,
   });
 
-  const allNews: NewsFlowItem[] = data?.pages.flatMap((p) => p.items) || [];
+  const isRelated = filters.symbols.length > 0 && data?.pages[0]?.mode !== 'all';
+  const allNews = useMemo(() => data?.pages.flatMap(page => page.items.map(item => {
+    if (isMarketWide(item) || page.fallback_used === true) {
+      return { ...item, association_class: 'general_market', matched_symbols: [] };
+    }
+    if (isRelated && !hasTickerEvidence(item)) {
+      return { ...item, association_class: 'none', matched_symbols: [] };
+    }
+    return item;
+  })) ?? [], [data?.pages, isRelated]);
   const hasData = allNews.length > 0;
   const isFallback = Boolean(error && hasData);
+  let feedNote = 'Market feed';
+  if (isRelated) {
+    if (hasData && allNews.every(isMarketWide)) feedNote = 'Market-wide fallback';
+    else if (hasData && !allNews.some(hasTickerEvidence)) feedNote = 'Ticker association unverified';
+    else feedNote = 'Ticker feed';
+  }
   // `/news/flow` rows may lack a source publication date; the helper reports
   // those as unknown instead of borrowing the query receipt.
   const observation = useMemo(
@@ -122,7 +148,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
         empty: !hasData,
         apiGroup: '/news',
         endpoint: '/news/flow',
-        sourceLabel: filters.symbols.length ? 'Ticker feed' : 'Market feed',
+        sourceLabel: feedNote,
         lastDataDate: observation.lastDataDate,
         fetchedAt: dataUpdatedAt,
         coverage: observation.coverage,
@@ -138,7 +164,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
     dataUpdatedAt,
     isFallback,
     allNews.length,
-    filters.symbols.length,
+    feedNote,
     observation.lastDataDate,
     observation.coverage,
     observation.warning,
@@ -162,7 +188,7 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
             fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
-            note={filters.symbols.length ? 'Ticker feed' : 'Market feed'}
+            note={feedNote}
             align="right"
           />
         </div>

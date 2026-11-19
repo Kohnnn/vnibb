@@ -274,3 +274,87 @@ describe('ComparisonAnalysisWidget primary ticker synchronization', () => {
     expect(screen.queryByText('FPT')).not.toBeInTheDocument()
   })
 })
+
+it('keeps independent fiscal rows and source unknowns beside the two valuation grids', async () => {
+  mockGetPeerCompanies.mockResolvedValue({ peers: [] })
+  mockGetComparisonPerformance.mockResolvedValue([])
+  mockCompareStocks.mockResolvedValue({
+    metrics: [{ id: 'ev_ebitda', name: 'EV/EBITDA', format: 'ratio' }],
+    stocks: [{ symbol: 'MSR', metrics: { ev_ebitda: 18.76 }, valuation_basis: {
+      ev_ebitda: { source: 'quarter-feed', fiscal_period: 'Q2-2025', valuation_as_of: '2025-09-01', denominator_basis: 'reported consolidated EBITDA' },
+    } }, { symbol: 'VNM', metrics: { ev_ebitda: 12.16 } }],
+  })
+  mockGetFinancialRatios.mockImplementation(async (symbol: string) => ({ data: [
+    { period: '2023', source: 'older-feed', ev_ebitda: 7.63 },
+    { period: '2024', ev_ebitda: 8.42, ...(symbol === 'VNM' ? { source: 'snapshot-feed' } : {}) },
+  ] }))
+  renderComparison()
+  await screen.findByText('18.76')
+  await screen.findAllByText('8.42')
+  const [upper, lower] = screen.getAllByRole('table')
+  const topCell = within(upper).getByText('18.76').closest('td')
+  expect(topCell).toHaveTextContent('quarter-feed')
+  expect(topCell).toHaveTextContent('Q2-2025')
+  expect(topCell).toHaveTextContent('2025-09-01')
+  expect(topCell).toHaveTextContent('reported consolidated EBITDA')
+  const lowerCell = within(lower).getAllByText('8.42')[0].closest('td')
+  expect(lowerCell).toHaveTextContent('2024')
+  expect(lowerCell).toHaveTextContent(/source: unknown/i)
+  expect(lowerCell).not.toHaveTextContent('quarter-feed')
+  expect(within(lower).getAllByText('8.42')[1].closest('td')).toHaveTextContent('snapshot-feed')
+  expect(topCell?.querySelector('svg')).toBeNull()
+  expect(lowerCell?.querySelector('svg')).toBeNull()
+})
+
+it.each([
+  {
+    scenario: 'a P/B-only snapshot',
+    peer: { period: 'Q2-2025', pb: 2.5 },
+    fiscal: null,
+    mixed: false,
+  },
+  {
+    scenario: 'equivalent fiscal labels',
+    peer: { period: 'Q2-2025', pb: 2.5, ev_ebitda: 9, valuation_basis: { ev_ebitda: { fiscal_period: '2024' } } },
+    fiscal: '2024',
+    mixed: false,
+  },
+  {
+    scenario: 'undated fiscal evidence',
+    peer: { period: 'Q2-2025', pb: 2.5, ev_ebitda: 9, valuation_basis: { ev_ebitda: { fiscal_period: 'Q2' } } },
+    fiscal: 'unknown',
+    mixed: false,
+  },
+  {
+    scenario: 'two displayed multiples with distinct fiscal periods',
+    peer: { period: '2024', pb: 2.5, ev_ebitda: 0, valuation_basis: { ev_ebitda: { fiscal_period: 'Q2-2025' } } },
+    fiscal: 'Q2-2025',
+    mixed: true,
+  },
+])('summarizes snapshot multiples with $scenario', async ({ peer, fiscal, mixed }) => {
+  mockGetPeerCompanies.mockResolvedValue({ peers: [] })
+  mockGetComparisonPerformance.mockResolvedValue([])
+  mockCompareStocks.mockResolvedValue({ metrics: [], stocks: [] })
+  mockGetFinancialRatios.mockImplementation(async (symbol: string) => ({
+    data: [symbol === 'MSR' ? { period: 'FY2024', ps: 1.25 } : peer],
+  }))
+
+  renderComparison()
+
+  const table = await screen.findByRole('table')
+  expect(within(table).getByText('1.25').closest('td')).toHaveTextContent('Fiscal: FY2024')
+  expect(within(table).getByText('2.50')).toBeInTheDocument()
+  const peerBasis = within(table).queryByLabelText(/^Basis for VNM EV\/EBITDA/)
+  if (fiscal) {
+    expect(peerBasis).toHaveTextContent(`Fiscal: ${fiscal}`)
+  } else {
+    expect(peerBasis).not.toBeInTheDocument()
+  }
+  const caption = table.querySelector('caption')
+  expect(caption).toHaveTextContent('EV/EBITDA and P/S are reported multiples')
+  if (mixed) {
+    expect(caption).toHaveTextContent('Mixed fiscal periods.')
+  } else {
+    expect(caption).not.toHaveTextContent('Mixed fiscal periods.')
+  }
+})

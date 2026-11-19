@@ -379,16 +379,21 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
             };
         }
 
-        case 'UPDATE_SYNC_GROUP':
+        case 'UPDATE_SYNC_GROUP': {
+            const { dashboardId, groupId, symbol } = action.payload;
+            const dashboard = state.dashboards.find((d) => d.id === dashboardId);
+            if (!dashboard?.syncGroups.some((g) => g.id === groupId && g.currentSymbol !== symbol)) {
+                return state;
+            }
             return {
                 ...state,
                 dashboards: state.dashboards.map((d) =>
-                    d.id === action.payload.dashboardId
+                    d === dashboard
                         ? {
                             ...d,
                             syncGroups: d.syncGroups.map((g) =>
-                                g.id === action.payload.groupId
-                                    ? { ...g, currentSymbol: action.payload.symbol }
+                                g.id === groupId
+                                    ? { ...g, currentSymbol: symbol }
                                     : g
                             ),
                             updatedAt: new Date().toISOString(),
@@ -396,6 +401,7 @@ export function dashboardReducer(state: DashboardState, action: DashboardAction)
                         : d
                 ),
             };
+        }
 
         case 'ADD_SYNC_GROUP': {
             if (!isEditableDashboardId(action.payload.dashboardId)) {

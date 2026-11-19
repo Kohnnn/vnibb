@@ -4,7 +4,7 @@
 import { memo, useEffect, useMemo } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { useFinancialRatios, useIncomeStatement } from '@/lib/queries';
-import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { buildWidgetRuntime, type WidgetDataPayload } from '@/lib/widgetRuntime';
 import { PeriodToggle } from '@/components/ui/PeriodToggle';
 import { usePeriodState } from '@/hooks/usePeriodState';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
@@ -12,10 +12,11 @@ import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { canonicalPeriodRows, formatFinancialPeriodLabel, FUNDAMENTAL_PERIOD_SYNC_GROUP, matchesFinancialPeriodMode, normalizeFinancialPeriod, periodSortKey, type FinancialPeriodMode } from '@/lib/financialPeriods';
-import { convertFinancialValueForUnit, EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
+import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units';
 import { DenseFinancialTable, type DenseTableRow } from '@/components/ui/DenseFinancialTable';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useUnit } from '@/contexts/UnitContext';
+import { isPerShareMetric, PER_SHARE_METRICS, projectFinancialRatios } from './financialRatioValues';
 
 interface FinancialRatiosWidgetProps {
     id: string;
@@ -93,52 +94,24 @@ const ratioLabels: Record<string, string> = {
 
 const TABLE_YEAR_LIMIT = 20;
 const QUARTER_PERIOD_LIMIT = 40;
-// These metrics are undefined, not zero, when a denominator is missing. Providers
-// emit a literal 0 for a period they could not compute, which would otherwise
-// render as a real 0.00 multiple and feed the swing heuristic a bogus base.
-const UNDEFINED_WHEN_ZERO_RATIO_KEYS: Record<string, true> = {
-    pe: true,
-    pb: true,
-    ps: true,
-    peg_ratio: true,
-    ev_sales: true,
-    ev_ebitda: true,
-    pfcf: true,
-    p_fcf: true,
-    price_to_fcf: true,
-};
-
 const STATEMENT_PERIOD_OPTIONS = ['FY', 'Q', 'TTM'] as const;
 
-const RATIO_FIELD_ALIASES: Record<string, string[]> = {
-    pe: ['pe', 'pe_ratio', 'priceToEarning'],
-    pb: ['pb', 'pb_ratio', 'priceToBook'],
-    ps: ['ps', 'ps_ratio', 'priceToSales'],
-    ev_ebitda: ['ev_ebitda', 'evToEbitda'],
-    ev_sales: ['ev_sales', 'evToSales'],
-};
-
-function readRatioMetric(entry: Record<string, unknown> | undefined, metricKey: string): number | null {
-    if (!entry) return null;
-    const metadata = entry.unit_metadata as Record<string, { unavailable_reason?: unknown }> | undefined;
-    if (entry.unavailable_reason || metadata?.[metricKey]?.unavailable_reason) return null;
-    if (metricKey === 'dividend_yield' || metricKey === 'payout_ratio') {
-        const units = entry.ratio_units as Record<string, unknown> | undefined;
-        if (!units || units[metricKey] !== 'percent') return null;
-    }
-    if (['eps', 'bvps', 'dps'].includes(metricKey) && (entry.ratio_units as Record<string, unknown> | undefined)?.[metricKey] !== 'VND/share') return null;
-    const keys = RATIO_FIELD_ALIASES[metricKey] ?? [metricKey];
-    const zeroMeansUndefined = UNDEFINED_WHEN_ZERO_RATIO_KEYS[metricKey] === true;
-    for (const key of keys) {
-        const value = entry[key];
-        if (value === null || value === undefined || value === '') continue;
-        const numeric = typeof value === 'number' ? value : Number(value);
-        if (!Number.isFinite(numeric)) continue;
-        if (zeroMeansUndefined && numeric === 0) continue;
-        return numeric;
-    }
-    return null;
-}
+const categories = [
+    { id: 'valuation', label: 'Valuation', metrics: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'] },
+    { id: 'per-share', label: 'Per share', metrics: PER_SHARE_METRICS },
+    { id: 'liquidity', label: 'Liquidity', metrics: ['current_ratio', 'quick_ratio', 'cash_ratio'] },
+    { id: 'efficiency', label: 'Efficiency', metrics: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'] },
+    { id: 'banking', label: 'Banking', metrics: [
+        'loan_to_deposit', 'casa_ratio', 'deposit_growth', 'nim',
+        'equity_to_assets', 'asset_yield', 'credit_cost', 'provision_coverage',
+    ] },
+    { id: 'profitability', label: 'Profitability', metrics: ['gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa'] },
+    { id: 'leverage', label: 'Leverage', metrics: ['debt_equity', 'debt_assets', 'equity_multiplier'] },
+    { id: 'coverage', label: 'Coverage', metrics: ['interest_coverage', 'debt_service_coverage'] },
+    { id: 'ocf', label: 'Operating cash flow', metrics: ['ocf_debt', 'fcf_yield', 'ocf_sales'] },
+    { id: 'growth', label: 'Growth', metrics: ['revenue_growth', 'earnings_growth'] },
+    { id: 'dividend', label: 'Dividend', metrics: ['dividend_yield', 'payout_ratio'] },
+] as const;
 
 function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemove, onDataChange }: FinancialRatiosWidgetProps) {
     // Default to the shared group the "Financial Period View" banner writes; a
@@ -187,22 +160,16 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
     const rawRatios = useMemo(() => period === 'TTM' ? [] : data?.data || [], [period, data?.data]);
     const canonicalRatios = useMemo(() => canonicalPeriodRows(rawRatios), [rawRatios]);
     const ratios = useMemo(() => canonicalRatios.rows
-        .map((entry) => ({ ...entry, period: normalizeFinancialPeriod(entry.period)!,
-            payout_ratio: readRatioMetric(entry as unknown as Record<string, unknown>, 'payout_ratio'),
-            dividend_yield: readRatioMetric(entry as unknown as Record<string, unknown>, 'dividend_yield'),
-        }))
-        .filter((entry) => matchesFinancialPeriodMode(entry.period, periodMode))
+        .flatMap((entry) => {
+            const label = normalizeFinancialPeriod(entry.period);
+            return label && matchesFinancialPeriodMode(label, periodMode) ? [{ ...entry, period: label }] : [];
+        })
         .sort((left, right) => periodSortKey(left.period) - periodSortKey(right.period)),
         [canonicalRatios.rows, periodMode]);
-    const exportData = useMemo(() => ratios.map((entry) => ({
-        period: entry.period,
-        ...Object.fromEntries(Object.keys(entry).filter((key) => typeof entry[key as keyof typeof entry] === 'number')
-            .concat(['payout_ratio', 'dividend_yield']).map((key) => [key,
-                ['eps', 'bvps', 'dps'].includes(key)
-                    ? convertFinancialValueForUnit(readRatioMetric(entry as unknown as Record<string, unknown>, key), unitConfig, entry.period)
-                    : readRatioMetric(entry as unknown as Record<string, unknown>, key),
-            ])),
-    })), [ratios, unitConfig]);
+    const { exportData, perShareUnit, readValue, units } = useMemo(
+        () => projectFinancialRatios(ratios, unitConfig),
+        [ratios, unitConfig],
+    );
 
     // Columns are exactly the statement panels' window, so the same period selector shows
     // the same headings in every panel — including "2026 YTD", which the ratio feed cannot
@@ -240,46 +207,12 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                 period,
                 periodScope: periodSyncGroup ? 'shared' : 'local',
                 observationStatus: period === 'TTM' ? 'unsupported' : hasData ? 'available' : isLoading ? 'loading' : refreshWarning ? 'unavailable' : 'empty',
+                units,
                 exportData,
                 extra: hasData ? { periods: ratios.length, data: exportData } : undefined,
             }),
         );
-    }, [onDataChange, hasData, isFallback, isLoading, refreshWarning, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, ratios.length, exportData]);
-
-    const categoryMetrics = {
-        valuation: ['pe', 'pb', 'ps', 'ev_sales', 'ev_ebitda', 'peg_ratio'],
-        liquidity: ['current_ratio', 'quick_ratio', 'cash_ratio'],
-        efficiency: ['asset_turnover', 'inventory_turnover', 'receivables_turnover'],
-        banking: [
-            'loan_to_deposit',
-            'casa_ratio',
-            'deposit_growth',
-            'nim',
-            'equity_to_assets',
-            'asset_yield',
-            'credit_cost',
-            'provision_coverage',
-        ],
-        profitability: ['gross_margin', 'operating_margin', 'net_margin', 'roe', 'roa'],
-        leverage: ['debt_equity', 'debt_assets', 'equity_multiplier'],
-        coverage: ['interest_coverage', 'debt_service_coverage'],
-        ocf: ['ocf_debt', 'fcf_yield', 'ocf_sales'],
-        growth: ['revenue_growth', 'earnings_growth'],
-        dividend: ['dividend_yield', 'payout_ratio'],
-    } as const;
-
-    const categoryLabels: Record<keyof typeof categoryMetrics, string> = {
-        valuation: 'Valuation',
-        liquidity: 'Liquidity',
-        efficiency: 'Efficiency',
-        banking: 'Banking',
-        profitability: 'Profitability',
-        leverage: 'Leverage',
-        coverage: 'Coverage',
-        ocf: 'Operating cash flow',
-        growth: 'Growth',
-        dividend: 'Dividend',
-    };
+    }, [onDataChange, hasData, isFallback, isLoading, refreshWarning, dataUpdatedAt, symbol, apiPeriod, period, periodSyncGroup, ratios.length, exportData, units]);
 
     const percentKeys = new Set([
         'gross_margin',
@@ -336,49 +269,24 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
 
         // A "2026 YTD" column has no ratio row of its own, so its cells stay empty rather
         // than borrowing the closed year's values and inventing a fiscal year.
-        const hasMetricData = (metricKey: string) =>
-            visiblePeriods.some((periodValue) => {
-                const entry = ratioLookup.get(periodValue);
-                return readRatioMetric(entry as Record<string, unknown> | undefined, metricKey) !== null;
-            });
-
-        Object.entries(categoryMetrics).forEach(([categoryKey, metricKeys]) => {
-            const visibleMetricKeys = metricKeys.filter((metricKey) => hasMetricData(metricKey));
-            if (visibleMetricKeys.length === 0) {
-                return;
-            }
-
-            const groupId = `group:${categoryKey}`;
-            rows.push({
-                id: groupId,
-                label: categoryLabels[categoryKey as keyof typeof categoryLabels],
-                values: {},
-                isGroup: true,
-            });
-
-            visibleMetricKeys.forEach((metricKey) => {
-                rows.push({
+        for (const category of categories) {
+            const groupId = `group:${category.id}`;
+            const metricRows: DenseTableRow[] = [];
+            for (const metricKey of category.metrics) {
+                const cells = tableColumns.map(({ key }) => [key, readValue(ratioLookup.get(key), metricKey)] as const);
+                if (!cells.some(([, value]) => value !== null)) continue;
+                metricRows.push({
                     id: metricKey,
-                    label: ratioLabels[metricKey] || metricKey,
+                    label: isPerShareMetric(metricKey) ? `${metricKey.toUpperCase()} (${perShareUnit})` : ratioLabels[metricKey] || metricKey,
                     parentId: groupId,
                     indent: 12,
-                    values: Object.fromEntries(
-                        visiblePeriods.map((periodValue, index) => {
-                            const entry = ratioLookup.get(periodValue);
-                            return [
-                                tableColumns[index]?.key ?? `period_${index}`,
-                                ['eps', 'bvps', 'dps'].includes(metricKey)
-                                    ? convertFinancialValueForUnit(readRatioMetric(entry as Record<string, unknown> | undefined, metricKey), unitConfig, periodValue)
-                                    : readRatioMetric(entry as Record<string, unknown> | undefined, metricKey),
-                            ];
-                        })
-                    ),
+                    values: Object.fromEntries(cells),
                 });
-            });
-        });
-
+            }
+            if (metricRows.length) rows.push({ id: groupId, label: category.label, values: {}, isGroup: true }, ...metricRows);
+        }
         return rows;
-    }, [categoryLabels, categoryMetrics, ratioLookup, tableColumns, visiblePeriods, unitConfig]);
+    }, [perShareUnit, ratioLookup, readValue, tableColumns]);
 
     const dataQualityWarnings = useMemo(() => {
         const warnings: string[] = [];
@@ -393,7 +301,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         const addSwingWarnings = (metricKey: 'ps' | 'ev_sales', label: string) => {
             const values = visiblePeriods
                 .filter((periodValue) => ratioLookup.has(periodValue))
-                .map((periodValue) => ({ period: periodValue, value: readRatioMetric(ratioLookup.get(periodValue) as Record<string, unknown> | undefined, metricKey) }))
+                .map((periodValue) => ({ period: periodValue, value: readValue(ratioLookup.get(periodValue), metricKey) }))
                 .filter((item): item is { period: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value) && item.value > 0);
             for (let index = 1; index < values.length; index += 1) {
                 const previous = values[index - 1];
@@ -409,7 +317,7 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
         addSwingWarnings('ps', 'P/S');
         addSwingWarnings('ev_sales', 'EV/Sales');
         return warnings.slice(0, 3);
-    }, [ratioLookup, visiblePeriods]);
+    }, [ratioLookup, readValue, visiblePeriods]);
 
     return (
         <WidgetContainer
@@ -512,18 +420,10 @@ function FinancialRatiosWidgetComponent({ id, symbol, config, isEditing, onRemov
                                 maxYears={tableColumns.length || 1}
                                 initialScrollPosition="end"
                                 storageKey={`ratios:${id}:${symbol}:${period}`}
-                                footerNote={`Note: Ratio history by ${period}. EPS/BVPS/DPS are ${unitConfig.display === 'USD' ? 'USD' : 'VND'} per share; dimensionless ratios are not currency-converted. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
+                                footerNote={`Note: Ratio history by ${period}. Dimensionless ratios are not currency-converted. First available period is the base period; missing ratios render as ${EMPTY_VALUE}.`}
                                 valueFormatter={(value, row) => {
-                                    if (UNDEFINED_WHEN_ZERO_RATIO_KEYS[row.id] === true && typeof value === 'number' && value === 0) {
-                                        return EMPTY_VALUE;
-                                    }
-                                    if (row.id === 'eps' || row.id === 'bvps' || row.id === 'dps') {
-                                        return formatNumber(value as number | null | undefined, { decimals: 2 });
-                                    }
-                                    const isPercentMetric = percentKeys.has(row.id);
-                                    return isPercentMetric
-                                        ? formatPct(row.id, value as number | null | undefined)
-                                        : formatRatio(value as number | null | undefined);
+                                    const numeric = typeof value === 'number' ? value : null;
+                                    return percentKeys.has(row.id) ? formatPct(row.id, numeric) : formatRatio(numeric);
                                 }}
                             />
                         </>

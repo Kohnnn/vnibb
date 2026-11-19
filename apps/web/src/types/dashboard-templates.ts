@@ -141,7 +141,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
   {
     id: MARKET_SCAN_TEMPLATE_ID,
     name: 'Market Scan',
-    description: 'Read Vietnamese market breadth and movers, then filter stocks in the native screener.',
+    description: 'Read Vietnamese market breadth, movers, and market-wide headlines, then filter stocks in the native screener.',
     category: 'market',
     widgets: [
       { type: 'market_overview', layout: { x: 0, y: 0, w: 8, h: 7 } },
@@ -149,6 +149,7 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'top_movers', layout: { x: 16, y: 0, w: 8, h: 7 } },
       { type: 'screener', layout: { x: 0, y: 7, w: 14, h: 12 } },
       { type: 'market_heatmap', layout: { x: 14, y: 7, w: 10, h: 12 } },
+      { type: 'market_news', layout: { x: 0, y: 19, w: 24, h: 8 }, config: { mode: 'all' } },
     ],
   },
   {
@@ -235,6 +236,19 @@ export const DASHBOARD_TEMPLATES: DashboardTemplate[] = [
       { type: 'top_movers', layout: { x: 8, y: 12, w: 8, h: 7 } },
       { type: 'market_breadth', layout: { x: 16, y: 12, w: 8, h: 7 } },
       { type: 'sector_performance', layout: { x: 0, y: 19, w: 8, h: 7 } },
+    ],
+  },
+  {
+    id: 'company-research',
+    name: 'Company Research',
+    description: 'Research the selected company with its quote, price and volume, financial statements, news, and events.',
+    category: 'research',
+    widgets: [
+      { type: 'ticker_info', layout: { x: 0, y: 0, w: 8, h: 12 } },
+      { type: 'price_chart', layout: { x: 8, y: 0, w: 16, h: 12 } },
+      { type: 'unified_financials', layout: { x: 0, y: 12, w: 24, h: 16 }, config: { periodSyncGroup: null } },
+      { type: 'news_feed', layout: { x: 0, y: 28, w: 14, h: 12 } },
+      { type: 'events_calendar', layout: { x: 14, y: 28, w: 10, h: 8 } },
     ],
   },
   {

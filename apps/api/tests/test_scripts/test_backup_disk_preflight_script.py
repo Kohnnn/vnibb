@@ -7,6 +7,7 @@ test drives one of those contracts through a fake `docker` and a fake
 Postgres, Mongo or 10 GB of disk is needed.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -68,6 +69,8 @@ if verb == "cp":
     if state["staged_archive_short"]:
         blob = blob[:-1024]
     Path(argv[2]).write_bytes(blob)
+    # docker cp can preserve the container file's mode even under a private host umask.
+    Path(argv[2]).chmod(0o644)
     sys.exit(0)
 
 assert verb == "exec", argv
@@ -291,6 +294,8 @@ def _make_previous_set(backup_dir, stamp, pg_bytes=REAL_SET_BYTES, usable=True):
     set_dir.mkdir(parents=True, exist_ok=True)
     dump = set_dir / f"postgres-{stamp}.dump"
     dump.write_bytes(b"previous dump")
+    with dump.open("r+b") as payload:
+        payload.truncate(pg_bytes)  # Sparse fixture for multi-GiB sizing cases.
     mongo = set_dir / f"mongo-vnibb-market-{stamp}.archive.gz"
     mongo.write_bytes(b"previous mongo")
     manifest = {
@@ -669,6 +674,85 @@ def test_retention_prunes_only_after_a_verified_set(run_backup):
     remaining = _sets(backup_dir)
     assert len(remaining) == 2
     assert "20250101T000000Z" not in remaining
+
+
+def test_backup_set_and_copied_artifacts_are_private(run_backup):
+    previous = os.umask(0o022)
+    try:
+        result, _, root = run_backup(stamp=PREV_STAMP)
+    finally:
+        os.umask(previous)
+    assert result.returncode == 0, result.stderr
+    directory = root / PREV_STAMP
+    assert directory.stat().st_mode & 0o777 == 0o700
+    assert all(p.stat().st_mode & 0o777 == 0o600 for p in directory.iterdir())
+
+
+@pytest.mark.parametrize("containers_running", [("vnibb-db", "vnibb-mongo"), ("vnibb-db",)])
+def test_overlapping_backup_cannot_dump_or_mark_failed(run_backup, containers_running):
+    fd = os.open(run_backup.backup_dir, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        result, commands, root = run_backup(stamp=PREV_STAMP, containers_running=containers_running)
+    finally:
+        os.close(fd)
+    assert result.returncode == 1
+    assert "could not lock the backup directory" in result.stderr
+    assert commands == []
+    assert not list(root.iterdir())
+
+
+def test_retention_prunes_only_canonical_sets_in_mixed_backup_root(run_backup):
+    root = run_backup.backup_dir
+    oldest = _make_previous_set(root, PREV_STAMP, pg_bytes=1024)
+    previous = _make_previous_set(root, "20250102T000000Z", pg_bytes=1024)
+    release = root / "20250109-release"
+    incomplete = root / "20250108T000000Z"
+    linked_manifest = root / "20250107T000000Z"
+    for path in (release, incomplete, linked_manifest):
+        path.mkdir()
+    (release / "manifest.json").write_text("release metadata", encoding="utf-8")
+    (incomplete / "partial.dump").touch()
+    (linked_manifest / "manifest.json").symlink_to(previous / "manifest.json")
+    linked_set = root / "20250106T000000Z"
+    linked_set.symlink_to(previous, target_is_directory=True)
+    loose_file = root / "20250105T000000Z"
+    marker = root / "20250104T000000Z.FAILED"
+    loose_file.touch()
+    marker.touch()
+
+    # These are timestamped, real directories with real manifests.
+    for stamp in ("19991231T235959Z", "20250109T123456Z"):
+        unrelated = root / stamp
+        unrelated.mkdir()
+        (unrelated / "manifest.json").write_text('{"kind":"release"}')
+        (unrelated / "release.tgz").write_bytes(b"foreign archive")
+    damaged = _make_previous_set(root, "20250109T120000Z", pg_bytes=1024)
+    (damaged / f"postgres-{damaged.name}.dump").write_bytes(b"truncated")
+    mixed = _make_previous_set(root, "20250109T110000Z", pg_bytes=1024)
+    (mixed / ".operator-note").touch()
+
+    release.chmod(0)
+    try:
+        result, _, _ = run_backup(stamp="20250110T000000Z", keep_sets=2)
+    finally:
+        release.chmod(0o700)
+
+    assert result.returncode == 0, result.stderr
+    assert "2 set(s) retained, keeping 2" in result.stdout
+    assert not oldest.exists()
+    assert (previous / "manifest.json").is_file()
+    assert (root / "20250110T000000Z" / "manifest.json").is_file()
+    assert (release / "manifest.json").read_text(encoding="utf-8") == "release metadata"
+    assert (incomplete / "partial.dump").is_file()
+    assert (linked_manifest / "manifest.json").is_symlink()
+    assert linked_set.is_symlink()
+    assert loose_file.is_file()
+    assert marker.is_file()
+    for stamp in ("19991231T235959Z", "20250109T123456Z"):
+        assert (root / stamp / "release.tgz").read_bytes() == b"foreign archive"
+    assert (damaged / f"postgres-{damaged.name}.dump").read_bytes() == b"truncated"
+    assert (mixed / ".operator-note").is_file()
 
 
 def test_retention_failure_preserves_new_verified_pair(run_backup):

@@ -31,3 +31,13 @@ it('forwards provenance and excludes unverified and conflicting market caps from
   expect(response.sector_averages).toEqual({ pe: 13 });
   expect(response.sectorAverages.pe).toBe(20);
 });
+
+it.each(['stocks', 'data'])('preserves per-field evidence from the %s response shape', async (shape) => {
+  const basis = { ev_ebitda: { fiscal_period: 'Q2-2025' }, ps_ratio: { source: 'annual-feed' } };
+  const stock = { symbol: 'HPG', metrics: { ps_ratio: 1.36, ev_ebitda: 18.76 }, valuation_basis: basis };
+  mockGet.mockResolvedValue({ data: { [shape]: shape === 'stocks' ? [stock] : { HPG: stock } } });
+  useComparison(['HPG'], { period: '1Y' });
+  const response = await mockQuery.mock.calls.at(-1)![0].queryFn();
+  expect(response.stocks[0].valuation_basis).toEqual(basis);
+  expect(response.data.HPG.valuation_basis).toEqual(basis);
+});

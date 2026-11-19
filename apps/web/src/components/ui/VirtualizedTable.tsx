@@ -47,6 +47,8 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
     count: data.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight,
+    // The sticky header precedes the row canvas in this scrollport.
+    scrollMargin: headerHeight,
     overscan: 10,
   });
 
@@ -74,51 +76,57 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
     );
   }
 
+  const flexibleColumnMinWidth = 80;
+  const minWidth = columns.reduce((total, column) => total + (column.width ?? flexibleColumnMinWidth), 0);
+  const gridTemplateColumns = columns.map(({ width }) => (
+    width === undefined ? `minmax(${flexibleColumnMinWidth}px, 1fr)` : `${width}px`
+  )).join(' ');
+
   return (
-    <div className={cn("flex flex-col h-full overflow-hidden", className)}>
-      {/* Header */}
-      <div 
-        className="sticky top-0 z-10 flex shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]"
-        style={{ height: headerHeight }}
-      >
-        {columns.map(column => {
-          const isSorted = sortField === column.id;
-          const canSort = column.sortable !== false && !!onSort;
+    <div
+      ref={parentRef}
+      className={cn("h-full overflow-auto scrollbar-hide", className)}
+      style={{ scrollPaddingTop: headerHeight }}
+    >
+      <div style={{ minWidth }}>
+        {/* Header */}
+        <div
+          className="sticky top-0 z-10 grid border-b border-[var(--border-color)] bg-[var(--bg-secondary)]"
+          style={{ height: headerHeight, gridTemplateColumns }}
+        >
+          {columns.map(column => {
+            const isSorted = sortField === column.id;
+            const canSort = column.sortable !== false && !!onSort;
 
-          return (
-            <div
-              key={column.id}
-              onClick={() => canSort && handleSort(column.id)}
-              className={cn(
-                  "flex select-none items-center px-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] transition-colors",
-                  canSort ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]' : '',
-                  column.align === 'right' ? 'justify-end text-right' : 
-                  column.align === 'center' ? 'justify-center text-center' : 'justify-start text-left'
-              )}
-              style={{ width: column.width || 'auto', flex: column.width ? 'none' : 1 }}
-            >
-              <div className="flex items-center gap-1.5">
-                {column.header}
-                {canSort && (
-                    <div className="flex flex-col opacity-30">
-                        {isSorted ? (
-                            sortOrder === 'asc' ? <ArrowUp size={10} className="text-[var(--color-accent-primary)]" /> : <ArrowDown size={10} className="text-[var(--color-accent-primary)]" />
-                        ) : (
-                            <ArrowUpDown size={10} />
-                        )}
-                    </div>
+            return (
+              <div
+                key={column.id}
+                onClick={() => canSort && handleSort(column.id)}
+                className={cn(
+                    "flex select-none items-center px-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] transition-colors",
+                    canSort ? 'cursor-pointer hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-secondary)]' : '',
+                    column.align === 'right' ? 'justify-end text-right' :
+                    column.align === 'center' ? 'justify-center text-center' : 'justify-start text-left'
                 )}
+              >
+                <div className="flex items-center gap-1.5">
+                  {column.header}
+                  {canSort && (
+                      <div className="flex flex-col opacity-30">
+                          {isSorted ? (
+                              sortOrder === 'asc' ? <ArrowUp size={10} className="text-[var(--color-accent-primary)]" /> : <ArrowDown size={10} className="text-[var(--color-accent-primary)]" />
+                          ) : (
+                              <ArrowUpDown size={10} />
+                          )}
+                      </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
 
-      {/* Virtualized Body */}
-      <div
-        ref={parentRef}
-        className="flex-1 overflow-auto scrollbar-hide"
-      >
+        {/* Virtualized Body */}
         <div
           style={{
             height: `${rowVirtualizer.getTotalSize()}px`,
@@ -136,14 +144,15 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
               <div
                 key={virtualItem.key}
                 className={cn(
-                    "absolute left-0 top-0 flex w-full items-center border-b border-[var(--border-subtle)] transition-colors",
+                    "absolute left-0 top-0 grid w-full items-center border-b border-[var(--border-subtle)] transition-colors",
                     isClickable ? 'cursor-pointer hover:bg-[var(--bg-tertiary)]' : '',
                     isClickable && !interactiveCells ? 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring-color)]' : '',
                     virtualItem.index % 2 ? 'bg-[var(--bg-secondary)]/40' : 'bg-transparent'
                 )}
                 style={{
                   height: `${virtualItem.size}px`,
-                  transform: `translateY(${virtualItem.start}px)`,
+                  gridTemplateColumns,
+                  transform: `translateY(${virtualItem.start - headerHeight}px)`,
                 }}
                 role={isClickable && !interactiveCells ? 'button' : undefined}
                 tabIndex={isClickable && !interactiveCells ? 0 : undefined}
@@ -165,7 +174,6 @@ export function VirtualizedTable<T extends { id?: string | number | any }>({
                         column.align === 'right' ? 'text-right' : 
                         column.align === 'center' ? 'text-center' : 'text-left'
                     )}
-                    style={{ width: column.width || 'auto', flex: column.width ? 'none' : 1 }}
                   >
                     {getCellValue(row, column)}
                   </div>

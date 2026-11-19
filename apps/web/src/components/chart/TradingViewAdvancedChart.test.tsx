@@ -1,5 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
+import { buildPriceHistoryRuntime, type PriceHistoryStatus } from '@/lib/priceChartScope';
+import { getWidgetExportData } from '@/lib/widgetRuntime';
 import { TradingViewAdvancedChart } from './TradingViewAdvancedChart';
 
 const mockCandleSetData = jest.fn();
@@ -54,7 +56,10 @@ function historyRow(overrides: Record<string, unknown> = {}) {
 }
 
 function quote(overrides: Record<string, unknown> = {}) {
-  return { symbol: 'FPT', price: 57300, price_unit: 'VND', updated_at: '2026-10-02T12:00:00', ...overrides };
+  return {
+    symbol: 'FPT', price: 57300, price_unit: 'VND',
+    as_of: '2026-10-02T12:00:00+07:00', updated_at: '2026-10-02T12:00:00', ...overrides,
+  };
 }
 
 async function renderCandles() {
@@ -93,6 +98,96 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
     global.ResizeObserver = originalResizeObserver;
   });
 
+  test('qualifies a failed VNM comparison while FPT candles remain available', async () => {
+    mockHistory.mockImplementation(async (symbol: string) => {
+      if (symbol === 'VNM') throw new Error('Comparison request rejected');
+      return { data: [historyRow()] };
+    });
+    const onHistoryStatusChange = jest.fn<void, [PriceHistoryStatus]>();
+    render(<TradingViewAdvancedChart symbol="FPT" compareSymbol="VNM" timeframe="1M" onHistoryStatusChange={onHistoryStatusChange} />);
+
+    await waitFor(() => expect(mockCandleSetData).toHaveBeenCalledWith([
+      { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57300 },
+    ]));
+    expect(mockHistory.mock.calls.map(([symbol]) => symbol)).toEqual(['FPT', 'VNM']);
+    expect(mockHistory.mock.calls[1][1]).toEqual(mockHistory.mock.calls[0][1]);
+    expect(mockLineSetData).not.toHaveBeenCalled();
+
+    const status = onHistoryStatusChange.mock.lastCall![0];
+    expect(status.request).toMatchObject({ symbol: 'FPT', compareSymbol: 'VNM', timeframe: '1M' });
+    expect(status).toMatchObject({ observationStatus: 'available', coverage: 'partial' });
+    expect(screen.getByRole('status', { name: 'Comparison history' })).toHaveTextContent('VNM comparison history could not be loaded.');
+
+    const runtime = buildPriceHistoryRuntime(status.request, 'candles', status);
+    expect(runtime.__widgetRuntime?.provenance).toMatchObject({
+      observationStatus: 'available', coverage: 'partial', warnings: ['VNM comparison history could not be loaded.'],
+    });
+    expect(getWidgetExportData(runtime)).toMatchObject({ compareSymbol: 'VNM', comparisonStatus: 'unavailable' });
+
+    const replacement = { ...status.request };
+    const pending = buildPriceHistoryRuntime(replacement, 'candles', status);
+    expect(pending.__widgetRuntime?.requestScope).toBe(replacement);
+    expect(pending.__widgetRuntime?.provenance?.observationStatus).toBe('loading');
+    expect(pending.__widgetRuntime?.provenance?.coverage).toBeUndefined();
+    expect(pending.__widgetRuntime?.provenance?.warnings).toBeUndefined();
+    expect(getWidgetExportData(pending)).not.toHaveProperty('comparisonStatus');
+  });
+
+  test.each([
+    { kind: 'an endpoint error', body: { data: [], error: 'Synthetic response error' }, status: 'unavailable', notice: 'VNM comparison history could not be loaded.' },
+    { kind: 'no observations', body: { data: [] }, status: 'empty', notice: 'No VNM comparison history is available for this range.' },
+    { kind: 'uncertified observations', body: { data: [historyRow({ price_unit: 'unknown' })] }, status: 'unavailable', notice: 'VNM comparison history could not be plotted.' },
+    { kind: 'a zero starting close', body: { data: [historyRow({ close: 0 })] }, status: 'unavailable', notice: 'VNM comparison history could not be plotted.' },
+  ])('qualifies VNM history with $kind', async ({ body, status, notice }) => {
+    mockHistory.mockImplementation(async (symbol: string) => symbol === 'VNM' ? body : { data: [historyRow()] });
+    const onHistoryStatusChange = jest.fn<void, [PriceHistoryStatus]>();
+    render(<TradingViewAdvancedChart symbol="FPT" compareSymbol="VNM" timeframe="1M" onHistoryStatusChange={onHistoryStatusChange} />);
+
+    expect(await screen.findByRole('status', { name: 'Comparison history' })).toHaveTextContent(notice);
+    expect(onHistoryStatusChange.mock.lastCall?.[0]).toMatchObject({
+      observationStatus: 'available', coverage: 'partial', comparison: { observationStatus: status },
+    });
+    await waitFor(() => expect(mockCandleSetData).toHaveBeenCalled());
+    expect(mockLineSetData).not.toHaveBeenCalled();
+  });
+
+  test('plots the replacement comparison and ignores an obsolete VNM failure', async () => {
+    const obsolete = Promise.withResolvers<unknown>();
+    mockHistory.mockImplementation(async (symbol: string) => {
+      if (symbol === 'VNM') return obsolete.promise;
+      if (symbol === 'VCB') {
+        return { data: [historyRow({ close: 95000 }), historyRow({ time: '2026-10-05', close: 104500 })] };
+      }
+      return { data: [historyRow()] };
+    });
+    const onHistoryStatusChange = jest.fn<void, [PriceHistoryStatus]>();
+    const chart = (compareSymbol: string) => (
+      <TradingViewAdvancedChart symbol="FPT" compareSymbol={compareSymbol} timeframe="1M" onHistoryStatusChange={onHistoryStatusChange} />
+    );
+    const { rerender } = render(chart('VNM'));
+    const signal = mockHistory.mock.calls.find(([symbol]) => symbol === 'VNM')?.[1].signal;
+    expect(signal?.aborted).toBe(false);
+    rerender(chart('VCB'));
+    expect(signal?.aborted).toBe(true);
+
+    expect(await screen.findByText('Compare VCB')).toBeInTheDocument();
+    await waitFor(() => expect(mockLineSetData).toHaveBeenCalledWith([
+      { time: '2026-10-02', value: 57300 },
+      { time: '2026-10-05', value: expect.closeTo(63030) },
+    ]));
+    const status = onHistoryStatusChange.mock.lastCall![0];
+    expect(status.request.compareSymbol).toBe('VCB');
+    expect(status.observationStatus).toBe('available');
+    expect(status.coverage).toBeUndefined();
+    expect(getWidgetExportData(buildPriceHistoryRuntime(status.request, 'candles', status)))
+      .toMatchObject({ compareSymbol: 'VCB', comparisonStatus: 'available' });
+
+    await act(async () => { obsolete.reject(new Error('Obsolete comparison failed')); });
+    expect(onHistoryStatusChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status', { name: 'Comparison history' })).not.toBeInTheDocument();
+    expect(screen.getByText('Compare VCB')).toBeInTheDocument();
+  });
+
   test.each(['unknown', undefined])('rejects a 57.3 quote with %s unit without changing VND history', async (price_unit) => {
     mockQuote.mockResolvedValue({ data: quote({ price: 57.3, price_unit }) });
     expect(await renderCandles()).toEqual([
@@ -122,9 +217,9 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
     ]);
   });
 
-  test('ignores an older quote rather than replacing adjusted historical observations', async () => {
-    mockHistory.mockResolvedValue({ data: [historyRow({ adjustment_applied: true, close: 23220 })] });
-    mockQuote.mockResolvedValue({ data: quote({ price: 31560, updated_at: '2026-10-01T12:00:00' }) });
+  test('ignores a quote observed before the latest history session', async () => {
+    mockHistory.mockResolvedValue({ data: [historyRow({ close: 23220 })] });
+    mockQuote.mockResolvedValue({ data: quote({ price: 31560, as_of: '2026-10-01T12:00:00+07:00' }) });
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 23220 },
     ]);
@@ -138,23 +233,47 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
     ]);
   });
 
-  test('ignores a same-day quote older than the latest timestamped history row', async () => {
+  test.each([
+    ['2026-10-02T12:00:00+07:00', 57000],
+    ['2026-10-02', 57000],
+    ['2026-10-02T14:01:00+07:00', 57300],
+  ])('orders the same-session observation %s against timestamped history', async (as_of, expectedClose) => {
     mockHistory.mockResolvedValue({ data: [historyRow({ time: '2026-10-02T14:00:00' })] });
+    mockQuote.mockResolvedValue({ data: quote({ as_of }) });
+    expect(await renderCandles()).toEqual([
+      { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: expectedClose },
+    ]);
+  });
+
+  test.each(['not-a-date', '2026-11-31T12:00:00+07:00'])('ignores invalid quote observation %s even with a valid update time', async (as_of) => {
+    mockQuote.mockResolvedValue({ data: quote({ as_of }) });
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57000 },
     ]);
   });
 
-  test('ignores invalid quote timestamps', async () => {
-    mockQuote.mockResolvedValue({ data: quote({ updated_at: 'not-a-date' }) });
+  test.each([
+    [null, 57000],
+    ['2026-09-15T00:00:00+07:00', 57300],
+  ])('uses the stored quote observation %s, not its November write date', async (as_of, expectedClose) => {
+    mockHistory.mockResolvedValue({ data: [historyRow({ time: '2026-09-15' })] });
+    mockQuote.mockResolvedValue({
+      data: quote({ as_of, updated_at: '2026-11-18T18:00:00+07:00' }),
+      meta: { source: 'postgres:stored_quote', as_of, stale: as_of === null ? null : true },
+    });
     expect(await renderCandles()).toEqual([
-      { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57000 },
+      { time: '2026-09-15', open: 57000, high: 57500, low: 56000, close: expectedClose },
     ]);
   });
 
-  test('appends a newer confirmed quote without copying older adjusted OHLC into the new day', async () => {
+  test.each([
+    '2026-10-05',
+    '2026-10-05T00:00:00',
+    '2026-10-04T17:00:00Z', // midnight October 5 on the exchange, still October 4 in UTC
+    '2026-10-05T09:15:00+07:00',
+  ])('appends the certified quote observation %s on the exchange session', async (as_of) => {
     mockHistory.mockResolvedValue({ data: [historyRow({ adjustment_applied: true, close: 23220 })] });
-    mockQuote.mockResolvedValue({ data: quote({ updated_at: '2026-10-05T12:00:00' }) });
+    mockQuote.mockResolvedValue({ data: quote({ as_of, updated_at: null }) });
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 23220 },
       { time: '2026-10-05', open: 57300, high: 57300, low: 57300, close: 57300 },

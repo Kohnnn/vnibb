@@ -42,27 +42,24 @@ function formatPublishedTime(value: string | null | undefined): string {
   return formatted === '-' ? 'Date unavailable' : formatted;
 }
 
-function renderHighlightedText(text: string, tokens: string[]) {
+function renderHighlightedText(text: string, tokens: readonly string[]) {
   if (!text || tokens.length === 0) return text;
 
   const escapedTokens = tokens
     .map((token) => token.trim())
-    .filter((token) => token.length > 1)
+    .filter(Boolean)
     .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
   if (!escapedTokens.length) return text;
 
-  const regex = new RegExp(`(${escapedTokens.join('|')})`, 'gi');
-  const parts = text.split(regex);
+  const parts = text.split(new RegExp(`(?<![\\p{L}\\p{N}_])(${escapedTokens.join('|')})(?![\\p{L}\\p{N}_])`, 'giu'));
 
   return parts.map((part, index) =>
-    escapedTokens.some((token) => new RegExp(`^${token}$`, 'i').test(part)) ? (
+    index % 2 === 1 ? (
       <mark key={`${part}-${index}`} className="rounded bg-[var(--color-state-bg)] px-0.5 text-[var(--text-secondary)]">
         {part}
       </mark>
-    ) : (
-      <span key={`${part}-${index}`}>{part}</span>
-    )
+    ) : part
   );
 }
 
@@ -77,6 +74,8 @@ interface MarketNewsArticle {
   relevanceScore: number | null;
   matchReason: string | null;
   isMarketWideFallback: boolean;
+  association_class?: string | null;
+  match_evidence?: { matched_terms?: { field?: string; kind?: string; term?: string }[] };
 }
 
 interface MarketNewsFeed {
@@ -105,7 +104,7 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
     refetch,
     isFetching,
     dataUpdatedAt,
-  } = useQuery({
+  } = useQuery<MarketNewsFeed>({
     queryKey: ['market-news-global', upperSymbol, mode],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: '30', mode });
@@ -135,9 +134,9 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
             : [],
           relevanceScore: typeof item.relevance_score === 'number' ? item.relevance_score : null,
           matchReason: typeof item.match_reason === 'string' && item.match_reason ? item.match_reason : null,
-          isMarketWideFallback: Boolean(item.is_market_wide_fallback),
+          isMarketWideFallback: item.is_market_wide_fallback === true || item.association_class === 'general_market',
         })),
-        fallbackUsed: Boolean(data?.fallback_used),
+        fallbackUsed: data?.fallback_used === true,
         mode: (data?.mode || mode) as 'all' | 'related',
       } satisfies MarketNewsFeed;
     },
@@ -150,11 +149,12 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
   const articles = news?.articles || [];
   const hasData = articles.length > 0;
   const isFallback = Boolean(error && hasData);
-  const feedNote = news?.fallbackUsed
-    ? 'Market-wide fallback'
-    : mode === 'related' && upperSymbol
-      ? `Related to ${upperSymbol}`
-      : 'Global feed';
+  const showAssociation = mode === 'related' && Boolean(upperSymbol) && news?.mode !== 'all';
+  const feedNote = showAssociation
+    ? news?.fallbackUsed || (hasData && articles.every(item => item.isMarketWideFallback))
+      ? 'Market-wide fallback'
+      : `Related to ${upperSymbol}`
+    : 'Global feed';
   // Source observation only: latest genuine article publication date. Receipt
   // time (dataUpdatedAt) is retrieval evidence and never becomes freshness, and
   // undated rows keep the feed at partial coverage rather than looking fresh.
@@ -257,7 +257,16 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
           ) : (
             <div className="divide-y divide-[var(--border-subtle)]">
               {articles.map((item: MarketNewsArticle, index: number) => {
-                const highlightTokens = Array.from(new Set([upperSymbol, ...item.matchedSymbols].filter(Boolean)));
+                const marketWide = showAssociation && (news?.fallbackUsed || item.isMarketWideFallback);
+                const ranked = showAssociation && !marketWide
+                  && (item.association_class === 'direct_company' || item.association_class === 'verified_peer');
+                const sectorOnly = showAssociation && !marketWide && item.association_class === 'verified_sector';
+                const terms = item.match_evidence?.matched_terms;
+                // Body evidence can come from content outside the displayed summary.
+                const titleMatches = ranked && Array.isArray(terms) ? item.matchedSymbols.filter(symbol =>
+                  terms.some(term => term?.field === 'title' && (term.kind === 'symbol' || term.kind === 'peer_symbol')
+                    && typeof term.term === 'string' && term.term.toUpperCase() === symbol),
+                ) : [];
 
                 return (
                 <a
@@ -269,9 +278,9 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                 >
                   <div className="mb-1 flex flex-wrap items-start gap-1.5">
                     <div className="text-sm text-[var(--text-primary)] font-medium line-clamp-2 group-hover:text-[var(--color-accent-primary)] transition-colors">
-                      {renderHighlightedText(item.title, highlightTokens)}
+                      {renderHighlightedText(item.title, titleMatches)}
                     </div>
-                    {item.matchedSymbols.slice(0, 3).map((matchedSymbol: string) => (
+                    {ranked && item.matchedSymbols.slice(0, 3).map((matchedSymbol) => (
                       <span
                         key={`${item.id ?? item.title}-${matchedSymbol}`}
                         className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--color-accent-primary)]"
@@ -279,15 +288,24 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                         {matchedSymbol}
                       </span>
                     ))}
-                    {item.relevanceScore !== null && mode === 'related' && !item.isMarketWideFallback && (
+                    {ranked && (
                       <span
                         className="rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]"
                         title="Rule-based ranking score, not a probability of company relevance. Peer and sector matches are indirect."
                       >
-                        {item.matchReason?.replaceAll('_', ' ') || 'Association unverified'} · rank {Math.round(item.relevanceScore * 100)}/100
+                        {item.association_class === 'verified_peer' ? 'Verified peer' : item.matchReason?.replaceAll('_', ' ') || 'Direct company'}
+                        {item.relevanceScore !== null && ` · rank ${Math.round(item.relevanceScore * 100)}/100`}
                       </span>
                     )}
-                    {item.isMarketWideFallback && (
+                    {sectorOnly && (
+                      <span className="rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
+                        Industry overlap · no company evidence
+                      </span>
+                    )}
+                    {showAssociation && !ranked && !sectorOnly && !marketWide && (
+                      <span className="text-[10px] text-[var(--text-muted)]">Association unverified</span>
+                    )}
+                    {marketWide && (
                       <span className="rounded border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-1.5 py-0.5 text-[9px] font-bold uppercase text-[var(--text-secondary)]">
                         Market-wide
                       </span>
@@ -295,7 +313,7 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
                   </div>
                   {item.summary && (
                     <div className="text-[11px] text-[var(--text-secondary)] line-clamp-2 mb-1.5">
-                      {renderHighlightedText(item.summary, highlightTokens)}
+                      {item.summary}
                     </div>
                   )}
                   <div className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">

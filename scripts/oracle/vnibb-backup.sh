@@ -23,6 +23,7 @@
 #   * retention keeps the newest $KEEP_SETS sets and prunes older ones only
 #     after the new set has verified; $KEEP_SETS is never adjusted silently
 set -euo pipefail
+umask 077
 
 COMPOSE_FILE="${COMPOSE_FILE:-/srv/vnibb/docker-compose.oracle.yml}"
 ENV_FILE="${ENV_FILE:-/srv/vnibb/deployment/env.oracle}"
@@ -153,6 +154,66 @@ trap_cleanup() {
 
 stat_bytes() { stat -c %s "$1"; }
 
+manifest_stamps() {
+    python3 - "$BACKUP_DIR" "$PG_DB" "$MONGO_DB" <<'PY'
+import json
+import os
+import re
+import sys
+
+root, pg_db, mongo_db = sys.argv[1:]
+
+
+def is_backup_pair(entry):
+    stamp = entry.name
+    payloads = {f"postgres-{stamp}.dump", f"mongo-{mongo_db}-{stamp}.archive.gz"}
+    with os.scandir(entry.path) as children:
+        files = {child.name: child for child in children}
+    if files.keys() != payloads | {"manifest.json"} or not all(
+        child.is_file(follow_symlinks=False) for child in files.values()
+    ):
+        return False
+    try:
+        with open(files["manifest.json"].path, encoding="utf-8") as source:
+            manifest = json.load(source)
+    except ValueError:
+        return False
+    if not isinstance(manifest, dict) or manifest.get("stamp") != stamp:
+        return False
+    postgres, mongo, artifacts = (manifest.get(key) for key in ("postgres", "mongo", "artifacts"))
+    if not all(isinstance(item, dict) for item in (postgres, mongo, artifacts)):
+        return False
+    if postgres.get("database") != pg_db or mongo.get("database") != mongo_db or mongo.get("included") is not True:
+        return False
+    if artifacts.keys() != payloads:
+        return False
+    for name, record in artifacts.items():
+        if not isinstance(record, dict) or type(record.get("bytes")) is not int or record["bytes"] <= 0:
+            return False
+        digest = record.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return False
+        if files[name].stat(follow_symlinks=False).st_size != record["bytes"]:
+            return False
+    return True
+
+
+stamps = []
+with os.scandir(root) as entries:
+    for entry in entries:
+        if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", entry.name) or not entry.is_dir(follow_symlinks=False):
+            continue
+        try:
+            if is_backup_pair(entry):
+                stamps.append(entry.name)
+        except FileNotFoundError:
+            continue
+
+for stamp in sorted(stamps, reverse=True):
+    print(stamp)
+PY
+}
+
 # $HOST_FREE_BYTES_OVERRIDE lets a drill exercise the preflight against a value
 # other than the real one. It is an operator/test knob, not a default: leaving
 # it unset always reads the true free space.
@@ -183,14 +244,17 @@ print(int(fields[3]) * 1024)
 }
 
 # --- preflight -------------------------------------------------------------
+[[ "$KEEP_SETS" =~ ^[1-9][0-9]*$ ]] || { warn "KEEP_SETS must be a positive integer"; exit 1; }
+mkdir -p "$BACKUP_DIR"
+# Serialize all backup writes, including failed preflight markers.
+exec {backup_lock}<"$BACKUP_DIR"
+flock -n "$backup_lock" || { warn "could not lock the backup directory"; exit 1; }
+[[ ! -e "$DEST" ]] || { warn "backup set $STAMP already exists"; exit 1; }
+[[ ! -e "$FAILED_MARKER" ]] || { warn "a previous run for $STAMP already failed; not overwriting its marker"; exit 1; }
+
 [[ -f "$COMPOSE_FILE" ]] || fail "compose file not found: $COMPOSE_FILE"
 [[ "$(docker inspect --format '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null)" == true ]] || fail "postgres container $PG_CONTAINER not running"
 [[ "$(docker inspect --format '{{.State.Running}}' "$MONGO_CONTAINER" 2>/dev/null)" == true ]] || fail "mongo container $MONGO_CONTAINER not running"
-
-mkdir -p "$BACKUP_DIR"
-[[ -d "$BACKUP_DIR" ]] || fail "backup directory could not be created: $BACKUP_DIR"
-[[ ! -e "$DEST" ]] || fail "backup set $STAMP already exists"
-[[ ! -e "$FAILED_MARKER" ]] || fail "a previous run for $STAMP already failed; not overwriting its marker"
 
 # Docker can place the writable layer, PostgreSQL data and Mongo data on
 # different filesystems. Read free space inside each container; an unreadable
@@ -253,15 +317,10 @@ fi
 # the uncompressed data directories. A set whose manifest is missing,
 # unparsable or lacks a Postgres artifact is ignored and the floor applies --
 # a damaged previous set never lowers the requirement.
-PREV_SET=""
+stamps="$(manifest_stamps)" || fail "could not enumerate backup sets for disk preflight"
+PREV_SET="${stamps%%$'\n'*}"
 PREV_PG_BYTES=""
 PREV_MONGO_BYTES=""
-while IFS= read -r candidate; do
-    [[ "$candidate" == "$STAMP" ]] && continue
-    [[ -f "${BACKUP_DIR}/${candidate}/manifest.json" ]] || continue
-    PREV_SET="$candidate"
-    break
-done < <(find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d -name '20*' -printf '%f\n' | sort -r)
 
 if [[ -n "$PREV_SET" ]]; then
     # Prints "<postgres bytes> <mongo bytes>", either possibly empty.
@@ -453,6 +512,7 @@ MONGO_ARCHIVE="${DEST}/mongo-${MONGO_DB}-${STAMP}.archive.gz"
 if ! docker cp "${MONGO_CONTAINER}:${MONGO_ARCHIVE_IN_CONTAINER}" "$MONGO_ARCHIVE"; then
     fail "docker cp of the mongo archive failed"
 fi
+chmod 600 "$MONGO_ARCHIVE" || fail "could not restrict copied mongo archive permissions"
 
 # Verify the copy while the staged original still exists: a `docker cp` that
 # stopped early is a short file, not a smaller dump, and that can only be told
@@ -524,9 +584,10 @@ trap - EXIT
 # Only prune after this set verified. The FAILED marker from an earlier run is
 # never counted as a set. $KEEP_SETS is whatever the operator configured; this
 # script never adjusts it, so retention stays documented behaviour.
-mapfile -t SETS < <(find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d -name '20*' \
-    -printf '%f\n' | sort -r)
-if [[ "${#SETS[@]}" -gt "$KEEP_SETS" ]]; then
+stamps=$(manifest_stamps) || { warn "RETENTION FAILURE: could not enumerate backup sets"; exit 1; }
+mapfile -t SETS <<< "$stamps"
+count=${#SETS[@]}
+if [[ ${#KEEP_SETS} -le ${#count} && $count -gt $KEEP_SETS ]]; then
     for old in "${SETS[@]:$KEEP_SETS}"; do
         # The set just written is always newest and therefore always inside the
         # kept prefix, but never let a misconfigured KEEP_SETS delete it: that
@@ -537,8 +598,9 @@ if [[ "${#SETS[@]}" -gt "$KEEP_SETS" ]]; then
             warn "RETENTION FAILURE: could not remove $old; verified new set $STAMP remains available"
             exit 1
         fi
+        count=$((count - 1))
     done
 fi
 
-log "backup set $STAMP complete: ${#SETS[@]} set(s) retained, keeping $KEEP_SETS"
+log "backup set $STAMP complete: $count set(s) retained, keeping $KEEP_SETS"
 exit 0

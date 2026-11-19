@@ -1,3 +1,4 @@
+import { formatSourceObservation } from '@/lib/formatDate';
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -237,9 +238,10 @@ describe('MarketHeatmapWidget', () => {
 
   it('shows stale constituent date and cached source despite a current price timestamp', () => {
     const oldConstituents = '2026-09-10';
+    const priceUpdatedAt = '2026-09-23T00:00:00Z';
     mockUseMarketHeatmap.mockReturnValue(mockHeatmapData({
-      updated_at: '2026-09-23T00:00:00Z',
-      price_updated_at: '2026-09-23T00:00:00Z',
+      updated_at: priceUpdatedAt,
+      price_updated_at: priceUpdatedAt,
       constituents_as_of: oldConstituents,
       constituents_stale: true,
       cached: true,
@@ -249,7 +251,7 @@ describe('MarketHeatmapWidget', () => {
 
     expect(screen.getByText('Cached')).toBeInTheDocument();
     expect(screen.getByText(/Constituents 2026-09-10 \(stale\)/)).toBeInTheDocument();
-    expect(screen.getByText(/As of 2026-09-23/)).toBeInTheDocument();
+    expect(screen.getByText(`As of ${formatSourceObservation(priceUpdatedAt)}`)).toBeInTheDocument();
     expect(onDataChange).toHaveBeenLastCalledWith(expect.objectContaining({
       __widgetRuntime: expect.objectContaining({
         provenance: expect.objectContaining({ cached: true, stale: true, updatedAt: oldConstituents }),
