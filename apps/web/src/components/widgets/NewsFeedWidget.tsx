@@ -54,19 +54,43 @@ interface NewsArticle {
     association_class?: string | null;
 }
 
-function NewsAssociation({ article, symbol }: { article: NewsArticle; symbol: string }) {
-    const matched = article.matched_symbols ?? [];
-    const exact = matched.some(value => value.toUpperCase() === symbol.toUpperCase())
-        && ['exact_symbol_title', 'exact_symbol_body', 'exact_symbol_related'].includes(article.match_reason ?? '');
-    const label = article.is_market_wide_fallback || article.association_class === 'general_market'
-        ? 'Market-wide fallback'
-        : article.association_class === 'verified_sector'
-            ? 'Industry overlap · no company evidence'
-            : article.association_class === 'direct_company' || article.association_class === 'verified_peer'
-                ? (exact ? `Symbol mention: ${symbol}` : 'Association unverified')
-                : 'Association unverified';
-    const detail = `Provider association metadata, not investment relevance. Reason: ${article.match_reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${article.relevance_score ?? 'unavailable'}; class: ${article.association_class ?? 'unavailable'}.`;
+function isMarketWideArticle(article: NewsArticle) {
+    return article.is_market_wide_fallback === true || article.association_class === 'general_market';
+}
+
+function isAdmittedArticle(article: NewsArticle) {
+    return !isMarketWideArticle(article) && (article.association_class === 'direct_company'
+        || article.association_class === 'verified_peer' || article.association_class === 'verified_sector');
+}
+
+function NewsAssociation({ article, symbol }: { readonly article: NewsArticle; readonly symbol: string }) {
+    const marketWide = isMarketWideArticle(article);
+    const matched = marketWide ? [] : article.matched_symbols ?? [];
+    const upperSymbol = symbol.toUpperCase();
+    let label = 'Association unverified';
+    if (marketWide) {
+        label = 'Market-wide fallback';
+    } else if (article.association_class === 'verified_sector') {
+        label = 'Industry overlap · no company evidence';
+    } else if (article.association_class === 'verified_peer') {
+        const peers = matched.filter(value => value.toUpperCase() !== upperSymbol);
+        label = peers.length ? `Verified peer: ${peers.join(', ')}` : 'Verified peer';
+    } else if (article.association_class === 'direct_company') {
+        const exact = matched.some(value => value.toUpperCase() === upperSymbol)
+            && ['exact_symbol_title', 'exact_symbol_body', 'exact_symbol_related'].includes(article.match_reason ?? '');
+        label = exact ? `Symbol mention: ${upperSymbol}` : 'Direct company';
+    }
+    const reason = marketWide ? null : article.match_reason;
+    const score = marketWide && article.relevance_score !== 0 ? null : article.relevance_score;
+    const association = marketWide ? 'general_market' : article.association_class;
+    const detail = `Article association evidence, not investment relevance. Reason: ${reason ?? 'unavailable'}; matched symbols: ${matched.join(', ') || 'none'}; score: ${score ?? 'unavailable'}; class: ${association ?? 'unavailable'}.`;
     return <span title={detail} className="text-[10px] text-[var(--text-muted)]">{label}</span>;
+}
+
+interface NewsFeedResponse {
+    readonly articles: readonly NewsArticle[];
+    readonly mode?: 'all' | 'related';
+    readonly fallback_used?: boolean;
 }
 
 interface NewsFeedWidgetProps {
@@ -170,7 +194,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useQuery({
+    } = useQuery<NewsFeedResponse>({
         queryKey: ['news-feed', symbol, sourceFilter, sentimentFilter, requestMode],
         queryFn: async () => {
             const params = new URLSearchParams();
@@ -204,15 +228,24 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         networkMode: 'online',
     });
 
+    const isRelated = requestMode === 'related' && data?.mode !== 'all';
     const newsItems: NewsArticle[] = useMemo(
         () => (data?.articles || []).map((item: NewsArticle) => ({
             ...item,
             published_date: normalizeNewsItemTimestamp(item) || item.published_date || null,
+            is_market_wide_fallback: data?.fallback_used === true || item.is_market_wide_fallback,
         })),
-        [data?.articles]
+        [data?.articles, data?.fallback_used]
     );
     const hasData = newsItems.length > 0;
     const isFallback = Boolean(error && hasData);
+    const momentumArticles = useMemo(() => isRelated ? newsItems.filter(isAdmittedArticle) : newsItems, [isRelated, newsItems]);
+    let feedNote = 'Market feed';
+    if (isRelated) {
+        if (hasData && newsItems.every(isMarketWideArticle)) feedNote = 'Market-wide fallback';
+        else if (hasData && !momentumArticles.length) feedNote = 'Ticker association unverified';
+        else feedNote = `${symbol} related feed`;
+    }
     // Source observation only: raw API rows (not the UI-mapped `published_date`,
     // which may fall back to crawl aliases) so the latest genuine article date is
     // used and the query receipt never becomes freshness.
@@ -228,7 +261,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                 empty: !hasData,
                 apiGroup: '/news',
                 endpoint: '/news/feed',
-                sourceLabel: symbol ? `${symbol} related feed` : 'Market feed',
+                sourceLabel: feedNote,
                 lastDataDate: observation.lastDataDate,
                 fetchedAt: dataUpdatedAt,
                 coverage: observation.coverage,
@@ -244,7 +277,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         dataUpdatedAt,
         isFallback,
         newsItems.length,
-        symbol,
+        feedNote,
         observation.lastDataDate,
         observation.coverage,
         observation.warning,
@@ -274,12 +307,12 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
     const sources = Array.from(new Set(newsItems.map(n => n.source)));
     const recentArticleCount = useMemo(() => {
         const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        return newsItems.filter((item) => {
+        return momentumArticles.filter((item) => {
             if (!item.published_date) return false;
             const parsed = new Date(item.published_date).getTime();
             return Number.isFinite(parsed) && parsed >= cutoff;
         }).length;
-    }, [newsItems]);
+    }, [momentumArticles]);
     const momentumBars = useMemo(() => {
         const buckets = Array.from({ length: 7 }, (_, index) => {
             const date = new Date();
@@ -293,7 +326,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         });
         const bucketMap = new Map(buckets.map((bucket) => [bucket.key, bucket]));
 
-        newsItems.forEach((item) => {
+        momentumArticles.forEach((item) => {
             if (!item.published_date) return;
             const parsed = new Date(item.published_date);
             if (Number.isNaN(parsed.getTime())) return;
@@ -310,7 +343,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
             ...bucket,
             height: `${Math.max(18, Math.round((bucket.count / peak) * 100))}%`,
         }));
-    }, [newsItems]);
+    }, [momentumArticles]);
 
     return (
         <WidgetContainer
@@ -345,16 +378,16 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                         fetchedAt={dataUpdatedAt}
                         isFetching={isFetching && hasData}
                         isCached={isFallback}
-                        note={symbol ? `${symbol} related feed` : 'Market feed'}
+                        note={feedNote}
                         align="right"
                     />
                 </div>
 
-                {hasData && (
+                {momentumArticles.length > 0 && (
                     <div className="mx-2 mb-2 mt-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/50 px-3 py-2">
                         <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">
-                            <span>{symbol ? `${symbol} news momentum` : 'News momentum'}</span>
-                            <span>{recentArticleCount}/{newsItems.length} articles in 7d</span>
+                            <span>{isRelated ? `${symbol} news momentum` : 'News momentum'}</span>
+                            <span>{recentArticleCount}/{momentumArticles.length} articles in 7d</span>
                         </div>
                         <div className="mt-2 flex items-end gap-1.5 h-16">
                             {momentumBars.map((bucket) => (
@@ -478,7 +511,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                                                         source={item.sentiment_source}
                                                     />
                                                 )}
-                                                {symbol && <NewsAssociation article={item} symbol={symbol} />}
+                                                {isRelated && symbol && <NewsAssociation article={item} symbol={symbol} />}
                                             </div>
 
                                             {/* Related symbols */}
