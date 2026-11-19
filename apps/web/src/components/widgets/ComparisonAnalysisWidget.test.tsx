@@ -305,3 +305,56 @@ it('keeps independent fiscal rows and source unknowns beside the two valuation g
   expect(topCell?.querySelector('svg')).toBeNull()
   expect(lowerCell?.querySelector('svg')).toBeNull()
 })
+
+it.each([
+  {
+    scenario: 'a P/B-only snapshot',
+    peer: { period: 'Q2-2025', pb: 2.5 },
+    fiscal: null,
+    mixed: false,
+  },
+  {
+    scenario: 'equivalent fiscal labels',
+    peer: { period: 'Q2-2025', pb: 2.5, ev_ebitda: 9, valuation_basis: { ev_ebitda: { fiscal_period: '2024' } } },
+    fiscal: '2024',
+    mixed: false,
+  },
+  {
+    scenario: 'undated fiscal evidence',
+    peer: { period: 'Q2-2025', pb: 2.5, ev_ebitda: 9, valuation_basis: { ev_ebitda: { fiscal_period: 'Q2' } } },
+    fiscal: 'unknown',
+    mixed: false,
+  },
+  {
+    scenario: 'two displayed multiples with distinct fiscal periods',
+    peer: { period: '2024', pb: 2.5, ev_ebitda: 0, valuation_basis: { ev_ebitda: { fiscal_period: 'Q2-2025' } } },
+    fiscal: 'Q2-2025',
+    mixed: true,
+  },
+])('summarizes snapshot multiples with $scenario', async ({ peer, fiscal, mixed }) => {
+  mockGetPeerCompanies.mockResolvedValue({ peers: [] })
+  mockGetComparisonPerformance.mockResolvedValue([])
+  mockCompareStocks.mockResolvedValue({ metrics: [], stocks: [] })
+  mockGetFinancialRatios.mockImplementation(async (symbol: string) => ({
+    data: [symbol === 'MSR' ? { period: 'FY2024', ps: 1.25 } : peer],
+  }))
+
+  renderComparison()
+
+  const table = await screen.findByRole('table')
+  expect(within(table).getByText('1.25').closest('td')).toHaveTextContent('Fiscal: FY2024')
+  expect(within(table).getByText('2.50')).toBeInTheDocument()
+  const peerBasis = within(table).queryByLabelText(/^Basis for VNM EV\/EBITDA/)
+  if (fiscal) {
+    expect(peerBasis).toHaveTextContent(`Fiscal: ${fiscal}`)
+  } else {
+    expect(peerBasis).not.toBeInTheDocument()
+  }
+  const caption = table.querySelector('caption')
+  expect(caption).toHaveTextContent('EV/EBITDA and P/S are reported multiples')
+  if (mixed) {
+    expect(caption).toHaveTextContent('Mixed fiscal periods.')
+  } else {
+    expect(caption).not.toHaveTextContent('Mixed fiscal periods.')
+  }
+})

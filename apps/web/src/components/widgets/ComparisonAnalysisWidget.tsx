@@ -112,6 +112,22 @@ interface RatioColumn {
   format: 'ratio' | 'percent'
 }
 
+function getSnapshotValuation(row: SnapshotRow | null | undefined, key: RatioColumn['key']) {
+  const field = valuationKey(key)
+  const value = row?.[key]
+  if (!row || !field || typeof value !== 'number' || !Number.isFinite(value)) return undefined
+
+  const evidence = row.valuation_basis?.[field]
+  return {
+    field,
+    evidence: {
+      ...evidence,
+      fiscal_period: evidence?.fiscal_period ?? row.period,
+      source: evidence?.source ?? row.source,
+    },
+  }
+}
+
 const VALUATION_RATIO_COLUMNS: RatioColumn[] = [
   { key: 'pe', label: 'P/E', format: 'ratio' },
   { key: 'ps', label: 'P/S', format: 'ratio' },
@@ -383,6 +399,12 @@ function ComparisonAnalysisWidgetComponent({
     () => CATEGORY_RATIO_COLUMNS[activeCategory] ?? VALUATION_RATIO_COLUMNS,
     [activeCategory]
   )
+  const ratioGridFiscalPeriods = activeCategory === 'valuation'
+    ? activeRatioColumns.flatMap(({ key }) => symbols.flatMap((ticker) => {
+      const valuation = getSnapshotValuation(ratioRowBySymbol[ticker], key)
+      return valuation ? [valuation.evidence.fiscal_period] : []
+    }))
+    : []
 
   const addSymbol = () => {
     const cleaned = newSymbol.trim().toUpperCase()
@@ -784,7 +806,7 @@ function ComparisonAnalysisWidgetComponent({
               <WidgetEmpty message="No ratio snapshot data available for selected symbols." />
             ) : (
               <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
-                {activeCategory === 'valuation' && <ValuationCaption periods={ratioGridRows.map(row => row.ratios?.period)} />}
+                {activeCategory === 'valuation' && <ValuationCaption periods={ratioGridFiscalPeriods} />}
                 <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95">
                   <tr className="border-b border-[var(--border-color)]">
                     <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
@@ -830,7 +852,7 @@ function ComparisonAnalysisWidgetComponent({
                         {symbols.map((ticker) => {
                           const row = ratioRowBySymbol[ticker]
                           const rawValue = row?.[column.key]
-                          const evidence = field ? row?.valuation_basis?.[field] : undefined
+                          const valuation = getSnapshotValuation(row, column.key)
                           const numericValue =
                             typeof rawValue === 'number' && Number.isFinite(rawValue)
                               ? rawValue
@@ -855,11 +877,8 @@ function ComparisonAnalysisWidgetComponent({
                                       : 'text-[var(--text-primary)]'
                               )}
                             >
-                              {field && numericValue !== null ? (
-                                <ValuationCell label={label} ticker={ticker} metric={field} snapshot evidence={{
-                                  ...evidence, fiscal_period: evidence?.fiscal_period ?? row?.period,
-                                  source: evidence?.source ?? row?.source,
-                                }} />
+                              {valuation ? (
+                                <ValuationCell label={label} ticker={ticker} metric={valuation.field} snapshot evidence={valuation.evidence} />
                               ) : (
                                 <div className="inline-flex items-center gap-2">
                                   <span className="font-semibold">{label}</span>
