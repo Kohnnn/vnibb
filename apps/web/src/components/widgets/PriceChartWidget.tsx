@@ -1,27 +1,27 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { BarChart3, ChartArea, ChartLine, Sigma } from 'lucide-react';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useFinancialRatios, useProfile, useScreenerData } from '@/lib/queries';
-import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import type { WidgetDataPayload } from '@/lib/widgetRuntime';
 import { latestByFinancialPeriod } from '@/lib/financialPeriods';
 import { TradingViewAdvancedChart } from '@/components/chart/TradingViewAdvancedChart';
+import { PRICE_CHART_TIMEFRAME_OPTIONS, PRICE_CHART_MODE_OPTIONS } from '@/lib/priceChartControls';
 import {
-  PRICE_CHART_TIMEFRAME_OPTIONS,
-  PRICE_CHART_MODE_OPTIONS,
-  normalizePriceChartTimeframe,
-  normalizePriceChartMode,
-} from '@/lib/priceChartControls';
+  buildPriceHistoryRuntime,
+  PriceChartScopeContext,
+  usePriceChartScope,
+  type PriceHistoryStatus,
+} from '@/lib/priceChartScope';
 import { formatDividendYield, formatPercent, formatRatio, readDividendYield } from '@/lib/formatters';
-import type { FinancialRatioData } from '@/types/equity';
-import type { ScreenerData } from '@/types/screener';
 import { firstFinite } from './utils';
 
 const CHART_MODE_ICONS = { candles: BarChart3, line: ChartLine, area: ChartArea };
+const CHART_FEATURES = ['Volume', 'Crosshair', 'Fast symbol switching'] as const;
 
 interface PriceChartWidgetProps {
   id: string;
@@ -45,70 +45,71 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
   const {
     data: screenerData,
     isLoading: metricsLoading,
-    error: metricsError,
     isFetching: metricsFetching,
-    dataUpdatedAt: metricsUpdatedAt,
+    isError: screenerFailed,
+    dataUpdatedAt: metricsFetchedAt,
   } = useScreenerData({ symbol, limit: 1, enabled: Boolean(symbol) });
-  const { data: ratiosData } = useFinancialRatios(symbol, { period: 'FY', enabled: Boolean(symbol) });
+  const {
+    data: ratiosData, isLoading: ratiosLoading, isFetching: ratiosFetching, isError: ratiosFailed,
+  } = useFinancialRatios(symbol, { period: 'FY', enabled: Boolean(symbol) });
 
-  const configuredTimeframe = normalizePriceChartTimeframe(config?.timeframe ?? timeframe);
-  const configuredMode = normalizePriceChartMode(config?.chartType);
-  const configuredCompareSymbol = typeof config?.compareSymbol === 'string' ? config.compareSymbol.toUpperCase() : '';
-  const [localControls, setLocalControls] = useState({
-    timeframe: configuredTimeframe,
-    chartType: configuredMode,
-    compareSymbol: configuredCompareSymbol,
-  });
-  const [previousConfig, setPreviousConfig] = useState({
-    timeframe: configuredTimeframe,
-    chartType: configuredMode,
-    compareSymbol: configuredCompareSymbol,
-  });
-  if (previousConfig.timeframe !== configuredTimeframe || previousConfig.chartType !== configuredMode || previousConfig.compareSymbol !== configuredCompareSymbol) {
-    const controls = { timeframe: configuredTimeframe, chartType: configuredMode, compareSymbol: configuredCompareSymbol };
-    setPreviousConfig(controls);
-    setLocalControls(controls);
-  }
-  const selectedTimeframe = localControls.timeframe;
-  const chartMode = localControls.chartType;
-  const compareInput = localControls.compareSymbol;
-  const compareSymbol = compareInput.trim().toUpperCase();
-  const updateControls = (updates: Partial<typeof localControls>) => {
-    setLocalControls(current => ({ ...current, ...updates }));
+  const dashboardScope = useContext(PriceChartScopeContext);
+  const standaloneScope = usePriceChartScope(symbol, { ...config, timeframe: config?.timeframe ?? timeframe }, !dashboardScope);
+  const scope = dashboardScope ?? standaloneScope;
+  const { request, controls, setAdjustmentMode } = scope;
+  const { timeframe: selectedTimeframe, chartType: chartMode, compareSymbol: compareInput } = controls;
+  const updateControls = (updates: Partial<typeof controls>) => {
+    scope.updateControls(updates);
     onConfigChange?.(updates);
   };
 
   const exchange = profileData?.data?.exchange;
-  const metrics = screenerData?.data?.[0] as ScreenerData | undefined;
-  const latestRatio = latestByFinancialPeriod(ratiosData?.data) as FinancialRatioData | undefined;
-  const snapshotMetrics: SnapshotMetric = {
-    pe: firstFinite(latestRatio?.pe, metrics?.pe),
-    pb: firstFinite(latestRatio?.pb, metrics?.pb),
-    roe: firstFinite(latestRatio?.roe, metrics?.roe),
-    dividendYield: firstFinite(
-      readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield),
-      readDividendYield(metrics?.dividend_yield, metrics?.ratio_units?.dividend_yield),
-    ),
+  const metrics = screenerData?.data[0];
+  const latestRatio = latestByFinancialPeriod(ratiosData?.data);
+  const ratioMetrics: SnapshotMetric = {
+    pe: firstFinite(latestRatio?.pe),
+    pb: firstFinite(latestRatio?.pb),
+    roe: firstFinite(latestRatio?.roe),
+    dividendYield: firstFinite(readDividendYield(latestRatio?.dividend_yield, latestRatio?.ratio_units?.dividend_yield)),
   };
-  const hasMetrics = Boolean(
-    Object.values(snapshotMetrics).some((value) => value !== null && value !== undefined)
-  );
+  const snapshotMetrics: SnapshotMetric = {
+    pe: ratioMetrics.pe ?? firstFinite(metrics?.pe),
+    pb: ratioMetrics.pb ?? firstFinite(metrics?.pb),
+    roe: ratioMetrics.roe ?? firstFinite(metrics?.roe),
+    dividendYield: ratioMetrics.dividendYield ?? firstFinite(readDividendYield(metrics?.dividend_yield, metrics?.ratio_units?.dividend_yield)),
+  };
+  const hasMetrics = Object.values(snapshotMetrics).some((value) => value !== null);
+  const hasRatioMetrics = Object.values(ratioMetrics).some((value) => value !== null);
+  const screenerMeta = screenerData?.meta;
+  const screenerUnavailable = screenerMeta?.availability === 'unavailable' ||
+    (!metrics && (screenerFailed || Boolean(screenerData?.error)));
+  const screenerStale = screenerMeta?.stale || screenerMeta?.source === 'stale_cache';
+  const screenerFallback = screenerMeta?.fallback || screenerMeta?.source === 'fallback_cache';
+  let screenerNotice: string | undefined;
+  if (screenerUnavailable) {
+    screenerNotice = 'Screener data is unavailable.';
+  } else if (screenerFailed) {
+    screenerNotice = 'Screener refresh failed. Keeping the previously fetched screener snapshot.';
+  } else if (screenerFallback) {
+    screenerNotice = screenerStale ? 'Using a stale fallback screener snapshot.' : 'Using a fallback screener snapshot.';
+  } else if (screenerStale) {
+    screenerNotice = 'Using a stale screener snapshot.';
+  } else if (screenerData?.error) {
+    screenerNotice = 'Screener delivery is incomplete.';
+  }
+  const ratiosNotice = ratiosFailed
+    ? hasRatioMetrics ? 'Financial ratios refresh failed. Keeping the previously fetched ratios.' : 'Financial ratios are unavailable.'
+    : ratiosData?.error
+      ? hasRatioMetrics ? 'Financial ratios delivery is incomplete. Showing available ratios.' : 'Financial ratios are unavailable.'
+      : null;
 
-  const featureChips = useMemo(() => ['Live data', 'Volume', 'Crosshair', 'Fast symbol switching'], []);
-
+  const [historyStatus, setHistoryStatus] = useState<PriceHistoryStatus>();
+  const currentStatus = historyStatus?.request === request ? historyStatus : undefined;
   useEffect(() => {
-    onDataChange?.(buildWidgetRuntime({
-      empty: !symbol,
-      apiGroup: '/tradingview/external',
-      endpoint: `/tradingview/external/${symbol}?timeframe=${selectedTimeframe}`,
-      sourceLabel: exchange || 'TradingView',
-      derived: true,
-      stale: Boolean(metricsError && hasMetrics),
-      extra: { timeframe: selectedTimeframe, chartType: chartMode },
-    }));
-  }, [chartMode, exchange, hasMetrics, metricsError, onDataChange, selectedTimeframe, symbol]);
+    if (request) onDataChange?.(buildPriceHistoryRuntime(request, chartMode, currentStatus));
+  }, [chartMode, currentStatus, onDataChange, request]);
 
-  if (!symbol) {
+  if (!symbol || !request) {
     return <WidgetEmpty message="Select a symbol to view the chart" />;
   }
 
@@ -121,7 +122,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
       widgetId={id}
     >
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
-        <div className="border-b border-[var(--border-subtle)] px-3 py-2.5">
+        <div role="group" aria-label="Chart settings" className="border-b border-[var(--border-subtle)] px-3 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5">
               <div className="flex min-w-0 flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-0.5" role="group" aria-label="Chart timeframe">
@@ -166,7 +167,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
               </div>
 
               <div className="hidden items-center gap-1 md:flex">
-                {featureChips.map((feature) => (
+                {CHART_FEATURES.map((feature) => (
                   <span
                     key={feature}
                     className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--text-muted)]"
@@ -200,48 +201,51 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
             </div>
 
             <WidgetMeta
-              sourceLabel={exchange || 'VniBB'}
-              note={`${selectedTimeframe} lightweight chart`}
-              updatedAt={null}
-              fetchedAt={metricsUpdatedAt}
-              isFetching={metricsFetching && hasMetrics}
+              sourceLabel="VniBB"
+              note={exchange ? `Listing venue: ${exchange}` : undefined}
               align="right"
             />
           </div>
         </div>
 
-        <div className="relative flex-1 min-h-[220px]">
+        <section aria-label="Price history chart" className="relative flex-1 min-h-[220px]">
           <TradingViewAdvancedChart
             symbol={symbol}
-            compareSymbol={compareSymbol}
             timeframe={selectedTimeframe}
             mode={chartMode}
             className="h-full"
             height={220}
+            history={{ request, setAdjustmentMode }}
+            onHistoryStatusChange={setHistoryStatus}
           />
-          <div className="pointer-events-none absolute bottom-2 left-3 text-[10px] text-[var(--text-muted)]">
-            Lightweight TradingView-style chart using live VniBB data without local chart caching
-          </div>
-        </div>
+        </section>
 
-        <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+        <section aria-label="Fundamentals Snapshot" className="border-t border-[var(--border-subtle)] px-3 py-2.5">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
               Fundamentals Snapshot
-            </span>
+            </h3>
             <WidgetMeta
-              updatedAt={null}
-              fetchedAt={metricsUpdatedAt}
-              isFetching={metricsFetching && hasMetrics}
-              note="Ratios prioritized"
+              fetchedAt={hasMetrics && !hasRatioMetrics && !screenerUnavailable ? metricsFetchedAt : undefined}
+              isFetching={(metricsFetching || ratiosFetching) && hasMetrics}
+              note={hasRatioMetrics ? 'Ratios prioritized' : undefined}
               align="right"
             />
           </div>
 
-          {metricsLoading && !hasMetrics ? (
+          {screenerNotice && (
+            <p role="status" aria-label="Screener delivery" className="mb-2 text-xs text-[var(--color-warning)]">
+              {screenerNotice}
+            </p>
+          )}
+          {ratiosNotice && (
+            <p role="status" aria-label="Financial ratios delivery" className="mb-2 text-xs text-[var(--color-warning)]">
+              {ratiosNotice}
+            </p>
+          )}
+
+          {(metricsLoading || ratiosLoading) && !hasMetrics ? (
             <WidgetSkeleton lines={2} />
-          ) : metricsError && !hasMetrics ? (
-            <div className="text-sm text-[var(--text-muted)]">Fundamentals not available yet.</div>
           ) : !hasMetrics ? (
             <div className="text-sm text-[var(--text-muted)]">Fundamentals not available yet.</div>
           ) : (
@@ -266,7 +270,7 @@ export function PriceChartWidget({ id, symbol, timeframe = '1Y', config, onConfi
               ))}
             </div>
           )}
-        </div>
+        </section>
       </div>
     </WidgetContainer>
   );

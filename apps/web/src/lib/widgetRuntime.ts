@@ -18,8 +18,9 @@ export interface WidgetRuntimeInput {
   empty: boolean
   /** API group, e.g. '/equity', '/market', '/news'. */
   apiGroup: string
-  /** Concrete endpoint hit, e.g. '/equity/historical?symbol=FPT'. */
+  /** Request endpoint, or a route name if marked as a summary. */
   endpoint: string
+  endpointKind?: ExportProvenance['endpointKind']
   /** Human-readable source label shown on the health chip / exports. */
   sourceLabel?: string
   /** Compact row height (grid units) when empty. */
@@ -49,12 +50,14 @@ export interface WidgetRuntimeInput {
   /** Extra fields merged into the onDataChange payload (e.g. rows for export). */
   extra?: Record<string, unknown>
   exportData?: unknown
+  requestScope?: object
 }
 
 export interface WidgetRuntime<T = unknown> {
   readonly layoutHint?: { readonly empty?: boolean; readonly compactHeight?: number }
   readonly provenance?: Partial<ExportProvenance>
   readonly exportData?: unknown
+  readonly requestScope?: object
   readonly data?: T
 }
 
@@ -87,6 +90,7 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     sourceLabel: input.sourceLabel ?? (input.derived ? 'Derived (client)' : undefined),
     apiGroup: input.apiGroup,
     endpoint: input.endpoint,
+    endpointKind: input.endpointKind,
     adjustmentMode: input.adjustmentMode,
     period: input.period,
     periodScope: input.periodScope,
@@ -111,6 +115,7 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
       layoutHint: { empty: input.empty, compactHeight: input.compactHeight },
       provenance,
       exportData: input.exportData,
+      ...(input.requestScope !== undefined && { requestScope: input.requestScope }),
     },
   }
 }

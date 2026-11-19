@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { HistogramData, IChartApi, ISeriesApi, WhitespaceData } from 'lightweight-charts';
 import { RefreshCw } from 'lucide-react';
 import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
@@ -10,6 +10,13 @@ import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
 import { CHART_CAPTURE_EVENT, LIGHT_CAPTURE_ATTR, type ChartLightCaptureDetail } from '@/lib/chartCapture';
 import { useColorblind } from '@/lib/colorblind';
+import {
+  usePriceHistoryRequest,
+  type PriceAdjustmentMode,
+  type PriceHistoryControl,
+  type PriceHistoryRequest,
+  type PriceHistoryStatus,
+} from '@/lib/priceChartScope';
 
 export type AdvancedChartMode = 'candles' | 'line' | 'area';
 export type AdvancedChartTimeframe = '1D' | '5D' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y' | 'MAX' | 'YTD';
@@ -21,6 +28,8 @@ interface TradingViewAdvancedChartProps {
   mode?: AdvancedChartMode;
   className?: string;
   height?: number;
+  history?: PriceHistoryControl;
+  onHistoryStatusChange?: (status: PriceHistoryStatus) => void;
 }
 
 interface ChartPoint {
@@ -37,6 +46,7 @@ interface ChartPoint {
 }
 
 const REQUEST_TIMEOUT_MS = 20000;
+const HISTORY_UNAVAILABLE = 'Price history could not be loaded. Please try again.';
 const MIN_CHART_DIMENSION_PX = 8;
 const MAX_CHART_SIZE_RETRIES = 90;
 
@@ -46,6 +56,26 @@ interface ExcludedSession {
 
 /** A renderer point: a certified bar, or whitespace marking an excluded session. */
 type ChartSeriesPoint = ChartPoint | ExcludedSession;
+
+interface HistoryData {
+  points: ChartSeriesPoint[];
+  comparePoints: ChartPoint[];
+  eventMarkers: ChartEventMarker[];
+  error: string | null;
+  excludedNotice: string | null;
+  historyDelivery: { partial: boolean; fallback: boolean } | null;
+  sessionBasis: string;
+  adjustmentCoverage: number | null;
+}
+
+interface HistoryResult extends HistoryData {
+  request: PriceHistoryRequest;
+}
+
+const EMPTY_HISTORY: HistoryData = {
+  points: [], comparePoints: [], eventMarkers: [], error: null, excludedNotice: null,
+  historyDelivery: null, sessionBasis: 'Unknown', adjustmentCoverage: null,
+};
 
 function isChartPoint(point: ChartSeriesPoint): point is ChartPoint {
   return 'close' in point;
@@ -121,69 +151,43 @@ function isChartDimensionError(error: unknown): boolean {
   return normalized.includes('width') && normalized.includes('height') && normalized.includes('greater than 0');
 }
 
-function toDateInput(value: Date): string {
-  return value.toISOString().split('T')[0];
-}
-
-function resolveDateRange(timeframe: AdvancedChartTimeframe): { startDate: string; endDate: string } {
-  const end = new Date();
-  const start = new Date(end);
-
-  switch (timeframe) {
-    case '1D':
-      start.setDate(end.getDate() - 2);
-      break;
-    case '5D':
-      start.setDate(end.getDate() - 7);
-      break;
-    case '1M':
-      start.setDate(end.getDate() - 31);
-      break;
-    case '3M':
-      start.setDate(end.getDate() - 93);
-      break;
-    case '6M':
-      start.setDate(end.getDate() - 186);
-      break;
-    case '1Y':
-      start.setDate(end.getDate() - 365);
-      break;
-    case '3Y':
-      start.setDate(end.getDate() - 365 * 3);
-      break;
-    case '5Y':
-      start.setDate(end.getDate() - 365 * 5);
-      break;
-    case 'MAX':
-      start.setFullYear(2000, 0, 1);
-      break;
-    case 'YTD':
-      start.setMonth(0, 1);
-      break;
-  }
-
-  return { startDate: toDateInput(start), endDate: toDateInput(end) };
-}
-
 function safeNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+const marketDate = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+const observationPattern = /^(\d{4}-\d{2}-\d{2})(?:T((?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?)(Z|[+-]\d{2}:\d{2})?)?$/;
+
+function parseMarketObservation(value: string | null | undefined): { day: string; instant: number | null } | null {
+  const match = value?.match(observationPattern);
+  if (!match) return null;
+  const [, day, clock, offset] = match;
+  const dayCheck = new Date(`${day}T00:00:00Z`);
+  if (!Number.isFinite(dayCheck.getTime()) || !dayCheck.toISOString().startsWith(day)) return null;
+  // A day-only history row is a session key, not a midnight observation.
+  if (!clock) return { day, instant: null };
+  // The quote route interprets naive source timestamps as Vietnam wall time.
+  const date = new Date(`${day}T${clock}${offset ?? '+07:00'}`);
+  if (!Number.isFinite(date.getTime())) return null;
+  const parts = marketDate.formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value;
+  return { day: `${part('year')}-${part('month')}-${part('day')}`, instant: date.getTime() };
+}
+
 function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
   const byDate = new Map<string, ChartPoint>();
   for (const row of rows) {
-    const rawTime = String(row.time ?? '');
-    const time = rawTime.slice(0, 10);
-    const timestamp = new Date(rawTime).getTime();
+    const observation = parseMarketObservation(typeof row.time === 'string' ? row.time : null);
     const open = safeNumber(row.open);
     const high = safeNumber(row.high);
     const low = safeNumber(row.low);
     const close = safeNumber(row.close);
-    if (open === null || high === null || low === null || close === null || !time || !Number.isFinite(timestamp)) {
-      continue;
-    }
+    if (open === null || high === null || low === null || close === null || !observation) continue;
+    const { day: time, instant: observedAt } = observation;
     // The history endpoint owns source/adjustment precedence; retain its first valid row per day.
     if (byDate.has(time)) continue;
     // The row marker is the only certification source. The response-level
@@ -197,52 +201,33 @@ function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
       volume: safeNumber(row.volume) ?? 0,
       volumeAvailable: safeNumber(row.volume) !== null,
       priceUnit,
-      observedAt: rawTime.length > 10 ? timestamp : null,
+      observedAt,
       adjustmentApplied: row.adjustment_applied === true,
     });
   }
   return Array.from(byDate.values()).sort((left, right) => left.time.localeCompare(right.time));
 }
 
-/**
- * Format a Date as a `YYYY-MM-DD` business-day string suitable for
- * lightweight-charts. Uses the local calendar day (matches the convention used
- * by the historical-prices API which returns `Pydantic date` → date-only).
- *
- * Mixing a full ISO timestamp with date-only strings inside a single
- * lightweight-charts series silently rejects the data (chart frame still
- * draws but candles disappear). Always emit `YYYY-MM-DD` here so every point
- * in the series is the same time-kind.
- */
-function toBusinessDayString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function mergeQuote(points: ChartPoint[], quote: QuoteData | null): ChartPoint[] {
-  const updatedAt = quote?.updatedAt ?? quote?.updated_at;
   const priceUnit = quote?.price_unit;
-  if (quote?.price == null || !updatedAt || points.length === 0 ||
+  if (quote?.price == null || points.length === 0 ||
       (priceUnit !== 'VND' && priceUnit !== 'index_points') ||
       points.some((point) => point.priceUnit !== priceUnit)) {
     return points;
   }
 
-  const quoteTime = new Date(updatedAt);
+  // Only the admitted observation dates the bar; updated_at may be a storage write.
+  const observation = parseMarketObservation(quote.as_of);
   const quotePrice = safeNumber(quote.price);
-  if (!Number.isFinite(quoteTime.getTime()) || quotePrice === null) return points;
+  if (!observation || quotePrice === null) return points;
 
   const latest = points[points.length - 1];
-  const quoteDay = toBusinessDayString(quoteTime);
-  if (quoteDay < latest.time ||
-      (latest.observedAt !== null && quoteTime.getTime() < latest.observedAt)) {
-    return points;
-  }
+  const { day: quoteDay, instant } = observation;
+  if (quoteDay < latest.time) return points;
   const isSameDay = quoteDay === latest.time;
-  // A raw quote cannot replace a bar carrying a historical adjustment factor.
-  if (isSameDay && latest.adjustmentApplied) return points;
+  // A raw quote cannot replace an adjusted bar or a more recent observation.
+  if (isSameDay && (latest.adjustmentApplied ||
+      (latest.observedAt !== null && (instant === null || instant < latest.observedAt)))) return points;
 
   const mergedPoint: ChartPoint = {
     time: isSameDay ? latest.time : quoteDay,
@@ -253,7 +238,7 @@ function mergeQuote(points: ChartPoint[], quote: QuoteData | null): ChartPoint[]
     volume: safeNumber(quote.volume) ?? (isSameDay ? latest.volume : 0),
     volumeAvailable: safeNumber(quote.volume) !== null || (isSameDay && latest.volumeAvailable),
     priceUnit,
-    observedAt: quoteTime.getTime(),
+    observedAt: instant,
     adjustmentApplied: false,
   };
 
@@ -267,7 +252,16 @@ export function TradingViewAdvancedChart({
   mode = 'candles',
   className,
   height = 220,
+  history,
+  onHistoryStatusChange,
 }: TradingViewAdvancedChartProps) {
+  const [standaloneAdjustment, setStandaloneAdjustment] = useState<PriceAdjustmentMode>('adjusted');
+  const standaloneRequest = usePriceHistoryRequest({
+    symbol, timeframe, compareSymbol: compareSymbol ?? '', adjustmentMode: standaloneAdjustment,
+  });
+  const request = history?.request ?? standaloneRequest;
+  const setAdjustmentMode = history?.setAdjustmentMode ?? setStandaloneAdjustment;
+  const { compareSymbol: activeCompareSymbol, adjustmentMode } = request;
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const { resolvedTheme } = useTheme();
@@ -277,119 +271,102 @@ export function TradingViewAdvancedChart({
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Line'> | ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
-  const [points, setPoints] = useState<ChartSeriesPoint[]>([]);
-  const [comparePoints, setComparePoints] = useState<ChartPoint[]>([]);
-  const [eventMarkers, setEventMarkers] = useState<ChartEventMarker[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [excludedNotice, setExcludedNotice] = useState<string | null>(null);
-  const [adjustmentMode, setAdjustmentMode] = useState<'raw' | 'adjusted'>('adjusted');
+  const [result, setResult] = useState<HistoryResult>();
+  const [canvasError, setCanvasError] = useState<{ request: PriceHistoryRequest; message: string }>();
   const [hoveredPoint, setHoveredPoint] = useState<ChartPoint | null>(null);
-  const [sessionBasis, setSessionBasis] = useState('Unknown');
-  const [adjustmentCoverage, setAdjustmentCoverage] = useState<number | null>(null);
-
-  const dateRange = useMemo(() => resolveDateRange(timeframe), [timeframe]);
-  const normalizedCompareSymbol = (compareSymbol || '').trim().toUpperCase();
-  const activeCompareSymbol = normalizedCompareSymbol && normalizedCompareSymbol !== symbol.trim().toUpperCase()
-    ? normalizedCompareSymbol
-    : '';
+  const currentResult = result?.request === request ? result : undefined;
+  const {
+    points, comparePoints, eventMarkers, excludedNotice, historyDelivery, sessionBasis, adjustmentCoverage,
+  } = currentResult ?? EMPTY_HISTORY;
+  const isLoading = Boolean(request.symbol) && !currentResult;
+  const error = currentResult?.error ?? (canvasError?.request === request ? canvasError.message : null);
 
   useEffect(() => {
+    const { symbol, compareSymbol, timeframe, startDate, endDate, interval, adjustmentMode } = request;
     if (!symbol) return;
 
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const options = { startDate, endDate, interval, adjustmentMode, signal: controller.signal };
+    let disposed = false;
 
     const load = async () => {
-      setIsLoading(true);
-      setError(null);
-
       try {
         const [historyResponse, quoteResponse, eventsResponse, compareResponse] = await Promise.all([
-          getHistoricalPrices(symbol, {
-            startDate: dateRange.startDate,
-            endDate: dateRange.endDate,
-            interval: '1D',
-            adjustmentMode,
-            signal: controller.signal,
-          }),
+          getHistoricalPrices(symbol, options),
           getQuote(symbol, controller.signal).catch(() => null),
           getCompanyEvents(symbol, { limit: 80 }).catch(() => null),
-          activeCompareSymbol
-            ? getHistoricalPrices(activeCompareSymbol, {
-                startDate: dateRange.startDate,
-                endDate: dateRange.endDate,
-                interval: '1D',
-                adjustmentMode,
-                signal: controller.signal,
-              }).catch(() => null)
-            : Promise.resolve(null),
+          compareSymbol ? getHistoricalPrices(compareSymbol, options).catch(() => null) : Promise.resolve(null),
         ]);
 
+        if (disposed) return;
         setHoveredPoint(null);
-        setSessionBasis(historyResponse?.meta?.session_basis || 'Unknown');
-        setAdjustmentCoverage(historyResponse?.meta?.adjustment_coverage_pct ?? null);
+        const historyError = historyResponse?.error != null;
+        const delivery = {
+          ...EMPTY_HISTORY,
+          request,
+          sessionBasis: historyResponse?.meta?.session_basis || 'Unknown',
+          adjustmentCoverage: historyResponse?.meta?.adjustment_coverage_pct ?? null,
+        };
         const normalized = normalizePoints(
           (historyResponse?.data || []) as unknown as Array<Record<string, unknown>>,
         );
         const merged = mergeQuote(normalized, quoteResponse?.data ?? null);
         const unit = certifiedUnit(merged);
         if (merged.length === 0) {
-          setPoints([]);
-          setComparePoints([]);
-          setEventMarkers([]);
-          setExcludedNotice(null);
-        } else if (unit === null) {
+          setResult({ ...delivery, error: historyError ? HISTORY_UNAVAILABLE : null });
+          return;
+        }
+        if (unit === null) {
           // No certified unit covers the response (every row unmarked, or marked
           // rows disagree on VND vs index points), so no honest series can be
           // drawn. Withhold the chart and name the excluded coverage instead of
           // plotting the marked subset as if it were continuous certified history.
-          setPoints([]);
-          setComparePoints([]);
-          setEventMarkers([]);
-          setExcludedNotice(null);
-          setError(uncertifiedNotice(merged));
-        } else {
-          const excluded = merged.filter((point) => point.priceUnit !== unit).length;
-          // Unmarked sessions keep their slot as whitespace so the renderer breaks
-          // the line there instead of joining across them.
-          setPoints(withExcludedGaps(merged, unit));
-          // The compare series is drawn on its own scale, so an unmarked or mixed
-          // compare history would still read as continuous certified history.
-          const compareNormalized = normalizePoints(
-            (compareResponse?.data || []) as unknown as Array<Record<string, unknown>>,
-          );
-          const compareUnit = certifiedUnit(compareNormalized);
-          setComparePoints(
-            compareUnit !== null && compareNormalized.every((point) => point.priceUnit === compareUnit)
-              ? compareNormalized
-              : [],
-          );
-          setEventMarkers(buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8));
-          setExcludedNotice(excluded > 0 ? excludedCoverageNotice(excluded, merged.length) : null);
-        }
-      } catch (fetchError) {
-        if ((fetchError as Error)?.name === 'AbortError') {
+          setResult({ ...delivery, error: uncertifiedNotice(merged) });
           return;
         }
-        setError((fetchError as Error)?.message || 'Failed to load chart data');
-        setPoints([]);
-        setComparePoints([]);
-        setEventMarkers([]);
-        setExcludedNotice(null);
+
+        // The compare series is drawn on its own scale, so an unmarked or mixed
+        // compare history would still read as continuous certified history.
+        const compareNormalized = normalizePoints(
+          (compareResponse?.data || []) as unknown as Array<Record<string, unknown>>,
+        );
+        const compareUnit = certifiedUnit(compareNormalized);
+        const excluded = merged.filter((point) => point.priceUnit !== unit).length;
+        const partial = historyError || historyResponse?.meta?.completeness_status === 'partial';
+        const fallback = historyResponse?.meta?.fallback_used === true;
+        setResult({
+          ...delivery,
+          // Unmarked sessions keep their slot as whitespace so the renderer breaks
+          // the line there instead of joining across them.
+          points: withExcludedGaps(merged, unit),
+          comparePoints: compareUnit !== null && compareNormalized.every((point) => point.priceUnit === compareUnit)
+            ? compareNormalized : [],
+          eventMarkers: buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8),
+          excludedNotice: excluded > 0 ? excludedCoverageNotice(excluded, merged.length) : null,
+          historyDelivery: partial || fallback ? { partial, fallback } : null,
+        });
+      } catch {
+        if (!disposed) setResult({ ...EMPTY_HISTORY, request, error: HISTORY_UNAVAILABLE });
       } finally {
         window.clearTimeout(timeoutId);
-        setIsLoading(false);
       }
     };
 
-    load();
+    void load();
 
     return () => {
+      disposed = true;
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [activeCompareSymbol, adjustmentMode, symbol, timeframe, dateRange.startDate, dateRange.endDate]);
+  }, [request]);
+
+  const observationStatus = error ? 'unavailable' : points.length ? 'available' : 'empty';
+  const coverage = observationStatus === 'available' && (historyDelivery?.partial || excludedNotice) ? 'partial' : undefined;
+  useEffect(() => {
+    if (!isLoading) onHistoryStatusChange?.({ request, observationStatus, coverage });
+  }, [request, isLoading, observationStatus, coverage, onHistoryStatusChange]);
 
   useEffect(() => {
     if (!containerRef.current || points.length === 0) return;
@@ -567,10 +544,10 @@ export function TradingViewAdvancedChart({
           chartRef.current = null;
           mainSeriesRef.current = null;
           volumeSeriesRef.current = null;
-          setError('Chart data could not be parsed for this timeframe.');
+          setCanvasError({ request, message: 'Chart data could not be parsed for this timeframe.' });
           return;
         }
-        const effectiveMode = timeframe === 'MAX' && safePoints.length > 900 && mode === 'candles' ? 'line' : mode;
+        const effectiveMode = request.timeframe === 'MAX' && safePoints.length > 900 && mode === 'candles' ? 'line' : mode;
         try {
           if (effectiveMode === 'line') {
             series = chart.addLineSeries({
@@ -617,7 +594,7 @@ export function TradingViewAdvancedChart({
           // can grep for in user devtools.
           console.error(
             '[VniBB PriceChart] series.setData failed for symbol',
-            symbol,
+            request.symbol,
             'mode',
             effectiveMode,
             'sample point',
@@ -806,6 +783,7 @@ export function TradingViewAdvancedChart({
         }
         const admittedPoints = new Map(points.filter(isRenderablePoint).map((point) => [point.time, point]));
         chart.subscribeCrosshairMove((event) => {
+          if (disposed) return;
           const time = typeof event.time === 'string' ? event.time
             : event.time && typeof event.time === 'object'
               ? `${event.time.year}-${String(event.time.month).padStart(2, '0')}-${String(event.time.day).padStart(2, '0')}`
@@ -837,6 +815,7 @@ export function TradingViewAdvancedChart({
           chart.timeScale().fitContent();
         }
       } catch (chartError) {
+        if (disposed) return;
         removeChart(chartRef.current);
         chartRef.current = null;
         mainSeriesRef.current = null;
@@ -847,7 +826,7 @@ export function TradingViewAdvancedChart({
           return;
         }
 
-        setError((chartError as Error)?.message || 'Failed to render chart');
+        setCanvasError({ request, message: 'The chart could not be rendered.' });
       } finally {
         isRendering = false;
       }
@@ -879,7 +858,7 @@ export function TradingViewAdvancedChart({
           scheduleRenderRetry();
           return;
         }
-        setError((resizeError as Error)?.message || 'Failed to resize chart');
+        setCanvasError({ request, message: 'The chart could not be resized.' });
       }
     });
     resizeObserver.observe(containerRef.current);
@@ -896,11 +875,11 @@ export function TradingViewAdvancedChart({
       mainSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [activeCompareSymbol, colorblind, comparePoints, eventMarkers, mode, points, timeframe, resolvedTheme]);
+  }, [activeCompareSymbol, colorblind, comparePoints, eventMarkers, mode, points, request, resolvedTheme]);
 
   return (
     <div className={cn('relative h-full w-full', className)} style={{ minHeight: height }}>
-      <div ref={containerRef} className="absolute inset-0 h-full w-full" />
+      {points.length > 0 && <div ref={containerRef} className="absolute inset-0 h-full w-full" />}
 
       <div className="absolute left-3 top-3 z-10 flex items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 p-1 backdrop-blur">
         {(['adjusted', 'raw'] as const).map((modeOption) => (
@@ -942,12 +921,15 @@ export function TradingViewAdvancedChart({
         </div>
       ) : null}
 
-      {!isLoading && !error && excludedNotice ? (
-        <div
-          role="status"
-          className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-secondary)] backdrop-blur"
-        >
-          {excludedNotice}
+      {!isLoading && !error && (excludedNotice || historyDelivery) ? (
+        <div className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-secondary)] backdrop-blur">
+          {historyDelivery && (
+            <div role="status" aria-label="History delivery">
+              {historyDelivery.partial && 'Showing partial price history. '}
+              {historyDelivery.fallback && 'History includes fallback data.'}
+            </div>
+          )}
+          {excludedNotice && <div role="status">{excludedNotice}</div>}
         </div>
       ) : null}
 
@@ -958,13 +940,15 @@ export function TradingViewAdvancedChart({
         >
           <div className="flex items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-modal)] px-4 py-3 text-xs text-[var(--text-secondary)] shadow-xl">
             <RefreshCw size={14} className="animate-spin text-[var(--color-accent-primary)]" />
-            <span>Loading live chart data...</span>
+            <span>Loading chart data...</span>
           </div>
         </div>
       )}
 
       {!isLoading && error && (
         <div
+          role="status"
+          aria-label="History unavailable"
           className="absolute inset-0 flex items-center justify-center backdrop-blur-sm"
           style={{ backgroundColor: 'color-mix(in srgb, var(--bg-primary) 82%, transparent)' }}
         >

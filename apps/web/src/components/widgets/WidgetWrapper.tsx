@@ -61,16 +61,10 @@ import { cn } from '@/lib/utils';
 import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@/lib/exportWidget';
 import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
-import { getWidgetExportData } from '@/lib/widgetRuntime';
-import type { WidgetRuntimeLayoutHint } from './types';
+import { getWidgetExportData, type WidgetRuntime } from '@/lib/widgetRuntime';
+import { buildPriceHistoryRuntime, PriceChartScopeContext, usePriceChartScope } from '@/lib/priceChartScope';
 
-interface WidgetRuntimePayload {
-    readonly __widgetRuntime?: {
-        readonly layoutHint?: WidgetRuntimeLayoutHint;
-        readonly provenance?: Partial<ExportProvenance>;
-        readonly exportData?: unknown;
-    };
-}
+type WidgetRuntimePayload = { readonly __widgetRuntime?: WidgetRuntime };
 
 function readWidgetRuntime(data: unknown) {
     return data && typeof data === 'object' && !Array.isArray(data)
@@ -238,9 +232,6 @@ export function WidgetWrapper({
     const [showCapabilities, setShowCapabilities] = useState(false);
     const [widgetGroup, setWidgetGroup] = useState<WidgetGroupId>(initialWidgetGroup);
     const [publishedData, setPublishedData] = useState<unknown>();
-    // A mount-time prop effect can overwrite the child's first publication.
-    // Keep the fallback separate so the child's current empty/withheld state wins.
-    const internalData = publishedData === undefined ? widgetData : publishedData;
     const [isContentVisible, setIsContentVisible] = useState(false);
     const contentHostRef = useRef<HTMLDivElement | null>(null);
     const tickerTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -409,12 +400,26 @@ export function WidgetWrapper({
         rawExchangeBadge && rawExchangeBadge !== 'VN' && rawExchangeBadge !== 'UNKNOWN'
             ? rawExchangeBadge
             : null;
+    const isDashboardPriceChart = widgetType === 'price_chart' && currentWidget?.type === 'price_chart';
+    const priceChartScope = usePriceChartScope(displaySymbol, currentWidget?.config, isDashboardPriceChart && !isCollapsed);
+    const { request: chartRequest, controls: chartControls } = priceChartScope;
+    const internalData = useMemo(() => {
+        // Keep the widget fallback separate so the child's own empty/withheld state wins.
+        if (!isDashboardPriceChart) return publishedData === undefined ? widgetData : publishedData;
+        if (!chartRequest) return undefined;
+        // The toolbar and portal see the new selection before the child can publish it.
+        if (readWidgetRuntime(publishedData)?.requestScope === chartRequest) {
+            return { ...publishedData as WidgetRuntimePayload, chartType: chartControls.chartType };
+        }
+        return buildPriceHistoryRuntime(chartRequest, chartControls.chartType);
+    }, [chartControls.chartType, chartRequest, isDashboardPriceChart, publishedData, widgetData]);
     const widgetRuntime = readWidgetRuntime(internalData);
     const dataToExport = useMemo(() => {
         const data = readAdmittedWidgetData(internalData, widgetRuntime);
         // An older publisher may supply only metadata in its runtime envelope.
-        return data === undefined && internalData !== widgetData ? readAdmittedWidgetData(widgetData) : data;
-    }, [internalData, widgetData, widgetRuntime]);
+        return !isDashboardPriceChart && data === undefined && internalData !== widgetData
+            ? readAdmittedWidgetData(widgetData) : data;
+    }, [internalData, isDashboardPriceChart, widgetData, widgetRuntime]);
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]
@@ -467,7 +472,9 @@ export function WidgetWrapper({
     }, [internalData]);
 
     const trackedParameters = useMemo(() => parameters.map((parameter) => {
-        const currentValue = liveParameterValues[parameter.id] ?? parameter.currentValue;
+        const chartValue = chartRequest && (parameter.id === 'timeframe' || parameter.id === 'chartType')
+            ? chartControls[parameter.id] : undefined;
+        const currentValue = chartValue ?? liveParameterValues[parameter.id] ?? parameter.currentValue;
         return {
             ...parameter,
             currentValue,
@@ -488,7 +495,7 @@ export function WidgetWrapper({
                 parameter.onChange(value);
             },
         };
-    }), [dashboardId, displaySymbol, id, liveParameterValues, parameters, tabId, title, widgetType]);
+    }), [chartControls, chartRequest, dashboardId, displaySymbol, id, liveParameterValues, parameters, tabId, title, widgetType]);
 
     const trackedMultiSelectParams = useMemo(() => multiSelectParams.map((parameter) => ({
         ...parameter,
@@ -742,7 +749,7 @@ export function WidgetWrapper({
             widgetGroup,
             tabId,
             dashboardId,
-            widgetConfig: currentWidget?.config || null,
+            widgetConfig: chartRequest ? { ...currentWidget?.config, ...chartControls } : currentWidget?.config || null,
             dataSample,
             ...(publishedProvenance && { dataProvenance: projectAgentProvenance(publishedProvenance, widgetType) }),
         };
@@ -998,7 +1005,9 @@ export function WidgetWrapper({
             {widgetHost && !isCollapsed && createPortal(
                 <WidgetHeaderVisibilityProvider hideHeader>
                     <WidgetErrorBoundary widgetName={title} onError={(error) => logClientError(`Widget ${id} (${title}) crashed:`, error)}>
-                        {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setPublishedData })}
+                        <PriceChartScopeContext.Provider value={chartRequest ? priceChartScope : null}>
+                            {withResolvedWidgetProps(children, { id, symbol: displaySymbol, widgetGroup, onDataChange: setPublishedData })}
+                        </PriceChartScopeContext.Provider>
                     </WidgetErrorBoundary>
                 </WidgetHeaderVisibilityProvider>, widgetHost
             )}

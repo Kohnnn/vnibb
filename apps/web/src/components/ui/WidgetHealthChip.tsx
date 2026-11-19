@@ -110,7 +110,7 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
           )}
           {details?.endpoint && (
             <div className="flex justify-between gap-2">
-              <span className="text-[var(--text-muted)]">Endpoint</span>
+              <span className="text-[var(--text-muted)]">{details.endpointKind === 'route_summary' ? 'Route summary' : 'Endpoint'}</span>
               <span className="text-right font-mono text-[9px] text-[var(--text-primary)]">{details.endpoint}</span>
             </div>
           )}

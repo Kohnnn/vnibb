@@ -54,7 +54,10 @@ function historyRow(overrides: Record<string, unknown> = {}) {
 }
 
 function quote(overrides: Record<string, unknown> = {}) {
-  return { symbol: 'FPT', price: 57300, price_unit: 'VND', updated_at: '2026-10-02T12:00:00', ...overrides };
+  return {
+    symbol: 'FPT', price: 57300, price_unit: 'VND',
+    as_of: '2026-10-02T12:00:00+07:00', updated_at: '2026-10-02T12:00:00', ...overrides,
+  };
 }
 
 async function renderCandles() {
@@ -122,9 +125,9 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
     ]);
   });
 
-  test('ignores an older quote rather than replacing adjusted historical observations', async () => {
-    mockHistory.mockResolvedValue({ data: [historyRow({ adjustment_applied: true, close: 23220 })] });
-    mockQuote.mockResolvedValue({ data: quote({ price: 31560, updated_at: '2026-10-01T12:00:00' }) });
+  test('ignores a quote observed before the latest history session', async () => {
+    mockHistory.mockResolvedValue({ data: [historyRow({ close: 23220 })] });
+    mockQuote.mockResolvedValue({ data: quote({ price: 31560, as_of: '2026-10-01T12:00:00+07:00' }) });
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 23220 },
     ]);
@@ -138,23 +141,47 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
     ]);
   });
 
-  test('ignores a same-day quote older than the latest timestamped history row', async () => {
+  test.each([
+    ['2026-10-02T12:00:00+07:00', 57000],
+    ['2026-10-02', 57000],
+    ['2026-10-02T14:01:00+07:00', 57300],
+  ])('orders the same-session observation %s against timestamped history', async (as_of, expectedClose) => {
     mockHistory.mockResolvedValue({ data: [historyRow({ time: '2026-10-02T14:00:00' })] });
+    mockQuote.mockResolvedValue({ data: quote({ as_of }) });
+    expect(await renderCandles()).toEqual([
+      { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: expectedClose },
+    ]);
+  });
+
+  test.each(['not-a-date', '2026-11-31T12:00:00+07:00'])('ignores invalid quote observation %s even with a valid update time', async (as_of) => {
+    mockQuote.mockResolvedValue({ data: quote({ as_of }) });
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57000 },
     ]);
   });
 
-  test('ignores invalid quote timestamps', async () => {
-    mockQuote.mockResolvedValue({ data: quote({ updated_at: 'not-a-date' }) });
+  test.each([
+    [null, 57000],
+    ['2026-09-15T00:00:00+07:00', 57300],
+  ])('uses the stored quote observation %s, not its November write date', async (as_of, expectedClose) => {
+    mockHistory.mockResolvedValue({ data: [historyRow({ time: '2026-09-15' })] });
+    mockQuote.mockResolvedValue({
+      data: quote({ as_of, updated_at: '2026-11-18T18:00:00+07:00' }),
+      meta: { source: 'postgres:stored_quote', as_of, stale: as_of === null ? null : true },
+    });
     expect(await renderCandles()).toEqual([
-      { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57000 },
+      { time: '2026-09-15', open: 57000, high: 57500, low: 56000, close: expectedClose },
     ]);
   });
 
-  test('appends a newer confirmed quote without copying older adjusted OHLC into the new day', async () => {
+  test.each([
+    '2026-10-05',
+    '2026-10-05T00:00:00',
+    '2026-10-04T17:00:00Z', // midnight October 5 on the exchange, still October 4 in UTC
+    '2026-10-05T09:15:00+07:00',
+  ])('appends the certified quote observation %s on the exchange session', async (as_of) => {
     mockHistory.mockResolvedValue({ data: [historyRow({ adjustment_applied: true, close: 23220 })] });
-    mockQuote.mockResolvedValue({ data: quote({ updated_at: '2026-10-05T12:00:00' }) });
+    mockQuote.mockResolvedValue({ data: quote({ as_of, updated_at: null }) });
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 23220 },
       { time: '2026-10-05', open: 57300, high: 57300, low: 57300, close: 57300 },
