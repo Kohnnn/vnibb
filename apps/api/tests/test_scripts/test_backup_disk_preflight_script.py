@@ -294,6 +294,8 @@ def _make_previous_set(backup_dir, stamp, pg_bytes=REAL_SET_BYTES, usable=True):
     set_dir.mkdir(parents=True, exist_ok=True)
     dump = set_dir / f"postgres-{stamp}.dump"
     dump.write_bytes(b"previous dump")
+    with dump.open("r+b") as payload:
+        payload.truncate(pg_bytes)  # Sparse fixture for multi-GiB sizing cases.
     mongo = set_dir / f"mongo-vnibb-market-{stamp}.archive.gz"
     mongo.write_bytes(b"previous mongo")
     manifest = {
@@ -719,9 +721,20 @@ def test_retention_prunes_only_canonical_sets_in_mixed_backup_root(run_backup):
     loose_file.touch()
     marker.touch()
 
+    # These are timestamped, real directories with real manifests.
+    for stamp in ("19991231T235959Z", "20250109T123456Z"):
+        unrelated = root / stamp
+        unrelated.mkdir()
+        (unrelated / "manifest.json").write_text('{"kind":"release"}')
+        (unrelated / "release.tgz").write_bytes(b"foreign archive")
+    damaged = _make_previous_set(root, "20250109T120000Z", pg_bytes=1024)
+    (damaged / f"postgres-{damaged.name}.dump").write_bytes(b"truncated")
+    mixed = _make_previous_set(root, "20250109T110000Z", pg_bytes=1024)
+    (mixed / ".operator-note").touch()
+
     release.chmod(0)
     try:
-        result, _, _ = run_backup(stamp="20250110T000000Z", keep_sets=2, host_free_bytes=12 * GIB)
+        result, _, _ = run_backup(stamp="20250110T000000Z", keep_sets=2)
     finally:
         release.chmod(0o700)
 
@@ -736,6 +749,10 @@ def test_retention_prunes_only_canonical_sets_in_mixed_backup_root(run_backup):
     assert linked_set.is_symlink()
     assert loose_file.is_file()
     assert marker.is_file()
+    for stamp in ("19991231T235959Z", "20250109T123456Z"):
+        assert (root / stamp / "release.tgz").read_bytes() == b"foreign archive"
+    assert (damaged / f"postgres-{damaged.name}.dump").read_bytes() == b"truncated"
+    assert (mixed / ".operator-note").is_file()
 
 
 def test_retention_failure_preserves_new_verified_pair(run_backup):

@@ -155,23 +155,59 @@ trap_cleanup() {
 stat_bytes() { stat -c %s "$1"; }
 
 manifest_stamps() {
-    python3 - "$BACKUP_DIR" <<'PY'
+    python3 - "$BACKUP_DIR" "$PG_DB" "$MONGO_DB" <<'PY'
+import json
 import os
 import re
-import stat
 import sys
 
+root, pg_db, mongo_db = sys.argv[1:]
+
+
+def is_backup_pair(entry):
+    stamp = entry.name
+    payloads = {f"postgres-{stamp}.dump", f"mongo-{mongo_db}-{stamp}.archive.gz"}
+    with os.scandir(entry.path) as children:
+        files = {child.name: child for child in children}
+    if files.keys() != payloads | {"manifest.json"} or not all(
+        child.is_file(follow_symlinks=False) for child in files.values()
+    ):
+        return False
+    try:
+        with open(files["manifest.json"].path, encoding="utf-8") as source:
+            manifest = json.load(source)
+    except ValueError:
+        return False
+    if not isinstance(manifest, dict) or manifest.get("stamp") != stamp:
+        return False
+    postgres, mongo, artifacts = (manifest.get(key) for key in ("postgres", "mongo", "artifacts"))
+    if not all(isinstance(item, dict) for item in (postgres, mongo, artifacts)):
+        return False
+    if postgres.get("database") != pg_db or mongo.get("database") != mongo_db or mongo.get("included") is not True:
+        return False
+    if artifacts.keys() != payloads:
+        return False
+    for name, record in artifacts.items():
+        if not isinstance(record, dict) or type(record.get("bytes")) is not int or record["bytes"] <= 0:
+            return False
+        digest = record.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            return False
+        if files[name].stat(follow_symlinks=False).st_size != record["bytes"]:
+            return False
+    return True
+
+
 stamps = []
-with os.scandir(sys.argv[1]) as entries:
+with os.scandir(root) as entries:
     for entry in entries:
         if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", entry.name) or not entry.is_dir(follow_symlinks=False):
             continue
         try:
-            mode = os.stat(os.path.join(entry.path, "manifest.json"), follow_symlinks=False).st_mode
+            if is_backup_pair(entry):
+                stamps.append(entry.name)
         except FileNotFoundError:
             continue
-        if stat.S_ISREG(mode):
-            stamps.append(entry.name)
 
 for stamp in sorted(stamps, reverse=True):
     print(stamp)
