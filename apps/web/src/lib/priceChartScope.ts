@@ -21,6 +21,10 @@ export interface PriceHistoryStatus {
   readonly request: PriceHistoryRequest;
   readonly observationStatus: 'available' | 'empty' | 'unavailable';
   readonly coverage?: 'partial';
+  readonly comparison?: {
+    readonly observationStatus: 'available' | 'empty' | 'unavailable';
+    readonly warning?: string;
+  };
 }
 
 export interface PriceHistoryControl {
@@ -113,6 +117,7 @@ export function usePriceChartScope(
 
 export function buildPriceHistoryRuntime(request: PriceHistoryRequest, chartType: AdvancedChartMode, status?: PriceHistoryStatus) {
   const history = status?.request === request ? status : undefined;
+  const comparison = history?.comparison;
   return buildWidgetRuntime({
     empty: !request.symbol,
     apiGroup: '/equity',
@@ -121,7 +126,13 @@ export function buildPriceHistoryRuntime(request: PriceHistoryRequest, chartType
     sourceLabel: 'VniBB',
     observationStatus: request.symbol ? history?.observationStatus ?? 'loading' : 'empty',
     coverage: request.symbol ? history?.coverage : undefined,
+    warnings: comparison?.warning ? [comparison.warning] : undefined,
     requestScope: request,
-    extra: { timeframe: request.timeframe, chartType },
+    // The wrapper also reads this payload for the agent's data sample.
+    extra: {
+      timeframe: request.timeframe,
+      chartType,
+      ...(comparison && { compareSymbol: request.compareSymbol, comparisonStatus: comparison.observationStatus }),
+    },
   });
 }

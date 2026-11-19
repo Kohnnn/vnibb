@@ -60,6 +60,7 @@ type ChartSeriesPoint = ChartPoint | ExcludedSession;
 interface HistoryData {
   points: ChartSeriesPoint[];
   comparePoints: ChartPoint[];
+  comparison?: PriceHistoryStatus['comparison'];
   eventMarkers: ChartEventMarker[];
   error: string | null;
   excludedNotice: string | null;
@@ -208,6 +209,35 @@ function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
   return Array.from(byDate.values()).sort((left, right) => left.time.localeCompare(right.time));
 }
 
+function qualifyComparison(
+  symbol: string,
+  response: Awaited<ReturnType<typeof getHistoricalPrices>> | null,
+): Pick<HistoryData, 'comparePoints' | 'comparison'> {
+  if (!symbol) return { comparePoints: [] };
+  if (!response || response.error != null) {
+    return {
+      comparePoints: [],
+      comparison: { observationStatus: 'unavailable', warning: `${symbol} comparison history could not be loaded.` },
+    };
+  }
+  const points = normalizePoints((response.data || []) as unknown as Array<Record<string, unknown>>);
+  if (points.length === 0) {
+    return {
+      comparePoints: [],
+      comparison: { observationStatus: 'empty', warning: `No ${symbol} comparison history is available for this range.` },
+    };
+  }
+  // The rebased series needs one certified unit throughout and a positive starting close.
+  const unit = certifiedUnit(points);
+  if (unit === null || points.some((point) => point.priceUnit !== unit) || points[0].close <= 0) {
+    return {
+      comparePoints: [],
+      comparison: { observationStatus: 'unavailable', warning: `${symbol} comparison history could not be plotted.` },
+    };
+  }
+  return { comparePoints: points, comparison: { observationStatus: 'available' } };
+}
+
 function mergeQuote(points: ChartPoint[], quote: QuoteData | null): ChartPoint[] {
   const priceUnit = quote?.price_unit;
   if (quote?.price == null || points.length === 0 ||
@@ -276,7 +306,7 @@ export function TradingViewAdvancedChart({
   const [hoveredPoint, setHoveredPoint] = useState<ChartPoint | null>(null);
   const currentResult = result?.request === request ? result : undefined;
   const {
-    points, comparePoints, eventMarkers, excludedNotice, historyDelivery, sessionBasis, adjustmentCoverage,
+    points, comparePoints, comparison, eventMarkers, excludedNotice, historyDelivery, sessionBasis, adjustmentCoverage,
   } = currentResult ?? EMPTY_HISTORY;
   const isLoading = Boolean(request.symbol) && !currentResult;
   const error = currentResult?.error ?? (canvasError?.request === request ? canvasError.message : null);
@@ -326,12 +356,6 @@ export function TradingViewAdvancedChart({
           return;
         }
 
-        // The compare series is drawn on its own scale, so an unmarked or mixed
-        // compare history would still read as continuous certified history.
-        const compareNormalized = normalizePoints(
-          (compareResponse?.data || []) as unknown as Array<Record<string, unknown>>,
-        );
-        const compareUnit = certifiedUnit(compareNormalized);
         const excluded = merged.filter((point) => point.priceUnit !== unit).length;
         const partial = historyError || historyResponse?.meta?.completeness_status === 'partial';
         const fallback = historyResponse?.meta?.fallback_used === true;
@@ -340,8 +364,7 @@ export function TradingViewAdvancedChart({
           // Unmarked sessions keep their slot as whitespace so the renderer breaks
           // the line there instead of joining across them.
           points: withExcludedGaps(merged, unit),
-          comparePoints: compareUnit !== null && compareNormalized.every((point) => point.priceUnit === compareUnit)
-            ? compareNormalized : [],
+          ...qualifyComparison(compareSymbol, compareResponse),
           eventMarkers: buildChartEventMarkers(eventsResponse?.data || [], merged, timeframe === '5Y' ? 12 : 8),
           excludedNotice: excluded > 0 ? excludedCoverageNotice(excluded, merged.length) : null,
           historyDelivery: partial || fallback ? { partial, fallback } : null,
@@ -363,10 +386,11 @@ export function TradingViewAdvancedChart({
   }, [request]);
 
   const observationStatus = error ? 'unavailable' : points.length ? 'available' : 'empty';
-  const coverage = observationStatus === 'available' && (historyDelivery?.partial || excludedNotice) ? 'partial' : undefined;
+  const coverage = observationStatus === 'available' && (historyDelivery?.partial || excludedNotice || comparison?.warning)
+    ? 'partial' : undefined;
   useEffect(() => {
-    if (!isLoading) onHistoryStatusChange?.({ request, observationStatus, coverage });
-  }, [request, isLoading, observationStatus, coverage, onHistoryStatusChange]);
+    if (!isLoading) onHistoryStatusChange?.({ request, observationStatus, coverage, comparison });
+  }, [request, isLoading, observationStatus, coverage, comparison, onHistoryStatusChange]);
 
   useEffect(() => {
     if (!containerRef.current || points.length === 0) return;
@@ -921,7 +945,7 @@ export function TradingViewAdvancedChart({
         </div>
       ) : null}
 
-      {!isLoading && !error && (excludedNotice || historyDelivery) ? (
+      {!isLoading && !error && (excludedNotice || historyDelivery || comparison?.warning) ? (
         <div className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-xs rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-secondary)] backdrop-blur">
           {historyDelivery && (
             <div role="status" aria-label="History delivery">
@@ -930,6 +954,7 @@ export function TradingViewAdvancedChart({
             </div>
           )}
           {excludedNotice && <div role="status">{excludedNotice}</div>}
+          {comparison?.warning && <div role="status" aria-label="Comparison history">{comparison.warning}</div>}
         </div>
       ) : null}
 

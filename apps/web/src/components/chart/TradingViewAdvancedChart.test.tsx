@@ -1,5 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { getCompanyEvents, getHistoricalPrices, getQuote } from '@/lib/api';
+import { buildPriceHistoryRuntime, type PriceHistoryStatus } from '@/lib/priceChartScope';
+import { getWidgetExportData } from '@/lib/widgetRuntime';
 import { TradingViewAdvancedChart } from './TradingViewAdvancedChart';
 
 const mockCandleSetData = jest.fn();
@@ -94,6 +96,96 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
   afterEach(() => {
     jest.restoreAllMocks();
     global.ResizeObserver = originalResizeObserver;
+  });
+
+  test('qualifies a failed VNM comparison while FPT candles remain available', async () => {
+    mockHistory.mockImplementation(async (symbol: string) => {
+      if (symbol === 'VNM') throw new Error('Comparison request rejected');
+      return { data: [historyRow()] };
+    });
+    const onHistoryStatusChange = jest.fn<void, [PriceHistoryStatus]>();
+    render(<TradingViewAdvancedChart symbol="FPT" compareSymbol="VNM" timeframe="1M" onHistoryStatusChange={onHistoryStatusChange} />);
+
+    await waitFor(() => expect(mockCandleSetData).toHaveBeenCalledWith([
+      { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57300 },
+    ]));
+    expect(mockHistory.mock.calls.map(([symbol]) => symbol)).toEqual(['FPT', 'VNM']);
+    expect(mockHistory.mock.calls[1][1]).toEqual(mockHistory.mock.calls[0][1]);
+    expect(mockLineSetData).not.toHaveBeenCalled();
+
+    const status = onHistoryStatusChange.mock.lastCall![0];
+    expect(status.request).toMatchObject({ symbol: 'FPT', compareSymbol: 'VNM', timeframe: '1M' });
+    expect(status).toMatchObject({ observationStatus: 'available', coverage: 'partial' });
+    expect(screen.getByRole('status', { name: 'Comparison history' })).toHaveTextContent('VNM comparison history could not be loaded.');
+
+    const runtime = buildPriceHistoryRuntime(status.request, 'candles', status);
+    expect(runtime.__widgetRuntime?.provenance).toMatchObject({
+      observationStatus: 'available', coverage: 'partial', warnings: ['VNM comparison history could not be loaded.'],
+    });
+    expect(getWidgetExportData(runtime)).toMatchObject({ compareSymbol: 'VNM', comparisonStatus: 'unavailable' });
+
+    const replacement = { ...status.request };
+    const pending = buildPriceHistoryRuntime(replacement, 'candles', status);
+    expect(pending.__widgetRuntime?.requestScope).toBe(replacement);
+    expect(pending.__widgetRuntime?.provenance?.observationStatus).toBe('loading');
+    expect(pending.__widgetRuntime?.provenance?.coverage).toBeUndefined();
+    expect(pending.__widgetRuntime?.provenance?.warnings).toBeUndefined();
+    expect(getWidgetExportData(pending)).not.toHaveProperty('comparisonStatus');
+  });
+
+  test.each([
+    { kind: 'an endpoint error', body: { data: [], error: 'Synthetic response error' }, status: 'unavailable', notice: 'VNM comparison history could not be loaded.' },
+    { kind: 'no observations', body: { data: [] }, status: 'empty', notice: 'No VNM comparison history is available for this range.' },
+    { kind: 'uncertified observations', body: { data: [historyRow({ price_unit: 'unknown' })] }, status: 'unavailable', notice: 'VNM comparison history could not be plotted.' },
+    { kind: 'a zero starting close', body: { data: [historyRow({ close: 0 })] }, status: 'unavailable', notice: 'VNM comparison history could not be plotted.' },
+  ])('qualifies VNM history with $kind', async ({ body, status, notice }) => {
+    mockHistory.mockImplementation(async (symbol: string) => symbol === 'VNM' ? body : { data: [historyRow()] });
+    const onHistoryStatusChange = jest.fn<void, [PriceHistoryStatus]>();
+    render(<TradingViewAdvancedChart symbol="FPT" compareSymbol="VNM" timeframe="1M" onHistoryStatusChange={onHistoryStatusChange} />);
+
+    expect(await screen.findByRole('status', { name: 'Comparison history' })).toHaveTextContent(notice);
+    expect(onHistoryStatusChange.mock.lastCall?.[0]).toMatchObject({
+      observationStatus: 'available', coverage: 'partial', comparison: { observationStatus: status },
+    });
+    await waitFor(() => expect(mockCandleSetData).toHaveBeenCalled());
+    expect(mockLineSetData).not.toHaveBeenCalled();
+  });
+
+  test('plots the replacement comparison and ignores an obsolete VNM failure', async () => {
+    const obsolete = Promise.withResolvers<unknown>();
+    mockHistory.mockImplementation(async (symbol: string) => {
+      if (symbol === 'VNM') return obsolete.promise;
+      if (symbol === 'VCB') {
+        return { data: [historyRow({ close: 95000 }), historyRow({ time: '2026-10-05', close: 104500 })] };
+      }
+      return { data: [historyRow()] };
+    });
+    const onHistoryStatusChange = jest.fn<void, [PriceHistoryStatus]>();
+    const chart = (compareSymbol: string) => (
+      <TradingViewAdvancedChart symbol="FPT" compareSymbol={compareSymbol} timeframe="1M" onHistoryStatusChange={onHistoryStatusChange} />
+    );
+    const { rerender } = render(chart('VNM'));
+    const signal = mockHistory.mock.calls.find(([symbol]) => symbol === 'VNM')?.[1].signal;
+    expect(signal?.aborted).toBe(false);
+    rerender(chart('VCB'));
+    expect(signal?.aborted).toBe(true);
+
+    expect(await screen.findByText('Compare VCB')).toBeInTheDocument();
+    await waitFor(() => expect(mockLineSetData).toHaveBeenCalledWith([
+      { time: '2026-10-02', value: 57300 },
+      { time: '2026-10-05', value: expect.closeTo(63030) },
+    ]));
+    const status = onHistoryStatusChange.mock.lastCall![0];
+    expect(status.request.compareSymbol).toBe('VCB');
+    expect(status.observationStatus).toBe('available');
+    expect(status.coverage).toBeUndefined();
+    expect(getWidgetExportData(buildPriceHistoryRuntime(status.request, 'candles', status)))
+      .toMatchObject({ compareSymbol: 'VCB', comparisonStatus: 'available' });
+
+    await act(async () => { obsolete.reject(new Error('Obsolete comparison failed')); });
+    expect(onHistoryStatusChange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('status', { name: 'Comparison history' })).not.toBeInTheDocument();
+    expect(screen.getByText('Compare VCB')).toBeInTheDocument();
   });
 
   test.each(['unknown', undefined])('rejects a 57.3 quote with %s unit without changing VND history', async (price_unit) => {
