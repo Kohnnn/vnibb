@@ -18,7 +18,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { ChartSizeBox } from '@/components/ui/ChartSizeBox';
 import { EMPTY_VALUE, formatCompactValueForUnit, formatPercent } from '@/lib/units';
-import { formatShortDate } from '@/lib/formatDate';
+import { formatSourceObservation } from '@/lib/formatDate';
 import { cn } from '@/lib/utils';
 
 interface MarketHeatmapWidgetProps {
@@ -252,11 +252,12 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
     const hasData = Boolean(treemapData && data?.sectors?.length);
     const isFallback = Boolean(error && hasData);
     const heatmapEndpoint = `/market/heatmap?group_by=${groupBy}&exchange=${exchange}&limit=500`;
-    const constituentDate = data?.constituents_as_of;
+    const constituentDate = formatSourceObservation(data?.constituents_as_of)?.slice(0, 10);
+    const priceDate = formatSourceObservation(data?.price_updated_at)?.slice(0, 10);
     const constituentNote = constituentDate
-        ? `Constituents ${formatShortDate(constituentDate)}${data?.constituents_stale ? ' (stale)' : ''}`
+        ? `Constituents ${constituentDate}${data?.constituents_stale ? ' (stale)' : ''}`
         : 'Constituents date unknown';
-    const freshnessNote = `${data?.partial ? 'Partial universe · ' : ''}Price ${data?.price_updated_at ? formatShortDate(data.price_updated_at) : 'date unknown'} · ${constituentNote}`;
+    const freshnessNote = `${data?.partial ? 'Partial universe · ' : ''}Price ${priceDate ?? 'date unknown'} · ${constituentNote}`;
     const sizeLabel = SIZE_LABELS[data?.size_metric ?? ''] ?? 'Unknown metric';
     const formatSize = (value: number) => data?.size_metric === 'volume'
         ? value.toLocaleString()
@@ -479,17 +480,20 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                     )}
                 </div>
 
-                {/* Legend bar */}
-                <div className="px-3 py-2 border-t border-[var(--border-default)] bg-[var(--bg-secondary)] flex items-center justify-between shadow-[0_-5px_15px_rgba(0,0,0,0.2)] z-10">
-                    <div className="flex items-center gap-3">
-                        <div className="flex h-1.5 w-32 rounded-full overflow-hidden border border-[var(--border-subtle)] shadow-inner">
-                            {[HEAT_LOSS[3], HEAT_LOSS[1], HEAT_NEUTRAL, HEAT_GAIN[1], HEAT_GAIN[3]].map((fill, index) => (
-                                <div key={`legend-${index}`} className="flex-1" style={{ backgroundColor: fill }} />
-                            ))}
+                {/* Let the disclosure wrap below the legend and clear the fixed devtools badge. */}
+                <div className={cn(
+                    "z-10 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 shadow-[0_-5px_15px_rgba(0,0,0,0.2)]",
+                    process.env.NODE_ENV === 'development' && 'pr-16'
+                )}>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <div className="flex items-center gap-2">
+                            <div className="flex h-1.5 w-24 overflow-hidden rounded-full border border-[var(--border-subtle)] shadow-inner">
+                                {[HEAT_LOSS[3], HEAT_LOSS[1], HEAT_NEUTRAL, HEAT_GAIN[1], HEAT_GAIN[3]].map((fill, index) => (
+                                    <div key={`legend-${index}`} className="flex-1" style={{ backgroundColor: fill }} />
+                                ))}
+                            </div>
+                            <span className="whitespace-nowrap text-[8px] font-black uppercase tracking-tighter text-[var(--text-muted)]">-7% to +7%</span>
                         </div>
-                        <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-tighter">-7% to +7%</span>
-                    </div>
-                    <div className="flex items-center gap-3">
                         {/* An empty universe already says "Market data unavailable";
                             printing 0 Stocks • 0 Groups beside it reads as a flat market. */}
                         {hasData && data && (
@@ -499,16 +503,16 @@ function MarketHeatmapWidgetComponent({ id, isEditing, onRemove, onDataChange }:
                                 <span className="text-[var(--text-secondary)]">{selectedGroup ? 1 : data.sectors.length}</span> Groups
                             </div>
                         )}
-                        <WidgetMeta
-                            updatedAt={data?.price_updated_at ?? null}
-                            fetchedAt={dataUpdatedAt}
-                            isFetching={isFetching && hasData}
-                            isCached={Boolean(data?.cached) || isFallback}
-                            isStale={isFallback && !data?.cached}
-                            note={hasData ? freshnessNote : undefined}
-                            align="right"
-                        />
                     </div>
+                    <WidgetMeta
+                        updatedAt={data?.price_updated_at ?? null}
+                        fetchedAt={dataUpdatedAt}
+                        isFetching={isFetching && hasData}
+                        isCached={Boolean(data?.cached) || isFallback}
+                        isStale={isFallback && !data?.cached}
+                        note={hasData ? freshnessNote : undefined}
+                        className="min-w-0 flex-1 basis-44"
+                    />
                 </div>
             </div>
         </WidgetContainer>
