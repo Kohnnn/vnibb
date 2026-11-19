@@ -155,9 +155,27 @@ trap_cleanup() {
 stat_bytes() { stat -c %s "$1"; }
 
 manifest_stamps() {
-    find "$BACKUP_DIR" -regextype posix-extended -mindepth 2 -maxdepth 2 \
-        -type f -regex '.*/[0-9]{8}T[0-9]{6}Z/manifest\.json' -printf '%P\n' \
-        | cut -d/ -f1 | LC_ALL=C sort -r
+    python3 - "$BACKUP_DIR" <<'PY'
+import os
+import re
+import stat
+import sys
+
+stamps = []
+with os.scandir(sys.argv[1]) as entries:
+    for entry in entries:
+        if not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z", entry.name) or not entry.is_dir(follow_symlinks=False):
+            continue
+        try:
+            mode = os.stat(os.path.join(entry.path, "manifest.json"), follow_symlinks=False).st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISREG(mode):
+            stamps.append(entry.name)
+
+for stamp in sorted(stamps, reverse=True):
+    print(stamp)
+PY
 }
 
 # $HOST_FREE_BYTES_OVERRIDE lets a drill exercise the preflight against a value
@@ -190,18 +208,17 @@ print(int(fields[3]) * 1024)
 }
 
 # --- preflight -------------------------------------------------------------
-[[ -f "$COMPOSE_FILE" ]] || fail "compose file not found: $COMPOSE_FILE"
-[[ "$(docker inspect --format '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null)" == true ]] || fail "postgres container $PG_CONTAINER not running"
-[[ "$(docker inspect --format '{{.State.Running}}' "$MONGO_CONTAINER" 2>/dev/null)" == true ]] || fail "mongo container $MONGO_CONTAINER not running"
-
-mkdir -p "$BACKUP_DIR"
-[[ -d "$BACKUP_DIR" ]] || fail "backup directory could not be created: $BACKUP_DIR"
 [[ "$KEEP_SETS" =~ ^[1-9][0-9]*$ ]] || { warn "KEEP_SETS must be a positive integer"; exit 1; }
-# A cron and manual run must not both reserve the same free bytes or rotate each other's set.
+mkdir -p "$BACKUP_DIR"
+# Serialize all backup writes, including failed preflight markers.
 exec {backup_lock}<"$BACKUP_DIR"
 flock -n "$backup_lock" || { warn "could not lock the backup directory"; exit 1; }
 [[ ! -e "$DEST" ]] || { warn "backup set $STAMP already exists"; exit 1; }
 [[ ! -e "$FAILED_MARKER" ]] || { warn "a previous run for $STAMP already failed; not overwriting its marker"; exit 1; }
+
+[[ -f "$COMPOSE_FILE" ]] || fail "compose file not found: $COMPOSE_FILE"
+[[ "$(docker inspect --format '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null)" == true ]] || fail "postgres container $PG_CONTAINER not running"
+[[ "$(docker inspect --format '{{.State.Running}}' "$MONGO_CONTAINER" 2>/dev/null)" == true ]] || fail "mongo container $MONGO_CONTAINER not running"
 
 # Docker can place the writable layer, PostgreSQL data and Mongo data on
 # different filesystems. Read free space inside each container; an unreadable
@@ -264,15 +281,10 @@ fi
 # the uncompressed data directories. A set whose manifest is missing,
 # unparsable or lacks a Postgres artifact is ignored and the floor applies --
 # a damaged previous set never lowers the requirement.
-PREV_SET=""
+stamps="$(manifest_stamps)" || fail "could not enumerate backup sets for disk preflight"
+PREV_SET="${stamps%%$'\n'*}"
 PREV_PG_BYTES=""
 PREV_MONGO_BYTES=""
-while IFS= read -r candidate; do
-    [[ "$candidate" == "$STAMP" ]] && continue
-    [[ -f "${BACKUP_DIR}/${candidate}/manifest.json" ]] || continue
-    PREV_SET="$candidate"
-    break
-done < <(manifest_stamps)
 
 if [[ -n "$PREV_SET" ]]; then
     # Prints "<postgres bytes> <mongo bytes>", either possibly empty.

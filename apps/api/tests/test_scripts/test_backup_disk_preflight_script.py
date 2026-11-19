@@ -686,26 +686,56 @@ def test_backup_set_and_copied_artifacts_are_private(run_backup):
     assert all(p.stat().st_mode & 0o777 == 0o600 for p in directory.iterdir())
 
 
-def test_overlapping_backup_cannot_consume_the_same_free_space(run_backup):
+@pytest.mark.parametrize("containers_running", [("vnibb-db", "vnibb-mongo"), ("vnibb-db",)])
+def test_overlapping_backup_cannot_dump_or_mark_failed(run_backup, containers_running):
     fd = os.open(run_backup.backup_dir, os.O_RDONLY)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
-        result, commands, root = run_backup(stamp=PREV_STAMP)
+        result, commands, root = run_backup(stamp=PREV_STAMP, containers_running=containers_running)
     finally:
         os.close(fd)
-    assert result.returncode != 0
+    assert result.returncode == 1
+    assert "could not lock the backup directory" in result.stderr
+    assert commands == []
     assert not list(root.iterdir())
-    assert not any('pg_dump' in command for command in commands)
 
 
-def test_retention_leaves_release_directories_and_incomplete_sets_alone(run_backup):
+def test_retention_prunes_only_canonical_sets_in_mixed_backup_root(run_backup):
     root = run_backup.backup_dir
-    protected = [root / '20240101-release', root / '20240102T000000Z']
-    for path in protected:
+    oldest = _make_previous_set(root, PREV_STAMP, pg_bytes=1024)
+    previous = _make_previous_set(root, "20250102T000000Z", pg_bytes=1024)
+    release = root / "20250109-release"
+    incomplete = root / "20250108T000000Z"
+    linked_manifest = root / "20250107T000000Z"
+    for path in (release, incomplete, linked_manifest):
         path.mkdir()
-    result, _, _ = run_backup(stamp=PREV_STAMP, keep_sets=1)
+    (release / "manifest.json").write_text("release metadata", encoding="utf-8")
+    (incomplete / "partial.dump").touch()
+    (linked_manifest / "manifest.json").symlink_to(previous / "manifest.json")
+    linked_set = root / "20250106T000000Z"
+    linked_set.symlink_to(previous, target_is_directory=True)
+    loose_file = root / "20250105T000000Z"
+    marker = root / "20250104T000000Z.FAILED"
+    loose_file.touch()
+    marker.touch()
+
+    release.chmod(0)
+    try:
+        result, _, _ = run_backup(stamp="20250110T000000Z", keep_sets=2, host_free_bytes=12 * GIB)
+    finally:
+        release.chmod(0o700)
+
     assert result.returncode == 0, result.stderr
-    assert all(path.is_dir() for path in protected)
+    assert "2 set(s) retained, keeping 2" in result.stdout
+    assert not oldest.exists()
+    assert (previous / "manifest.json").is_file()
+    assert (root / "20250110T000000Z" / "manifest.json").is_file()
+    assert (release / "manifest.json").read_text(encoding="utf-8") == "release metadata"
+    assert (incomplete / "partial.dump").is_file()
+    assert (linked_manifest / "manifest.json").is_symlink()
+    assert linked_set.is_symlink()
+    assert loose_file.is_file()
+    assert marker.is_file()
 
 
 def test_retention_failure_preserves_new_verified_pair(run_backup):
