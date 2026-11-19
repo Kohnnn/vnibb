@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import { API_BASE_URL } from '@/lib/api';
+import { API_BASE_URL, type ValuationBasis } from '@/lib/api';
 import { resolveMarketCap, type MarketCapProvenance, type MarketCapResult } from '@/lib/marketCap';
 
 export interface MetricDefinition {
@@ -18,6 +18,7 @@ export interface StockMetrics {
     industry?: string;
     exchange?: string;
     metrics: Record<string, any>;
+    valuation_basis?: ValuationBasis | null;
     market_cap_provenance?: MarketCapProvenance | null;
     market_cap_result?: MarketCapResult;
 }
@@ -95,6 +96,7 @@ export const useComparison = (
                     industry: stock.industry,
                     exchange: stock.exchange,
                     metrics: stock.metrics || {},
+                    valuation_basis: stock.valuation_basis,
                     market_cap_provenance: stock.market_cap_provenance,
                     market_cap_result: stock.market_cap_result,
                 };

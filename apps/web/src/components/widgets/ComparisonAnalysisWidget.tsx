@@ -28,6 +28,8 @@ import {
   getFinancialRatios,
   getPeerCompanies,
 } from '@/lib/api'
+import { ValuationCaption, ValuationCell, valuationKey } from './comparison/ValuationCell'
+import type { StockComparison, ValuationBasis } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { DEFAULT_TICKER } from '@/lib/defaultTicker'
 import { EMPTY_VALUE, formatNumber, formatPercent } from '@/lib/units'
@@ -101,6 +103,8 @@ function isLowerBetterMetric(metricId: string): boolean {
 }
 
 type PerformancePeriod = (typeof PERFORMANCE_PERIODS)[number]
+
+type SnapshotRow = FinancialRatioData & { source?: string | null; valuation_basis?: ValuationBasis | null }
 
 interface RatioColumn {
   key: keyof FinancialRatioData
@@ -287,7 +291,7 @@ function ComparisonAnalysisWidgetComponent({
           try {
             const response = await getFinancialRatios(ticker, { period })
             const latest = Array.isArray(response?.data) ? response.data.at(-1) ?? null : null
-            return { symbol: ticker, ratios: latest as FinancialRatioData | null }
+            return { symbol: ticker, ratios: latest as SnapshotRow | null }
           } catch {
             return { symbol: ticker, ratios: null }
           }
@@ -307,17 +311,14 @@ function ComparisonAnalysisWidgetComponent({
     ratioGridRows.length > 0 && ratioGridRows.some((entry) => Boolean(entry.ratios))
   const isFallback = Boolean(comparisonQuery.error && hasData)
   const stockBySymbol = useMemo(() => {
-    return comparisonStocks.reduce<Record<string, Record<string, unknown>>>((acc, row: unknown) => {
-      const obj = row as { symbol?: unknown }
-      if (obj?.symbol) {
-        acc[String(obj.symbol).toUpperCase()] = obj as Record<string, unknown>
-      }
+    return comparisonStocks.reduce<Record<string, StockComparison>>((acc, row) => {
+      if (row?.symbol) acc[row.symbol.toUpperCase()] = row
       return acc
     }, {})
   }, [comparisonStocks])
 
   const ratioRowBySymbol = useMemo(() => {
-    return ratioGridRows.reduce<Record<string, FinancialRatioData | null>>((acc, row) => {
+    return ratioGridRows.reduce<Record<string, SnapshotRow | null>>((acc, row) => {
       acc[row.symbol.toUpperCase()] = row.ratios
       return acc
     }, {})
@@ -505,7 +506,7 @@ function ComparisonAnalysisWidgetComponent({
                 fetchedAt={comparisonQuery.dataUpdatedAt || null}
                 isFetching={(comparisonQuery.isFetching || performanceQuery.isFetching) && hasData}
                 isCached={isFallback}
-                note={`${period} fundamentals`}
+                note={`Requested fundamentals: ${period}`}
                 align="right"
               />
             </div>
@@ -670,6 +671,7 @@ function ComparisonAnalysisWidgetComponent({
             <WidgetEmpty message="No comparison data available." />
           ) : (
             <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
+              {activeCategory === 'valuation' && <ValuationCaption periods={comparisonStocks.flatMap(stock => Object.values(stock.valuation_basis ?? {}).map(field => field?.fiscal_period))} />}
               <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95">
                 <tr className="border-b border-[var(--border-color)]">
                   <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
@@ -691,7 +693,8 @@ function ComparisonAnalysisWidgetComponent({
                   const metricId = String(metric?.id ?? metric?.key ?? '')
                   const metricFormat = String(metric?.format ?? 'number')
                   const metricName = String(metric?.name ?? metric?.label ?? metricId)
-                  const { best, worst } = getBestWorst(metricId)
+                  const field = valuationKey(metricId)
+                  const { best, worst } = field ? { best: null, worst: null } : getBestWorst(metricId)
 
                   return (
                     <tr
@@ -725,11 +728,15 @@ function ComparisonAnalysisWidgetComponent({
                                     : 'text-[var(--text-primary)]'
                             )}
                           >
-                            <div className="inline-flex items-center gap-1">
-                              <span className="font-semibold">{label}</span>
-                              {!isMissing && isBest && <TrendingUp size={10} className="opacity-70" />}
-                              {!isMissing && isWorst && <TrendingDown size={10} className="opacity-70" />}
-                            </div>
+                            {field && !isMissing ? (
+                              <ValuationCell label={label} ticker={ticker} metric={field} evidence={stock?.valuation_basis?.[field]} />
+                            ) : (
+                              <div className="inline-flex items-center gap-1">
+                                <span className="font-semibold">{label}</span>
+                                {!isMissing && isBest && <TrendingUp size={10} className="opacity-70" />}
+                                {!isMissing && isWorst && <TrendingDown size={10} className="opacity-70" />}
+                              </div>
+                            )}
                           </td>
                         )
                       })}
@@ -752,7 +759,7 @@ function ComparisonAnalysisWidgetComponent({
               </div>
             </div>
             <span className="text-[10px] text-[var(--text-muted)]">
-              Period: {period}
+              {activeCategory === 'valuation' ? 'Requested period' : 'Period'}: {period}
             </span>
           </div>
 
@@ -777,6 +784,7 @@ function ComparisonAnalysisWidgetComponent({
               <WidgetEmpty message="No ratio snapshot data available for selected symbols." />
             ) : (
               <table className="data-table financial-dense freeze-first-col w-full text-[11px]">
+                {activeCategory === 'valuation' && <ValuationCaption periods={ratioGridRows.map(row => row.ratios?.period)} />}
                 <thead className="sticky top-0 z-20 bg-[var(--bg-secondary)]/95">
                   <tr className="border-b border-[var(--border-color)]">
                     <th className="w-[180px] bg-[var(--bg-secondary)] text-left">Metric</th>
@@ -795,7 +803,8 @@ function ComparisonAnalysisWidgetComponent({
                 </thead>
                 <tbody>
                   {activeRatioColumns.map((column) => {
-                    const numericValues = symbols
+                    const field = valuationKey(String(column.key))
+                    const numericValues = field ? [] : symbols
                       .map((ticker) => ratioRowBySymbol[ticker]?.[column.key])
                       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
                     const best = numericValues.length
@@ -819,7 +828,9 @@ function ComparisonAnalysisWidgetComponent({
                         </td>
 
                         {symbols.map((ticker) => {
-                          const rawValue = ratioRowBySymbol[ticker]?.[column.key]
+                          const row = ratioRowBySymbol[ticker]
+                          const rawValue = row?.[column.key]
+                          const evidence = field ? row?.valuation_basis?.[field] : undefined
                           const numericValue =
                             typeof rawValue === 'number' && Number.isFinite(rawValue)
                               ? rawValue
@@ -844,12 +855,19 @@ function ComparisonAnalysisWidgetComponent({
                                       : 'text-[var(--text-primary)]'
                               )}
                             >
-                              <div className="inline-flex items-center gap-2">
-                                <span className="font-semibold">{label}</span>
-                                {label !== EMPTY_VALUE && isBest && <TrendingUp size={10} className="opacity-70" />}
-                                {label !== EMPTY_VALUE && isWorst && <TrendingDown size={10} className="opacity-70" />}
-                                {trendSeries.length >= 2 ? <Sparkline data={trendSeries} width={48} height={14} /> : null}
-                              </div>
+                              {field && numericValue !== null ? (
+                                <ValuationCell label={label} ticker={ticker} metric={field} snapshot evidence={{
+                                  ...evidence, fiscal_period: evidence?.fiscal_period ?? row?.period,
+                                  source: evidence?.source ?? row?.source,
+                                }} />
+                              ) : (
+                                <div className="inline-flex items-center gap-2">
+                                  <span className="font-semibold">{label}</span>
+                                  {label !== EMPTY_VALUE && isBest && <TrendingUp size={10} className="opacity-70" />}
+                                  {label !== EMPTY_VALUE && isWorst && <TrendingDown size={10} className="opacity-70" />}
+                                  {trendSeries.length >= 2 ? <Sparkline data={trendSeries} width={48} height={14} /> : null}
+                                </div>
+                              )}
                             </td>
                           )
                         })}

@@ -274,3 +274,34 @@ describe('ComparisonAnalysisWidget primary ticker synchronization', () => {
     expect(screen.queryByText('FPT')).not.toBeInTheDocument()
   })
 })
+
+it('keeps independent fiscal rows and source unknowns beside the two valuation grids', async () => {
+  mockGetPeerCompanies.mockResolvedValue({ peers: [] })
+  mockGetComparisonPerformance.mockResolvedValue([])
+  mockCompareStocks.mockResolvedValue({
+    metrics: [{ id: 'ev_ebitda', name: 'EV/EBITDA', format: 'ratio' }],
+    stocks: [{ symbol: 'MSR', metrics: { ev_ebitda: 18.76 }, valuation_basis: {
+      ev_ebitda: { source: 'quarter-feed', fiscal_period: 'Q2-2025', valuation_as_of: '2025-09-01', denominator_basis: 'reported consolidated EBITDA' },
+    } }, { symbol: 'VNM', metrics: { ev_ebitda: 12.16 } }],
+  })
+  mockGetFinancialRatios.mockImplementation(async (symbol: string) => ({ data: [
+    { period: '2023', source: 'older-feed', ev_ebitda: 7.63 },
+    { period: '2024', ev_ebitda: 8.42, ...(symbol === 'VNM' ? { source: 'snapshot-feed' } : {}) },
+  ] }))
+  renderComparison()
+  await screen.findByText('18.76')
+  await screen.findAllByText('8.42')
+  const [upper, lower] = screen.getAllByRole('table')
+  const topCell = within(upper).getByText('18.76').closest('td')
+  expect(topCell).toHaveTextContent('quarter-feed')
+  expect(topCell).toHaveTextContent('Q2-2025')
+  expect(topCell).toHaveTextContent('2025-09-01')
+  expect(topCell).toHaveTextContent('reported consolidated EBITDA')
+  const lowerCell = within(lower).getAllByText('8.42')[0].closest('td')
+  expect(lowerCell).toHaveTextContent('2024')
+  expect(lowerCell).toHaveTextContent(/source: unknown/i)
+  expect(lowerCell).not.toHaveTextContent('quarter-feed')
+  expect(within(lower).getAllByText('8.42')[1].closest('td')).toHaveTextContent('snapshot-feed')
+  expect(topCell?.querySelector('svg')).toBeNull()
+  expect(lowerCell?.querySelector('svg')).toBeNull()
+})

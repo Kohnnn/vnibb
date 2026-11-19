@@ -136,3 +136,49 @@ describe('PeerComparisonWidget market cap provenance', () => {
     expect(JSON.stringify(onDataChange.mock.calls)).toContain('22410910941.25');
   });
 });
+
+it('keeps legacy and partial multiple cells neutral, including in heatmap mode', () => {
+  mockUsePeers.mockReturnValue({ data: undefined });
+  mockUseComparison.mockReturnValue({ data: {
+    metrics: [{ id: 'ps_ratio', name: 'P/S Ratio', format: 'number' }],
+    stocks: [
+      { symbol: 'MSR', metrics: { ps_ratio: 3.82 }, valuation_basis: { ps_ratio: { source: 'quarter-feed', fiscal_period: 'Q2-2025' } } },
+      { symbol: 'VNM', metrics: { ps_ratio: 2.14 } },
+    ],
+  }, refetch: jest.fn() });
+  render(<PeerComparisonWidget id="peer" symbol="MSR" config={{ comparisonPeers: ['MSR', 'VNM'], comparisonHeatmapEnabled: true }} />);
+  const [, known, legacy, mean] = screen.getAllByRole('row')[1].querySelectorAll('td');
+  expect(known).toHaveTextContent('Q2-2025');
+  expect(known).toHaveTextContent('quarter-feed');
+  expect(legacy).toHaveTextContent(/source: unknown/i);
+  expect(known.style.backgroundColor).toBe('');
+  expect(mean).toHaveTextContent('2.98');
+  expect(mean).toHaveTextContent(/descriptive only/i);
+});
+
+it.each([
+  ['equivalent quarters', 'Q2-2025', '2025-Q2', '2025-Q2', false],
+  ['equivalent years', '2025', 'FY 2025', 'FY 2025', false],
+  ['different quarters', 'Q2-2025', '2025-Q3', '2025-Q3', true],
+  ['quarter and same fiscal year', 'Q2-2025', 'FY 2025', 'FY 2025', true],
+  ['missing period', 'Q2-2025', null, 'unknown', false],
+  ['explicit unknown', 'Q2-2025', 'UNKNOWN', 'unknown', false],
+  ['malformed quarter', 'Q2-2025', 'Q5-2025', 'unknown', false],
+  ['conflicting quarter label', 'Q2-2025', 'Q3-Q4 2025', 'unknown', false],
+  ['undated rolling window', 'Q2-2025', 'TTM', 'unknown', false],
+] as const)('compares valuation fiscal periods by identity: %s', (_case, first, second, label, mixed) => {
+  mockUsePeers.mockReturnValue({ data: undefined });
+  mockUseComparison.mockReturnValue({ data: {
+    metrics: [{ id: 'ps_ratio', name: 'P/S Ratio', format: 'number' }],
+    stocks: [
+      { symbol: 'HPG', metrics: { ps_ratio: 3.82 }, valuation_basis: { ps_ratio: { origin: 'persisted_ratio', fiscal_period: first } } },
+      { symbol: 'NKG', metrics: { ps_ratio: 2.45 }, valuation_basis: { ps_ratio: { origin: 'provider_ratio', fiscal_period: second } } },
+    ],
+  }, refetch: jest.fn() });
+
+  render(<PeerComparisonWidget id="peer" symbol="HPG" config={{ comparisonPeers: ['HPG', 'NKG'] }} />);
+  const caption = screen.getByText(/EV\/EBITDA and P\/S are reported multiples/);
+  expect(caption.textContent?.includes('Mixed fiscal periods.')).toBe(mixed);
+  expect(screen.getByLabelText(`Basis for HPG P/S, fiscal period: ${first}`)).toBeInTheDocument();
+  expect(screen.getByLabelText(`Basis for NKG P/S, fiscal period: ${label}`)).toBeInTheDocument();
+});

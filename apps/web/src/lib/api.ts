@@ -2067,7 +2067,18 @@ export interface StockMetrics {
     revenueGrowth?: number | null;
 }
 
+export type ValuationKey = 'ev_ebitda' | 'ps_ratio';
+export interface ValuationEvidence {
+    origin?: 'screener' | 'persisted_ratio' | 'provider_ratio' | null;
+    source?: string | null;
+    fiscal_period?: string | null;
+    valuation_as_of?: string | null;
+    denominator_basis?: string | null;
+}
+export type ValuationBasis = Partial<Record<ValuationKey, ValuationEvidence | null>>;
+
 export interface StockComparison {
+    valuation_basis?: ValuationBasis | null;
     symbol: string;
     company_name: string;
     metrics: Record<string, number | null>;
