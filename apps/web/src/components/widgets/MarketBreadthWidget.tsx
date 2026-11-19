@@ -10,6 +10,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { useMarketBreadth } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatNumber, formatPercent } from '@/lib/units';
+import type { MarketBreadthExchangeRow } from '@/lib/api';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
 import { signedToneClass } from '@/lib/priceColor';
 
@@ -18,6 +19,9 @@ interface MarketBreadthWidgetProps {
   onRemove?: () => void;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
+
+// The unscoped /market/breadth producer reports these three exchange buckets.
+const BREADTH_EXCHANGES = ['HOSE', 'HNX', 'UPCOM'] as const satisfies readonly MarketBreadthExchangeRow['exchange'][];
 
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
@@ -28,6 +32,7 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
   const breadthQuery = useMarketBreadth();
   const rows = useMemo(() => breadthQuery.data?.data ?? [], [breadthQuery.data?.data]);
   const hasData = rows.length > 0;
+  const missingExchanges = BREADTH_EXCHANGES.filter((exchange) => rows.every((row) => row.exchange !== exchange));
   const isLoading = breadthQuery.isLoading;
   const isFetching = breadthQuery.isFetching;
   const error = breadthQuery.error;
@@ -82,6 +87,11 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
             note="A/D + trend breadth"
             align="right"
           />
+          {hasData && missingExchanges.length > 0 && (
+            <p role="status" className="mt-1 text-xs text-[var(--text-secondary)]">
+              Partial exchange coverage: no breadth rows for {missingExchanges.join(', ')}.
+            </p>
+          )}
         </div>
 
         <div className="flex-1 overflow-auto p-3">
@@ -114,7 +124,10 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
             <div className="space-y-2">
               {rows.map((row) => {
                 const ratio = row.ad_ratio ?? (row.decliners === 0 && row.advancers > 0 ? Number.POSITIVE_INFINITY : null);
-                const breadthPct = row.total > 0 ? ((row.advancers - row.decliners) / row.total) * 100 : 0;
+                const classifiedCount = row.advancers + row.decliners + row.unchanged;
+                const breadthPct = classifiedCount > 0
+                  ? ((row.advancers - row.decliners) / classifiedCount) * 100
+                  : null;
                 return (
                   <div
                     key={row.exchange}
@@ -122,7 +135,10 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
                   >
                     <div className="flex items-center justify-between">
                       <div className="text-xs font-semibold text-[var(--text-primary)]">{row.exchange}</div>
-                      <div className="text-[10px] text-[var(--text-muted)]">{formatNumber(row.total, { decimals: 0 })}</div>
+                      <div className="text-[10px] text-[var(--text-muted)]">
+                        {formatNumber(row.total, { decimals: 0 })}
+                        {row.total === 0 && ' · No observations'}
+                      </div>
                     </div>
                     <div className="mt-2 grid grid-cols-3 gap-2 text-[10px]">
                       <div className="text-[var(--color-positive)]">▲ {row.advancers}</div>
@@ -142,6 +158,9 @@ export function MarketBreadthWidget({ id, onRemove, onDataChange }: MarketBreadt
                         <div className={`mt-1 font-mono ${signedToneClass(breadthPct)}`}>
                           {formatPercent(breadthPct, { input: 'percent', decimals: 1, signed: true })}
                         </div>
+                        {classifiedCount < row.total && (
+                          <div className="text-[var(--text-muted)]">{classifiedCount} of {row.total} classified</div>
+                        )}
                       </div>
                       <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-2 py-1.5">
                         <div className="uppercase tracking-widest text-[var(--text-muted)]">Above SMA20</div>
