@@ -13,6 +13,10 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Tie chart status, exports and agent attachments to the active price-history request. Show the fiscal source of each valuation multiple and retain monetary units and omission notes in Financial Ratios attachments (#270).
+- Add a Company Research workspace and market-wide news to Market Scan. Report breadth over classified observations, align screener columns on narrow screens and preserve heatmap session dates (#272).
+- Distinguish issuer, peer, sector and market-wide news and exclude market-wide fallback articles from issuer momentum (#250).
+- Serialize OCI backup runs, restrict retained pairs to private dated sets and allow the offline price-audit CLI to show help before loading timezone data (#171, #274).
 - Keep provider and IQ exception details in operator diagnostics rather than public financial-ratio, financial-statement and foreign-trading errors; retain available rows, lineage and failure distinctions (#111, #191, #249).
 - Preserve foreign-flow source dates, stale status and fallback warnings in Ownership Summary without treating retrieval time as source freshness (#249).
 - Carry article-sentiment provenance through news routes and widgets: distinguish locally computed heuristics, explicit provider classifications and unrecorded origins; preserve missing or null flow sentiment as null, never fabricated Neutral or implied stock-price impact (#250).
