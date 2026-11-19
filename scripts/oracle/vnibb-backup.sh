@@ -23,6 +23,7 @@
 #   * retention keeps the newest $KEEP_SETS sets and prunes older ones only
 #     after the new set has verified; $KEEP_SETS is never adjusted silently
 set -euo pipefail
+umask 077
 
 COMPOSE_FILE="${COMPOSE_FILE:-/srv/vnibb/docker-compose.oracle.yml}"
 ENV_FILE="${ENV_FILE:-/srv/vnibb/deployment/env.oracle}"
@@ -153,6 +154,12 @@ trap_cleanup() {
 
 stat_bytes() { stat -c %s "$1"; }
 
+manifest_stamps() {
+    find "$BACKUP_DIR" -regextype posix-extended -mindepth 2 -maxdepth 2 \
+        -type f -regex '.*/[0-9]{8}T[0-9]{6}Z/manifest\.json' -printf '%P\n' \
+        | cut -d/ -f1 | LC_ALL=C sort -r
+}
+
 # $HOST_FREE_BYTES_OVERRIDE lets a drill exercise the preflight against a value
 # other than the real one. It is an operator/test knob, not a default: leaving
 # it unset always reads the true free space.
@@ -189,8 +196,12 @@ print(int(fields[3]) * 1024)
 
 mkdir -p "$BACKUP_DIR"
 [[ -d "$BACKUP_DIR" ]] || fail "backup directory could not be created: $BACKUP_DIR"
-[[ ! -e "$DEST" ]] || fail "backup set $STAMP already exists"
-[[ ! -e "$FAILED_MARKER" ]] || fail "a previous run for $STAMP already failed; not overwriting its marker"
+[[ "$KEEP_SETS" =~ ^[1-9][0-9]*$ ]] || { warn "KEEP_SETS must be a positive integer"; exit 1; }
+# A cron and manual run must not both reserve the same free bytes or rotate each other's set.
+exec {backup_lock}<"$BACKUP_DIR"
+flock -n "$backup_lock" || { warn "could not lock the backup directory"; exit 1; }
+[[ ! -e "$DEST" ]] || { warn "backup set $STAMP already exists"; exit 1; }
+[[ ! -e "$FAILED_MARKER" ]] || { warn "a previous run for $STAMP already failed; not overwriting its marker"; exit 1; }
 
 # Docker can place the writable layer, PostgreSQL data and Mongo data on
 # different filesystems. Read free space inside each container; an unreadable
@@ -261,7 +272,7 @@ while IFS= read -r candidate; do
     [[ -f "${BACKUP_DIR}/${candidate}/manifest.json" ]] || continue
     PREV_SET="$candidate"
     break
-done < <(find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d -name '20*' -printf '%f\n' | sort -r)
+done < <(manifest_stamps)
 
 if [[ -n "$PREV_SET" ]]; then
     # Prints "<postgres bytes> <mongo bytes>", either possibly empty.
@@ -453,6 +464,7 @@ MONGO_ARCHIVE="${DEST}/mongo-${MONGO_DB}-${STAMP}.archive.gz"
 if ! docker cp "${MONGO_CONTAINER}:${MONGO_ARCHIVE_IN_CONTAINER}" "$MONGO_ARCHIVE"; then
     fail "docker cp of the mongo archive failed"
 fi
+chmod 600 "$MONGO_ARCHIVE" || fail "could not restrict copied mongo archive permissions"
 
 # Verify the copy while the staged original still exists: a `docker cp` that
 # stopped early is a short file, not a smaller dump, and that can only be told
@@ -524,9 +536,10 @@ trap - EXIT
 # Only prune after this set verified. The FAILED marker from an earlier run is
 # never counted as a set. $KEEP_SETS is whatever the operator configured; this
 # script never adjusts it, so retention stays documented behaviour.
-mapfile -t SETS < <(find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d -name '20*' \
-    -printf '%f\n' | sort -r)
-if [[ "${#SETS[@]}" -gt "$KEEP_SETS" ]]; then
+stamps=$(manifest_stamps) || { warn "RETENTION FAILURE: could not enumerate backup sets"; exit 1; }
+mapfile -t SETS <<< "$stamps"
+count=${#SETS[@]}
+if [[ ${#KEEP_SETS} -le ${#count} && $count -gt $KEEP_SETS ]]; then
     for old in "${SETS[@]:$KEEP_SETS}"; do
         # The set just written is always newest and therefore always inside the
         # kept prefix, but never let a misconfigured KEEP_SETS delete it: that
@@ -537,8 +550,9 @@ if [[ "${#SETS[@]}" -gt "$KEEP_SETS" ]]; then
             warn "RETENTION FAILURE: could not remove $old; verified new set $STAMP remains available"
             exit 1
         fi
+        count=$((count - 1))
     done
 fi
 
-log "backup set $STAMP complete: ${#SETS[@]} set(s) retained, keeping $KEEP_SETS"
+log "backup set $STAMP complete: $count set(s) retained, keeping $KEEP_SETS"
 exit 0

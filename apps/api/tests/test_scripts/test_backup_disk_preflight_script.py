@@ -7,6 +7,7 @@ test drives one of those contracts through a fake `docker` and a fake
 Postgres, Mongo or 10 GB of disk is needed.
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -68,6 +69,8 @@ if verb == "cp":
     if state["staged_archive_short"]:
         blob = blob[:-1024]
     Path(argv[2]).write_bytes(blob)
+    # docker cp can preserve the container file's mode even under a private host umask.
+    Path(argv[2]).chmod(0o644)
     sys.exit(0)
 
 assert verb == "exec", argv
@@ -669,6 +672,40 @@ def test_retention_prunes_only_after_a_verified_set(run_backup):
     remaining = _sets(backup_dir)
     assert len(remaining) == 2
     assert "20250101T000000Z" not in remaining
+
+
+def test_backup_set_and_copied_artifacts_are_private(run_backup):
+    previous = os.umask(0o022)
+    try:
+        result, _, root = run_backup(stamp=PREV_STAMP)
+    finally:
+        os.umask(previous)
+    assert result.returncode == 0, result.stderr
+    directory = root / PREV_STAMP
+    assert directory.stat().st_mode & 0o777 == 0o700
+    assert all(p.stat().st_mode & 0o777 == 0o600 for p in directory.iterdir())
+
+
+def test_overlapping_backup_cannot_consume_the_same_free_space(run_backup):
+    fd = os.open(run_backup.backup_dir, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        result, commands, root = run_backup(stamp=PREV_STAMP)
+    finally:
+        os.close(fd)
+    assert result.returncode != 0
+    assert not list(root.iterdir())
+    assert not any('pg_dump' in command for command in commands)
+
+
+def test_retention_leaves_release_directories_and_incomplete_sets_alone(run_backup):
+    root = run_backup.backup_dir
+    protected = [root / '20240101-release', root / '20240102T000000Z']
+    for path in protected:
+        path.mkdir()
+    result, _, _ = run_backup(stamp=PREV_STAMP, keep_sets=1)
+    assert result.returncode == 0, result.stderr
+    assert all(path.is_dir() for path in protected)
 
 
 def test_retention_failure_preserves_new_verified_pair(run_backup):
