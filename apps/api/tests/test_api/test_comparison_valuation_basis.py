@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from vnibb.models.trading import FinancialRatio
 from vnibb.services import comparison_service as comparison
 from vnibb.services.cache_manager import CacheResult
