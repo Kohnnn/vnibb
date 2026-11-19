@@ -207,6 +207,8 @@ test('#272: applying Market Scan adds market-wide news without changing existing
     published: dashboards?.find(({ id }) => id === published.id),
   });
   expect(preserved(after)).toEqual(preserved(before));
+  // URL symbol restoration can finish before the first persisted snapshot.
+  expect(preserved(after).saved?.updatedAt).toBe(original.updatedAt);
   await testInfo.attach('preserved-layouts', {
     body: JSON.stringify({ before: preserved(before), after: preserved(after), appliedDashboard: dashboardId }, null, 2),
     contentType: 'application/json',
