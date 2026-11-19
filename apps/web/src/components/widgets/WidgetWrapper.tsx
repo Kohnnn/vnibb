@@ -63,6 +63,7 @@ import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
 import { getWidgetExportData, type WidgetRuntime } from '@/lib/widgetRuntime';
 import { buildPriceHistoryRuntime, PriceChartScopeContext, usePriceChartScope } from '@/lib/priceChartScope';
+import { projectFinancialRatioAgentSample } from './financialRatioValues';
 
 type WidgetRuntimePayload = { readonly __widgetRuntime?: WidgetRuntime };
 
@@ -740,6 +741,9 @@ export function WidgetWrapper({
         } else if (sourceData !== undefined) {
             dataSample = sourceData;
         }
+        const ratioSample = widgetType === 'financial_ratios' && Array.isArray(dataSample)
+            ? projectFinancialRatioAgentSample(dataSample)
+            : undefined;
 
         return {
             widgetId: id,
@@ -750,7 +754,8 @@ export function WidgetWrapper({
             tabId,
             dashboardId,
             widgetConfig: chartRequest ? { ...currentWidget?.config, ...chartControls } : currentWidget?.config || null,
-            dataSample,
+            dataSample: ratioSample?.dataSample ?? dataSample,
+            ...(ratioSample?.dataSampleOmissions && { dataSampleOmissions: ratioSample.dataSampleOmissions }),
             ...(publishedProvenance && { dataProvenance: projectAgentProvenance(publishedProvenance, widgetType) }),
         };
     };
