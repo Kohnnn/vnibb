@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vnibb.models.news import CompanyEvent, Dividend
+from vnibb.providers.vnstock.dividends import VNSTOCK_DIVIDEND_PROJECTION
 
 DistributionType = Literal["cash", "stock", "mixed"]
 DividendStatus = Literal["observed", "announced", "scheduled", "confirmed", "paid"]
@@ -36,8 +37,10 @@ _TYPE_ALIASES: dict[str, DistributionType] = {
 }
 _ACTIVE_STATUSES = {"announced", "scheduled", "confirmed", "paid"}
 _CANCELLED_STATUSES = {"cancelled", "canceled"}
-# The historical fetcher's flat shape erased the source aliases for cash, payment and fiscal year.
-_LOSSY_DIVIDEND_FIELDS = {"dividend_type", "cash_dividend", "stock_dividend", "issue_year"}
+_LEGACY_DIVIDEND_PAYLOAD_FIELDS = {
+    "symbol", "ex_date", "record_date", "payment_date", "dividend_type", "cash_dividend",
+    "stock_dividend", "dividend_ratio", "fiscal_year", "issue_year", "description",
+}
 _DATE_ALIASES = {
     "ex_date": ("ex_date", "exDate", "exright_date", "exRightDate"),
     "record_date": ("record_date", "recordDate", "ngayDKCC"),
@@ -222,6 +225,7 @@ class _Observation:
     event_id: str | None
     revision: int | None
     conflict: str | None
+    lossy_projection: bool
 
     @property
     def retained(self) -> bool:
@@ -252,6 +256,20 @@ class _Observation:
         )
 
 
+def _is_lossy_dividend_projection(row: CompanyEvent | Dividend, raw: dict[str, Any]) -> bool:
+    if raw.get("source_projection") == VNSTOCK_DIVIDEND_PROJECTION:
+        return True
+    # Old writers stored the entire untagged DividendData dump. The event
+    # writer also identified its synthesized rows in the stored description.
+    if isinstance(row, Dividend):
+        return raw.keys() == _LEGACY_DIVIDEND_PAYLOAD_FIELDS
+    return (
+        row.event_type == "dividend"
+        and (row.description or "").endswith("Dividend event synthesized from dividend history")
+        and _LEGACY_DIVIDEND_PAYLOAD_FIELDS <= raw.keys()
+    )
+
+
 def _typed_dates(
     raw: dict[str, Any], stored: dict[ActionDateType, date | None], *, lossy_projection: bool,
 ) -> tuple[dict[ActionDateType, date | None], bool]:
@@ -279,7 +297,7 @@ def _typed_dates(
 def _observation(row: CompanyEvent | Dividend) -> _Observation:
     raw = _raw(row)
     retained = isinstance(row, Dividend)
-    lossy_projection = _LOSSY_DIVIDEND_FIELDS <= raw.keys()
+    lossy_projection = _is_lossy_dividend_projection(row, raw)
     method = row.issue_method if retained else row.event_type
     kinds = {
         kind for value in (method, raw.get("action_subtype"), raw.get("dividend_type"))
@@ -317,6 +335,7 @@ def _observation(row: CompanyEvent | Dividend) -> _Observation:
     return _Observation(
         row, raw, dates, kind, fiscal_year, issue_year, status, _text(raw.get("source")),
         str(event_id) if type(event_id) is int else _text(event_id), revision, conflict,
+        lossy_projection=lossy_projection,
     )
 
 
@@ -361,7 +380,7 @@ def _admit(item: _Observation) -> tuple[DividendDistribution | None, str | None]
     if kind in ("cash", "mixed"):
         # The typed legacy column is readable as an observation, not as a notice.
         # An unqualified raw amount itself cannot establish VND/share.
-        if legacy and isinstance(row, Dividend) and not _LOSSY_DIVIDEND_FIELDS <= raw.keys() and (
+        if legacy and isinstance(row, Dividend) and not item.lossy_projection and (
             currency in (None, "VND") and unit in (None, "VND/share")
         ):
             if cash is None or currency is None or unit is None:
@@ -370,7 +389,7 @@ def _admit(item: _Observation) -> tuple[DividendDistribution | None, str | None]
                 cash_rate = _amount(row.dividend_rate)
         elif currency != "VND" or unit != "VND/share":
             return None, "unsupported_cash_basis"
-        if cash is None and isinstance(row, Dividend) and not _LOSSY_DIVIDEND_FIELDS <= raw.keys():
+        if cash is None and isinstance(row, Dividend) and not item.lossy_projection:
             cash = _amount(row.dividend_value)
         if cash is None:
             return None, "unsupported_cash_basis"

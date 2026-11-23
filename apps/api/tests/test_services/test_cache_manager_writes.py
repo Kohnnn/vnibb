@@ -13,7 +13,7 @@ from vnibb.services.cache_manager import CacheManager
 
 
 @pytest.mark.asyncio
-async def test_listing_duplicate_absent_symbols_keep_other_rows_and_last_nonempty_values(test_db):
+async def test_listing_sparse_duplicate_keeps_observed_metadata_and_cannot_seed_bare_symbol(test_db):
     suffix = uuid4().hex[:7].upper()
     duplicate, other = f"D{suffix}", f"O{suffix}"
 
@@ -27,18 +27,17 @@ async def test_listing_duplicate_absent_symbols_keep_other_rows_and_last_nonempt
 
     rows = await test_db.execute(select(Stock).where(Stock.symbol.in_([duplicate, other])))
     by_symbol = {row.symbol: row for row in rows.scalars()}
-    assert stored == 3
-    assert set(by_symbol) == {duplicate, other}
+    assert stored == 2
+    assert set(by_symbol) == {duplicate}
     assert by_symbol[duplicate].company_name == "Last"
     assert by_symbol[duplicate].exchange == "HNX"
     assert by_symbol[duplicate].industry == "Banks"
     assert by_symbol[duplicate].sector == "Finance"
-    assert by_symbol[other].company_name == "Other Co"
     await test_db.execute(Stock.__table__.delete().where(Stock.symbol.in_([duplicate, other])))
     await test_db.commit()
 
 @pytest.mark.asyncio
-async def test_listing_conflict_preserves_created_at_and_sparse_existing_fields(test_db):
+async def test_listing_conflict_preserves_existing_board_and_created_at(test_db):
     symbol = f"E{uuid4().hex[:7]}".upper()
     original_created_at = datetime(2020, 1, 1)
     test_db.add(Stock(symbol=symbol, company_name="Original", exchange="HOSE", created_at=original_created_at))
@@ -49,23 +48,52 @@ async def test_listing_conflict_preserves_created_at_and_sparse_existing_fields(
     ) == 1
     stock = (await test_db.execute(select(Stock).where(Stock.symbol == symbol))).scalar_one()
     assert stock.company_name == "Updated"
-    assert stock.exchange == "HNX"
+    assert stock.exchange == "HOSE"
     assert stock.created_at == original_created_at
     await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
     await test_db.commit()
 
 @pytest.mark.asyncio
-async def test_iq_delisting_changes_only_explicit_confirmed_symbol(test_db):
-    suffix = uuid4().hex[:7].upper()
-    old, untouched = f"D{suffix}", f"U{suffix}"
-    test_db.add_all([Stock(symbol=old, exchange="HOSE", is_active=1), Stock(symbol=untouched, exchange="HOSE", is_active=1)])
+@pytest.mark.parametrize("source", ["vietcap", "VCI"])
+async def test_listing_refresh_withholds_status_claims_and_preserves_dated_membership(test_db, source):
+    suffix = uuid4().hex[:6].upper()
+    current, delisted, missing, new = (f"{prefix}{suffix}" for prefix in "CDMN")
+    listing_date, delisting_date = date(2020, 1, 2), date(2026, 3, 12)
+    test_db.add_all([
+        Stock(symbol=current, exchange="HOSE", is_active=1, listing_date=listing_date),
+        Stock(symbol=delisted, exchange="DELISTED", is_active=0, listing_date=listing_date,
+              delisting_date=delisting_date, empty_sync_count=7),
+    ])
     await test_db.commit()
-    assert await CacheManager(test_db).store_listing_data([{ "symbol": old, "exchange": "DELISTED", "is_active": 0}], source="vietcap") == 1
-    test_db.expire_all()
-    rows = (await test_db.execute(select(Stock).where(Stock.symbol.in_([old, untouched])))).scalars().all()
-    assert {row.symbol: row.is_active for row in rows} == {old: 0, untouched: 1}
-    await test_db.execute(Stock.__table__.delete().where(Stock.symbol.in_([old, untouched])))
-    await test_db.commit()
+    try:
+        cache = CacheManager(test_db)
+        for status in ("DELISTED", "SUSPENDED", "NO_TRADE"):
+            assert await cache.store_listing_data([
+                {"symbol": current, "exchange": "HOSE", "status": status, "delisting_date": delisting_date},
+                {"symbol": missing, "exchange": status, "is_active": 0},
+            ], source=source) == 0
+
+        assert await cache.store_listing_data([
+            {"symbol": delisted, "exchange": "HNX", "company_name": "Description refreshed", "is_active": 1},
+            {"symbol": new, "exchange": "HSX", "company_name": "New identity"},
+        ], source=source) == 2
+        test_db.expire_all()
+        stocks = await test_db.scalars(select(Stock).where(Stock.symbol.in_([current, delisted, missing, new])))
+        by_symbol = {stock.symbol: stock for stock in stocks}
+        assert set(by_symbol) == {current, delisted, new}
+        assert (by_symbol[current].is_active, by_symbol[current].exchange) == (1, "HOSE")
+        assert by_symbol[current].listing_date == listing_date
+        assert by_symbol[current].delisting_date is None
+        old = by_symbol[delisted]
+        assert (old.is_active, old.exchange, old.listing_date, old.delisting_date) == (
+            0, "DELISTED", listing_date, delisting_date,
+        )
+        assert old.company_name == "Description refreshed"
+        assert old.empty_sync_count == 7
+        assert (by_symbol[new].is_active, by_symbol[new].exchange) == (1, "HOSE")
+    finally:
+        await test_db.execute(Stock.__table__.delete().where(Stock.symbol.in_([current, delisted, missing, new])))
+        await test_db.commit()
 
 
 @pytest.mark.asyncio

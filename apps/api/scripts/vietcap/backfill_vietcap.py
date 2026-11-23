@@ -145,16 +145,27 @@ def upsert_eod_rows(db: Any, collection: str, symbol: str, rows: list[dict[str, 
 # ---------------------------------------------------------------------------
 
 def select_universe(rows: list[dict[str, Any]], selector: str) -> dict[str, dict[str, Any]]:
-    by_symbol = {str(row["symbol"]).upper(): row for row in rows if row.get("symbol")}
+    by_symbol: dict[str, dict[str, Any]] = {}
+    conflicts = set()
+    for row in rows:
+        if not (symbol := str(row.get("symbol") or "").strip().upper()):
+            continue
+        if symbol in by_symbol and by_symbol[symbol].get("type") != row.get("type"):
+            conflicts.add(symbol)
+        by_symbol[symbol] = row
     selector = selector.strip().upper()
     if selector == "ALL":
-        return by_symbol
-    if selector in {"STOCK", "ETF", "FUND", "UNIT_TRUST", "CW", "FU", "BOND", "DEBENTURE"}:
-        return {symbol: row for symbol, row in by_symbol.items() if row.get("type") == selector}
-    requested = {symbol.strip().upper() for symbol in selector.split(",") if symbol.strip()}
-    if requested - set(by_symbol):
-        raise ValueError(f"unconfirmed symbols: {','.join(sorted(requested - set(by_symbol)))}")
-    return {symbol: by_symbol[symbol] for symbol in sorted(requested)}
+        selected = by_symbol.keys()
+    elif selector in PRICE_COLLECTION_BY_TYPE:
+        selected = {str(row["symbol"]).strip().upper() for row in rows
+                    if row.get("symbol") and row.get("type") == selector}
+    else:
+        selected = {symbol.strip().upper() for symbol in selector.split(",") if symbol.strip()}
+        if missing := selected - by_symbol.keys():
+            raise ValueError(f"unconfirmed symbols: {','.join(sorted(missing))}")
+    if ambiguous := conflicts.intersection(selected):
+        raise ValueError(f"conflicting instrument types: {','.join(sorted(ambiguous))}")
+    return {symbol: by_symbol[symbol] for symbol in sorted(selected)}
 
 
 def load_checkpoint(path: Path, contract: dict[str, Any]) -> dict[str, Any]:
@@ -185,20 +196,24 @@ def checkpoint_inventory(state: dict[str, Any], symbols: list[str], datasets: se
         outcomes = [row.get("outcome") for row in receipts.values()]
         report[dataset] = {"expected": len(targets), "pending": sum(outcome != "succeeded" for outcome in outcomes),
                            "unattempted": outcomes.count("pending") + outcomes.count("attempted"),
-                           "attempted_terminal": sum(outcome in {"succeeded", "failed", "empty"} for outcome in outcomes),
+                           "attempted_terminal": sum(outcome in {"succeeded", "failed", "empty", "withheld", "partial"} for outcome in outcomes),
                            "failed": outcomes.count("failed"), "empty": outcomes.count("empty"),
+                           "withheld": outcomes.count("withheld"), "partial": outcomes.count("partial"),
                            "receipts": receipts, "history_complete": None}
     return report
 
+class MissingHistoricalStockIdentity(ValueError):
+    """The listing was withheld and no existing identity can own the price row."""
 
-def resolve_universe(client: VietcapClient, raw_symbols: str) -> dict[str, dict[str, Any]]:
-    """Return {symbol: {type, board, organName...}} for the requested universe.
 
-    raw_symbols == 'ALL' -> every instrument from getAll.
-    raw_symbols == 'STOCK' (or other type) -> filter getAll by type.
-    Otherwise treat as comma-separated explicit list (type looked up from getAll).
-    """
-    return select_universe(client.get_all_symbols(), raw_symbols)
+async def existing_stock_identity(symbol: str) -> bool:
+    from sqlalchemy import select
+    from vnibb.core.database import async_session_maker
+    from vnibb.models.stock import Stock
+
+    async with async_session_maker() as session:
+        # Retained inactive identities can own historical data without rejoining a current cohort.
+        return await session.scalar(select(Stock.id).where(Stock.symbol == symbol)) is not None
 
 
 def price_collection_for(instrument_type: str | None) -> str:
@@ -277,9 +292,8 @@ def _main(runner: Any) -> int:
     contract = {"source": "vietcap", "count_back": args.count_back, "cutoff": args.cutoff.isoformat(), "start": args.start.isoformat()}
     state = load_checkpoint(args.checkpoint_file, contract)
     cached = json.loads(args.universe_file.read_text()) if args.universe_file else None
-    universe = select_universe(cached["instruments"], args.symbols) if cached else {}
     if not args.apply:
-        symbols = sorted(universe) if cached else sorted(state.get("universe", {}))
+        symbols = sorted(select_universe(cached["instruments"], args.symbols) if cached else state.get("universe", {}))
         print(json.dumps({"mode": "read_only", "contract": contract, "universe_count": len(symbols), "universe_source": cached.get("source") if cached else state.get("universe_source"), "datasets": checkpoint_inventory(state, symbols, selected), "support": "Provider-free receipt inventory; no listing discovery without --apply or explicit --universe-file. Successful countBack acquisition is not exchange-session or since-2000 completeness."}, indent=2, default=str))
         return 0
     deadline = time.monotonic() + args.budget_seconds
@@ -364,7 +378,8 @@ def _main(runner: Any) -> int:
             save_receipt(args.checkpoint_file, state, "__universe__", "icb", "failed", {"error": str(exc)})
 
     try:
-        universe = require_data(universe or resolve_universe(client, args.symbols), "symbol universe")
+        trading_rows = cached["instruments"] if cached else client.get_all_symbols()
+        universe = require_data(select_universe(trading_rows, args.symbols), "symbol universe")
     except Exception as exc:
         record_error(exc)
         print(json.dumps({"totals": totals, "errors": failures, "unavailable": unavailable, "error": str(exc)}))
@@ -413,23 +428,42 @@ def _main(runner: Any) -> int:
         record_error(exc)
 
 
+    withheld_listings: set[str] = set()
     listing_symbols = symbols if "listing" in selected else [
         symbol for symbol in symbols
         if args.apply and "ohlc" in selected and universe[symbol].get("type") == "STOCK"
     ]
     if listing_symbols:
         try:
-            trading = [universe[symbol] for symbol in listing_symbols]
+            requested_listings = set(listing_symbols)
+            trading = [row for row in trading_rows
+                       if str(row.get("symbol") or "").strip().upper() in requested_listings]
             search = [search_index[symbol] for symbol in listing_symbols if symbol in search_index]
             missing = [symbol for symbol in listing_symbols if not universe[symbol].get("type")]
             if missing:
                 raise ValueError(f"Listing type unavailable for {','.join(missing)}")
             totals["listing_rows"] = w.upsert_listing_rows(db, trading, search, dry_run=not args.apply)
-            if args.apply:
-                from vnibb.services.vietcap_financials import persist_vietcap_listings
-                stock_trading = [row for row in trading if row.get("type") == "STOCK"]
-                totals["structured_listing_rows"] = runner.run(persist_vietcap_listings(stock_trading, search)) if stock_trading else 0
-                save_receipt(args.checkpoint_file, state, "__universe__", "listing", "succeeded", {"mongo_rows": totals["listing_rows"], "sql_rows": totals["structured_listing_rows"], "confirmed_count": len(trading), "confirmed_stock_count": len(stock_trading), "missing_supplementary_search": [row["symbol"] for row in trading if row["symbol"] not in search_index], "history_complete": None})
+            from vnibb.services.vietcap_financials import (
+                ListingPersistenceOutcome,
+                persist_vietcap_listings,
+            )
+
+            stock_symbols = {symbol for symbol in listing_symbols if universe[symbol].get("type") == "STOCK"}
+            evidence: ListingPersistenceOutcome = {}
+            totals["structured_listing_rows"] = (
+                runner.run(persist_vietcap_listings(trading, search, outcome=evidence)) if stock_symbols else 0
+            )
+            withheld_listings = set(evidence.get("withheld", []))
+            outcome = ("partial" if evidence["persisted"] else "withheld") if withheld_listings else "succeeded"
+            save_receipt(args.checkpoint_file, state, "__universe__", "listing", outcome, {
+                "mongo_rows": totals["listing_rows"], "sql_rows": totals["structured_listing_rows"],
+                "confirmed_count": len(listing_symbols), "confirmed_stock_count": len(stock_symbols),
+                "withheld_symbols": sorted(withheld_listings),
+                "missing_supplementary_search": [s for s in listing_symbols if s not in search_index],
+                "history_complete": None,
+            })
+            if withheld_listings and "listing" in selected:
+                record_error(ValueError("Requested canonical listings were withheld"))
         except Exception as exc:
             listing_summary = {"step": "listing", "error": str(exc)}
             report_persistence_error(exc, listing_summary, "structured_listing_rows")
@@ -446,7 +480,8 @@ def _main(runner: Any) -> int:
 
         if "ohlc" in selected and claim_pair(symbol, "ohlc"):
             try:
-                raw = None
+                if symbol in withheld_listings and not runner.run(existing_stock_identity(symbol)):
+                    raise MissingHistoricalStockIdentity("No retained stock identity for withheld listing")
                 cutoff_epoch = int(datetime.combine(args.cutoff + timedelta(days=1), datetime.min.time(), tzinfo=UTC).timestamp()) - 1
                 raw = client.get_ohlc(symbol, count_back=args.count_back, to_epoch=cutoff_epoch)
                 rows = ohlc_rows_from_gap_chart(symbol, raw, instrument_type=meta.get("type")) if raw else []
@@ -468,7 +503,13 @@ def _main(runner: Any) -> int:
             except Exception as exc:
                 report_persistence_error(exc, row_summary, "structured_price_rows")
                 row_summary["ohlc_error"] = str(exc)
-                save_receipt(args.checkpoint_file, state, symbol, "ohlc", "empty" if isinstance(exc, ValueError) and str(exc).startswith("Requested data unavailable: OHLC") else "failed", row_summary)
+                if isinstance(exc, MissingHistoricalStockIdentity):
+                    outcome = "withheld"
+                elif isinstance(exc, ValueError) and str(exc).startswith("Requested data unavailable: OHLC"):
+                    outcome = "empty"
+                else:
+                    outcome = "failed"
+                save_receipt(args.checkpoint_file, state, symbol, "ohlc", outcome, row_summary)
 
         if "financials" in selected and claim_pair(symbol, "financials"):
             try:

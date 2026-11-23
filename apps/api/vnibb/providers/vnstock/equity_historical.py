@@ -8,11 +8,11 @@ for Vietnam-listed stocks using the vnstock library.
 import asyncio
 import logging
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
-from vnibb.providers.base import BaseFetcher
 from vnibb.core.config import settings
 from vnibb.core.exceptions import (
     ProviderCredentialRefusedError,
@@ -20,6 +20,7 @@ from vnibb.core.exceptions import (
     ProviderTimeoutError,
 )
 from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
+from vnibb.providers.base import BaseFetcher
 from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
@@ -98,12 +99,23 @@ class EquityHistoricalData(BaseModel):
     high: float = Field(..., description="Highest price")
     low: float = Field(..., description="Lowest price")
     close: float = Field(..., description="Closing price")
-    volume: int = Field(..., description="Trading volume")
+    volume: int | None = Field(None, description="Trading volume; null when unobserved or invalid")
     price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit, independent of adjustment mode")
     price_source: Optional[str] = Field(
         None,
-        description="Per-row source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
+        description="OHLC source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
     )
+    volume_source: str | None = Field(
+        None,
+        description="Source of borrowed volume; the resolving reader if no record source is known",
+    )
+    volume_resolution_source: str | None = Field(
+        None,
+        description="Reader that supplied borrowed volume, independent of the OHLC reader",
+    )
+
+    # Retained records can carry source lineage that is not exposed as price_source.
+    _retained_volume_source: str | None = PrivateAttr(default=None)
 
     # Optional extended fields from vnstock
     value: Optional[float] = Field(None, description="Trading value in VND")
@@ -118,6 +130,23 @@ class EquityHistoricalData(BaseModel):
     adjustment_applied: bool = Field(
         default=False, description="Whether adjusted OHLC values were applied"
     )
+
+    @field_validator("volume", mode="before")
+    @classmethod
+    def validate_volume(cls, value: Any) -> int | None:
+        # The browser must be able to represent the share count exactly.
+        max_exact_volume = 2**53 - 1
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if 0 <= value <= max_exact_volume else None
+        try:
+            volume = Decimal(str(value))
+        except (InvalidOperation, ValueError):
+            return None
+        if not volume.is_finite() or not 0 <= volume <= max_exact_volume:
+            return None
+        return int(volume) if volume == volume.to_integral_value() else None
 
     model_config = {
         "json_schema_extra": {
@@ -259,7 +288,7 @@ class VnstockEquityHistoricalFetcher(
                         high=float(row.get("high") or 0),
                         low=float(row.get("low") or 0),
                         close=float(row.get("close") or row.get("price") or 0),
-                        volume=int(row.get("volume") or 0),
+                        volume=row.get("volume"),
                         value=float(row["value"]) if row.get("value") else None,
                         raw_close=float(row.get("raw_close") if row.get("raw_close") is not None else row.get("close") or row.get("price") or 0),
                         adjusted_close=float(row["adjusted_close"]) if row.get("adjusted_close") is not None else float(row["adj_close"]) if row.get("adj_close") is not None else None,

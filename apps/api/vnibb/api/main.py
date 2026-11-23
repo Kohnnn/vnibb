@@ -242,6 +242,8 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(r"^/live/?$"),
         re.compile(r"^/ready/?$"),
         re.compile(r"^/api/v1/equity/[^/]+/quote/?$"),
+        # Retain observations in the widget, not in an HTTP cache that masks refresh outcomes.
+        re.compile(r"^/api/v1/equity/[^/]+/(officers|subsidiaries)/?$"),
         re.compile(r"^/api/v1/ws(/|$)"),
     )
 
@@ -256,7 +258,7 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(
             r"^/api/v1/equity/[^/]+/"
             r"(profile|ratios|income-statement|balance-sheet|cash-flow|dividends|"
-            r"events|shareholders|officers|ownership|rating|news)(/|$)"
+            r"events|shareholders|ownership|rating|news)(/|$)"
         ),
         re.compile(r"^/api/v1/listings?(/|$)"),
         re.compile(r"^/api/v1/comparison(/|$)"),

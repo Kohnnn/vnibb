@@ -441,16 +441,18 @@ class LlmService:
             widget_type = str(client_context.get("widgetType") or "").strip()
             widget_type_key = str(client_context.get("widgetTypeKey") or "").strip()
             active_tab = str(client_context.get("activeTab") or "").strip()
+        is_company_reference = widget_type_key in {"officers_management", "subsidiaries"}
         is_matrix = "matrix_selection" in context
         if is_matrix:
             context_blob = serialize_matrix_context(context)
         else:
             context_blob = json.dumps(context, ensure_ascii=True, default=str)
             if len(context_blob) > MAX_CONTEXT_CHARS:
-                if widget_type_key == "financial_ratios" and isinstance(client_context, dict):
+                if (widget_type_key == "financial_ratios" or is_company_reference) and isinstance(client_context, dict):
                     widget_payload = client_context.get("widget_payload")
-                    if isinstance(widget_payload, dict) and widget_payload.get("dataSample"):
-                        # Keep ratio observations and their qualifiers ahead of the larger FY snapshot.
+                    qualifier_key = "dataProvenance" if is_company_reference else "dataSample"
+                    if isinstance(widget_payload, dict) and widget_payload.get(qualifier_key):
+                        # Preserve the evidence and qualifiers ahead of the larger financial snapshot.
                         sample_fields = ("dataProvenance", "dataSampleOmissions", "dataSample")
                         ordered_payload = {key: widget_payload[key] for key in sample_fields if key in widget_payload}
                         ordered_payload.update(widget_payload)
@@ -485,6 +487,12 @@ class LlmService:
             "14. Keep the answer decision-useful, avoid filler, and do not restate obvious context unless it helps the conclusion.\n"
             "15. Do not cite browser client context as authoritative evidence unless the user explicitly asks about it, and label it clearly if you do."
         )
+        if is_company_reference and not is_matrix:
+            developer_prompt += (
+                "\nA failed source request or an empty return does not establish that a company "
+                "has zero officers or subsidiaries. Label retained records as previous observations "
+                "when their refresh failed, and never use their fetch time as a source date."
+            )
         if is_matrix:
             developer_prompt += (
                 "\n16. This is a frozen Matrix selection, not latest market data. Use only the "

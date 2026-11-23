@@ -17,6 +17,15 @@ from vnibb.providers.vnstock.runtime import run_reference_provider
 
 logger = logging.getLogger(__name__)
 
+VNSTOCK_DIVIDEND_PROJECTION = "vnstock_dividend_history"
+_PAYMENT_DATE_BASES = (
+    ("paymentDate", "payment_date"),
+    ("payout_date", "payment_date"),
+    ("executeDate", "execution_date"),
+    ("issue_date", "issue_date"),
+    ("public_date", "publication_date"),
+)
+
 
 # =============================================================================
 # DATA MODELS
@@ -31,6 +40,7 @@ class DividendData(BaseModel):
     ex_date: Optional[str] = Field(None, alias="exDate")
     record_date: Optional[str] = Field(None, alias="recordDate")
     payment_date: Optional[str] = Field(None, alias="paymentDate")
+    payment_date_basis: str | None = None
     # Dividend info
     dividend_type: Optional[str] = Field(None, alias="type")
     cash_dividend: Optional[float] = Field(None, alias="cashDividend")
@@ -41,6 +51,7 @@ class DividendData(BaseModel):
     issue_year: Optional[int] = Field(None, alias="issueYear")
     # Description
     description: Optional[str] = None
+    source_projection: str = VNSTOCK_DIVIDEND_PROJECTION
 
     model_config = {"populate_by_name": True}
 
@@ -143,6 +154,11 @@ class VnstockDividendsFetcher:
 
             result = []
             for r in records:
+                payment_date, payment_date_basis = next(
+                    ((value, basis) for field, basis in _PAYMENT_DATE_BASES
+                     if (value := _clean_str(r.get(field))) is not None),
+                    (None, None),
+                )
                 result.append(
                     DividendData(
                         symbol=symbol.upper(),
@@ -153,13 +169,8 @@ class VnstockDividendsFetcher:
                             or r.get("ex_date")
                         ),
                         record_date=_clean_str(r.get("recordDate") or r.get("record_date")),
-                        payment_date=_clean_str(
-                            r.get("paymentDate")
-                            or r.get("payout_date")
-                            or r.get("executeDate")
-                            or r.get("issue_date")
-                            or r.get("public_date")
-                        ),
+                        payment_date=payment_date,
+                        payment_date_basis=payment_date_basis,
                         dividend_type=_clean_str(
                             r.get("type") or r.get("eventType") or r.get("event_type") or r.get("event_code")
                         ),

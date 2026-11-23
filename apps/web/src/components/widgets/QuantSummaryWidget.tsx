@@ -28,11 +28,13 @@ import type { QuantPriceDiagnostics } from '@/lib/api'
 import { EMPTY_VALUE } from '@/lib/units'
 import {
   average,
+  describeCumulativeFlowBasis,
   scoreDrawdown,
   scoreEmaRespect,
   scoreFlow,
   scoreSeasonality,
   scoreSortino,
+  type VolumeDeltaBasis,
 } from '@/lib/quantRegime'
 
 interface QuantSummaryWidgetProps {
@@ -51,8 +53,7 @@ type SeasonalityMetric = {
 type VolumeDeltaMetric = {
   current_20d_cumulative_delta?: number | null
   cumulative?: Array<{ cumulative_delta?: number | null }>
-  strongest_buy_month?: string | null
-  strongest_sell_month?: string | null
+  basis?: VolumeDeltaBasis | null
 }
 
 type SortinoMetric = {
@@ -92,13 +93,15 @@ function formatSigned(value: number | null | undefined, suffix = ''): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}${suffix}`
 }
 
-function flowLabel(score: number): string {
+function flowLabel(score: number | null): string {
+  if (score === null) return 'Unavailable'
   if (score >= 68) return 'Accumulating'
   if (score <= 32) return 'Distributing'
   return 'Balanced'
 }
 
-function flowTone(score: number): string {
+function flowTone(score: number | null): string {
+  if (score === null) return 'text-[var(--text-muted)]'
   if (score >= 68) return 'text-[var(--color-positive)]'
   if (score <= 32) return 'text-[var(--color-negative)]'
   return 'text-[var(--color-accent-primary)]'
@@ -153,10 +156,13 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
 
   const sortinoAverage = averageSortino(sortino)
   const seasonalityScore = scoreSeasonality(seasonality?.hit_rate_pct ?? null)
-  const flowScore = scoreFlow(
-    volumeDelta?.current_20d_cumulative_delta ?? null,
-    (volumeDelta?.cumulative || []).map((point) => point.cumulative_delta ?? null),
-  )
+  const current20 = volumeDelta?.current_20d_cumulative_delta ?? null
+  const flowHistory = volumeDelta?.cumulative
+  const flowScore = useMemo(() => Number.isFinite(current20)
+    ? scoreFlow(current20, flowHistory?.map((point) => point.cumulative_delta ?? null) ?? [])
+    : null, [current20, flowHistory])
+  const flowStatus = flowLabel(flowScore)
+  const flowCumulativeBasis = describeCumulativeFlowBasis(volumeDelta?.basis)
   const emaScore = scoreEmaRespect(emaRespect?.ema_levels || [])
   const drawdownScore = scoreDrawdown(
     drawdown?.max_drawdown_from_52w_high_pct ?? null,
@@ -172,20 +178,34 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
       { metric: 'Hurst', value: regime.structure.score, fullMark: 100 },
       { metric: 'Sortino', value: sortinoScore, fullMark: 100 },
       { metric: 'Parkinson', value: regime.volatility.score, fullMark: 100 },
-      { metric: 'Flow', value: flowScore, fullMark: 100 },
+      ...(flowScore === null ? [] : [{ metric: 'Flow', value: flowScore, fullMark: 100 }]),
       { metric: 'Drawdown', value: drawdownScore, fullMark: 100 },
       { metric: 'Seasonality', value: seasonalityScore, fullMark: 100 },
       { metric: 'EMA', value: emaScore, fullMark: 100 },
       { metric: 'Tracking', value: trackingScore, fullMark: 100 },
       { metric: 'Downside', value: downsideScore, fullMark: 100 },
-    ],
+    ].filter(({ value }) => Number.isFinite(value)),
     [downsideScore, drawdownScore, emaScore, flowScore, regime.momentum.score, regime.structure.score, regime.volatility.score, seasonalityScore, sortinoScore, trackingScore],
   )
 
-  const compositeRiskScore = Math.round(
-    average(radarData.map((item) => item.value).filter((value) => Number.isFinite(value))) || 0,
-  )
-  const hasData = !derivedWithheld && Boolean(quantQuery.data?.data) && (radarData.some((item) => item.value > 0) || regime.hasData)
+  // Score defaults are not evidence that a certified response contains data.
+  const hasScoreInputs = flowScore !== null || regime.hasData || [
+    seasonality?.hit_rate_pct, sortinoAverage, drawdown?.max_drawdown_from_52w_high_pct,
+    drawdown?.avg_days_to_recovery, benchmarkRisk?.current_tracking_error_30d_pct,
+    benchmarkRisk?.downside_deviation_30d_pct,
+  ].some(Number.isFinite) || emaRespect?.ema_levels?.some((level) => Number.isFinite(level.support_bounce_rate_pct)
+    || /^(strong|moderate|weak|fragile)$/i.test(level.support_strength ?? ''))
+  const hasDetails = [
+    benchmarkRisk?.current_beta_63d, benchmarkRisk?.var_95_1d_pct, benchmarkRisk?.cvar_95_1d_pct,
+    calmar?.annualized_return_pct, calmar?.calmar_ratio,
+  ].some(Number.isFinite) || seasonality?.best_month || seasonality?.worst_month || emaRespect?.best_support_ema
+  const hasData = !derivedWithheld && Boolean(upperSymbol && quantQuery.data?.data && (hasScoreInputs || hasDetails))
+  const compositeFactorCount = hasScoreInputs ? radarData.length : 0
+  const compositeRiskScore = hasData && compositeFactorCount > 0
+    ? Math.round(radarData.reduce((sum, { value }) => sum + value, 0) / compositeFactorCount)
+    : null
+  const compositeBasis = compositeRiskScore === null ? 'No composite inputs available'
+    : `${compositeFactorCount} equally weighted factors · ${flowScore === null ? 'Flow excluded (unavailable)' : 'Flow included'}`
   const isLoading = (quantQuery.isLoading || regime.isLoading) && !hasData
   const isFetching = quantQuery.isFetching || regime.isFetching
   const error = quantQuery.error || regime.error
@@ -201,38 +221,44 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
       lastDataDate: quantQuery.data?.data?.last_data_date ?? regime.updatedAt ?? null,
       fetchedAt: quantQuery.data?.data?.computed_at ?? quantQuery.dataUpdatedAt,
       adjustmentMode: quantQuery.data?.data?.adjustment_mode,
+      basis: hasData ? compositeBasis : undefined,
       derived: true,
       extra: {
         metrics: hasData ? Object.keys(metrics).length : 0,
         ...(hasData ? { compositeRiskScore, regime: regime.regimeLabel } : {}),
       },
+      exportData: hasData ? [{
+        symbol: upperSymbol,
+        period,
+        regime: regime.regimeLabel,
+        action: regime.action,
+        momentum_score: regime.momentum.score,
+        hurst_score: regime.structure.score,
+        volatility_score: regime.volatility.score,
+        sortino_score: sortinoScore,
+        flow_score: flowScore,
+        current_20d_cumulative_delta: flowScore === null ? null : current20,
+        flow_cumulative_basis: flowCumulativeBasis,
+        drawdown_score: drawdownScore,
+        seasonality_score: seasonalityScore,
+        ema_score: emaScore,
+        beta_63d: benchmarkRisk?.current_beta_63d ?? null,
+        tracking_error_30d_pct: benchmarkRisk?.current_tracking_error_30d_pct ?? null,
+        downside_deviation_30d_pct: benchmarkRisk?.downside_deviation_30d_pct ?? null,
+        var_95_1d_pct: benchmarkRisk?.var_95_1d_pct ?? null,
+        cvar_95_1d_pct: benchmarkRisk?.cvar_95_1d_pct ?? null,
+        annualized_return_pct: calmar?.annualized_return_pct ?? null,
+        calmar_ratio: calmar?.calmar_ratio ?? null,
+        composite_risk_score: compositeRiskScore,
+        composite_factor_count: compositeFactorCount,
+        composite_basis: compositeBasis,
+      }] : undefined,
     }))
-  }, [compositeRiskScore, hasData, metrics, onDataChange, period, quantQuery.data?.data?.adjustment_mode, quantQuery.data?.data?.computed_at, quantQuery.data?.data?.last_data_date, quantQuery.dataUpdatedAt, regime.regimeLabel, regime.updatedAt, upperSymbol])
-
-  const exportRows = hasData ? [
-    {
-      symbol: upperSymbol,
-      period,
-      regime: regime.regimeLabel,
-      action: regime.action,
-      momentum_score: regime.momentum.score,
-      hurst_score: regime.structure.score,
-      volatility_score: regime.volatility.score,
-      sortino_score: sortinoScore,
-      flow_score: flowScore,
-      drawdown_score: drawdownScore,
-      seasonality_score: seasonalityScore,
-      ema_score: emaScore,
-      beta_63d: benchmarkRisk?.current_beta_63d ?? null,
-      tracking_error_30d_pct: benchmarkRisk?.current_tracking_error_30d_pct ?? null,
-      downside_deviation_30d_pct: benchmarkRisk?.downside_deviation_30d_pct ?? null,
-      var_95_1d_pct: benchmarkRisk?.var_95_1d_pct ?? null,
-      cvar_95_1d_pct: benchmarkRisk?.cvar_95_1d_pct ?? null,
-      annualized_return_pct: calmar?.annualized_return_pct ?? null,
-      calmar_ratio: calmar?.calmar_ratio ?? null,
-      composite_risk_score: compositeRiskScore,
-    },
-  ] : []
+  }, [benchmarkRisk, calmar, compositeBasis, compositeFactorCount, compositeRiskScore, current20, drawdownScore, emaScore,
+    flowCumulativeBasis, flowScore, hasData, metrics, onDataChange, period, quantQuery.data?.data?.adjustment_mode,
+    quantQuery.data?.data?.computed_at, quantQuery.data?.data?.last_data_date, quantQuery.dataUpdatedAt, regime.action,
+    regime.momentum.score, regime.regimeLabel, regime.structure.score, regime.updatedAt, regime.volatility.score,
+    seasonalityScore, sortinoScore, upperSymbol])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view quant summary" icon={<Gauge size={18} />} />
@@ -249,8 +275,6 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
         void quantQuery.refetch()
         void regime.refetch()
       }}
-      exportData={exportRows}
-      exportFilename={`quant_summary_${upperSymbol}_${period.toLowerCase()}`}
       noPadding
     >
       <div className="flex h-full flex-col bg-[var(--bg-primary)] p-3">
@@ -314,8 +338,9 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Flow</div>
-                <div className={`mt-1 text-lg font-semibold ${flowTone(flowScore)}`}>{flowLabel(flowScore)}</div>
-                <div className="text-[10px] text-[var(--text-secondary)]">20D delta {formatSigned(volumeDelta?.current_20d_cumulative_delta ?? null)}</div>
+                <div className={`mt-1 text-lg font-semibold ${flowTone(flowScore)}`}>{flowStatus}</div>
+                <div className="text-[10px] text-[var(--text-secondary)]">20D delta {formatSigned(current20)}</div>
+                {flowCumulativeBasis && <div className="text-[10px] text-[var(--text-secondary)]">Cumulative history: {flowCumulativeBasis}</div>}
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Trend</div>
@@ -324,7 +349,9 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Risk Score</div>
-                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">{compositeRiskScore}/100</div>
+                <div className="mt-1 text-lg font-semibold text-[var(--color-accent-primary)]">
+                  {compositeRiskScore === null ? EMPTY_VALUE : `${compositeRiskScore}/100`}
+                </div>
                 <div className="text-[10px] text-[var(--text-secondary)]">Composite regime risk</div>
               </div>
               <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
@@ -338,34 +365,36 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
               <div className="flex min-h-0 flex-col rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Quant Radar</div>
-                  <div className="text-[10px] text-[var(--text-secondary)]">8-factor blend</div>
+                  <div className="text-[10px] text-[var(--text-secondary)]">{compositeBasis}</div>
                 </div>
-                <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
-                  <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                    <RadarChart data={radarData} outerRadius="72%">
-                      <PolarGrid stroke="rgba(148,163,184,0.25)" />
-                      <PolarAngleAxis dataKey="metric" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                      <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{
-                          background: 'var(--bg-secondary)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '8px',
-                          fontSize: '11px',
-                        }}
-                        formatter={(value) => [`${Number(value ?? 0).toFixed(0)}`, 'Score'] as [string, string]}
-                      />
-                      <Radar
-                        name="Quant"
-                        dataKey="value"
-                        stroke="var(--chart-blue)"
-                        fill="color-mix(in srgb, var(--chart-blue) 22%, transparent)"
-                        fillOpacity={1}
-                        strokeWidth={2}
-                      />
-                    </RadarChart>
-                  </ResponsiveContainer>
-                </ChartMountGuard>
+                {compositeRiskScore !== null && (
+                  <ChartMountGuard className="flex-1 min-h-[180px]" minHeight={180}>
+                    <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                      <RadarChart data={radarData} outerRadius="72%">
+                        <PolarGrid stroke="rgba(148,163,184,0.25)" />
+                        <PolarAngleAxis dataKey="metric" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                        <PolarRadiusAxis angle={90} domain={[0, 100]} tick={false} axisLine={false} />
+                        <Tooltip
+                          contentStyle={{
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                          }}
+                          formatter={(value) => [typeof value === 'number' ? value.toFixed(0) : EMPTY_VALUE, 'Score'] as [string, string]}
+                        />
+                        <Radar
+                          name="Quant"
+                          dataKey="value"
+                          stroke="var(--chart-blue)"
+                          fill="color-mix(in srgb, var(--chart-blue) 22%, transparent)"
+                          fillOpacity={1}
+                          strokeWidth={2}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </ChartMountGuard>
+                )}
               </div>
 
               <div className="flex flex-col gap-3">
@@ -430,7 +459,7 @@ export function QuantSummaryWidget({ id, symbol, onRemove, onDataChange }: Quant
                   <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2">
                     <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Summary</div>
                     <div className="mt-1 text-[var(--text-primary)]">
-                      Flow is {flowLabel(flowScore).toLowerCase()}, seasonality hit rate is {formatSigned(seasonality?.hit_rate_pct, '%')}, and benchmark risk sits at {formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')} tracking error with {formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')} downside deviation.
+                      Flow is {flowStatus.toLowerCase()}, seasonality hit rate is {formatSigned(seasonality?.hit_rate_pct, '%')}, and benchmark risk sits at {formatSigned(benchmarkRisk?.current_tracking_error_30d_pct, '%')} tracking error with {formatSigned(benchmarkRisk?.downside_deviation_30d_pct, '%')} downside deviation.
                     </div>
                   </div>
                 </div>

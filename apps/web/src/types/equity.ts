@@ -8,7 +8,7 @@ export interface EquityHistoricalData {
   high: number;
   low: number;
   close: number;
-  volume: number;
+  volume: number | null;
   value?: number | null;
   raw_close?: number | null;
   adjusted_close?: number | null;
@@ -17,6 +17,8 @@ export interface EquityHistoricalData {
   adjustment_applied?: boolean;
   price_unit?: 'VND' | 'index_points' | 'unknown';
   price_source?: string | null;
+  volume_source?: string | null;
+  volume_resolution_source?: string | null;
 }
 
 export interface EquityHistoricalResponse {
@@ -217,6 +219,7 @@ export interface FundamentalAnalysisResponse {
   meta?: {
     count?: number;
     last_data_date?: string | null;
+    events?: NonNullable<CompanyEventsResponse['meta']>;
   };
   error?: string | null;
 }
@@ -249,11 +252,13 @@ export interface OfficerData {
   ownership_pct?: number;
 }
 
-export interface OfficersResponse {
-  symbol: string;
-  count: number;
-  data: OfficerData[];
+export interface CompanyReferenceResponse<Row> {
+  data: Row[];
+  meta?: { count: number; symbol?: string | null; last_data_date?: string | null } | null;
+  error?: string | null;
 }
+
+export type OfficersResponse = CompanyReferenceResponse<OfficerData>;
 
 export interface IntradayTradeData {
   symbol: string;
@@ -512,11 +517,7 @@ export interface SubsidiaryData {
   charter_capital?: number;
 }
 
-export interface SubsidiariesResponse {
-  symbol: string;
-  count: number;
-  data: SubsidiaryData[];
-}
+export type SubsidiariesResponse = CompanyReferenceResponse<SubsidiaryData>;
 
 interface StatementProvenance {
   source?: string | null;

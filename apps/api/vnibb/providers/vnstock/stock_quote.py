@@ -8,6 +8,7 @@ Extracts: price, change, change_pct, volume, high, low
 
 import logging
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -42,6 +43,19 @@ def _coerce_quote_timestamp(value: object, *, preserve_timezone: bool = False) -
     return None
 
 
+def _coerce_quote_volume(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        volume = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+    # Keep the share count exact for browser clients, as with historical bars.
+    if not volume.is_finite() or not 0 <= volume <= 2**53 - 1:
+        return None
+    return int(volume) if volume == volume.to_integral_value() else None
+
+
 # =============================================================================
 # DATA MODELS
 # =============================================================================
@@ -63,7 +77,7 @@ class StockQuoteData(BaseModel):
     change_pct: Optional[float] = Field(None, alias="changePct", description="Percent change")
     
     # Volume & Value
-    volume: Optional[int] = Field(None, description="Trading volume")
+    volume: Optional[int] = Field(None, description="Trading volume; null when unobserved or invalid")
     value: Optional[float] = Field(None, description="Trading value")
     
     # Metadata
@@ -232,7 +246,7 @@ class VnstockStockQuoteFetcher:
                 prev_close=prev_close,
                 change=change,
                 change_pct=round(change_pct, 2) if change_pct is not None else None,
-                volume=int(latest.get("volume") or 0) if latest.get("volume") else None,
+                volume=_coerce_quote_volume(latest.get("volume")),
                 value=float(latest.get("value") or 0) if latest.get("value") else None,
                 updated_at=_coerce_quote_timestamp(
                     latest.get("updated_at") or latest.get("time") or latest.get("date")

@@ -30,15 +30,35 @@ QUALITY_DATASET = "eod"
 MONGO_EOD_AUDIT_SYMBOL_LIMIT = 20
 MONGO_EOD_AUDIT_LOOKBACK_DAYS = 90
 MONGO_EOD_AUDIT_MAX_TIME_MS = 1_500
+PRICE_ROW_5Y_METRIC = "top_with_price_row_at_or_before_5y_cutoff"
+PRICE_ROW_5Y_CUTOFF_POLICY = "host_date_minus_5y_plus_30d_inclusive"
+MONGO_EOD_RUN_OUTCOME_KEY = "mongo_eod_quality"
 
 
 @dataclass(frozen=True)
 class QualityThresholds:
     top_with_prices: int = 200
-    top_with_5y_prices: int = 80
+    top_with_price_row_at_or_before_5y_cutoff: int = 80
     top_with_ratios: int = 120
     top_with_company_news: int = 50
     top_with_company_events: int = 30
+
+
+def price_row_five_year_cutoff(anchor: date) -> date:
+    """Inclusive old-row cutoff with a 30-day allowance, not a session window."""
+    if anchor.month == 2 and anchor.day == 29:
+        anchor = anchor.replace(day=28)
+    return anchor.replace(year=anchor.year - 5) + timedelta(days=30)
+
+
+def normalize_archived_price_row_metric(counts: dict[str, Any]) -> dict[str, Any]:
+    """Read the archive's old metric as one retained row, never as coverage."""
+    if "top_with_5y_prices" not in counts:
+        return counts
+    normalized = dict(counts)
+    old_row_count = normalized.pop("top_with_5y_prices")
+    normalized.setdefault(PRICE_ROW_5Y_METRIC, old_row_count)
+    return normalized
 
 
 def _to_iso(value: Any) -> str | None:
@@ -151,12 +171,43 @@ def _mongo_eod_quality_status(summary: dict[str, int]) -> tuple[str, list[str]]:
     warnings = ["cross_source_overlaps"] if summary.get("cross_source_overlaps", 0) else []
     if summary.get("audited_documents", 0) == 0:
         warnings.append("empty_sample")
+    elif summary.get("coverage_symbols", 0) < summary.get("audited_symbols", 0):
+        warnings.append("partial_sample_coverage")
     return ("failed" if failures else "warning" if warnings else "ok", failures + warnings)
 
 
-def _mongo_eod_quality_unavailable(category: str, symbol_count: int) -> dict[str, Any]:
+def _mongo_eod_sample_coverage(
+    requested: int, represented: int | None, *, read_failed: bool = False
+) -> dict[str, int | str]:
+    if represented is None:
+        status = "not_assessed"
+    elif represented == 0:
+        status = "empty"
+    else:
+        status = "partial" if represented < requested else "complete"
+    return {
+        "status": status,
+        "requested_symbols": requested,
+        "represented_symbols": represented or 0,
+        "no_row_symbols": requested - represented if represented is not None else 0,
+        "failed_read_symbols": requested if read_failed else 0,
+        "unknown_symbols": requested if represented is None and not read_failed else 0,
+        "session_eligibility": "not_assessed",
+    }
+
+
+def _mongo_eod_quality_unavailable(
+    category: str, symbol_count: int, *, read_outcome: str
+) -> dict[str, Any]:
     return {
         "status": category,
+        "read_outcome": read_outcome,
+        "integrity_status": "not_assessed",
+        "admission_status": "not_assessed",
+        "freshness_status": "not_assessed",
+        "sample_coverage": _mongo_eod_sample_coverage(
+            symbol_count, None, read_failed=read_outcome == "read_failed"
+        ),
         "summary_counts": {
             "audited_symbols": symbol_count,
             "audited_documents": 0,
@@ -180,12 +231,14 @@ async def get_mongo_eod_quality_summary(symbols: Iterable[str]) -> dict[str, Any
         :MONGO_EOD_AUDIT_SYMBOL_LIMIT
     ]
     if not sample_symbols:
-        return _mongo_eod_quality_unavailable("no_symbols", 0)
-    service = get_mongo_market_data_service()
-    if not service.enabled:
-        return _mongo_eod_quality_unavailable("unavailable", len(sample_symbols))
+        return _mongo_eod_quality_unavailable("no_symbols", 0, read_outcome="no_symbols")
     cutoff = datetime.utcnow() - timedelta(days=MONGO_EOD_AUDIT_LOOKBACK_DAYS)
-    match = {"symbol": {"$in": sample_symbols}, "tradeDate": {"$gte": cutoff}}
+    match = {
+        "symbol": {"$in": sample_symbols},
+        "tradeDate": {"$gte": cutoff},
+        # Match literal scalar symbols so grouping cannot exceed the requested sample.
+        "$expr": {"$eq": [{"$type": "$symbol"}, "string"]},
+    }
     converted_fields = {
         f"_{field}": {
             "$convert": {"input": f"${field}", "to": "double", "onError": None, "onNull": None}
@@ -211,51 +264,166 @@ async def get_mongo_eod_quality_summary(symbols: Iterable[str]) -> dict[str, Any
         ]
     }
 
-    def _aggregate(collection: Any, pipeline: list[dict[str, Any]]) -> dict[str, Any]:
-        rows = list(collection.aggregate(pipeline, maxTimeMS=MONGO_EOD_AUDIT_MAX_TIME_MS))
-        return rows[0] if rows else {}
+    quality_checks = {
+        "missing_or_non_vnd_price_unit": {"$ne": ["$priceUnit", "VND"]},
+        "missing_provenance": {
+            "$or": [
+                check
+                for field in ("source", "sourceKey", "updatedAt", "schemaVersion")
+                for check in (
+                    {"$in": [{"$type": f"${field}"}, ["missing", "null"]]},
+                    {"$eq": [f"${field}", ""]},
+                )
+            ]
+        },
+        "invalid_ohlcv": {"$not": [valid_ohlcv]},
+    }
+    date_rows = {"$match": {"$expr": {"$eq": [{"$type": "$tradeDate"}, "date"]}}}
+    trade_day = {"$dateToString": {"format": "%Y-%m-%d", "date": "$tradeDate"}}
+    pipeline = [
+        {"$match": match},
+        {
+            "$project": {
+                "_id": 0,
+                "symbol": 1,
+                "tradeDate": 1,
+                "source": 1,
+                "priceUnit": 1,
+                "sourceKey": 1,
+                "updatedAt": 1,
+                "schemaVersion": 1,
+                **converted_fields,
+            }
+        },
+        # Every facet consumes the same matched stream, including concurrent arrivals.
+        {
+            "$facet": {
+                "quality_by_symbol": [
+                    {"$set": quality_checks},
+                    {
+                        "$group": {
+                            "_id": "$symbol",
+                            "documents": {"$sum": 1},
+                            "first_trade_date": {"$min": "$tradeDate"},
+                            "last_trade_date": {"$max": "$tradeDate"},
+                            **{key: {"$sum": {"$cond": [f"${key}", 1, 0]}} for key in quality_checks},
+                        }
+                    },
+                    {"$sort": {"_id": 1}},
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "symbol": "$_id",
+                            "documents": 1,
+                            "first_trade_date": 1,
+                            "last_trade_date": 1,
+                            **dict.fromkeys(quality_checks, 1),
+                        }
+                    },
+                ],
+                "exact_duplicates": [
+                    {
+                        "$group": {
+                            "_id": {"symbol": "$symbol", "date": "$tradeDate", "source": "$source"},
+                            "documents": {"$sum": 1},
+                        }
+                    },
+                    {"$match": {"documents": {"$gt": 1}}},
+                    {"$count": "groups"},
+                ],
+                "same_source_duplicates": [
+                    date_rows,
+                    {
+                        "$group": {
+                            "_id": {"symbol": "$symbol", "day": trade_day, "source": "$source"},
+                            "documents": {"$sum": 1},
+                        }
+                    },
+                    {"$match": {"documents": {"$gt": 1}}},
+                    {"$count": "groups"},
+                ],
+                "cross_source_overlaps": [
+                    date_rows,
+                    {
+                        "$group": {
+                            "_id": {"symbol": "$symbol", "day": trade_day},
+                            "sources": {"$addToSet": "$source"},
+                        }
+                    },
+                    {"$match": {"$expr": {"$gt": [{"$size": "$sources"}, 1]}}},
+                    {"$count": "groups"},
+                ],
+            }
+        },
+    ]
+
+    def _failure(exc: Exception, read_outcome: str) -> dict[str, Any]:
+        is_timeout = isinstance(exc, TimeoutError) or getattr(exc, "timeout", False)
+        category = "timeout" if is_timeout else "unavailable"
+        logger.warning("Mongo EOD quality audit %s (%s: %s)", category, read_outcome, type(exc).__name__)
+        return _mongo_eod_quality_unavailable(category, len(sample_symbols), read_outcome=read_outcome)
 
     def _read() -> dict[str, Any]:
-        collection = service._get_collection("market_prices_eod")
-        quality = _aggregate(
-            collection,
-            [
-                {"$match": match},
-                {"$project": {"symbol": 1, "tradeDate": 1, "source": 1, "priceUnit": 1, "sourceKey": 1, "updatedAt": 1, "schemaVersion": 1, **converted_fields}},
-                {"$set": {"missing_or_non_vnd_price_unit": {"$ne": ["$priceUnit", "VND"]}, "missing_provenance": {"$or": [{"$in": [{"$type": "$source"}, ["missing", "null"]]}, {"$eq": ["$source", ""]}, {"$in": [{"$type": "$sourceKey"}, ["missing", "null"]]}, {"$eq": ["$sourceKey", ""]}, {"$in": [{"$type": "$updatedAt"}, ["missing", "null"]]}, {"$eq": ["$updatedAt", ""]}, {"$in": [{"$type": "$schemaVersion"}, ["missing", "null"]]}, {"$eq": ["$schemaVersion", ""]}]}, "invalid_ohlcv": {"$not": [valid_ohlcv]}}},
-                {"$group": {"_id": None, "audited_documents": {"$sum": 1}, "missing_or_non_vnd_price_unit": {"$sum": {"$cond": ["$missing_or_non_vnd_price_unit", 1, 0]}}, "invalid_ohlcv": {"$sum": {"$cond": ["$invalid_ohlcv", 1, 0]}}, "missing_provenance": {"$sum": {"$cond": ["$missing_provenance", 1, 0]}}}},
-                {"$project": {"_id": 0}},
-            ],
-        )
-        exact_duplicates = _aggregate(collection, [{"$match": match}, {"$group": {"_id": {"symbol": "$symbol", "tradeDate": "$tradeDate", "source": "$source"}, "documents": {"$sum": 1}}}, {"$match": {"documents": {"$gt": 1}}}, {"$group": {"_id": None, "exact_duplicates": {"$sum": 1}}}, {"$project": {"_id": 0}}])
-        same_source_duplicates = _aggregate(collection, [{"$match": match | {"tradeDate": {"$gte": cutoff, "$type": "date"}}}, {"$group": {"_id": {"symbol": "$symbol", "tradeDay": {"$dateToString": {"format": "%Y-%m-%d", "date": "$tradeDate"}}, "source": "$source"}, "documents": {"$sum": 1}}}, {"$match": {"documents": {"$gt": 1}}}, {"$group": {"_id": None, "same_source_duplicates": {"$sum": 1}}}, {"$project": {"_id": 0}}])
-        cross_source_overlaps = _aggregate(collection, [{"$match": match | {"tradeDate": {"$gte": cutoff, "$type": "date"}}}, {"$group": {"_id": {"symbol": "$symbol", "tradeDay": {"$dateToString": {"format": "%Y-%m-%d", "date": "$tradeDate"}}}, "sources": {"$addToSet": "$source"}}}, {"$match": {"$expr": {"$gt": [{"$size": "$sources"}, 1]}}}, {"$group": {"_id": None, "cross_source_overlaps": {"$sum": 1}}}, {"$project": {"_id": 0}}])
-        coverage = list(collection.aggregate([{"$match": match}, {"$group": {"_id": "$symbol", "documents": {"$sum": 1}, "first_trade_date": {"$min": "$tradeDate"}, "last_trade_date": {"$max": "$tradeDate"}}}, {"$project": {"_id": 0, "symbol": "$_id", "documents": 1, "first_trade_date": 1, "last_trade_date": 1}}, {"$sort": {"symbol": 1}}, {"$limit": MONGO_EOD_AUDIT_SYMBOL_LIMIT}], maxTimeMS=MONGO_EOD_AUDIT_MAX_TIME_MS))
+        try:
+            service = get_mongo_market_data_service()
+            if not service.enabled:
+                return _mongo_eod_quality_unavailable(
+                    "unavailable", len(sample_symbols), read_outcome="disabled"
+                )
+            collection = service._get_collection("market_prices_eod")
+        except Exception as exc:
+            return _failure(exc, "setup_failed")
+
+        try:
+            rows = list(collection.aggregate(pipeline, maxTimeMS=MONGO_EOD_AUDIT_MAX_TIME_MS))
+        except Exception as exc:
+            return _failure(exc, "read_failed")
+
+        facets = rows[0] if rows else {}
+        coverage = facets.get("quality_by_symbol", [])
+        duplicate_counts = {}
+        for key in ("exact_duplicates", "same_source_duplicates", "cross_source_overlaps"):
+            groups = facets.get(key, [])
+            duplicate_counts[key] = groups[0]["groups"] if groups else 0
         summary = {
             "audited_symbols": len(sample_symbols),
-            "audited_documents": int(quality.get("audited_documents", 0)),
-            "missing_or_non_vnd_price_unit": int(quality.get("missing_or_non_vnd_price_unit", 0)),
-            "invalid_ohlcv": int(quality.get("invalid_ohlcv", 0)),
-            "missing_provenance": int(quality.get("missing_provenance", 0)),
-            "exact_duplicates": int(exact_duplicates.get("exact_duplicates", 0)),
-            "same_source_duplicates": int(same_source_duplicates.get("same_source_duplicates", 0)),
-            "cross_source_overlaps": int(cross_source_overlaps.get("cross_source_overlaps", 0)),
+            "audited_documents": sum(row["documents"] for row in coverage),
+            **{key: sum(row.get(key, 0) for row in coverage) for key in quality_checks},
+            **duplicate_counts,
             "coverage_symbols": len(coverage),
         }
         status, issues = _mongo_eod_quality_status(summary)
+        if status == "failed":
+            integrity_status = "failed"
+        elif not summary["audited_documents"]:
+            integrity_status = "not_assessed"
+        else:
+            integrity_status = "warning" if summary["cross_source_overlaps"] else "ok"
         return {
             "status": status,
+            "read_outcome": "observed",
+            "integrity_status": integrity_status,
+            "admission_status": "not_assessed",
+            "freshness_status": "not_assessed",
+            "sample_coverage": _mongo_eod_sample_coverage(len(sample_symbols), len(coverage)),
             "summary_counts": summary,
-            "details": {"max_time_ms": MONGO_EOD_AUDIT_MAX_TIME_MS, "lookback_days": MONGO_EOD_AUDIT_LOOKBACK_DAYS, "coverage": [{**row, "first_trade_date": _to_iso(row.get("first_trade_date")), "last_trade_date": _to_iso(row.get("last_trade_date"))} for row in coverage]},
+            "details": {
+                "max_time_ms": MONGO_EOD_AUDIT_MAX_TIME_MS,
+                "lookback_days": MONGO_EOD_AUDIT_LOOKBACK_DAYS,
+                "coverage": [
+                    {
+                        "symbol": row["symbol"],
+                        "documents": row["documents"],
+                        "first_trade_date": _to_iso(row.get("first_trade_date")),
+                        "last_trade_date": _to_iso(row.get("last_trade_date")),
+                    }
+                    for row in coverage
+                ],
+            },
             "issues": issues,
         }
 
-    try:
-        return await asyncio.to_thread(_read)
-    except Exception as exc:
-        category = "timeout" if "timeout" in type(exc).__name__.lower() or "timed out" in str(exc).lower() else "unavailable"
-        logger.warning("Mongo EOD quality audit %s: %s", category, exc)
-        return _mongo_eod_quality_unavailable(category, len(sample_symbols))
+    return await asyncio.to_thread(_read)
 
 
 async def ensure_quality_run(
@@ -453,6 +621,12 @@ async def get_quality_run_trend(
 def serialize_quality_run(run: DataQualityRun | None) -> dict[str, Any] | None:
     if run is None:
         return None
+    counts = (
+        dict(normalize_archived_price_row_metric(run.summary_counts))
+        if run.summary_counts is not None
+        else None
+    )
+    mongo_outcome = counts.pop(MONGO_EOD_RUN_OUTCOME_KEY, None) if counts is not None else None
     return {
         "run_id": run.run_id,
         "started_at": _to_iso(run.started_at),
@@ -463,7 +637,9 @@ def serialize_quality_run(run: DataQualityRun | None) -> dict[str, Any] | None:
         "observed_market_date": _to_iso(run.observed_market_date),
         "latest_market_date": _to_iso(run.latest_market_date),
         "market_day_staleness": run.market_day_staleness,
-        "summary_counts": run.summary_counts,
+        "historical_session_coverage_status": "not_assessed",
+        "summary_counts": counts,
+        "mongo_eod_quality": mongo_outcome,
         "error_category": run.error_category,
     }
 
@@ -484,10 +660,11 @@ async def run_data_quality_check(
     market_day = is_market_business_day(market_today, holidays)
     async with async_session_maker() as session:
         await ensure_quality_run(session, run_id=stable_run_id, started_at=started_at)
+    summary_counts: dict[str, Any] = {"warning_count": 0}
     try:
         limits = thresholds or QualityThresholds()
         symbols = await _get_top_symbols(top_limit)
-        threshold_5y = date.today().replace(year=date.today().year - 5) + timedelta(days=30)
+        price_row_cutoff = price_row_five_year_cutoff(date.today())
         async with async_session_maker() as session:
             price_rows = await session.execute(
                 select(
@@ -526,17 +703,19 @@ async def run_data_quality_check(
         latest_ratio_value = latest_ratio.scalar()
         latest_news_value = latest_news.scalar()
         latest_event_value = latest_event.scalar()
-        top_with_5y = sum(1 for row in price_span if row.min_date and row.min_date <= threshold_5y)
+        top_with_old_price_row = sum(
+            1 for row in price_span if row.min_date is not None and row.min_date <= price_row_cutoff
+        )
         metrics = {
             "top_with_prices": len(price_span),
-            "top_with_5y_prices": top_with_5y,
+            PRICE_ROW_5Y_METRIC: top_with_old_price_row,
             "top_with_ratios": len(ratio_rows.fetchall()),
             "top_with_company_news": len(news_rows.fetchall()),
             "top_with_company_events": len(event_rows.fetchall()),
         }
         targets = {
             "top_with_prices": limits.top_with_prices,
-            "top_with_5y_prices": limits.top_with_5y_prices,
+            PRICE_ROW_5Y_METRIC: limits.top_with_price_row_at_or_before_5y_cutoff,
             "top_with_ratios": limits.top_with_ratios,
             "top_with_company_news": limits.top_with_company_news,
             "top_with_company_events": limits.top_with_company_events,
@@ -555,6 +734,17 @@ async def run_data_quality_check(
         }
         if isinstance(latest_ratio_value, datetime) and latest_ratio_value < stale_cutoff:
             warnings.append(f"financial_ratios freshness exceeded {max_stale_days} days")
+        mongo_eod_quality = await get_mongo_eod_quality_summary(symbols)
+        if mongo_eod_quality["status"] != "ok":
+            warnings.extend(mongo_eod_quality["issues"])
+        # Keep the sample observation even if the independent Vietcap freshness read fails.
+        summary_counts = metrics | mongo_eod_quality["summary_counts"] | {
+            "warning_count": len(warnings),
+            MONGO_EOD_RUN_OUTCOME_KEY: {
+                key: mongo_eod_quality[key]
+                for key in ("status", "read_outcome", "integrity_status", "sample_coverage")
+            },
+        }
         vietcap_latest = await _vietcap_corpus_latest_date()
         market_staleness = market_day_staleness(vietcap_latest, observed_market_date, holidays)
         freshness["vietcap_eod"] = _to_iso(vietcap_latest)
@@ -566,15 +756,16 @@ async def run_data_quality_check(
         )
         if vietcap_warning:
             warnings.append(vietcap_warning)
-        mongo_eod_quality = await get_mongo_eod_quality_summary(symbols)
-        if mongo_eod_quality["status"] != "ok":
-            warnings.extend(mongo_eod_quality["issues"])
+            summary_counts["warning_count"] = len(warnings)
         report = {
             "generated_at": datetime.utcnow().isoformat(),
             "run_id": stable_run_id,
             "top_limit": top_limit,
             "targets": targets,
             "metrics": metrics,
+            "price_row_five_year_cutoff": price_row_cutoff.isoformat(),
+            "price_row_five_year_cutoff_policy": PRICE_ROW_5Y_CUTOFF_POLICY,
+            "historical_session_coverage_status": "not_assessed",
             "freshness": freshness,
             "mongo_eod_quality": mongo_eod_quality,
             "observed_market_date": observed_market_date.isoformat(),
@@ -583,7 +774,6 @@ async def run_data_quality_check(
             "warnings": warnings,
             "status": "failed" if mongo_eod_quality["status"] == "failed" else "warning" if warnings else "ok",
         }
-        summary_counts = metrics | mongo_eod_quality["summary_counts"] | {"warning_count": len(warnings)}
         completed_at = datetime.utcnow()
         async with async_session_maker() as session:
             await complete_quality_run(
@@ -624,7 +814,7 @@ async def run_data_quality_check(
                 observed_market_date=observed_market_date,
                 latest_market_date=None,
                 market_day_staleness_value=None,
-                summary_counts={"warning_count": 0},
+                summary_counts=summary_counts,
                 error_category=type(exc).__name__[:64],
             )
         raise

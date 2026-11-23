@@ -1,12 +1,16 @@
 import json
 from datetime import date
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from vnibb.api.v1 import equity
+from vnibb.api.v1.schemas import StandardResponse
 from vnibb.mcp import server
 from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.stock import Stock, StockPrice
+from vnibb.providers.vnstock import dividends as vnstock_dividends
 from vnibb.services import ai_context_service
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures/dividend_coverage.json").read_text())
@@ -118,6 +122,104 @@ async def test_explicit_identity_controls_revisions_and_aliases_before_row_limit
         "other-issuer": "issuer_mismatch", "untyped-cash": "unsupported_cash_basis",
         "collision": "conflicting_observations", "revised-unspecified": "unverified_status",
     }
+
+
+@pytest.mark.asyncio
+async def test_verified_native_event_keeps_typed_payment_date_with_legacy_named_fields(client, test_db):
+    test_db.add(CompanyEvent(
+        id=1, symbol="FPT", event_type="dividend", event_date=date(2026, 6, 3),
+        record_date=date(2026, 5, 12), payment_date=date(2026, 6, 3),
+        raw_data={
+            **FIXTURE["synthetic"]["cash_evidence"], "source_event_id": "native",
+            "dividend_type": "cash", "stock_dividend": None, "issue_year": None,
+            "payment_date": "2026-06-03", "published_at": "2026-06-03",
+        },
+    ))
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/dividends")
+
+    assert response.status_code == 200
+    payload = response.json()
+    row, = payload["data"]
+    assert (row["cash_dividend"], row["record_date"], row["payment_date"]) == (
+        500, "2026-05-12", "2026-06-03",
+    )
+    assert row["ex_date"] is None
+    assert payload["meta"]["coverage"]["discrepancies"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source_field", "tagged", "expected_payment"), [
+    ("paymentDate", True, "2026-06-03"),
+    ("public_date", True, None),
+    ("public_date", False, None),
+])
+async def test_dividend_projection_requires_payment_date_evidence(
+    client, test_db, monkeypatch, source_field, tagged, expected_payment,
+):
+    monkeypatch.setattr(vnstock_dividends, "run_reference_provider", AsyncMock(return_value=[{
+        "type": "cash", "cashDividend": 500, "fiscalYear": 2025,
+        "recordDate": "2026-05-12", source_field: "2026-06-03",
+    }]))
+    projected, = await vnstock_dividends.VnstockDividendsFetcher.fetch("FPT")
+    old_payload = projected.model_dump(exclude={"source_projection", "payment_date_basis"})
+    test_db.add(stored(CompanyEvent, {
+        "id": 1, "symbol": "FPT", "event_type": "dividend",
+        "record_date": projected.record_date, "payment_date": projected.payment_date,
+        "description": "cash: Dividend event synthesized from dividend history" if not tagged else None,
+        "raw_data": {
+            **(projected.model_dump() if tagged else old_payload),
+            **FIXTURE["synthetic"]["cash_evidence"],
+            "source_event_id": "corroborated-projection",
+        },
+    }))
+    # The old writer persisted this flat payload without the origin of payment_date.
+    test_db.add(stored(Dividend, {
+        "id": 1, "symbol": "FPT", "issue_method": "cash", "dividend_value": 500,
+        "record_date": projected.record_date, "payment_date": projected.payment_date,
+        "raw_data": old_payload,
+    }))
+    await test_db.commit()
+
+    response = await client.get("/api/v1/equity/FPT/dividends")
+
+    assert response.status_code == 200
+    payload = response.json()
+    reasons = {item["dataset"]: item["code"] for item in payload["meta"]["coverage"]["discrepancies"]}
+    if expected_payment is None:
+        assert payload["data"] == []
+        assert reasons == {"dividends": "conflicting_date_basis", "company_events": "conflicting_date_basis"}
+    else:
+        row, = payload["data"]
+        assert row["payment_date"] == expected_payment
+        assert reasons == {"dividends": "conflicting_date_basis"}
+
+
+@pytest.mark.asyncio
+async def test_fundamental_analysis_keeps_the_scope_of_raw_events(client, test_db, monkeypatch):
+    await seed_app_observations(test_db)
+    for name in (
+        "get_profile", "get_financial_ratios", "get_financials", "get_shareholders",
+        "get_officers", "get_subsidiaries", "get_company_news",
+    ):
+        monkeypatch.setattr(equity, name, AsyncMock(return_value=StandardResponse(data=[])))
+    monkeypatch.setattr(equity, "_load_latest_fundamental_snapshot", AsyncMock(return_value=None))
+    provider = AsyncMock(side_effect=AssertionError("stored events must not call the provider"))
+    monkeypatch.setattr(equity.VnstockCompanyEventsFetcher, "fetch", provider)
+
+    direct = await client.get("/api/v1/equity/HPG/events?limit=10")
+    aggregate = await client.get("/api/v1/equity/HPG/fundamental-analysis")
+
+    assert direct.status_code == aggregate.status_code == 200
+    payload = aggregate.json()
+    assert payload["data"]["events"] == direct.json()["data"]
+    assert len(payload["data"]["events"]) == 3
+    assert payload["meta"]["events"] == {
+        "count": 3, "dividend_scope": "unreconciled_observations",
+        "dividend_history_endpoint": "/api/v1/equity/HPG/dividends",
+    }
+    provider.assert_not_awaited()
 
 
 @pytest.mark.asyncio

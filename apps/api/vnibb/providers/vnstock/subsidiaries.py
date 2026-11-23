@@ -57,6 +57,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
     provider_name = "vnstock"
     requires_credentials = False
     propagate_provider_errors = True
+    fail_on_provider_exit = True
     
     @staticmethod
     def transform_query(params: SubsidiariesQueryParams) -> dict[str, Any]:
@@ -74,23 +75,25 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
                 from vnibb.providers.vnstock.runtime import create_reference_company
 
                 company = create_reference_company(query["symbol"], settings.vnstock_source)
-                df = company.subsidiaries()
-                
-                if df is None or df.empty:
-                    return []
-                
-                return df.to_dict("records")
-            except Exception as e:
-                logger.error(f"vnstock subsidiaries fetch error: {e}")
-                raise ProviderError(message=str(e), provider="vnstock", details={"symbol": query["symbol"]})
+                frame = company.subsidiaries()
+                if frame is None:
+                    raise ProviderError("Subsidiaries source returned no table", provider="vnstock")
+                return frame.to_dict("records")
+            except (TimeoutError, ProviderError):
+                raise
+            except Exception as exc:
+                logger.warning("vnstock subsidiaries fetch error: %s", exc)
+                raise ProviderError(
+                    str(exc), provider="vnstock", details={"symbol": query["symbol"]}
+                ) from exc
         
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_sync),
                 timeout=settings.vnstock_timeout,
             )
-        except asyncio.TimeoutError:
-            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout)
+        except TimeoutError as exc:
+            raise ProviderTimeoutError(provider="vnstock", timeout_seconds=settings.vnstock_timeout) from exc
     
     @staticmethod
     def transform_data(

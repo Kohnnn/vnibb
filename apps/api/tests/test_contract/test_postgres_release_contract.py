@@ -47,7 +47,7 @@ async def test_concurrent_first_cache_writes_are_atomic_and_persisted(test_db):
     async def write_listing():
         async with session_factory() as session:
             return await CacheManager(session).store_listing_data(
-                [{"symbol": symbol, "company_name": "Listing Company"}]
+                [{"symbol": symbol, "company_name": "Listing Company", "exchange": "HNX"}]
             )
 
     async def write_profile():
@@ -64,6 +64,40 @@ async def test_concurrent_first_cache_writes_are_atomic_and_persisted(test_db):
     finally:
         await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
         await test_db.execute(Company.__table__.delete().where(Company.symbol == symbol))
+        await test_db.commit()
+
+
+@pytest.mark.postgres_contract
+@pytest.mark.asyncio
+async def test_daily_price_retry_state_serializes_concurrent_attempts(test_db):
+    from vnibb.models.app_kv import AppKeyValue
+    from vnibb.services.price_acquisition import PriceHistoryAcquisition
+
+    symbol = f"Q{uuid4().hex[:8]}".upper()
+    key = f"acquisition:daily_prices:{symbol}"
+    sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+    first = PriceHistoryAcquisition(sessions, "2026-03-17", "2026-03-17")
+    second = PriceHistoryAcquisition(sessions, "2026-03-18", "2026-03-18")
+    try:
+        attempts = [first.start_attempt() for _ in range(5)]
+        await asyncio.gather(*(
+            first.record(symbol, attempt, "empty_history") for attempt in attempts
+        ), second.record(symbol, second.start_attempt(), "persisted"))
+        deferred = await first.load(symbol)
+        assert deferred["consecutive_empty"] == 5
+        assert first.retry_after(deferred) is not None
+        assert (await second.load(symbol))["reason"] == "persisted"
+
+        recovery, new_empty = first.start_attempt(), first.start_attempt()
+        # A later response can settle first; order by attempt, not commit timing.
+        await first.record(symbol, new_empty, "empty_history")
+        await first.record(symbol, recovery, "persisted")
+        recovered = await first.load(symbol)
+        assert recovered["consecutive_empty"] == 1
+        assert first.retry_after(recovered) is None
+        assert recovered["reason"] == "empty_history"
+    finally:
+        await test_db.execute(AppKeyValue.__table__.delete().where(AppKeyValue.key == key))
         await test_db.commit()
 
 

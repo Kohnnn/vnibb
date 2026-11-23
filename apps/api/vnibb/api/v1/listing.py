@@ -17,7 +17,6 @@ from vnibb.providers.vnstock.listing import (
     IndustryData,
 )
 from vnibb.core.exceptions import ProviderError
-from vnibb.core.cache import redis_client, build_cache_key
 from vnibb.services.cache_manager import CacheManager
 
 router = APIRouter()
@@ -88,28 +87,9 @@ async def get_all_symbols(
         ]
         return SymbolsResponse(count=len(data), data=data)
     
-    # Fetch from upstream API
+    # VCI all_symbols is a display fallback without typed membership evidence.
     try:
         data = await VnstockListingFetcher.fetch_all_symbols(source=source)
-        
-        # Store in database cache (24 hour TTL is built into CacheManager)
-        if data:
-            await cache_manager.store_listing_data(
-                [d.model_dump(mode="json") for d in data],
-                source=source
-            )
-            
-            # Also update Redis for quick access
-            cache_key = build_cache_key("vnibb", "listing", "symbols", source)
-            try:
-                await redis_client.set_json(
-                    cache_key,
-                    [d.model_dump(mode="json") for d in data],
-                    ttl=86400
-                )
-            except Exception:
-                pass  # Redis cache write failure is non-fatal
-        
         return SymbolsResponse(count=len(data), data=data)
     except (ProviderError, Exception) as e:
         # Fallback to stale cache on API failure

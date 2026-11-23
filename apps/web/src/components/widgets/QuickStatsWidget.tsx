@@ -12,6 +12,10 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE, formatPercent } from '@/lib/units';
 import { signedToneClass, priceDirection } from '@/lib/priceColor';
+import { isObservedVolume } from '@/lib/volumeObservation';
+
+const VOLUME_BASIS = 'Average volume is the mean of observed volume in the returned bars, including measured zero.';
+const volumeFormatter = new Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 });
 
 interface QuickStatsWidgetProps {
     symbol: string;
@@ -48,8 +52,24 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
     const high30 = closes.length > 0 ? Math.max(...closes) : 0;
     const low30 = closes.length > 0 ? Math.min(...closes.filter((c) => c > 0)) : 0;
 
-    const volumes = derivedWithheld ?[] : priceData.map((p) => p.volume || 0);
-    const avgVol = volumes.length > 0 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : 0;
+    let volumeSum = 0;
+    let observedVolumeCount = 0;
+    if (historyCertified) {
+        for (const { volume } of priceData) {
+            if (!isObservedVolume(volume)) continue;
+            volumeSum += volume;
+            observedVolumeCount += 1;
+        }
+    }
+    const avgVolume = observedVolumeCount > 0 ? volumeSum / observedVolumeCount : null;
+    const returnedCount = pricesQuery.data ? priceData.length : null;
+    const observationCount = historyCertified ? observedVolumeCount : null;
+    const excludedVolumeCount = historyCertified ? priceData.length - observedVolumeCount : null;
+    const volumeSample = historyCertified
+        ? `${observationCount} of ${returnedCount} returned bars observed · ${excludedVolumeCount} excluded`
+        : priceData.length > 0 ? 'Historical price units were not certified.' : 'No historical bars available.';
+    const rawQuoteVolume = latestQuote?.volume;
+    const quoteVolume = isObservedVolume(rawQuoteVolume) ? rawQuoteVolume : null;
 
     const isLoading = pricesQuery.isLoading || quoteQuery.isLoading || ratiosQuery.isLoading;
     const error = pricesQuery.error || quoteQuery.error || ratiosQuery.error;
@@ -75,16 +95,20 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
                 apiGroup: '/equity',
                 endpoint: `/equity/historical?symbol=${symbol}`,
                 sourceLabel: '30-day window',
+                basis: VOLUME_BASIS,
                 lastDataDate,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
                 derived: true,
-                extra: hasData
-                    ? { price: latestQuote?.price ?? latest?.close ?? null, pe: latestRatio?.pe ?? null }
-                    : undefined,
+                extra: hasData ? {
+                    price: latestQuote?.price ?? latest?.close ?? null,
+                    pe: latestRatio?.pe ?? null,
+                    avgVolume, returnedCount, observationCount, excludedVolumeCount, quoteVolume,
+                } : undefined,
             }),
         );
-    }, [hasData, dataUpdatedAt, isFallback, lastDataDate, symbol, latestQuote?.price, latest?.close, latestRatio?.pe, onDataChange]);
+    }, [hasData, dataUpdatedAt, isFallback, lastDataDate, symbol, latestQuote?.price, latest?.close, latestRatio?.pe,
+        avgVolume, returnedCount, observationCount, excludedVolumeCount, quoteVolume, onDataChange]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view quick stats" />;
@@ -117,7 +141,9 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
         },
         {
             label: 'Avg Volume',
-            value: avgVol > 0 ? `${(avgVol / 1e6).toFixed(1)}M` : EMPTY_VALUE,
+            value: avgVolume === null ? EMPTY_VALUE : volumeFormatter.format(avgVolume),
+            detail: volumeSample,
+            quoteDetail: quoteVolume === null ? null : `Quote volume: ${volumeFormatter.format(quoteVolume)}`,
             icon: BarChart2,
             color: 'text-[var(--text-secondary)]',
         },
@@ -170,6 +196,8 @@ export function QuickStatsWidget({ symbol, onDataChange }: QuickStatsWidgetProps
                                     <span className="text-[10px] text-[var(--text-secondary)]">{stat.label}</span>
                                 </div>
                                 <div className={`text-lg font-bold ${stat.color}`}>{stat.value}</div>
+                                {stat.detail && <p className="mt-1 text-[10px] text-[var(--text-secondary)]">{stat.detail}</p>}
+                                {stat.quoteDetail && <p className="text-[10px] text-[var(--text-secondary)]">{stat.quoteDetail}</p>}
                             </div>
                         ))}
                     </div>
