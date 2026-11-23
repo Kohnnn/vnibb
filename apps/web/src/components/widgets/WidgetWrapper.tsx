@@ -414,6 +414,7 @@ export function WidgetWrapper({
             : null;
     const isDashboardPriceChart = widgetType === 'price_chart' && currentWidget?.type === 'price_chart';
     const referenceWidgetType = isCompanyReferenceWidget(widgetType) ? widgetType : null;
+    const isFundamentalAnalysis = widgetType === 'fundamental_analysis';
     const priceChartScope = usePriceChartScope(displaySymbol, currentWidget?.config, isDashboardPriceChart && !isCollapsed);
     const { request: chartRequest, controls: chartControls } = priceChartScope;
     const internalData = useMemo(() => {
@@ -424,6 +425,11 @@ export function WidgetWrapper({
             // Do not label an old ticker's rows (or a generic fallback) as the new ticker.
             return buildCompanyReferenceRuntime(referenceWidgetType, displaySymbol);
         }
+        if (isFundamentalAnalysis) {
+            // Never attach the previous issuer's retained snapshot while this issuer loads.
+            const scope = readWidgetRuntime(publishedData)?.requestScope;
+            return scope && 'symbol' in scope && scope.symbol === displaySymbol ? publishedData : undefined;
+        }
         // Keep the widget fallback separate so the child's own empty/withheld state wins.
         if (!isDashboardPriceChart) return publishedData === undefined ? widgetData : publishedData;
         if (!chartRequest) return undefined;
@@ -432,14 +438,14 @@ export function WidgetWrapper({
             return { ...publishedData as WidgetRuntimePayload, chartType: chartControls.chartType };
         }
         return buildPriceHistoryRuntime(chartRequest, chartControls.chartType);
-    }, [chartControls.chartType, chartRequest, displaySymbol, isDashboardPriceChart, publishedData, referenceWidgetType, widgetData]);
+    }, [chartControls.chartType, chartRequest, displaySymbol, isDashboardPriceChart, isFundamentalAnalysis, publishedData, referenceWidgetType, widgetData]);
     const widgetRuntime = readWidgetRuntime(internalData);
     const dataToExport = useMemo(() => {
         const data = readAdmittedWidgetData(internalData, widgetRuntime);
         // An older publisher may supply only metadata in its runtime envelope.
-        return !isDashboardPriceChart && !referenceWidgetType && data === undefined && internalData !== widgetData
+        return !isDashboardPriceChart && !isFundamentalAnalysis && !referenceWidgetType && data === undefined && internalData !== widgetData
             ? readAdmittedWidgetData(widgetData) : data;
-    }, [internalData, isDashboardPriceChart, referenceWidgetType, widgetData, widgetRuntime]);
+    }, [internalData, isDashboardPriceChart, isFundamentalAnalysis, referenceWidgetType, widgetData, widgetRuntime]);
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]

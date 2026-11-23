@@ -113,7 +113,16 @@ from vnibb.services.foreign_flow_coverage import (
     provider_row_limit,
     requested_session_dates,
 )
-from vnibb.services.fundamental_valuation import admit_fundamental_snapshot, fundamental_valuation_unavailable_reason
+from vnibb.services.fundamental_valuation import (
+    CAGR_REQUIRED_SPAN_YEARS,
+    DATASET_CASH_FLOW,
+    VARIANT_YEAR_SUFFIX,
+    admit_fundamental_snapshot,
+    fundamental_valuation_unavailable_reason,
+)
+from vnibb.services.fundamental_valuation import (
+    SCHEMA_VERSION as FUNDAMENTAL_SCHEMA_VERSION,
+)
 from vnibb.services.market_session import expected_market_session, verified_market_closure
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
@@ -2351,18 +2360,301 @@ def _build_fundamental_valuation_section(snapshot: dict[str, Any] | None) -> dic
     }
 
 
-def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
+_RETAINED_FCF_REASONS = {
+    "positive": "Positive FCF",
+    "zero": "FCF is zero",
+    "negative": "Negative FCF",
+    "not_positive": "FCF not positive",
+    "unavailable": "FCF unavailable",
+}
+_RETAINED_DCF_BASE_REASON = "Retained DCF base coverage could not be confirmed as complete."
+
+
+def _retained_analysis_block(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _retained_fiscal_year(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and 1900 <= value <= 2200 else None
+
+
+def _retained_years(value: Any) -> list[int] | None:
+    if isinstance(value, list) and all(_retained_fiscal_year(year) is not None for year in value):
+        return value
+    return None
+
+
+def _retained_text(value: Any) -> str | None:
+    return _pick_optional_text(value) if isinstance(value, str) else None
+
+
+def _retained_financial_date(value: Any) -> str | None:
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str) and re.match(r"^\d{4}-\d{2}-\d{2}(?:$|[T ])", value):
+        observation = _coerce_meta_datetime(value)
+        if observation is not None:
+            return value
+    return None
+
+
+def _retained_computed_at(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        # PyMongo normally decodes BSON UTC timestamps as naive datetimes.
+        return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).isoformat()
+    if isinstance(value, str) and re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", value):
+        computed = _coerce_meta_datetime(value)
+        if computed is not None and computed.tzinfo is not None:
+            return value
+    return None
+
+
+def _retained_cashflow_statements(inputs: dict[str, Any]) -> dict[int, list[dict[str, Any]]]:
+    statements = _retained_analysis_block(inputs.get("unitLineage")).get("statements")
+    by_year: dict[int, list[dict[str, Any]]] = {}
+    if not isinstance(statements, list):
+        return by_year
+    for statement in statements:
+        row = _retained_analysis_block(statement)
+        source = _retained_analysis_block(row.get("source"))
+        year = _retained_fiscal_year(row.get("period"))
+        if (
+            year is not None
+            and source.get("dataset") == DATASET_CASH_FLOW
+            and source.get("variant") == DATASET_CASH_FLOW + VARIANT_YEAR_SUFFIX
+        ):
+            by_year.setdefault(year, []).append(row)
+    return by_year
+
+
+def _retained_fcf_conflicts(statements: list[dict[str, Any]]) -> list[str]:
+    def normalized(field: str) -> str:
+        return field.strip().lower().replace(" ", "_")
+
+    fields: set[str] = set()
+    for statement in statements:
+        conflicts = statement.get("conflictingFields")
+        if isinstance(conflicts, list):
+            fields.update(normalized(field) for field in conflicts if isinstance(field, str))
+    return [
+        component for component in ("operating_cash_flow", "capex")
+        if any(normalized(alias) in fields for alias in _statement_admission.FIELD_ALIASES[component])
+    ]
+
+
+def _retained_fcf_amount(coverage: dict[str, Any], fiscal_year: int | None) -> float | None:
+    # Ordinary v4 records persist only a positivity test. The DCF base is a
+    # multi-year mean, not evidence of the latest year's signed FCF.
+    amount = _retained_analysis_block(coverage.get("latestFcf"))
+    value = amount.get("value")
+    if (
+        fiscal_year is not None
+        and amount.get("status") == "admitted"
+        and amount.get("unit") == "VND"
+        and _retained_fiscal_year(amount.get("fiscalYear")) == fiscal_year
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and (isinstance(value, int) or math.isfinite(value))
+    ):
+        return value
+    return None
+
+
+def _retained_fcf_observation(
+    snapshot: dict[str, Any], coverage: dict[str, Any], fiscal_year: int | None, conflicts: list[str],
+) -> dict[str, Any]:
+    rejection = _retained_text(coverage.get("positiveReason"))
+    excluded = coverage.get("excluded")
+    latest_exclusion = next((
+        row for row in excluded
+        if isinstance(row, dict) and _retained_fiscal_year(row.get("year")) == fiscal_year
+    ), None) if fiscal_year is not None and isinstance(excluded, list) else None
+    latest_incomplete = bool(conflicts) or latest_exclusion is not None or fiscal_year in (
+        _retained_years(coverage.get("incompleteWindowYears")) or []
+    ) or (rejection or "").startswith("latest_year_incomplete:")
+    if latest_exclusion is not None and not rejection:
+        incomplete = latest_exclusion.get("incomplete")
+        parts = [
+            f"{part['component']}={part['reason']}"
+            for part in incomplete
+            if isinstance(part, dict) and _retained_text(part.get("component")) and _retained_text(part.get("reason"))
+        ] if isinstance(incomplete, list) else []
+        if parts:
+            rejection = "latest_year_incomplete:" + ",".join(parts)
+    if conflicts and not rejection:
+        # Older v4 records could persist the conflict alongside a positivity claim.
+        rejection = "latest_year_incomplete:" + ",".join(f"{field}=conflicting_observations" for field in conflicts)
+    if rejection or latest_incomplete:
+        return {
+            "unavailable_reason": rejection or "The latest annual operating cash flow and capex were not both admitted.",
+            "input_coverage": "incomplete" if latest_incomplete else None,
+        }
+    if fiscal_year is None:
+        return {"unavailable_reason": "No fiscal year was recorded for the retained FCF test."}
+
+    amount = _retained_fcf_amount(coverage, fiscal_year)
+    positive = coverage.get("positive")
+    stored_positive = snapshot.get("fcfPositive")
+    if any(flag is not None and type(flag) is not bool for flag in (positive, stored_positive)):
+        return {"unavailable_reason": "Invalid retained FCF positivity test."}
+    flags = {flag for flag in (positive, stored_positive) if flag is not None}
+    if len(flags) > 1 or (amount is not None and flags and (amount > 0) not in flags):
+        return {"unavailable_reason": "Retained FCF evidence disagrees about positivity."}
+    if amount is not None:
+        return {
+            "status": "positive" if amount > 0 else "negative" if amount < 0 else "zero",
+            "evidence": "signed_amount", "amount": amount, "unit": "VND",
+            "positive": amount > 0, "input_coverage": "complete",
+        }
+    if isinstance(positive, bool):
+        # The engine only records this test after admitting both latest-year inputs.
+        return {
+            "status": "positive" if positive else "not_positive",
+            "evidence": "positivity_only", "positive": positive, "input_coverage": "complete",
+        }
+    return {"unavailable_reason": "No admitted FCF amount or positivity test was recorded."}
+
+
+def _build_retained_fcf(snapshot: dict[str, Any] | None, snapshot_error: str | None) -> dict[str, Any]:
+    fcf: dict[str, Any] = dict.fromkeys((
+        "amount", "unit", "positive", "evidence", "fiscal_year", "source", "source_financial_date",
+        "basis", "input_coverage", "dcf_base_admitted_years", "dcf_base_required_rows", "unavailable_reason",
+    ))
+    fcf["status"] = "unavailable"
     if not snapshot:
+        fcf["unavailable_reason"] = (
+            f"Retained fundamental snapshot unavailable: {snapshot_error}." if snapshot_error
+            else "No retained fundamental snapshot was available."
+        )
+    elif (
+        type(schema_version := snapshot.get("schemaVersion")) is not int
+        or schema_version != FUNDAMENTAL_SCHEMA_VERSION
+    ):
+        found = schema_version if type(schema_version) is int else "unknown"
+        fcf["unavailable_reason"] = (
+            f"Retained FCF schema {found} is unsupported (expected {FUNDAMENTAL_SCHEMA_VERSION}); "
+            "recompute before publishing."
+        )
+    elif _retained_financial_date(snapshot.get("snapshotDate")) is None:
+        fcf["unavailable_reason"] = "Retained FCF withheld: the snapshot date was not recorded or is invalid."
+    else:
+        inputs = _retained_analysis_block(snapshot.get("inputs"))
+        coverage = _retained_analysis_block(_retained_analysis_block(inputs.get("derivedCoverage")).get("fcf"))
+        withheld = inputs.get("derivedWithheldFields")
+        if not coverage or (isinstance(withheld, list) and "fcfPositive" in withheld):
+            fcf["unavailable_reason"] = "Retained snapshot lacks admitted FCF coverage."
+        else:
+            fiscal_year = _retained_fiscal_year(coverage.get("latestYear"))
+            statements = _retained_cashflow_statements(inputs)
+            latest = statements.get(fiscal_year, []) if fiscal_year is not None else []
+            source = _retained_analysis_block(latest[0].get("source")) if len(latest) == 1 else {}
+            conflicts = {year: _retained_fcf_conflicts(rows) for year, rows in statements.items()}
+            latest_conflicts = conflicts.get(fiscal_year, []) if fiscal_year is not None else []
+            observation = _retained_fcf_observation(snapshot, coverage, fiscal_year, latest_conflicts)
+            # Before this marker existed, the engine could bridge rejected years with older rows.
+            incomplete_years = _retained_years(coverage.get("incompleteWindowYears"))
+            base_years = _retained_years(coverage.get("baseYears")) if incomplete_years is not None else None
+            if base_years is not None:
+                base_years = [
+                    year for year in base_years
+                    if year not in incomplete_years and not conflicts.get(year)
+                    and not (year == fiscal_year and observation.get("input_coverage") == "incomplete")
+                ]
+            required = coverage.get("baseRows")
+            fcf.update(
+                fiscal_year=fiscal_year,
+                source=_retained_text(source.get("source")) or _retained_text(source.get("provider")),
+                # Receipt timestamps in unitLineage are not a financial source date.
+                source_financial_date=_retained_financial_date(source.get("sourceDate")),
+                basis="Annual operating cash flow − |capex|" if fiscal_year is not None else None,
+                dcf_base_admitted_years=base_years,
+                dcf_base_required_rows=required if type(required) is int and required > 0 else None,
+                **observation,
+            )
+    fcf["reason"] = _RETAINED_FCF_REASONS[fcf["status"]]
+    return fcf
+
+
+def _project_snapshot_fcf(snapshot: dict[str, Any] | None, fcf: dict[str, Any]) -> dict[str, Any] | None:
+    """Keep FCF and dependent DCF claims consistent in every response copy."""
+    if not snapshot:
+        return snapshot
+    projected = {**snapshot, "fcfPositive": fcf["positive"]}
+    inputs = _retained_analysis_block(snapshot.get("inputs"))
+    coverage = _retained_analysis_block(inputs.get("derivedCoverage"))
+    stored_fcf = _retained_analysis_block(coverage.get("fcf"))
+    admitted_years = fcf["dcf_base_admitted_years"]
+    base_amount = inputs.get("baseFcf")
+    base_complete = (
+        admitted_years is not None
+        and len(set(admitted_years)) == len(admitted_years) == fcf["dcf_base_required_rows"]
+        and fcf["fiscal_year"] in admitted_years
+        and admitted_years == stored_fcf.get("baseYears")
+        and stored_fcf.get("status") == "complete"
+        and stored_fcf.get("incompleteWindowYears") == []
+    )
+    rejected_dcf = snapshot.get("valuationMethod") == "dcf" and (
+        not base_complete or type(base_amount) not in (int, float) or not 0 < base_amount < math.inf
+        or stored_fcf.get("baseFcf") != base_amount or isinstance(stored_fcf.get("baseFcf"), bool)
+    )
+    projected_inputs = dict(inputs)
+    if (not base_complete or rejected_dcf) and "baseFcf" in inputs:
+        projected_inputs["baseFcf"] = None
+    if stored_fcf:
+        published_fcf = {**stored_fcf, "positive": fcf["positive"], "positiveReason": fcf["unavailable_reason"]}
+        if "latestFcf" in stored_fcf and fcf["evidence"] != "signed_amount":
+            published_fcf["latestFcf"] = None
+        if not base_complete or rejected_dcf:
+            published_fcf["baseFcf"] = None
+        if admitted_years != stored_fcf.get("baseYears") or (stored_fcf.get("status") == "complete" and not base_complete):
+            published_fcf.update(
+                status="partial" if admitted_years is not None else None,
+                baseYears=admitted_years,
+                reason=_RETAINED_DCF_BASE_REASON,
+            )
+        projected_inputs["derivedCoverage"] = {**coverage, "fcf": published_fcf}
+    if rejected_dcf:
+        projected.update(intrinsicValue=None, marginOfSafety=None, valuationMethod=None, valuationVerdict=None)
+        if isinstance(computed := snapshot.get("computedFields"), list):
+            projected["computedFields"] = [
+                field for field in computed
+                if field not in ("intrinsic_value", "margin_of_safety", "valuation_method", "valuation_verdict")
+            ]
+        projected_inputs["derivedUnavailableReason"] = _RETAINED_DCF_BASE_REASON
+    if projected_inputs != inputs:
+        projected["inputs"] = projected_inputs
+    return projected
+
+
+def _retained_cagr_window(snapshot: dict[str, Any], key: str, value: Any) -> list[int] | None:
+    inputs = _retained_analysis_block(snapshot.get("inputs"))
+    coverage = _retained_analysis_block(inputs.get("derivedCoverage"))
+    cagr = _retained_analysis_block(_retained_analysis_block(coverage.get("cagr")).get(key))
+    if value is None or cagr.get("published") != value or cagr.get("status") != "complete":
         return None
+    if "windowStartYear" in cagr or "windowEndYear" in cagr:
+        window = _retained_years([cagr.get("windowStartYear"), cagr.get("windowEndYear")])
+    else:
+        window = _retained_years([cagr.get("startYear"), cagr.get("endYear")])
+    if window and cagr.get("windowComplete") is not False and window[1] - window[0] == CAGR_REQUIRED_SPAN_YEARS:
+        return window
+    return None
+
+
+def _build_competitive_advantage_section(
+    snapshot: dict[str, Any] | None, snapshot_error: str | None,
+) -> dict[str, Any]:
+    fcf = _build_retained_fcf(snapshot, snapshot_error)
+    if not snapshot:
+        return {"lineage": None, "fcf": fcf, "quality_metrics": {"fcf_positive": None}}
     moat = snapshot.get("moat")
     moat_score = snapshot.get("moatScore")
-    moat_factors = snapshot.get("moatFactors") or {}
+    moat_factors = _retained_analysis_block(snapshot.get("moatFactors"))
     reasons: list[str] = []
     roe = snapshot.get("roe")
     net_margin = snapshot.get("netMargin")
     revenue_cagr = snapshot.get("revenueCagr5y")
     profit_cagr = snapshot.get("profitCagr5y")
-    fcf_positive = snapshot.get("fcfPositive")
     dividend_years = snapshot.get("dividendYears")
     for label, value, suffix in (
         ("ROE", roe, "%"),
@@ -2372,22 +2664,21 @@ def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dic
     ):
         if isinstance(value, (int, float)):
             reasons.append(f"{label} {float(value):.1f}{suffix}")
-    if isinstance(fcf_positive, bool):
-        reasons.append("Positive FCF" if fcf_positive else "FCF not positive")
+    if fcf["status"] != "unavailable":
+        reasons.append(fcf["reason"])
     if isinstance(dividend_years, (int, float)):
         reasons.append(f"Dividend streak {int(dividend_years)}y")
     if isinstance(moat_score, (int, float)):
         reasons.append(f"Moat score {float(moat_score):.0f}/100")
-    if isinstance(moat_factors, dict):
-        factor_labels = (
-            ("Gross margin stability", moat_factors.get("gross_margin_stability"), "/100"),
-            ("Interest coverage", moat_factors.get("interest_coverage"), "x"),
-            ("ROIC spread", moat_factors.get("roic_spread"), "pp"),
-            ("Sector rank score", moat_factors.get("sector_rank_score"), "/100"),
-        )
-        for label, value, suffix in factor_labels:
-            if isinstance(value, (int, float)):
-                reasons.append(f"{label} {float(value):.1f}{suffix}")
+    for label, key, suffix in (
+        ("Gross margin stability", "gross_margin_stability", "/100"),
+        ("Interest coverage", "interest_coverage", "x"),
+        ("ROIC spread", "roic_spread", "pp"),
+        ("Sector rank score", "sector_rank_score", "/100"),
+    ):
+        value = moat_factors.get(key)
+        if isinstance(value, (int, float)):
+            reasons.append(f"{label} {float(value):.1f}{suffix}")
     return {
         "moat": moat,
         "moat_score": moat_score,
@@ -2399,10 +2690,20 @@ def _build_competitive_advantage_section(snapshot: dict[str, Any] | None) -> dic
             "debt_to_equity": snapshot.get("debtToEquity"),
             "revenue_cagr_5y": revenue_cagr,
             "profit_cagr_5y": profit_cagr,
-            "fcf_positive": fcf_positive,
+            "fcf_positive": fcf["positive"],
             "dividend_years": dividend_years,
         },
         "reasons": reasons,
+        "fcf": fcf,
+        "lineage": {
+            "snapshot_date": _retained_financial_date(snapshot.get("snapshotDate")),
+            "snapshot_computed_at": _retained_computed_at(snapshot.get("observedAt")),
+            "snapshot_source": _retained_text(snapshot.get("source")),
+            "schema_version": snapshot["schemaVersion"] if type(snapshot.get("schemaVersion")) is int else None,
+            "moat_factor_years": _retained_years(moat_factors.get("periods_used")),
+            "revenue_cagr_window": _retained_cagr_window(snapshot, "revenue", revenue_cagr),
+            "profit_cagr_window": _retained_cagr_window(snapshot, "profit", profit_cagr),
+        },
         "as_of": snapshot.get("snapshotDate"),
         "note": "Moat is a rules-based VNIBB quality label derived from historical profitability and margin behavior.",
     }
@@ -4898,11 +5199,14 @@ async def get_fundamental_analysis(
     subsidiaries = subsidiaries_task.result()
     news = news_task.result()
     fundamental_snapshot = snapshot_task.result()
-    valuation = _build_fundamental_valuation_section(fundamental_snapshot)
+    competitive_advantage = _build_competitive_advantage_section(
+        fundamental_snapshot, section_errors.get("fundamental_snapshot"),
+    )
+    fundamental_snapshot = _project_snapshot_fcf(fundamental_snapshot, competitive_advantage["fcf"])
     valuation_reason = fundamental_valuation_unavailable_reason(fundamental_snapshot)
     if valuation_reason:
         section_errors["valuation"] = valuation_reason
-    competitive_advantage = _build_competitive_advantage_section(fundamental_snapshot)
+    valuation = _build_fundamental_valuation_section(fundamental_snapshot)
 
     latest_ratio = ratios[-1] if isinstance(ratios, list) and ratios else None
     latest_financials = {

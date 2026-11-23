@@ -1,13 +1,13 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { FileText } from 'lucide-react';
 import { useFundamentalAnalysis } from '@/lib/queries';
-import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import { buildWidgetRuntime, type WidgetDataPayload } from '@/lib/widgetRuntime';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import type { FundamentalAnalysisData, FundamentalAnalysisItem } from '@/types/equity';
+import type { CompetitiveAdvantage, FundamentalAnalysisData, FundamentalAnalysisItem, RetainedFcf, RetainedQualityLineage } from '@/types/equity';
 
 interface FundamentalAnalysisWidgetProps {
   symbol: string;
@@ -58,6 +58,69 @@ function money(value: unknown): string | null {
   return numeric === null ? null : numeric.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
+const LEGACY_FCF_UNAVAILABLE: RetainedFcf = {
+  status: 'unavailable', reason: 'FCF unavailable', evidence: null, amount: null, unit: null,
+  positive: null, fiscal_year: null, source: null, source_financial_date: null, basis: null,
+  input_coverage: null, dcf_base_admitted_years: null, dcf_base_required_rows: null,
+  unavailable_reason: 'This response did not include a retained FCF admission record.',
+};
+
+function readRetainedFcf(fcf: RetainedFcf | undefined): RetainedFcf {
+  // Older servers send a bare flag without proof of admission. It is not a sign or an amount.
+  if (!fcf) return LEGACY_FCF_UNAVAILABLE;
+  if (fcf.status === 'unavailable') return { ...fcf, reason: 'FCF unavailable', evidence: null, amount: null, unit: null, positive: null };
+  if (fcf.input_coverage === 'complete' && fcf.fiscal_year != null && !fcf.unavailable_reason) {
+    if (fcf.evidence === 'signed_amount' && fcf.unit === 'VND' && typeof fcf.amount === 'number' && Number.isFinite(fcf.amount)) {
+      const status = fcf.amount > 0 ? 'positive' : fcf.amount < 0 ? 'negative' : 'zero';
+      if (fcf.status === status && fcf.positive === (fcf.amount > 0)) return fcf;
+    }
+    if (fcf.evidence === 'positivity_only' && typeof fcf.positive === 'boolean' &&
+      fcf.status === (fcf.positive ? 'positive' : 'not_positive')) {
+      return { ...fcf, amount: null, unit: null };
+    }
+  }
+  return { ...LEGACY_FCF_UNAVAILABLE, unavailable_reason: 'Retained FCF sign or admission evidence was inconsistent.' };
+}
+
+function fiscalYears(years: readonly number[] | null | undefined) {
+  return years?.map(year => `FY${year}`).join(', ') ?? null;
+}
+
+function fiscalWindow(years: readonly number[] | null | undefined) {
+  return years?.length === 2 ? `FY${years[0]}–FY${years[1]}` : null;
+}
+
+function retainedQualityExport(symbol: string, advantage: CompetitiveAdvantage, fcf: RetainedFcf, cashflowFailure?: string) {
+  const lineage = advantage.lineage;
+  // Serialize the known years as labels so the bounded agent sample preserves every year.
+  return {
+    symbol,
+    fcf: { ...fcf, dcf_base_admitted_years: fiscalYears(fcf.dcf_base_admitted_years) },
+    retained_quality_snapshot: lineage ? {
+      ...lineage,
+      moat_factor_years: fiscalYears(lineage.moat_factor_years),
+      revenue_cagr_window: fiscalWindow(lineage.revenue_cagr_window),
+      profit_cagr_window: fiscalWindow(lineage.profit_cagr_window),
+    } : null,
+    quality_metrics: {
+      roe: advantage.quality_metrics?.roe ?? null,
+      roa: advantage.quality_metrics?.roa ?? null,
+      net_margin: advantage.quality_metrics?.net_margin ?? null,
+      debt_to_equity: advantage.quality_metrics?.debt_to_equity ?? null,
+      revenue_cagr_5y: advantage.quality_metrics?.revenue_cagr_5y ?? null,
+      profit_cagr_5y: advantage.quality_metrics?.profit_cagr_5y ?? null,
+      dividend_years: advantage.quality_metrics?.dividend_years ?? null,
+    },
+    moat: advantage.moat ?? null,
+    moat_score: advantage.moat_score ?? null,
+    cashflow_section_error: cashflowFailure ? sectionFailureLabel(cashflowFailure) : null,
+  };
+}
+
+function sectionFailureLabel(reason: string): string {
+  return reason === 'Section deadline exceeded' || reason === 'Dependency timed out' ? reason : 'Unavailable';
+}
+
 function verdictTone(verdict?: string | null): string {
   if (verdict === 'undervalued' || verdict === 'fair_plus') return 'text-[var(--color-positive)] border-[var(--color-state-border)] bg-[var(--color-positive-bg)]';
   if (verdict === 'expensive' || verdict === 'stretched') return 'text-[var(--color-negative)] border-[var(--color-state-border)] bg-[var(--color-negative-bg)]';
@@ -66,15 +129,20 @@ function verdictTone(verdict?: string | null): string {
 
 export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalAnalysisWidgetProps) {
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useFundamentalAnalysis(symbol, Boolean(symbol));
-  const payload = getData(data?.data);
+  const result = getData(data?.data);
+  const activeSymbol = symbol.toUpperCase();
+  const payload = result?.symbol && result.symbol.toUpperCase() !== activeSymbol ? null : result;
   const profile = payload?.profile ?? null;
   const valuation = payload?.valuation ?? null;
   const valuationVerified = valuation?.inputs?.unitQuality === 'verified';
   const comparisonUnavailableReason = textValue(valuation?.inputs?.comparisonUnavailableReason)
     || 'Legacy valuation units are unverified. Price, intrinsic value and margin of safety are unavailable until source units are reconciled.';
   const competitiveAdvantage = payload?.competitive_advantage ?? null;
+  const retainedFcf = competitiveAdvantage?.fcf;
+  const fcf = useMemo(() => readRetainedFcf(retainedFcf), [retainedFcf]);
+  const lineage = competitiveAdvantage?.lineage;
+  const cashflowFailure = payload?.section_errors?.['financials.cashflow'];
   const profileDescription = textValue(profile?.description);
-  const companyName = textValue(profile?.company_name) || symbol?.toUpperCase();
   const summary = textValue(payload?.summary) || textValue(payload?.thesis) || profileDescription;
   const strengths = normalizeItems(payload?.strengths).slice(0, 3);
   const risks = normalizeItems(payload?.risks).slice(0, 3);
@@ -88,33 +156,34 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
         <ul className="mt-1 list-inside list-disc">
           {sectionErrors.map(([section, reason]) => (
             <li key={section}>
-              {section.replace(/[._]/g, ' ')}: {/deadline|timed?\s*out/i.test(reason) ? 'Section deadline exceeded' : 'Unavailable'}
+              {section.replace(/[._]/g, ' ')}: {sectionFailureLabel(reason)}
             </li>
           ))}
         </ul>
       )}
     </div>
   ) : null;
-  const source = textValue(payload?.source) || textValue(valuation?.source) || 'vnstock';
-  // The endpoint serves no source observation date: `as_of` is the valuation engine's
-  // run date and `dataUpdatedAt` is a retrieval receipt, so both belong outside
-  // `lastDataDate`.
-  const updatedAt = null;
+  const source = textValue(payload?.source) || lineage?.snapshot_source || textValue(valuation?.source) || undefined;
   const moatFactors = competitiveAdvantage?.moat_factors ?? {};
   const qualityMetrics = competitiveAdvantage?.quality_metrics ?? {};
+  const otherQualityReasons = (competitiveAdvantage?.reasons ?? []).filter(reason => !/\bFCF\b/i.test(reason));
+  const hasQualityMetrics = Boolean(lineage || competitiveAdvantage?.moat || competitiveAdvantage?.moat_score != null ||
+    Object.entries(qualityMetrics).some(([key, value]) => key !== 'fcf_positive' && value != null));
 
   useEffect(() => {
     onDataChange?.(buildWidgetRuntime({
       empty: !hasData,
       apiGroup: '/equity',
-      endpoint: `/equity/${symbol}/fundamental-analysis`,
+      endpoint: `/equity/${activeSymbol}/fundamental-analysis`,
       sourceLabel: source,
-      lastDataDate: updatedAt,
+      // The retained source financial date belongs to FCF only, not to the mixed widget payload.
+      lastDataDate: null,
       fetchedAt: dataUpdatedAt || null,
       stale: Boolean(error && hasData),
-      extra: { sections: sections.length, strengths: strengths.length, risks: risks.length },
+      requestScope: { symbol: activeSymbol },
+      exportData: competitiveAdvantage ? retainedQualityExport(activeSymbol, competitiveAdvantage, fcf, cashflowFailure) : null,
     }));
-  }, [dataUpdatedAt, error, hasData, onDataChange, risks.length, sections.length, source, strengths.length, symbol, updatedAt]);
+  }, [activeSymbol, cashflowFailure, competitiveAdvantage, dataUpdatedAt, error, fcf, hasData, onDataChange, source]);
 
   if (!symbol) return <WidgetEmpty message="Select a symbol to view fundamental analysis" icon={<FileText size={18} />} />;
   if (isLoading && !hasData) return <WidgetSkeleton lines={6} />;
@@ -128,8 +197,10 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
 
   return (
     <div className="@container h-full min-w-0 space-y-3 overflow-auto">
-      <WidgetMeta updatedAt={updatedAt} fetchedAt={dataUpdatedAt || null} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="Fundamental analysis" align="right" />
+      <WidgetMeta updatedAt={null} fetchedAt={dataUpdatedAt || null} isFetching={isFetching && hasData} isCached={Boolean(error && hasData)} note="Fundamental analysis" align="right" />
       {partialWarning}
+
+      {competitiveAdvantage && <RetainedQualityEvidence fcf={fcf} lineage={lineage} />}
 
       <div className="grid min-w-0 grid-cols-1 gap-3 @4xl:grid-cols-2">
         {valuation && (
@@ -155,7 +226,7 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
           </div>
         )}
 
-        {competitiveAdvantage && (
+        {competitiveAdvantage && hasQualityMetrics && (
           <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -172,9 +243,9 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
               <Metric label="ROIC spread" value={pct(moatFactors.roic_spread)} />
               <Metric label="Rank" value={ratio(moatFactors.sector_rank_score, '/100')} />
             </div>
-            {Array.isArray(competitiveAdvantage.reasons) && competitiveAdvantage.reasons.length > 0 && (
+            {otherQualityReasons.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {competitiveAdvantage.reasons.slice(0, 8).map((reason) => (
+                {otherQualityReasons.slice(0, 8).map((reason) => (
                   <span key={reason} className="rounded-full bg-[var(--bg-tertiary)] px-2 py-1 text-[11px] text-[var(--text-secondary)]">{reason}</span>
                 ))}
               </div>
@@ -190,16 +261,17 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
         </div>
       )}
 
-      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
-        <Metric label="ROE" value={pct(qualityMetrics.roe)} />
-        <Metric label="ROA" value={pct(qualityMetrics.roa)} />
-        <Metric label="Net margin" value={pct(qualityMetrics.net_margin)} />
-        <Metric label="Debt/equity" value={ratio(qualityMetrics.debt_to_equity)} />
-        <Metric label="Revenue CAGR" value={pct(qualityMetrics.revenue_cagr_5y)} />
-        <Metric label="Profit CAGR" value={pct(qualityMetrics.profit_cagr_5y)} />
-        <Metric label="FCF" value={typeof qualityMetrics.fcf_positive === 'boolean' ? (qualityMetrics.fcf_positive ? 'positive' : 'negative') : null} />
-        <Metric label="Dividend" value={ratio(qualityMetrics.dividend_years, 'y')} />
-      </div>
+      {hasQualityMetrics && (
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
+          <Metric label="ROE" value={pct(qualityMetrics.roe)} />
+          <Metric label="ROA" value={pct(qualityMetrics.roa)} />
+          <Metric label="Net margin" value={pct(qualityMetrics.net_margin)} />
+          <Metric label="Debt/equity" value={ratio(qualityMetrics.debt_to_equity)} />
+          <Metric label="Revenue CAGR" value={pct(qualityMetrics.revenue_cagr_5y)} />
+          <Metric label="Profit CAGR" value={pct(qualityMetrics.profit_cagr_5y)} />
+          <Metric label="Dividend" value={ratio(qualityMetrics.dividend_years, 'y')} />
+        </div>
+      )}
 
       {(strengths.length > 0 || risks.length > 0) && (
         <div className="grid min-w-0 grid-cols-1 gap-3 @lg:grid-cols-2">
@@ -222,6 +294,41 @@ export function FundamentalAnalysisWidget({ symbol, onDataChange }: FundamentalA
         </div>
       )}
     </div>
+  );
+}
+
+function RetainedQualityEvidence({ fcf, lineage }: { fcf: RetainedFcf; lineage?: RetainedQualityLineage | null }) {
+  const unavailableReason = fcf.unavailable_reason;
+  const admittedYears = fiscalYears(fcf.dcf_base_admitted_years);
+  const windows = [
+    ['Moat factor years', fiscalYears(lineage?.moat_factor_years)],
+    ['Revenue CAGR window', fiscalWindow(lineage?.revenue_cagr_window)],
+    ['Profit CAGR window', fiscalWindow(lineage?.profit_cagr_window)],
+  ];
+  return (
+    <section aria-label="Retained quality snapshot" className="min-w-0 space-y-2 break-words rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-3 text-xs text-[var(--text-secondary)]">
+      <h3 className="font-bold text-[var(--text-primary)]">Retained quality snapshot</h3>
+      {lineage ? <>
+        <p>Snapshot date: {lineage.snapshot_date ?? 'not recorded'} · Snapshot source: {lineage.snapshot_source ?? 'not recorded'} · Schema: {lineage.schema_version ?? 'not recorded'}</p>
+        <p>Snapshot computed at: {lineage.snapshot_computed_at ?? 'not recorded'}</p>
+        <p>Independent of this request’s statement sections and the shared FY/Q/TTM selector. Metric periods and source dates are shown only where recorded.</p>
+        {windows.map(([label, value]) => value && <p key={label}>{label}: {value}</p>)}
+      </> : <p>{lineage === null ? 'No retained quality snapshot available.' : 'The API did not report retained quality lineage.'}</p>}
+      <Metric label="FCF" value={fcf.status.replace('_', ' ')} />
+      <p>
+        {fcf.reason}{fcf.status === 'unavailable' ? `: ${unavailableReason ?? 'No admitted FCF evidence.'}` : fcf.amount !== null
+          ? `: ${fcf.amount.toLocaleString(undefined, { maximumSignificantDigits: 21 })} ${fcf.unit}.`
+          : ' — only the FCF > 0 test was retained; the amount was not recorded.'}
+      </p>
+      {lineage && <>
+        <p>FCF fiscal period{fcf.status === 'unavailable' && fcf.fiscal_year != null ? ' (attempted)' : ''}: {fcf.fiscal_year != null ? `FY${fcf.fiscal_year}` : 'not recorded'} · Financial source: {fcf.source ?? 'not recorded'} · Source financial date: {fcf.source_financial_date ?? 'not recorded'}</p>
+        <p>Basis: {fcf.basis ?? 'not recorded'} · Latest-year input coverage: {fcf.input_coverage === 'complete'
+          ? 'operating cash flow and capex admitted' : fcf.input_coverage ?? 'not recorded'}</p>
+        {fcf.dcf_base_admitted_years !== null && fcf.dcf_base_required_rows !== null && (
+          <p>DCF base: {fcf.dcf_base_admitted_years.length}/{fcf.dcf_base_required_rows} required annual rows admitted ({admittedYears || 'none'}). This window does not establish the latest FCF amount.</p>
+        )}
+      </>}
+    </section>
   );
 }
 

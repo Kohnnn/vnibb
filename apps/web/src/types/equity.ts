@@ -186,12 +186,41 @@ export interface FundamentalValuation {
   note?: string | null;
 }
 
+export interface RetainedFcf {
+  status: 'positive' | 'zero' | 'negative' | 'not_positive' | 'unavailable';
+  reason: string;
+  unavailable_reason: string | null;
+  evidence: 'signed_amount' | 'positivity_only' | null;
+  amount: number | null;
+  unit: 'VND' | null;
+  positive: boolean | null;
+  fiscal_year: number | null;
+  source: string | null;
+  source_financial_date: string | null;
+  basis: string | null;
+  input_coverage: 'complete' | 'incomplete' | null;
+  dcf_base_admitted_years: number[] | null;
+  dcf_base_required_rows: number | null;
+}
+
+export interface RetainedQualityLineage {
+  snapshot_date: string | null;
+  snapshot_computed_at?: string | null;
+  snapshot_source: string | null;
+  schema_version: number | null;
+  moat_factor_years: number[] | null;
+  revenue_cagr_window: number[] | null;
+  profit_cagr_window: number[] | null;
+}
+
 export interface CompetitiveAdvantage {
   moat?: string | null;
   moat_score?: number | null;
-  moat_factors?: Record<string, number | string | string[] | null | undefined> | null;
+  moat_factors?: Record<string, number | string | number[] | null | undefined> | null;
   quality_metrics?: Record<string, number | boolean | null | undefined> | null;
   reasons?: string[];
+  fcf?: RetainedFcf;
+  lineage?: RetainedQualityLineage | null;
   as_of?: string | null;
   note?: string | null;
 }

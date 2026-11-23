@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AICopilot } from './AICopilot';
 import { consumeCopilotStream, openCopilotChatStream } from '@/lib/api';
+import { readVniAgentRuns } from '@/lib/vniagentRunLedger';
+import { readRecentVniAgentSessions } from '@/lib/vniagentSessions';
 
 jest.mock('@/contexts/AuthContext', () => ({ useAuth: jest.fn(() => ({ user: null, session: null, loading: false, isConfigured: false, provider: 'supabase', isAdmin: false, adminStatus: 'signed-out', adminError: null, refreshAdminSession: jest.fn(), isGuest: true, signIn: jest.fn(), signUp: jest.fn(), signInWithGoogle: jest.fn(), signInWithMagicLink: jest.fn(), signInAsAdmin: jest.fn(), signInAsGuest: jest.fn(), signOut: jest.fn(), canAdminLogin: false, canGuestLogin: false })) }));
 jest.mock('@/lib/queries', () => ({
@@ -65,4 +67,33 @@ describe('AICopilot grounded follow-ups', () => {
 
         expect(screen.queryByLabelText('Suggested follow-up questions')).not.toBeInTheDocument();
     });
+});
+
+test.each(['completed', 'error'] as const)('uses the attached issuer for the conversation and %s run', async (status) => {
+    sessionStorage.clear();
+    localStorage.clear();
+    jest.clearAllMocks();
+    jest.mocked(openCopilotChatStream).mockResolvedValue({} as Response);
+    jest.mocked(consumeCopilotStream).mockImplementation(async (_response, handlers) => {
+        if (status === 'error') throw new Error('Fixture stream failure');
+        handlers?.onChunk?.('Retained evidence answer.');
+        handlers?.onDone?.({ done: true, responseMeta });
+    });
+    const dataSample = { symbol: 'HPG', fcf: { status: 'zero', amount: 0 } };
+    render(<AICopilot isOpen onClose={() => {}} currentSymbol="FPT" activeTabName="Fundamental"
+        widgetContext="Fundamental Analysis" widgetContextData={{ widgetTypeKey: 'fundamental_analysis', symbol: ' hpg ', dataSample }} />);
+
+    expect(screen.getByText('HPG', { exact: true })).toBeVisible();
+    expect(screen.getAllByText(/Connected to @Fundamental Analysis on Fundamental for HPG/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('FPT', { exact: true })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'VniAgent message' }), { target: { value: 'Explain retained FCF' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    expect(jest.mocked(openCopilotChatStream).mock.calls[0][0].context).toMatchObject({
+        symbol: 'HPG', dataSnapshot: {}, widgetPayload: { symbol: 'HPG', dataSample },
+    });
+    await waitFor(() => expect(readVniAgentRuns()).toMatchObject([{ symbol: 'HPG', status }]));
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+    expect(readRecentVniAgentSessions()).toMatchObject([{ symbol: 'HPG' }]);
+    expect(screen.getByText('Same symbol thread archive')).toBeVisible();
 });

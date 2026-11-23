@@ -109,12 +109,49 @@ Recompute is an explicit backfill over the affected symbols
 (`build_fundamental_screener.py --symbols …`, dry-run first); no automatic
 production recompute is implied by this change.
 
-The fundamental-analysis API preserves `fundamental_snapshot` as raw evidence,
+The fundamental-analysis API retains the snapshot evidence in `fundamental_snapshot`
 but returns `valuation` and `latest_fundamental_snapshot.derived` as null with a
 `section_errors.valuation` reason when admission fails. Screener enrichment
 leaves `intrinsic_value`, `margin_of_safety`, `valuation_method` and
 `fcf_positive` null and records the same reason in `provider_evidence` for
 `market_fundamental_screener`. Independent quality fields remain available.
+
+### Fundamental Analysis quality evidence
+
+`GET /api/v1/equity/{symbol}/fundamental-analysis` projects `competitive_advantage.fcf`
+and `competitive_advantage.lineage` from the independently loaded snapshot, not
+from the current request's financial statement sections. `quality_metrics.fcf_positive`
+and the compatibility fields in the response's snapshot and valuation inputs
+follow the same admission decision. The stored document is unchanged.
+
+- An admitted `inputs.derivedCoverage.fcf.positive` is only a test of annual
+  operating cash flow minus absolute capex. A false result is `not_positive`,
+  with a null amount. Ordinary v4 records do not retain the latest signed amount.
+- An explicitly retained `latestFcf` record in that coverage block can publish a
+  signed result only with `status: "admitted"`, `unit: "VND"`, a finite numeric
+  `value`, and a `fiscalYear` matching `latestYear`. It cannot override an
+  input exclusion, a matching cash-flow input conflict, or conflicting positivity
+  evidence. The writer is unchanged.
+- Old schema, absent admission, and rejected latest-year inputs produce
+  `unavailable` with a reason, not zero. Latest-year admission is separate from
+  DCF base coverage. Fundamental Analysis omits conflicting years and withholds
+  DCF outputs from a rejected base, including a legacy window that lacks
+  `incompleteWindowYears`. Independently admitted latest-year FCF and residual
+  income (RIM) valuation do not depend on that base. The DCF average is not the
+  latest-period amount.
+- Snapshot date and schema describe the retained computation; `snapshot_computed_at`
+  preserves its exact stored timestamp (`observedAt`) when recorded. The FCF
+  fiscal year, matching cash-flow provider and explicit statement source date
+  are separate fields. Receipt time, other statement dates, and the shared
+  FY/Q/TTM selector do not fill missing lineage.
+  Moat-factor periods and the published five-year CAGR windows are only shown
+  where recorded; they are not dates for the other quality metrics.
+
+The widget's CSV/JSON and VniAgent attachment carry this same qualified result.
+When a widget's issuer differs from the dashboard issuer, VniAgent labels and
+records the conversation under the attached issuer.
+The read-only MCP statement tools do not expose the retained quality snapshot;
+their cash-flow rows are not substitutes for this observation.
 
 
 ## Valuation engine contract (`fundamental_valuation.py`)
