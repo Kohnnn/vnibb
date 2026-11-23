@@ -693,3 +693,46 @@ test('Open VniAgent keeps a legacy sample without forwarding raw provider warnin
   }));
   expect(JSON.stringify(onCopilotClick.mock.calls)).not.toMatch(/__widgetRuntime|provider-debug-fixture/);
 });
+
+test('ATR status, exports, and VniAgent use only the selected symbol’s admission', async () => {
+  mockWidgetType = 'atr_regime';
+  const user = userEvent.setup();
+  const onCopilotClick = jest.fn();
+  const reason = 'Unresolved interior sessions prevent consecutive true ranges.';
+  const summary = { atr: null, rank: null, suggestedShares: null };
+  const publication = buildWidgetRuntime({
+    empty: true, apiGroup: '/equity', endpoint: '/equity/historical',
+    observationStatus: 'unavailable', admissionReason: reason,
+    requestScope: { symbol: 'VCI' }, exportData: summary,
+    warnings: ['provider-debug-fixture'],
+  });
+  const wrapper = () => (
+    <WidgetWrapper id="screener" title="ATR Regime" widgetType="atr_regime" dashboardId="dashboard" tabId="tab"
+      data={{ atr: 999 }} onCopilotClick={onCopilotClick}>
+      <AgentDataPublisher payload={publication} />
+    </WidgetWrapper>
+  );
+  const { rerender } = render(wrapper());
+  await user.click(screen.getByRole('button', { name: 'Data status: Unavailable' }));
+  expect(screen.getByText(reason)).toBeInTheDocument();
+  await user.keyboard('{Escape}');
+
+  const json = await captureWidgetExport(user, 'ATR Regime', 'JSON');
+  expect(JSON.parse(json ?? '{}')).toEqual({
+    _provenance: expect.objectContaining({ admissionReason: reason, symbol: 'VCI' }), data: summary,
+  });
+  expect((await downloadWidgetCSV(user, 'ATR Regime')).metadata.get('admission_reason')).toBe(reason);
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  expect(onCopilotClick).toHaveBeenLastCalledWith(expect.objectContaining({
+    symbol: 'VCI', dataSample: null,
+    dataProvenance: { updatedAt: null, observationStatus: 'unavailable', admissionReason: reason },
+  }));
+
+  mockTickerOverride = 'FPT';
+  rerender(wrapper());
+  expect(screen.queryByRole('button', { name: 'Data status: Unavailable' })).not.toBeInTheDocument();
+  expect(await captureWidgetExport(user, 'ATR Regime', 'CSV')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  expect(onCopilotClick).toHaveBeenLastCalledWith(expect.objectContaining({ symbol: 'FPT', dataSample: null }));
+  expect(onCopilotClick.mock.lastCall?.[0]).not.toHaveProperty('dataProvenance');
+});

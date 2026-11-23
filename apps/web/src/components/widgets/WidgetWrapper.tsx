@@ -83,7 +83,7 @@ function readAdmittedWidgetData(data: unknown, runtime = readWidgetRuntime(data)
 const agentProvenanceFields = new Set([
     'sourceLabel', 'updatedAt', 'fetchedAt', 'period', 'periodScope', 'units', 'basis',
     'coverage', 'adjustmentMode', 'cached', 'stale', 'localOnly', 'expectedClosedSession',
-    'observationStatus', 'refreshStatus',
+    'observationStatus', 'refreshStatus', 'admissionReason',
 ]);
 const agentCoverageDateFields = new Set([
     'requestedStart', 'requestedEnd', 'observedStart', 'observedEnd', 'lastValidatedSession',
@@ -404,8 +404,13 @@ export function WidgetWrapper({
     const isDashboardPriceChart = widgetType === 'price_chart' && currentWidget?.type === 'price_chart';
     const priceChartScope = usePriceChartScope(displaySymbol, currentWidget?.config, isDashboardPriceChart && !isCollapsed);
     const { request: chartRequest, controls: chartControls } = priceChartScope;
+    const usesSymbolScopedHistory = widgetType === 'atr_regime';
     const internalData = useMemo(() => {
         // Keep the widget fallback separate so the child's own empty/withheld state wins.
+        if (usesSymbolScopedHistory) {
+            const scope = readWidgetRuntime(publishedData)?.requestScope;
+            return scope && 'symbol' in scope && scope.symbol === displaySymbol.toUpperCase() ? publishedData : undefined;
+        }
         if (!isDashboardPriceChart) return publishedData === undefined ? widgetData : publishedData;
         if (!chartRequest) return undefined;
         // The toolbar and portal see the new selection before the child can publish it.
@@ -413,14 +418,14 @@ export function WidgetWrapper({
             return { ...publishedData as WidgetRuntimePayload, chartType: chartControls.chartType };
         }
         return buildPriceHistoryRuntime(chartRequest, chartControls.chartType);
-    }, [chartControls.chartType, chartRequest, isDashboardPriceChart, publishedData, widgetData]);
+    }, [chartControls.chartType, chartRequest, displaySymbol, isDashboardPriceChart, publishedData, usesSymbolScopedHistory, widgetData]);
     const widgetRuntime = readWidgetRuntime(internalData);
     const dataToExport = useMemo(() => {
         const data = readAdmittedWidgetData(internalData, widgetRuntime);
         // An older publisher may supply only metadata in its runtime envelope.
-        return !isDashboardPriceChart && data === undefined && internalData !== widgetData
+        return !usesSymbolScopedHistory && !isDashboardPriceChart && data === undefined && internalData !== widgetData
             ? readAdmittedWidgetData(widgetData) : data;
-    }, [internalData, isDashboardPriceChart, widgetData, widgetRuntime]);
+    }, [internalData, isDashboardPriceChart, usesSymbolScopedHistory, widgetData, widgetRuntime]);
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]

@@ -37,6 +37,8 @@ export interface ExportProvenance {
   /** True only when the admitted observation is the expected closed session. */
   expectedClosedSession?: boolean;
   observationStatus?: WidgetObservationStatus;
+  /** User-facing analytical withholding reason, not a raw upstream error. */
+  admissionReason?: string;
   refreshStatus?: WidgetRefreshStatus;
   adjustmentMode?: string;
   /** Effective reporting period; separate from request scope and source time. */
@@ -101,6 +103,7 @@ function provenanceEntries(input: ExportProvenance) {
     ['market_closed', 'Market closed', resolved.marketClosed],
     ['expected_closed_session', 'Expected closed session', resolved.expectedClosedSession],
     ['observation_status', 'Observations', resolved.observationStatus],
+    ['admission_reason', 'Admission reason', resolved.admissionReason],
     ['refresh_status', 'Refresh', resolved.refreshStatus],
     ['adjustment_mode', 'Adjustment mode', resolved.adjustmentMode],
     ['warnings', 'Warnings', resolved.warnings?.join(' · ')],

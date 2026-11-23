@@ -258,11 +258,11 @@ class TechnicalAnalysisService:
     ) -> Optional[pd.DataFrame]:
         from vnibb.api.v1.equity import (
             _historical_resolution_meta,
+            _historical_unit_exclusions,
             _load_historical_from_db,
             _load_historical_from_mongo,
             _merge_historical_rows,
         )
-        from vnibb.core.price_units import is_index_symbol
 
         source_rows = []
         try:
@@ -280,8 +280,7 @@ class TechnicalAnalysisService:
             return None
 
         rows, source_counts = _merge_historical_rows(source_rows)
-        expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
-        excluded = [row for _, items in source_rows for row in items if row.price_unit != expected_unit]
+        excluded = _historical_unit_exclusions(symbol, source_rows)
         unresolved_dates = {row.time for row in excluded} - {row.time for row in rows}
         if unresolved_dates:
             frame = pd.DataFrame()
@@ -295,6 +294,7 @@ class TechnicalAnalysisService:
         frame.attrs["history_resolution"] = _historical_resolution_meta(
             rows, "raw", start_date=start_date, end_date=end_date, interval="1D",
             source_counts=source_counts, mongo_docs=[], warnings=[],
+            excluded=excluded,
         ).model_dump()
         return frame
 
