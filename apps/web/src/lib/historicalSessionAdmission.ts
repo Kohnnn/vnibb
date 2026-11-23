@@ -39,6 +39,7 @@ export function getHistoricalSessionAdmission(response?: EquityHistoricalRespons
     return unavailable('Verified historical calendar and admission evidence unavailable for this request.');
   }
   const basis = unit === 'index_points' && meta.session_basis === 'not_applicable'
+    && data.every((row) => row.adjustment_applied === false && row.raw_close === row.close)
     ? 'not_applicable'
     : unit === 'VND' && meta.session_basis === 'adjusted'
       && data.every((row) => row.adjustment_mode === 'adjusted' && row.adjustment_applied === true)
@@ -51,7 +52,7 @@ export function getHistoricalSessionAdmission(response?: EquityHistoricalRespons
   }
   const returnedDates = new Set(data.map((row) => row.time));
   if (!meta.unresolved_excluded_dates.every((day, i, days) => (
-    isOrderedDate(day, days[i - 1]) && !returnedDates.has(day)
+    isOrderedDate(day, days[i - 1]) && sessionDates.has(day) && !returnedDates.has(day)
   ))) {
     return unavailable('Unresolved historical dates conflict with returned session evidence.');
   }

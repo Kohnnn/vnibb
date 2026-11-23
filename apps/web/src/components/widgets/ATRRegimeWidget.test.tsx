@@ -25,6 +25,7 @@ type Options = {
   error?: Error | null;
   count?: number;
   flat?: boolean;
+  adjustedFinalClose?: boolean;
   /** Drop per-row price_unit so certified metadata has no row-level proof. */
   rowsMissingUnitProof?: boolean;
   skipSession?: string;
@@ -42,8 +43,10 @@ function bars(count: number, options: Options) {
       close: 100000,
       volume: 1000,
       price_unit: options.index ? 'index_points' as const : 'VND' as const,
+      raw_close: options.adjustedFinalClose && index === count - 1 ? 200000 : 100000,
+      adjustment_factor: options.index ? null : options.adjustedFinalClose && index === count - 1 ? 0.5 : 1,
       adjustment_mode: 'adjusted' as const,
-      adjustment_applied: true,
+      adjustment_applied: !options.index,
     };
     return options.rowsMissingUnitProof ? { ...row, price_unit: undefined } : row;
   }).filter((row) => row.time !== options.skipSession);
@@ -154,6 +157,7 @@ describe('ATR regime availability', () => {
   it('does not certify a returned bar also reported as unresolved', () => {
     const publish = showATR({ ...certified, unresolved_excluded_dates: [sessions[4]], unresolved_session_count: 1 });
     expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'unavailable', atr: null });
+    expect(publish.mock.lastCall?.[0].__widgetRuntime.provenance.stale).toBe(true);
     expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
   });
 
@@ -195,13 +199,23 @@ describe('ATR regime availability', () => {
     expect(screen.getByText('Suggested Shares')).toBeInTheDocument();
   });
 
+  it('keeps valid adjusted volatility but does not size shares on a rescaled final close', () => {
+    const publish = showATR(certified, { adjustedFinalClose: true });
+    expect(screen.getByText('ATR %')).toBeInTheDocument();
+    expect(screen.getByText(/Share sizing requires the final close/)).toBeInTheDocument();
+    expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({
+      atr: 20000, rank: 100, stopDistance: null, suggestedShares: null, suggestedValue: null,
+    });
+  });
+
   it('reports a genuine zero ATR instead of missing history', () => {
     const publish = showATR(certified, { flat: true });
 
     expect(screen.getByText('Sizing Model')).toBeInTheDocument();
     expect(screen.queryByText('Not enough ATR history')).not.toBeInTheDocument();
     expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
-    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ atr: 0, atrPct: 0, suggestedShares: null });
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ atr: 0, atrPct: 0, rank: 100, suggestedShares: null });
   });
 
   it('reports missing history instead of a zero ATR', () => {

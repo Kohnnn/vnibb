@@ -7,7 +7,7 @@ import json
 import logging
 import math
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from hashlib import sha256
@@ -151,6 +151,7 @@ def _dedup_eod_rows(
     *,
     limit: int | None = None,
     preserve_provenance: bool = True,
+    qualifies: Callable[[dict[str, Any]], bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Collapse to one deterministically ranked bar per logical trade date."""
 
@@ -160,6 +161,8 @@ def _dedup_eod_rows(
         if key is None:
             continue
         rank = _eod_row_rank(row)
+        if qualifies is not None:
+            rank = (not qualifies(row), *rank)
         current = best.get(key)
         if current is None or rank < current[0]:
             best[key] = (rank, dict(row))
@@ -853,8 +856,10 @@ class MongoMarketDataService:
         end_date: date | None = None,
         limit: int = 20000,
         include_provenance: bool = True,
+        include_candidates: bool = False,
+        qualifies: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[dict[str, Any]]:
-        """Return normalized EOD OHLCV rows for an explicit date range."""
+        """Return ranked EOD bars, optionally with preselection candidates for admission evidence."""
 
         symbol_upper = symbol.upper()
         empty_page = limit == 0
@@ -873,10 +878,15 @@ class MongoMarketDataService:
                 {"symbol": symbol_upper, **({"tradeDate": bounds} if bounds else {})},
                 {"_id": 0},
             ).sort("tradeDate", 1)
-            return _dedup_eod_rows(
-                _stream_eod_days(cursor, limit),
-                preserve_provenance=include_provenance,
-            )
+            if qualifies is not None or include_candidates:
+                # EOD history may include legacy rows with no interval marker,
+                # but an explicit non-daily candidate cannot occupy a daily slot.
+                cursor = (row for row in cursor if str(row.get("interval") or "1D").upper() == "1D")
+            candidates = _stream_eod_days(cursor, limit)
+            selected = _dedup_eod_rows(candidates, preserve_provenance=include_provenance, qualifies=qualifies)
+            if include_candidates:
+                return MongoReadRows(selected, {"candidates": candidates})
+            return selected
 
         return await _read_mongo(_read, empty_page=empty_page)
 

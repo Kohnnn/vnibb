@@ -91,8 +91,8 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
   const observationStatus = hasData ? 'available' : isLoading ? 'loading' : 'unavailable';
   const refreshStatus = failure ? 'failed' : isFetching ? 'refreshing' : data ? 'succeeded' : undefined;
   const coverage = meta?.calendar_verified === true ? meta.completeness_status ?? 'unknown' : 'unknown';
-  const health = deriveWidgetHealth({ updatedAt: lastDataDate, cached: isFallback, stale: isFallback, observationStatus, refreshStatus, coverage });
-  const isStale = health.status === 'stale';
+  const isStale = deriveWidgetHealth({ updatedAt: lastDataDate, stale: isFallback }).status === 'stale';
+  const health = deriveWidgetHealth({ updatedAt: lastDataDate, cached: isFallback, stale: isStale, observationStatus, refreshStatus, coverage });
   const admissionReason = hasData || isLoading ? undefined
     : failure ? 'Historical price request failed.'
     : unavailableReason ?? `Need at least ${MIN_RANK_POINTS} ATR observations for rank.`;
@@ -112,16 +112,19 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
   const lastClose = candles.at(-1)?.close ?? 0;
   const atrPct = hasData ? (lastAtr / lastClose) * 100 : 0;
   const atrPctHistory = atrSeries.map((point, i) => (point.value / candles[i + ATR_PERIOD - 1].close) * 100);
-  const rank = atrPct > 0 ? percentileRank(atrPctHistory, atrPct) : 0;
+  const rank = percentileRank(atrPctHistory, atrPct);
   const regime = getRegime(rank);
   const riskBudget = 1_000_000;
   const stopDistance = lastAtr * regime.stopMultiple;
-  const sizingAdmitted = hasData && admission.unit === 'VND' && stopDistance > 0;
+  const finalBar = candles.at(-1);
+  const isTradingPriceBasis = finalBar?.adjustment_factor === 1 && finalBar.raw_close === finalBar.close;
+  const sizingAdmitted = hasData && admission.unit === 'VND' && isTradingPriceBasis && stopDistance > 0;
   const suggestedShares = sizingAdmitted ? Math.floor(riskBudget / stopDistance) : null;
   const suggestedValue = suggestedShares !== null ? suggestedShares * lastClose : null;
-  const sizingReason = hasData && !sizingAdmitted
-    ? admission.unit === 'index_points' ? 'Share sizing is not applicable to index points.' : 'Share sizing requires a positive stop distance.'
-    : null;
+  const sizingReason = !hasData || sizingAdmitted ? null
+    : admission.unit === 'index_points' ? 'Share sizing is not applicable to index points.'
+    : !isTradingPriceBasis ? 'Share sizing requires the final close on its original trading-price basis.'
+    : 'Share sizing requires a positive stop distance.';
   const basis = admission.basis === 'adjusted' ? 'Source-adjusted OHLC, verified daily sessions'
     : admission.basis === 'not_applicable' ? 'Index points, verified daily sessions' : undefined;
   const recentAtr = atrSeries.slice(-12);

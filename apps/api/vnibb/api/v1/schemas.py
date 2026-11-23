@@ -29,9 +29,10 @@ class StandardResponse(BaseModel, Generic[T]):
 
 class HistoricalMetaData(MetaData):
     excluded_row_count: int
+    excluded_dates: list[date]
     replaced_excluded_dates: list[date]
-    unresolved_excluded_dates: list[date]
-    unresolved_session_count: int
+    unresolved_excluded_dates: list[date] | None
+    unresolved_session_count: int | None
     calendar_verified: bool | None
     expected_session_dates: list[date] | None
     missing_session_count: int | None

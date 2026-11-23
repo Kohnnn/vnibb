@@ -34,9 +34,10 @@ export interface EquityHistoricalResponse {
     unit_status?: 'confirmed_vnd' | 'mixed' | 'unconfirmed' | 'not_applicable' | null;
     session_basis?: 'adjusted' | 'mixed' | 'unverified' | 'not_applicable' | null;
     excluded_row_count?: number;
+    excluded_dates?: string[];
     replaced_excluded_dates?: string[];
-    unresolved_excluded_dates?: string[];
-    unresolved_session_count?: number;
+    unresolved_excluded_dates?: string[] | null;
+    unresolved_session_count?: number | null;
     calendar_verified?: boolean | null;
     expected_session_dates?: string[] | null;
     missing_session_count?: number | null;
