@@ -276,36 +276,39 @@ def test_volume_delta_short_windows_and_no_month_comparisons(bars, total_20d):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("quote_day", "observed_at", "quote_volume", "stored_volume", "delta", "total_20d"),
+    ("receipt_day", "observed_at", "quote_volume", "stored_volume", "applied_day", "delta", "total_20d"),
     [
-        pytest.param("2026-03-20", "2026-03-20", None, 100, 100, 2000, id="same-date-fallback"),
+        pytest.param("2026-03-20", "2026-03-20", None, 100, "2026-03-20", 100, 2000, id="same-date-fallback"),
         pytest.param(
-            "2026-03-20",
+            "2026-03-23",
             "2026-03-19T17:05:00Z",
             None,
             100,
+            "2026-03-20",
             100,
             2000,
             id="same-market-date-in-utc",
         ),
-        pytest.param("2026-03-20", "2026-03-20", None, 0, 0, 1900, id="same-date-zero-fallback"),
-        pytest.param("2026-03-20", "2026-03-20", 0, 100, 0, 1900, id="quote-zero-wins"),
-        pytest.param("2026-03-20", "2026-03-20", None, None, None, None, id="both-missing"),
-        pytest.param("2026-03-20", None, None, 100, None, None, id="unknown-market-date"),
-        pytest.param("2026-03-23", "2026-03-23", None, 100, None, None, id="new-date-missing"),
+        pytest.param("2026-03-20", "2026-03-20", None, 0, "2026-03-20", 0, 1900, id="same-date-zero-fallback"),
+        pytest.param("2026-03-20", "2026-03-20", 0, 100, "2026-03-20", 0, 1900, id="quote-zero-wins"),
+        pytest.param("2026-03-20", "2026-03-20", None, None, "2026-03-20", None, None, id="both-missing"),
+        pytest.param("2026-03-23", None, 250, 100, None, 100, 2000, id="unknown-market-date"),
+        pytest.param("2026-03-23", "invalid", 250, 100, None, 100, 2000, id="invalid-market-date"),
+        pytest.param("2026-03-24", "2026-03-23", None, 100, "2026-03-23", None, None, id="new-date-missing"),
         pytest.param(
             "2026-03-20",
             "2026-03-19T08:30:00Z",
             None,
             100,
             None,
-            None,
+            100,
+            2000,
             id="receipt-date-matches-but-market-date-differs",
         ),
     ],
 )
 async def test_quant_volume_delta_merges_quote_without_imputing_volume(
-    client, monkeypatch, quote_day, observed_at, quote_volume, stored_volume, delta, total_20d
+    client, monkeypatch, receipt_day, observed_at, quote_volume, stored_volume, applied_day, delta, total_20d
 ):
     frame = _build_price_frame(30).assign(
         time=pd.bdate_range(end="2026-03-20", periods=30),
@@ -318,10 +321,9 @@ async def test_quant_volume_delta_merges_quote_without_imputing_volume(
     frame.loc[29, "volume"] = stored_volume
     monkeypatch.setattr(quant, "_load_price_frame", AsyncMock(return_value=frame))
 
-    quote_timestamp = f"{quote_day} 10:15:00"
     quote_row = {
         "time": observed_at,
-        "updated_at": quote_timestamp,
+        "updated_at": f"{receipt_day} 10:15:00",
         "open": 110.0,
         "high": 130.0,
         "low": 110.0,
@@ -347,12 +349,14 @@ async def test_quant_volume_delta_merges_quote_without_imputing_volume(
     assert response.status_code == 200
     payload = response.json()
     assert payload["error"] is None
-    returned_bars = 30 if quote_day == "2026-03-20" else 31
+    last_day = applied_day or "2026-03-20"
+    returned_bars = 30 if last_day == "2026-03-20" else 31
     assert payload["meta"]["data_points"] == returned_bars
+    assert payload["meta"]["last_data_date"] == f"{last_day}T00:00:00"
     metric = payload["data"]["metrics"]["volume_delta"]
     assert metric["cumulative"][-1] == {
-        "date": quote_day,
-        "close": 130,
+        "date": last_day,
+        "close": 110 if applied_day is None else 130,
         "delta": delta,
         "cumulative_delta": None if delta is None else 2900 + delta,
     }
@@ -1378,7 +1382,7 @@ async def test_peer_analytics_omit_unresolved_price_sessions(monkeypatch, endpoi
 
 
 @pytest.mark.asyncio
-async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_db, monkeypatch):
+async def test_load_quant_frame_with_warning_appends_quote_on_observed_date(test_db, monkeypatch):
     async def fake_load_price_frame(*_args, **_kwargs):
         return pd.DataFrame(
             [
@@ -1400,7 +1404,8 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         high = 104.0
         low = 100.8
         volume = 1_250_000
-        updated_at = pd.Timestamp("2026-03-21 10:15:00")
+        updated_at = pd.Timestamp("2026-03-24 10:15:00")
+        as_of = pd.Timestamp("2026-03-23 15:00:00+07:00")
 
     async def fake_fetch_quote(*_args, **_kwargs):
         return DummyQuote(), False
@@ -1412,14 +1417,14 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         db=test_db,
         symbol="VCI",
         start_date=date(2026, 3, 1),
-        end_date=date(2026, 3, 21),
+        end_date=date(2026, 3, 24),
         source="VCI",
         period="1Y",
         adjustment_mode="raw",
     )
 
-    assert frame["close"].tolist()[-1] == 103.2
-    assert frame["time"].dt.date.tolist()[-1] == date(2026, 3, 21)
+    assert frame["close"].tolist() == [100.5, 103.2]
+    assert frame["time"].dt.date.tolist() == [date(2026, 3, 20), date(2026, 3, 23)]
     assert warning is not None
     assert "latest quote" in warning.lower()
 

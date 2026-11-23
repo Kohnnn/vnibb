@@ -284,6 +284,8 @@ Prediction markets notes:
 
 Volume flow keeps a missing daily delta and its chart point `null`. Monthly means use observed deltas only. The cumulative `basis` distinguishes a full returned-price window from an observed subtotal or unavailable series; it does not certify exchange-session coverage. `current_20d_cumulative_delta` requires all of the last 20 returned price bars to have an observed delta. `divergence_months` is `null` without a comparable month pair or if a compared month has missing deltas. Measured `0` remains valid.
 
+Quant places the latest quote on the Vietnam market date of its source `as_of`, not its receipt date. A quote without a known observation date, or one older than the last retained bar, leaves history unchanged. Missing quote volume can use the retained volume only on the same market date.
+
 ### Utility / Admin
 - `GET /dashboard/`
 - `POST /dashboard/`

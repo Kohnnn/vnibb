@@ -44,6 +44,7 @@ from vnibb.providers.vnstock.equity_historical import (
 )
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 from vnibb.services import statement_admission
+from vnibb.services.market_session import market_session_date
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
@@ -622,40 +623,27 @@ async def _merge_latest_quote_into_frame(
     expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
     if getattr(quote, "price_unit", "unknown") != expected_unit:
         return frame, "Skipped latest quote with unknown or incompatible price units."
-    quote_time = getattr(quote, "updated_at", None)
-    if quote_price is None or quote_time is None:
+    quote_date = market_session_date(getattr(quote, "as_of", None))
+    if quote_price is None or quote_date is None or pd.isna(quote_date):
         return frame, None
-
-    quote_timestamp = pd.to_datetime(quote_time, errors="coerce")
-    if pd.isna(quote_timestamp):
-        return frame, None
-    if getattr(quote_timestamp, "tzinfo", None) is not None:
-        quote_timestamp = quote_timestamp.tz_localize(None)
 
     diagnostics = frame.attrs.get("price_diagnostics")
     merged = frame.copy().sort_values("time").reset_index(drop=True)
     last_row = merged.iloc[-1]
-    quote_date = quote_timestamp.normalize()
-    last_date = pd.to_datetime(last_row["time"], errors="coerce")
-    if pd.isna(last_date):
+    last_date = market_session_date(last_row["time"])
+    if last_date is None or pd.isna(last_date):
         return frame, None
-    last_date = last_date.normalize()
 
     if quote_date < last_date:
         return frame, None
 
     quote_volume = getattr(quote, "volume", None)
     if pd.isna(quote_volume) and quote_date == last_date:
-        # A delivery timestamp cannot prove that volume belongs to the same session.
-        as_of = pd.to_datetime(getattr(quote, "as_of", None), errors="coerce")
-        if not pd.isna(as_of) and as_of.tzinfo is not None:
-            as_of = as_of.tz_convert(settings.vn_timezone)
-        if not pd.isna(as_of) and as_of.date() == last_date.date():
-            quote_volume = last_row.get("volume")
+        quote_volume = last_row.get("volume")
 
     fallback_open = float(last_row.get("close") or quote_price)
     latest_row = {
-        "time": quote_timestamp,
+        "time": pd.Timestamp(quote_date),
         "open": float(getattr(quote, "open", None) or fallback_open),
         "high": float(
             getattr(quote, "high", None)
