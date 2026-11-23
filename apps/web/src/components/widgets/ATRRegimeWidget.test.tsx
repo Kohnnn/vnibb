@@ -30,24 +30,24 @@ type Options = {
   /** Drop per-row price_unit so certified metadata has no row-level proof. */
   rowsMissingUnitProof?: boolean;
   skipSession?: string;
-  index?: boolean;
+  indexSymbol?: string;
 };
 
 function bars(count: number, options: Options) {
   return Array.from({ length: count }, (_, index) => {
     const row = {
-      symbol: options.index ? 'VN30' : 'FPT',
+      symbol: options.indexSymbol ?? 'FPT',
       time: options.datesMissing ? '' : sessions[index],
       open: 100000,
       high: options.flat ? 100000 : 110000,
       low: options.flat ? 100000 : 90000,
       close: 100000,
       volume: 1000,
-      price_unit: options.index ? 'index_points' as const : 'VND' as const,
+      price_unit: options.indexSymbol ? 'index_points' as const : 'VND' as const,
       raw_close: options.adjustedFinalClose && index === count - 1 ? 200000 : 100000,
-      adjustment_factor: options.index ? null : options.adjustedFinalClose && index === count - 1 ? 0.5 : 1,
+      adjustment_factor: options.indexSymbol ? null : options.adjustedFinalClose && index === count - 1 ? 0.5 : 1,
       adjustment_mode: 'adjusted' as const,
-      adjustment_applied: !options.index,
+      adjustment_applied: !options.indexSymbol,
     };
     return options.rowsMissingUnitProof ? { ...row, price_unit: undefined } : row;
   }).filter((row) => row.time !== options.skipSession);
@@ -60,7 +60,7 @@ function showATR(meta: NonNullable<EquityHistoricalResponse['meta']>, options: O
     error: options.error ?? null, refetch: jest.fn(), dataUpdatedAt: receivedAt,
   } as unknown as UseQueryResult<EquityHistoricalResponse, Error>);
   const publish = jest.fn();
-  render(<ATRRegimeWidget symbol={options.index ? 'VN30' : 'FPT'} onDataChange={publish} />);
+  render(<ATRRegimeWidget symbol={options.indexSymbol ?? 'FPT'} onDataChange={publish} />);
   return publish;
 }
 
@@ -186,17 +186,17 @@ describe('ATR regime availability', () => {
     expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'available', admittedSessions: 38, historyCount: 25 });
   });
 
-  it('does not invent a share sizing recommendation for index-point history', () => {
-    const publish = showATR({ ...certified, unit_status: 'not_applicable', session_basis: 'not_applicable' }, { index: true });
+  it.each(['VN30', 'VN100', 'VNDIAMOND'])('keeps %s in the ATR handoff without inventing share sizing', (indexSymbol) => {
+    const publish = showATR({ ...certified, unit_status: 'not_applicable', session_basis: 'not_applicable' }, { indexSymbol });
     expect(screen.getByText('ATR %')).toBeInTheDocument();
     expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
     const dataSample = getWidgetExportData(publish.mock.lastCall?.[0]);
-    expect(dataSample).toMatchObject({ symbol: 'VN30', status: 'available', suggestedShares: null });
+    expect(dataSample).toMatchObject({ symbol: indexSymbol, status: 'available', suggestedShares: null });
     const request = buildVniAgentWorkspaceContext({
       widgetTypeKey: 'atr_regime', symbol: 'FPT', dataSnapshot: { quote: { symbol: 'FPT' } },
-      widgetPayload: { symbol: 'vn30', dataSample },
+      widgetPayload: { symbol: indexSymbol.toLowerCase(), dataSample },
     });
-    expect(request).toMatchObject({ symbol: 'VN30', widgetPayload: { symbol: 'VN30', dataSample } });
+    expect(request).toMatchObject({ symbol: indexSymbol, widgetPayload: { symbol: indexSymbol, dataSample } });
     expect(request.dataSnapshot).toEqual({});
   });
 

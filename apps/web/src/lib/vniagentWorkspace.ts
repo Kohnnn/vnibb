@@ -84,15 +84,21 @@ function unscopedCapabilityContext(): VniAgentWidgetCapabilityContext {
   }
 }
 
-// Benchmark identifiers used by the historical analytics widgets are not all three-letter tickers.
-const HISTORICAL_BENCHMARKS: Record<string, true> = {
-  VNINDEX: true, VN30: true, HNX: true, HNXINDEX: true, HNX30: true, UPCOM: true, UPCOMINDEX: true,
-}
+// Keep the named benchmarks aligned with _INDEX_SYMBOLS in vnibb/core/price_units.py.
+const HISTORICAL_BENCHMARKS = new Set([
+  'VNINDEX', 'HNXINDEX', 'UPCOMINDEX', 'HNX30', 'VN30', 'VNMID', 'VNSML',
+  'VN100', 'VNALL', 'VNSI', 'VNIT', 'VNIND', 'VNCONS', 'VNCOND', 'VNHEAL',
+  'VNENE', 'VNUTI', 'VNREAL', 'VNFIN', 'VNMAT', 'VNDIAMOND', 'VNFINLEAD',
+  'VNFINSELECT', 'VNX50', 'VNXALL', 'HNXFIN', 'HNXCON', 'HNXLCAP', 'HNXMAN',
+  'HNXMSCAP', 'UPCOMLAR', 'UPCOMMID', 'UPCOMSML', 'HNX', 'UPCOM',
+  'VNMIDCAP', 'VNSMALLCAP', 'VNALLSHARE',
+])
 
 function readCapabilitySymbol(value: unknown, allowsHistoricalBenchmark: boolean): string {
   if (typeof value !== 'string') return ''
   const symbol = value.trim().toUpperCase()
-  return /^[A-Z0-9]{3}$/.test(symbol) || (allowsHistoricalBenchmark && Object.hasOwn(HISTORICAL_BENCHMARKS, symbol)) ? symbol : ''
+  const isBenchmark = allowsHistoricalBenchmark && HISTORICAL_BENCHMARKS.has(symbol.replace(/-/g, ''))
+  return /^[A-Z0-9]{3}$/.test(symbol) || isBenchmark ? symbol : ''
 }
 
 export function buildVniAgentWorkspaceContext(input: VniAgentWorkspaceContextInput): VniAgentWorkspaceContext {

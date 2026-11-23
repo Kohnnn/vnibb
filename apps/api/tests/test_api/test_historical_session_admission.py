@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from vnibb.api.v1 import equity
+from vnibb.core.price_units import persisted_price_record
 from vnibb.models.news import CompanyEvent
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
@@ -17,11 +18,13 @@ from vnibb.services.mongo_market_data_service import MongoMarketDataService
 @pytest.fixture(autouse=True)
 def offline_history(monkeypatch):
     monkeypatch.setattr(equity.settings, "market_holiday_dates", [])
-    monkeypatch.setattr(equity, "_load_historical_from_recent_cache", AsyncMock(return_value=[]))
+    monkeypatch.setattr(equity.redis_client, "get_json", AsyncMock(return_value=None))
+    provider_fetch = equity.VnstockEquityHistoricalFetcher.fetch
     monkeypatch.setattr(
         equity.VnstockEquityHistoricalFetcher, "fetch", AsyncMock(side_effect=TimeoutError("fixture timeout"))
     )
     monkeypatch.setattr(equity, "_schedule_critical_reinforcement", AsyncMock())
+    return provider_fetch
 
 
 @pytest.fixture
@@ -175,6 +178,52 @@ async def test_admission_counts_physical_candidates_and_ignores_closures(client,
     assert meta["missing_trailing_sessions"] == 1
     assert [row["time"] for row in payload["data"]] == ["2026-06-08", "2026-06-11"]
     assert payload["data"][0]["close"] == payload["data"][0]["high"] == 29
+
+
+@pytest.mark.asyncio
+async def test_recent_redis_mirror_counts_once_but_independent_same_date_candidates_count(client, test_db, monkeypatch):
+    day = date(2026, 6, 8)
+    stock = Stock(symbol="XYZ", exchange="HOSE")
+    test_db.add(stock)
+    await test_db.flush()
+    stored = StockPrice(
+        stock_id=stock.id, symbol="XYZ", time=day, interval="1D", source="legacy",
+        open=1000, high=1020, low=980, close=1000, adj_close=1000, volume=0,
+    )
+    test_db.add(stored)
+    await test_db.commit()
+    mirror = {**persisted_price_record(stored), "time": day.isoformat()}
+    recent_cache = AsyncMock(return_value=[mirror])
+    monkeypatch.setattr(equity.redis_client, "get_json", recent_cache)
+    mount_retained_prices(monkeypatch, [retained_bar(day, "unknown", source="other", price_source="other")])
+
+    meta = (await historical(client, day, day))["meta"]
+
+    recent_cache.assert_awaited_once_with(equity.build_cache_key("vnibb", "price", "recent", "XYZ"))
+    assert meta["excluded_row_count"] == 2  # One SQL observation and one independent Mongo candidate.
+    assert meta["excluded_dates"] == meta["unresolved_excluded_dates"] == [day.isoformat()]
+
+
+@pytest.mark.asyncio
+async def test_provider_unit_rejection_survives_malformed_volume(client, monkeypatch, offline_history):
+    start, hole, end = date(2026, 6, 8), date(2026, 6, 9), date(2026, 6, 10)
+    mount_retained_prices(monkeypatch, [retained_bar(start), retained_bar(end)])
+    fetcher = equity.VnstockEquityHistoricalFetcher
+    monkeypatch.setattr(fetcher, "fetch", offline_history)
+    row = {
+        "time": hole.isoformat(), "price_unit": "unknown", "open": 1000, "high": 1020, "low": 980, "close": 1000,
+    }
+    extract = AsyncMock(return_value=[{**row, "volume": "not reported"}, {**row, "volume": 0}])
+    monkeypatch.setattr(fetcher, "extract_data", extract)
+
+    payload = await historical(client, start, end)
+
+    extract.assert_awaited_once()
+    assert [bar["time"] for bar in payload["data"]] == [start.isoformat(), end.isoformat()]
+    meta = payload["meta"]
+    assert meta["excluded_row_count"] == 2  # One convertible rejection and one lost during numeric conversion.
+    assert meta["excluded_dates"] == meta["unresolved_excluded_dates"] == [hole.isoformat()]
+    assert meta["missing_interior_sessions"] == meta["unresolved_session_count"] == 1
 
 
 @pytest.mark.asyncio
