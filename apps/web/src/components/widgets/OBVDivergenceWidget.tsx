@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { Activity, TrendingDown, TrendingUp } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
-import { calculateOBV, type OHLCData } from '@/lib/chartUtils';
+import { calculateOBV } from '@/lib/chartUtils';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
@@ -12,11 +12,14 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatPercent } from '@/lib/units';
 import { signedToneClass } from '@/lib/priceColor';
+import type { EquityHistoricalData } from '@/types/equity';
 
 interface OBVDivergenceWidgetProps {
   symbol: string;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
+
+const LOOKBACK_BARS = 20;
 
 type DivergenceSignal = 'bullish' | 'bearish' | 'none';
 
@@ -28,31 +31,18 @@ function formatCompact(value: number): string {
   return value.toFixed(0);
 }
 
-function percentChange(current: number, previous: number): number {
-  if (!Number.isFinite(previous) || previous === 0) return 0;
-  return ((current - previous) / Math.abs(previous)) * 100;
-}
-
-function detectDivergence(candles: OHLCData[], lookback: number) {
-  if (candles.length < lookback + 1) {
-    return {
-      signal: 'none' as DivergenceSignal,
-      priceDeltaPct: 0,
-      obvDeltaPct: 0,
-      confidence: 0,
-    };
-  }
-
-  const recent = candles.slice(-lookback);
+function detectDivergence(recent: EquityHistoricalData[]) {
+  if (recent.length < LOOKBACK_BARS) return null;
   const obvSeries = calculateOBV(recent);
+  if (!obvSeries) return null;
 
   const firstClose = recent[0].close;
   const lastClose = recent[recent.length - 1].close;
-  const firstObv = obvSeries[0]?.value ?? 0;
-  const lastObv = obvSeries[obvSeries.length - 1]?.value ?? 0;
+  const firstObv = obvSeries[0].value;
+  const lastObv = obvSeries[obvSeries.length - 1].value;
 
-  const priceDeltaPct = percentChange(lastClose, firstClose);
-  const obvDeltaPct = percentChange(lastObv, firstObv === 0 ? 1 : firstObv);
+  const priceDeltaPct = ((lastClose - firstClose) / firstClose) * 100;
+  const obvDeltaPct = ((lastObv - firstObv) / Math.max(1, Math.abs(firstObv))) * 100;
 
   const priceTrendUp = priceDeltaPct > 1.5;
   const priceTrendDown = priceDeltaPct < -1.5;
@@ -73,6 +63,7 @@ function detectDivergence(candles: OHLCData[], lookback: number) {
     priceDeltaPct,
     obvDeltaPct,
     confidence,
+    obvSeries,
   };
 }
 
@@ -101,16 +92,23 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
     && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(meta?.unit_status ?? '')
     && (data?.data ??[]).every((row) => row.price_unit === expectedUnit);
   const derivedWithheld = Boolean(data) && !certifiedUnits;
-  const candles = (derivedWithheld ?[] : data?.data || []) as OHLCData[];
-  const hasData = candles.length > 30;
+  const candles = derivedWithheld ? [] : (data?.data ?? []);
+  const recent = candles.slice(-LOOKBACK_BARS);
+  const divergence = detectDivergence(recent);
+  const hasData = divergence !== null;
   const isFallback = Boolean(error && hasData);
   const adjustmentWarning = meta?.adjustment_warning ?? null;
   const lastDataDate = [meta?.freshness_as_of, meta?.last_data_date, candles.at(-1)?.time]
     .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
-  const lookback = 20;
-  const { signal, priceDeltaPct, obvDeltaPct, confidence } = detectDivergence(candles, lookback);
+  const signal = divergence?.signal;
+  const confidence = divergence?.confidence;
+  const unavailableReason = derivedWithheld
+    ? 'OBV divergence unavailable: historical price units were not certified.'
+    : recent.length < LOOKBACK_BARS
+      ? 'Not enough historical candles'
+      : `OBV divergence unavailable: incomplete observations in the ${LOOKBACK_BARS}-bar lookback.`;
 
   useEffect(() => {
     onDataChange?.(
@@ -119,14 +117,14 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
         apiGroup: '/equity',
         endpoint: `/equity/historical?symbol=${upperSymbol}&adjustment_mode=adjusted`,
         sourceLabel: 'OBV divergence (derived)',
+        basis: hasData ? `Latest ${LOOKBACK_BARS} returned bars, each with observed volume.` : undefined,
         lastDataDate,
         fetchedAt: dataUpdatedAt,
         adjustmentMode: 'adjusted',
         stale: isFallback,
         derived: true,
         extra: {
-          signal,
-          confidence,
+          ...(hasData ? { signal, confidence } : {}),
           adjustmentCoveragePct: data?.meta?.adjustment_coverage_pct ?? null,
           adjustmentRequestedCount: data?.meta?.adjustment_requested_count ?? 0,
           adjustmentAppliedCount: data?.meta?.adjustment_applied_count ?? 0,
@@ -136,9 +134,7 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
     );
   }, [adjustmentWarning, confidence, data?.meta?.adjustment_applied_count, data?.meta?.adjustment_coverage_pct, data?.meta?.adjustment_requested_count, dataUpdatedAt, hasData, isFallback, lastDataDate, onDataChange, signal, upperSymbol]);
 
-  const recent = candles.slice(-lookback);
-  const recentObv = calculateOBV(recent);
-  const maxAbsObv = recentObv.reduce((max, point) => Math.max(max, Math.abs(point.value)), 1);
+  const maxAbsObv = divergence?.obvSeries.reduce((max, point) => Math.max(max, Math.abs(point.value)), 1) ?? 1;
 
   const signalLabel =
     signal === 'bullish'
@@ -162,7 +158,7 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <Activity size={12} className="text-[var(--color-accent-primary)]" />
-          <span>OBV vs Price ({lookback}D)</span>
+          <span>OBV vs Price ({LOOKBACK_BARS} bars)</span>
         </div>
         <WidgetMeta
           updatedAt={lastDataDate}
@@ -187,12 +183,10 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
         ) : isLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
-        ) : !hasData ? (
+          <WidgetError title={recent.length === LOOKBACK_BARS ? unavailableReason : undefined} error={error as Error} onRetry={() => refetch()} />
+        ) : !divergence ? (
           <WidgetEmpty
-            message={derivedWithheld
-              ? 'OBV divergence unavailable: historical price units were not certified.'
-              : 'Not enough historical candles'}
+            message={unavailableReason}
             icon={<Activity size={18} />}
             size="compact"
           />
@@ -208,22 +202,22 @@ export function OBVDivergenceWidget({ symbol, onDataChange }: OBVDivergenceWidge
             <div className="grid grid-cols-2 gap-2 mb-2">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">Price %</div>
-                <div className={`text-xs font-mono ${signedToneClass(priceDeltaPct)}`}>
-                  {formatPercent(priceDeltaPct, { input: 'percent', decimals: 2, signed: true })}
+                <div className={`text-xs font-mono ${signedToneClass(divergence.priceDeltaPct)}`}>
+                  {formatPercent(divergence.priceDeltaPct, { input: 'percent', decimals: 2, signed: true })}
                 </div>
               </div>
-              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="OBV B%: Bollinger Band %B applied to On-Balance-Volume. Values outside ±300% indicate OBV is far below/above its 20-period band; usually means the price-volume divergence is extreme rather than a calculation error.">
+              <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1" title="OBV change over the lookback, relative to the starting magnitude (one-share denominator if the starting OBV is zero).">
                 <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-widest">OBV %</div>
-                <div className={`text-xs font-mono ${signedToneClass(obvDeltaPct)}`}>
-                  {Math.abs(obvDeltaPct) > 300
-                    ? `${obvDeltaPct > 0 ? '>' : '<'} ${obvDeltaPct > 0 ? '+' : '-'}300%`
-                    : formatPercent(obvDeltaPct, { input: 'percent', decimals: 2, signed: true })}
+                <div className={`text-xs font-mono ${signedToneClass(divergence.obvDeltaPct)}`}>
+                  {Math.abs(divergence.obvDeltaPct) > 300
+                    ? `${divergence.obvDeltaPct > 0 ? '> +' : '< -'}300%`
+                    : formatPercent(divergence.obvDeltaPct, { input: 'percent', decimals: 2, signed: true })}
                 </div>
               </div>
             </div>
 
-            {recentObv.slice(-12).map((point, index) => {
-              const prev = recentObv[recentObv.length - 12 + index - 1]?.value ?? point.value;
+            {divergence.obvSeries.slice(-12).map((point, index) => {
+              const prev = divergence.obvSeries[divergence.obvSeries.length - 12 + index - 1].value;
               const isUp = point.value >= prev;
               const widthPct = (Math.abs(point.value) / maxAbsObv) * 100;
 

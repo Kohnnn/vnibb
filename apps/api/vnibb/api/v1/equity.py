@@ -1579,9 +1579,8 @@ def _to_historical_data_from_payload(
     low_value = _coerce_optional_float(doc.get("low"))
     close_value = _coerce_optional_float(doc.get("close"))
     adj_close_value = _pick_optional_float(doc.get("adjusted_close"), doc.get("adj_close"), doc.get("adjClose"))
-    volume_value = _coerce_optional_int(doc.get("volume"))
 
-    if not time_value or None in {open_value, high_value, low_value, close_value, volume_value}:
+    if not time_value or None in {open_value, high_value, low_value, close_value}:
         return None
 
     adjusted_open, adjusted_high, adjusted_low, adjusted_close_resolved, factor, applied = (
@@ -1595,7 +1594,7 @@ def _to_historical_data_from_payload(
         )
     )
 
-    return EquityHistoricalData(
+    row = EquityHistoricalData(
         symbol=str(doc.get("symbol") or "").upper(),
         price_unit=doc["price_unit"],
         price_source=doc.get("price_source"),
@@ -1604,7 +1603,7 @@ def _to_historical_data_from_payload(
         high=adjusted_high,
         low=adjusted_low,
         close=adjusted_close_resolved,
-        volume=volume_value,
+        volume=doc.get("volume"),
         value=_coerce_optional_float(doc.get("value")),
         raw_close=close_value,
         adjusted_close=adj_close_value,
@@ -1612,6 +1611,11 @@ def _to_historical_data_from_payload(
         adjustment_mode=str(adjustment_mode or "raw").strip().lower() or "raw",
         adjustment_applied=applied,
     )
+    if row.volume is not None and not (row.price_source or "").strip():
+        stored_source = doc.get("source")
+        if isinstance(stored_source, str):
+            row._retained_volume_source = stored_source.strip() or None
+    return row
 
 
 def _parse_share_ratio_parts(ratio_text: str | None) -> tuple[float, float] | None:
@@ -1919,10 +1923,74 @@ _HISTORICAL_SOURCE_RANK = {
 }
 
 
+def _historical_volume_basis(row: EquityHistoricalData) -> tuple[Any, ...]:
+    # An unused adjusted_close does not change the effective raw bar.
+    raw_close = row.raw_close
+    if raw_close is None and not row.adjustment_applied:
+        raw_close = row.close
+    return (
+        row.symbol, row.time, row.price_unit,
+        row.open, row.high, row.low, row.close,
+        row.adjustment_mode, row.adjustment_applied, row.adjustment_factor, raw_close,
+    )
+
+
+def _preserve_same_bar_volume(
+    winner: EquityHistoricalData, alternatives: list[tuple[str, EquityHistoricalData]],
+) -> EquityHistoricalData:
+    """Enrich a price winner using already-admitted rows and their actual reader names."""
+    if winner.volume is not None or not winner.symbol.strip():
+        return winner
+    expected_unit = "index_points" if is_index_symbol(winner.symbol) else "VND"
+    if winner.price_unit != expected_unit or not all(
+        math.isfinite(price) for price in (winner.open, winner.high, winner.low, winner.close)
+    ):
+        return winner
+    if winner.adjustment_applied and (winner.raw_close is None or winner.adjustment_factor is None):
+        return winner
+
+    basis = _historical_volume_basis(winner)
+    best: tuple[int, str, str, int] | None = None
+    for reader, donor in alternatives:
+        if donor.volume is None or _historical_volume_basis(donor) != basis:
+            continue
+        resolution_source = (donor.volume_resolution_source or "").strip() or reader
+        source = (
+            (donor.volume_source or "").strip()
+            or (donor.price_source or "").strip()
+            or donor._retained_volume_source
+            or resolution_source
+        )
+        # Resolve same-reader disagreements without depending on input order.
+        rank = (
+            _HISTORICAL_SOURCE_RANK.get(resolution_source, len(_HISTORICAL_SOURCE_RANK)),
+            resolution_source,
+            source,
+            donor.volume,
+        )
+        if best is None or rank < best:
+            best = rank
+    if best is None:
+        return winner
+
+    _, resolution_source, source, volume = best
+    return winner.model_copy(
+        update={
+            "volume": volume,
+            "volume_source": source,
+            "volume_resolution_source": resolution_source,
+        }
+    )
+
+
 def _merge_historical_rows(
     source_rows: list[tuple[str, list[EquityHistoricalData]]],
+    *,
+    preserve_volume: bool = False,
 ) -> tuple[list[EquityHistoricalData], dict[str, int]]:
     selected: dict[date, tuple[tuple[Any, ...], str, EquityHistoricalData]] = {}
+    # Coverage probes only need the price winners; collect donors for the final response.
+    volume_donors: dict[date, list[tuple[str, EquityHistoricalData]]] = {}
     for source_name, rows in source_rows:
         source_rank = _HISTORICAL_SOURCE_RANK.get(source_name, len(_HISTORICAL_SOURCE_RANK))
         for row in rows:
@@ -1934,10 +2002,19 @@ def _merge_historical_rows(
             existing = selected.get(row.time)
             if existing is None or candidate < existing[0]:
                 selected[row.time] = (candidate, source_name, row)
+                if existing is None:
+                    continue
+                _, donor_reader, donor = existing
+            else:
+                donor_reader, donor = source_name, row
+            if preserve_volume and donor.volume is not None:
+                volume_donors.setdefault(row.time, []).append((donor_reader, donor))
     source_counts: dict[str, int] = {}
     merged: list[EquityHistoricalData] = []
     for _, source_name, row in sorted(selected.values(), key=lambda item: item[2].time):
         source_counts[source_name] = source_counts.get(source_name, 0) + 1
+        if row.volume is None and (alternatives := volume_donors.get(row.time)):
+            row = _preserve_same_bar_volume(row, alternatives)
         merged.append(row)
     return merged, source_counts
 
@@ -4176,7 +4253,7 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v6_stored_first")
+@cached(key_prefix="historical_v7_volume_observations")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
@@ -4299,7 +4376,7 @@ async def get_historical_prices(
         warnings.append(f"Excluded {excluded_count} row(s) with incompatible or unconfirmed price units; legacy provenance may be insufficient.")
 
     if merged:
-        merged, source_counts = _merge_historical_rows(source_rows)
+        merged, source_counts = _merge_historical_rows(source_rows, preserve_volume=True)
         merged = _apply_corporate_action_adjustments(merged, corporate_actions, adjustment_mode)
         return StandardResponse(
             data=merged,

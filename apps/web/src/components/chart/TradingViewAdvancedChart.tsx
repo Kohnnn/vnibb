@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { useTheme } from '@/contexts/ThemeContext';
 import { CHART_CAPTURE_EVENT, LIGHT_CAPTURE_ATTR, type ChartLightCaptureDetail } from '@/lib/chartCapture';
 import { useColorblind } from '@/lib/colorblind';
+import { isObservedVolume } from '@/lib/volumeObservation';
 import {
   usePriceHistoryRequest,
   type PriceAdjustmentMode,
@@ -38,8 +39,7 @@ interface ChartPoint {
   high: number;
   low: number;
   close: number;
-  volume: number;
-  volumeAvailable: boolean;
+  volume: number | null;
   priceUnit: 'VND' | 'index_points' | 'unknown';
   observedAt: number | null;
   adjustmentApplied: boolean;
@@ -199,8 +199,7 @@ function normalizePoints(rows: Array<Record<string, unknown>>): ChartPoint[] {
       : 'unknown';
     byDate.set(time, {
       time, open, high, low, close,
-      volume: safeNumber(row.volume) ?? 0,
-      volumeAvailable: safeNumber(row.volume) !== null,
+      volume: isObservedVolume(row.volume) ? row.volume : null,
       priceUnit,
       observedAt,
       adjustmentApplied: row.adjustment_applied === true,
@@ -265,8 +264,7 @@ function mergeQuote(points: ChartPoint[], quote: QuoteData | null): ChartPoint[]
     high: safeNumber(quote.high) ?? (isSameDay ? Math.max(latest.high, quotePrice) : quotePrice),
     low: safeNumber(quote.low) ?? (isSameDay ? Math.min(latest.low, quotePrice) : quotePrice),
     close: quotePrice,
-    volume: safeNumber(quote.volume) ?? (isSameDay ? latest.volume : 0),
-    volumeAvailable: safeNumber(quote.volume) !== null || (isSameDay && latest.volumeAvailable),
+    volume: isObservedVolume(quote.volume) ? quote.volume : isSameDay ? latest.volume : null,
     priceUnit,
     observedAt: instant,
     adjustmentApplied: false,
@@ -669,17 +667,16 @@ export function TradingViewAdvancedChart({
         chart.priceScale('volume').applyOptions({
           scaleMargins: { top: 0.8, bottom: 0 },
         });
-        volumeSeries.setData(
-          points.map((point) => (
-            isRenderablePoint(point)
-              ? {
-                  time: point.time,
-                  value: Number.isFinite(point.volume) ? point.volume : 0,
-                  color: point.close >= point.open ? hexToRgba(upColor, 0.35) : hexToRgba(downColor, 0.35),
-                }
-              : { time: point.time }
-          ))
-        );
+        const histogramData = (up: string, down: string): Array<HistogramData | WhitespaceData> =>
+          points.map((point) => isRenderablePoint(point) && point.volume !== null
+            ? {
+                time: point.time,
+                value: point.volume,
+                color: hexToRgba(point.close >= point.open ? up : down, 0.35),
+              }
+            : { time: point.time });
+        const liveVolumeData = histogramData(upColor, downColor);
+        volumeSeries.setData(liveVolumeData);
         // A canvas bakes its colours into pixels, so the exporter cannot lighten
         // it with CSS. Register a synchronous light render: the exporter asks,
         // this chart repaints on light tokens, hands over a bitmap, then puts the
@@ -708,9 +705,7 @@ export function TradingViewAdvancedChart({
             if (!value) throw new Error(`light capture token ${name} is missing`);
             return value;
           };
-          let originalVolume: Array<HistogramData | WhitespaceData> | null = null;
           try {
-            originalVolume = [...volumeSeries.data()];
             const lightUp = token('--color-positive');
             const lightDown = token('--color-negative');
             const lightFocal = token('--chart-blue');
@@ -749,15 +744,7 @@ export function TradingViewAdvancedChart({
             });
             // Volume bars carry their own baked colour, so they are re-set for
             // the snapshot and restored from the same points afterwards.
-            volumeSeries.setData(points.map((point) => (
-              isRenderablePoint(point)
-                ? {
-                    time: point.time,
-                    value: Number.isFinite(point.volume) ? point.volume : 0,
-                    color: hexToRgba(point.close >= point.open ? lightUp : lightDown, 0.35),
-                  }
-                : { time: point.time }
-            )));
+            volumeSeries.setData(histogramData(lightUp, lightDown));
             const bitmap = chart.takeScreenshot();
             // An empty bitmap would be pasted over the widget as a blank box.
             if (!bitmap.width || !bitmap.height) throw new Error('the chart screenshot is empty');
@@ -789,7 +776,7 @@ export function TradingViewAdvancedChart({
                 topColor: hexToRgba(focalColor, 0.35),
                 bottomColor: hexToRgba(focalColor, 0.04),
               });
-              if (originalVolume) volumeSeries.setData(originalVolume);
+              volumeSeries.setData(liveVolumeData);
             } catch (restoreError) {
               detail.canvas = undefined;
               detail.error ??= restoreError;
@@ -925,7 +912,7 @@ export function TradingViewAdvancedChart({
       {!isLoading && !error && points.some(isChartPoint) ? (
         <div className="pointer-events-none absolute left-3 top-12 z-10 max-w-[calc(100%-24px)] rounded border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-primary)]" aria-label="Chart units and session basis">
           <div>Price unit: {points.find(isChartPoint)?.priceUnit || 'Unknown'} · {adjustmentMode} · Session basis: {sessionBasis} · Adjustment coverage: {adjustmentCoverage === null ? 'Unknown' : `${adjustmentCoverage}%`}</div>
-          {hoveredPoint ? <div aria-label="OHLCV hover summary">{hoveredPoint.time} · O {hoveredPoint.open.toLocaleString()} · H {hoveredPoint.high.toLocaleString()} · L {hoveredPoint.low.toLocaleString()} · C {hoveredPoint.close.toLocaleString()} · Volume {hoveredPoint.volumeAvailable ? hoveredPoint.volume.toLocaleString() : 'Unknown'}</div> : <div>Hover a reported session for OHLCV.</div>}
+          {hoveredPoint ? <div aria-label="OHLCV hover summary">{hoveredPoint.time} · O {hoveredPoint.open.toLocaleString()} · H {hoveredPoint.high.toLocaleString()} · L {hoveredPoint.low.toLocaleString()} · C {hoveredPoint.close.toLocaleString()} · Volume {hoveredPoint.volume?.toLocaleString() ?? 'Unknown'}</div> : <div>Hover a reported session for OHLCV.</div>}
         </div>
       ) : null}
 

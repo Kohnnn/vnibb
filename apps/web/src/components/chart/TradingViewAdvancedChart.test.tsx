@@ -19,7 +19,7 @@ const mockCreateChart = jest.fn(() => ({
   addHistogramSeries: () => ({
     setData: mockVolumeSetData,
     applyOptions: jest.fn(),
-    data: () => mockVolumeSetData.mock.calls.at(-1)?.[0] ?? [],
+    data: () => (mockVolumeSetData.mock.calls.at(-1)?.[0] ?? []).filter((point: object) => Object.hasOwn(point, 'value')),
   }),
   priceScale: () => ({ applyOptions: jest.fn() }),
   timeScale: () => ({ setVisibleLogicalRange: jest.fn(), fitContent: jest.fn() }),
@@ -199,6 +199,35 @@ describe('TradingViewAdvancedChart price data consumed by the renderer', () => {
     expect(await renderCandles()).toEqual([
       { time: '2026-10-02', open: 57000, high: 57500, low: 56000, close: 57300 },
     ]);
+  });
+
+  test('leaves a histogram gap for unknown or invalid volume without losing the candle or a measured zero', async () => {
+    mockHistory.mockResolvedValue({ data: [
+      historyRow({ time: '2026-10-01', volume: null }),
+      historyRow({ time: '2026-10-02', volume: 0 }),
+      historyRow({ time: '2026-10-05', volume: -1 }),
+    ] });
+    mockQuote.mockResolvedValue({ data: null });
+
+    expect(await renderCandles()).toHaveLength(3);
+    expect(mockVolumeSetData).toHaveBeenLastCalledWith([
+      { time: '2026-10-01' },
+      expect.objectContaining({ time: '2026-10-02', value: 0 }),
+      { time: '2026-10-05' },
+    ]);
+  });
+
+  test.each([
+    ['2026-10-02', null, { time: '2026-10-02', value: 100 }],
+    ['2026-10-02', 0, { time: '2026-10-02', value: 0 }],
+    ['2026-10-05', null, { time: '2026-10-05' }],
+  ])('keeps quote volume on its own session (%s, %s)', async (as_of, volume, expected) => {
+    mockQuote.mockResolvedValue({ data: quote({ as_of, volume }) });
+
+    await renderCandles();
+    const latest = mockVolumeSetData.mock.lastCall?.[0].at(-1);
+    expect(Object.hasOwn(latest, 'value')).toBe(Object.hasOwn(expected, 'value'));
+    expect(latest).toMatchObject(expected);
   });
 
   test('preserves explicitly low VND prices in both history and quote', async () => {
@@ -517,6 +546,10 @@ describe('TradingViewAdvancedChart light capture', () => {
   });
 
   test('snapshots the light repaint, then restores candles, volume and colours', async () => {
+    mockHistory.mockResolvedValue({ data: [
+      historyRow({ time: '2026-10-01', volume: null }),
+      historyRow({ time: '2026-10-02', volume: 0 }),
+    ] });
     const { container } = render(<TradingViewAdvancedChart symbol="FPT" timeframe="1M" />);
     await waitFor(() => expect(mockCandleSetData).toHaveBeenCalled());
     await waitFor(() => expect(container.querySelector('[data-light-chart-capture]')).not.toBeNull());
@@ -539,6 +572,10 @@ describe('TradingViewAdvancedChart light capture', () => {
     const volumeCalls = mockVolumeSetData.mock.calls.map(([data]) => data);
     const lightVolume = volumeCalls.find((data) => JSON.stringify(data).includes('rgba(30, 123, 79'));
     expect(lightVolume).toBeDefined();
+    expect(lightVolume).toEqual([
+      { time: '2026-10-01' },
+      expect.objectContaining({ time: '2026-10-02', value: 0 }),
+    ]);
     expect(volumeCalls.at(-1)).toEqual(darkVolume);
     // Candles kept their data throughout: only colours were touched.
     const candleCalls = mockCandleSetData.mock.calls.map(([data]) => data);

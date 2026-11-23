@@ -61,6 +61,9 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 Operational Vietnamese provider requests use Vietcap IQ as the primary source and free VCI as the only secondary provider. Frontend source query options and settings accept `VCI` only; browser-saved selections from retired providers are replaced with `VCI`, while historical response source labels remain unchanged. An HTTP 200 financial-ratios fallback may include usable `data` alongside `error`; consumers retain the table, disclose that warning, and mark the served data as a fallback rather than normal success.
 
 Historical prices merge admitted SQL rows with Mongo/cache rows before requesting upstream gaps; raw/adjusted price and unit admissions remain unchanged. Events and dividends serve available persisted rows before provider requests. Ratio history reads existing certified fiscal Mongo/SQL rows with the same period mapping and per-cell unit admission as financial ratios. These provider fallbacks have a maximum ten-second deadline (or the shorter configured request budget); unavailable ratio history returns an `error`, not a fabricated empty success. Endpoint-owned read-only SQL transactions are released before slow upstream requests; caller-owned transactions are not rolled back.
+
+`GET /equity/historical` retains admitted OHLC when `volume` is missing or invalid (`null`); `0` is a measured volume. If another already-loaded reader has measured volume for the same symbol, date, unit, OHLC and adjustment basis, only the missing volume may be filled. In that case, `volume_source` gives its recorded source (or the reader if no upstream source is known), and `volume_resolution_source` names the volume reader. The selected price fields and price provenance are unchanged.
+
 Provider deadlines do not stop already-running synchronous VNStock calls. Identical quote/history/event/dividend acquisitions retain and share their executor future until actual completion, with at most 32 occupied acquisition keys; completed entries are removed. HTTP quote waits remain bounded by the request/provider deadlines. Price-socket quote jobs wait for the shared worker's actual completion, keeping their `websocket_fetch_concurrency` slot even after `vnstock_timeout` expires; admitted late results retain their provider observation timestamp, VND unit and `vnstock:VCI:quote.history` source and are broadcast without another acquisition. Cancellation propagates without cancelling the shared worker. Ratio acquisitions reuse the existing single-worker financial executor, sharing identical keys and rejecting different work while occupied.
 
 Financial statement units and fiscal basis:
@@ -277,6 +280,11 @@ Prediction markets notes:
 - `GET /rs/laggards`
 - `GET /rs/gainers`
 - `GET /rs/{symbol}`
+- `GET /quant/{symbol}?metrics=volume_delta` and `GET /quant/{symbol}/volume-flow`
+
+Volume flow keeps a missing daily delta and its chart point `null`. Monthly means use observed deltas only. The cumulative `basis` distinguishes a full returned-price window from an observed subtotal or unavailable series; it does not certify exchange-session coverage. `current_20d_cumulative_delta` requires all of the last 20 returned price bars to have an observed delta. `divergence_months` is `null` without a comparable month pair or if a compared month has missing deltas. Measured `0` remains valid.
+
+Quant places the latest quote on the Vietnam market date of its source `as_of`, not its receipt date. A quote without a known observation date, or one older than the last retained bar, leaves history unchanged. Missing quote volume can use the retained volume only on the same market date.
 
 ### Utility / Admin
 - `GET /dashboard/`

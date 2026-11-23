@@ -11,6 +11,7 @@ from vnibb.api.v1 import quant
 from vnibb.api.v1.schemas import MetaData, StandardResponse
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.providers.vnstock.equity_historical import EquityHistoricalData
+from vnibb.providers.vnstock.stock_quote import QuoteCache
 
 
 def _build_price_frame(rows: int = 120) -> pd.DataFrame:
@@ -171,6 +172,243 @@ async def test_quant_endpoint_returns_requested_metrics(client, monkeypatch):
     assert "gap_fill_rate_pct" in metrics["gap_stats"]
     assert "current_state" in metrics["macd_crossovers"]
     assert payload["meta"]["count"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("volume", [None, 0])
+async def test_volume_flow_keeps_unobserved_volumes_distinct_from_zero(client, monkeypatch, volume):
+    frame = _build_price_frame(30).assign(
+        time=pd.bdate_range("2026-01-05", periods=30),
+        volume=float("nan") if volume is None else volume,
+    )
+    monkeypatch.setattr(quant, "_load_quant_frame_with_warning", AsyncMock(return_value=(frame, None)))
+
+    response = await client.get("/api/v1/quant/VNM/volume-flow")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"] is None
+    metric = payload["data"]
+    assert metric["basis"] == {
+        "cumulative": "unavailable" if volume is None else "full_returned_window",
+        "monthly_avg": "observed_sample",
+        "observed_delta_bars": 0 if volume is None else 30,
+        "returned_price_bars": 30,
+    }
+    assert metric["current_20d_cumulative_delta"] == volume
+    assert metric["divergence_months"] == (None if volume is None else 0)
+    assert len(metric["cumulative"]) == 30
+    assert all(point["delta"] == point["cumulative_delta"] == volume for point in metric["cumulative"])
+    assert metric["monthly_avg"]["Jan"] == metric["monthly_avg"]["Feb"] == volume
+    if volume is None:
+        assert all(value is None for value in metric["monthly_avg"].values())
+        assert metric["strongest_buy_month"] is None
+        assert metric["strongest_sell_month"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gap", "total_20d", "divergence_count", "feb_mean"),
+    [
+        pytest.param(None, -190, 1, -9, id="complete"),
+        pytest.param(0, -190, 1, -9, id="gap-in-first-month-not-compared"),
+        pytest.param(11, None, None, -8.89, id="gap-in-rising-month"),
+        pytest.param(21, None, None, -9, id="gap-in-falling-month"),
+    ],
+)
+async def test_volume_flow_requires_complete_delta_rollups(
+    client, monkeypatch, gap, total_20d, divergence_count, feb_mean
+):
+    # Feb rises against Jan; Apr falls against Feb (the previous returned month).
+    dates = [
+        *pd.bdate_range("2026-01-05", periods=10),
+        *pd.bdate_range("2026-02-02", periods=10),
+        *pd.bdate_range("2026-04-01", periods=10),
+    ]
+    frame = pd.DataFrame({"time": dates, "close": [100] * 10 + [110] * 10 + [105] * 10})
+    frame = frame.assign(high=frame["close"] + 1, low=frame["close"], volume=10.0)
+    frame.loc[10, "volume"] = 0
+    if gap is not None:
+        frame.loc[gap, "volume"] = float("nan")
+    monkeypatch.setattr(quant, "_load_quant_frame_with_warning", AsyncMock(return_value=(frame, None)))
+
+    response = await client.get("/api/v1/quant/VNM/volume-flow")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"] is None
+    metric = payload["data"]
+    assert metric["current_20d_cumulative_delta"] == total_20d
+    assert metric["divergence_months"] == divergence_count
+    assert metric["monthly_avg"]["Feb"] == feb_mean
+    assert metric["monthly_avg"]["Mar"] is None
+    assert metric["basis"] == {
+        "cumulative": "full_returned_window" if gap is None else "observed_subtotal",
+        "monthly_avg": "observed_sample",
+        "observed_delta_bars": 30 if gap is None else 29,
+        "returned_price_bars": 30,
+    }
+    assert metric["cumulative"][10]["delta"] == 0
+    if gap is not None:
+        assert metric["cumulative"][gap]["delta"] is None
+        assert metric["cumulative"][gap]["cumulative_delta"] is None
+    assert metric["cumulative"][-1]["cumulative_delta"] == (-290 if gap is None else -280)
+
+
+@pytest.mark.parametrize(("bars", "total_20d"), [(19, None), (20, 200)])
+def test_volume_delta_short_windows_and_no_month_comparisons(bars, total_20d):
+    frame = pd.DataFrame(
+        {
+            "time": pd.bdate_range("2026-01-02", periods=bars),
+            "low": 100,
+            "high": 110,
+            "close": 110,
+            "volume": 10,
+        }
+    )
+
+    metric = quant._compute_volume_delta(frame)
+
+    # The route still requires 30 price bars for both of these inputs.
+    assert metric["current_20d_cumulative_delta"] == total_20d
+    assert metric["divergence_months"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("receipt_day", "observed_at", "quote_volume", "stored_volume", "applied_day", "delta", "total_20d"),
+    [
+        pytest.param("2026-03-20", "2026-03-20", None, 100, "2026-03-20", 100, 2000, id="same-date-fallback"),
+        pytest.param(
+            "2026-03-23",
+            "2026-03-19T17:05:00Z",
+            None,
+            100,
+            "2026-03-20",
+            100,
+            2000,
+            id="same-market-date-in-utc",
+        ),
+        pytest.param("2026-03-20", "2026-03-20", None, 0, "2026-03-20", 0, 1900, id="same-date-zero-fallback"),
+        pytest.param("2026-03-20", "2026-03-20", 0, 100, "2026-03-20", 0, 1900, id="quote-zero-wins"),
+        pytest.param("2026-03-20", "2026-03-20", None, None, "2026-03-20", None, None, id="both-missing"),
+        pytest.param("2026-03-23", None, 250, 100, None, 100, 2000, id="unknown-market-date"),
+        pytest.param("2026-03-23", "invalid", 250, 100, None, 100, 2000, id="invalid-market-date"),
+        pytest.param("2026-03-24", "2026-03-23", None, 100, "2026-03-23", None, None, id="new-date-missing"),
+        pytest.param(
+            "2026-03-20",
+            "2026-03-19T08:30:00Z",
+            None,
+            100,
+            None,
+            100,
+            2000,
+            id="receipt-date-matches-but-market-date-differs",
+        ),
+    ],
+)
+async def test_quant_volume_delta_merges_quote_without_imputing_volume(
+    client, monkeypatch, receipt_day, observed_at, quote_volume, stored_volume, applied_day, delta, total_20d
+):
+    frame = _build_price_frame(30).assign(
+        time=pd.bdate_range(end="2026-03-20", periods=30),
+        open=100.0,
+        high=110.0,
+        low=100.0,
+        close=110.0,
+        volume=100.0,
+    )
+    frame.loc[29, "volume"] = stored_volume
+    monkeypatch.setattr(quant, "_load_price_frame", AsyncMock(return_value=frame))
+
+    quote_row = {
+        "time": observed_at,
+        "updated_at": f"{receipt_day} 10:15:00",
+        "open": 110.0,
+        "high": 130.0,
+        "low": 110.0,
+        "close": 130.0,
+    }
+    if quote_volume is not None:
+        quote_row["volume"] = quote_volume
+    quote_history = pd.DataFrame([quote_row])
+    quote_history.attrs["price_unit"] = "VND"
+
+    class Provider:
+        def __init__(self, *, symbol, source):
+            assert (symbol, source) == ("VNM", "VCI")
+
+        def history(self, **_kwargs):
+            return quote_history
+
+    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_quote_class", lambda: Provider)
+    monkeypatch.setattr(QuoteCache, "_cache", {})
+
+    response = await client.get("/api/v1/quant/VNM", params={"metrics": "volume_delta"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"] is None
+    last_day = applied_day or "2026-03-20"
+    returned_bars = 30 if last_day == "2026-03-20" else 31
+    assert payload["meta"]["data_points"] == returned_bars
+    assert payload["meta"]["last_data_date"] == f"{last_day}T00:00:00"
+    metric = payload["data"]["metrics"]["volume_delta"]
+    assert metric["cumulative"][-1] == {
+        "date": last_day,
+        "close": 110 if applied_day is None else 130,
+        "delta": delta,
+        "cumulative_delta": None if delta is None else 2900 + delta,
+    }
+    assert metric["current_20d_cumulative_delta"] == total_20d
+    assert metric["basis"] == {
+        "cumulative": "observed_subtotal" if delta is None else "full_returned_window",
+        "monthly_avg": "observed_sample",
+        "observed_delta_bars": returned_bars - (delta is None),
+        "returned_price_bars": returned_bars,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mongo_volume", "provider_close", "provider_volume", "expected_delta", "expected_total"),
+    [
+        pytest.param(100, 110, None, 100, 2000, id="matching-mongo-volume"),
+        pytest.param(0, 110, None, 0, 1900, id="matching-mongo-zero"),
+        pytest.param(100, 110, 0, 0, 1900, id="measured-provider-zero-wins"),
+        pytest.param(100, 109, None, None, None, id="different-close-does-not-borrow"),
+    ],
+)
+async def test_volume_flow_keeps_matching_volume_from_an_earlier_history_reader(
+    client, monkeypatch, mongo_volume, provider_close, provider_volume, expected_delta, expected_total
+):
+    sessions = pd.bdate_range(end=pd.Timestamp(date.today()) - pd.Timedelta(days=14), periods=30)
+    mongo_rows = [
+        EquityHistoricalData(
+            symbol="VNM", time=day.date(), open=100, high=110, low=100, close=110,
+            raw_close=110, volume=100, price_unit="VND",
+        )
+        for day in sessions
+    ]
+    mongo_rows[-1] = mongo_rows[-1].model_copy(update={"volume": mongo_volume})
+    db_row = mongo_rows[-1].model_copy(update={"close": 105, "raw_close": 105, "volume": 25})
+    provider_row = mongo_rows[-1].model_copy(update={
+        "close": provider_close, "raw_close": provider_close, "volume": provider_volume,
+    })
+    monkeypatch.setattr(quant, "_load_historical_from_mongo", AsyncMock(return_value=mongo_rows))
+    monkeypatch.setattr(quant, "_load_historical_from_db", AsyncMock(return_value=[db_row]))
+    monkeypatch.setattr(quant.VnstockEquityHistoricalFetcher, "fetch", AsyncMock(return_value=[provider_row]))
+    monkeypatch.setattr(quant.VnstockStockQuoteFetcher, "fetch", AsyncMock(return_value=(None, False)))
+
+    response = await client.get("/api/v1/quant/VNM/volume-flow")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["error"] is None
+    metric = payload["data"]
+    assert metric["cumulative"][-1]["close"] == provider_close
+    assert metric["cumulative"][-1]["delta"] == expected_delta
+    assert metric["current_20d_cumulative_delta"] == expected_total
 
 
 @pytest.mark.asyncio
@@ -1060,7 +1298,7 @@ def _history_row(close: float, *, unit: str = "VND", day: int = 1, symbol: str =
 
 def test_quant_history_preserves_low_vnd_and_large_legitimate_split():
     rows = [_history_row(100_000), _history_row(100, day=2), _history_row(80, day=3)]
-    frame = quant._historical_rows_to_frame(quant._merge_historical_rows(rows))
+    frame = quant._historical_rows_to_frame(quant._merge_historical_rows(("mongo", rows)))
 
     assert frame["close"].tolist() == [100_000, 100, 80]
     assert rows[1].raw_close == 100
@@ -1071,7 +1309,7 @@ def test_quant_history_filters_unknown_units_before_merging_same_date():
     canonical = _history_row(73_000)
     unknown = _history_row(73, unit="unknown")
 
-    merged = quant._merge_historical_rows([canonical], [unknown])
+    merged = quant._merge_historical_rows(("db", [canonical]), ("provider", [unknown]))
 
     assert merged == [canonical]
     assert quant._historical_rows_to_frame([unknown]).empty
@@ -1144,7 +1382,7 @@ async def test_peer_analytics_omit_unresolved_price_sessions(monkeypatch, endpoi
 
 
 @pytest.mark.asyncio
-async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_db, monkeypatch):
+async def test_load_quant_frame_with_warning_appends_quote_on_observed_date(test_db, monkeypatch):
     async def fake_load_price_frame(*_args, **_kwargs):
         return pd.DataFrame(
             [
@@ -1166,7 +1404,8 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         high = 104.0
         low = 100.8
         volume = 1_250_000
-        updated_at = pd.Timestamp("2026-03-21 10:15:00")
+        updated_at = pd.Timestamp("2026-03-24 10:15:00")
+        as_of = pd.Timestamp("2026-03-23 15:00:00+07:00")
 
     async def fake_fetch_quote(*_args, **_kwargs):
         return DummyQuote(), False
@@ -1178,14 +1417,14 @@ async def test_load_quant_frame_with_warning_merges_latest_quote_snapshot(test_d
         db=test_db,
         symbol="VCI",
         start_date=date(2026, 3, 1),
-        end_date=date(2026, 3, 21),
+        end_date=date(2026, 3, 24),
         source="VCI",
         period="1Y",
         adjustment_mode="raw",
     )
 
-    assert frame["close"].tolist()[-1] == 103.2
-    assert frame["time"].dt.date.tolist()[-1] == date(2026, 3, 21)
+    assert frame["close"].tolist() == [100.5, 103.2]
+    assert frame["time"].dt.date.tolist() == [date(2026, 3, 20), date(2026, 3, 23)]
     assert warning is not None
     assert "latest quote" in warning.lower()
 

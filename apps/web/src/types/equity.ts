@@ -8,7 +8,7 @@ export interface EquityHistoricalData {
   high: number;
   low: number;
   close: number;
-  volume: number;
+  volume: number | null;
   value?: number | null;
   raw_close?: number | null;
   adjusted_close?: number | null;
@@ -17,6 +17,8 @@ export interface EquityHistoricalData {
   adjustment_applied?: boolean;
   price_unit?: 'VND' | 'index_points' | 'unknown';
   price_source?: string | null;
+  volume_source?: string | null;
+  volume_resolution_source?: string | null;
 }
 
 export interface EquityHistoricalResponse {

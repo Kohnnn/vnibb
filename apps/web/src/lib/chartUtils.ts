@@ -1,4 +1,4 @@
-
+import { isObservedVolume } from '@/lib/volumeObservation';
 /**
  * Utility functions for frontend technical analysis calculations.
  * Used for real-time overlays and indicators on the Price Chart.
@@ -236,28 +236,25 @@ export function calculateStochastic(data: OHLCData[], kPeriod: number = 14, dPer
     return { kLine, dLine };
 }
 
+interface OBVBar {
+    time: number | string;
+    close: number;
+    volume?: number | null;
+}
+
 /**
- * Calculate On-Balance Volume (OBV)
+ * Calculate On-Balance Volume (OBV) for one measured window. A gap makes the entire path unavailable.
  */
-export function calculateOBV(data: OHLCData[]) {
+export function calculateOBV(data: readonly OBVBar[]) {
     const obv: { time: number | string; value: number }[] = [];
     let runningOBV = 0;
 
     for (let i = 0; i < data.length; i++) {
-        if (i === 0) {
-            runningOBV = data[i].volume || 0;
-        } else {
-            const priceChange = data[i].close - data[i - 1].close;
-            const volume = data[i].volume || 0;
+        const { time, close, volume } = data[i];
+        if (!isObservedVolume(volume) || !Number.isFinite(close) || close <= 0) return null;
 
-            if (priceChange > 0) {
-                runningOBV += volume;
-            } else if (priceChange < 0) {
-                runningOBV -= volume;
-            }
-            // If price unchanged, OBV stays the same
-        }
-        obv.push({ time: data[i].time, value: runningOBV });
+        runningOBV = i === 0 ? volume : runningOBV + Math.sign(close - data[i - 1].close) * volume;
+        obv.push({ time, value: runningOBV });
     }
 
     return obv;
