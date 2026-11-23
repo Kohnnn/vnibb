@@ -294,7 +294,7 @@ class TechnicalAnalysisService:
         frame.attrs["history_resolution"] = _historical_resolution_meta(
             rows, "raw", start_date=start_date, end_date=end_date, interval="1D",
             source_counts=source_counts, mongo_docs=[], warnings=[],
-            excluded=excluded,
+            excluded_candidate_dates=[row.time for row in excluded],
         ).model_dump()
         return frame
 

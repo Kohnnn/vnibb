@@ -55,6 +55,7 @@ from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalData,
     EquityHistoricalQueryParams,
+    HistoricalProviderRows,
     VnstockEquityHistoricalFetcher,
 )
 from vnibb.providers.vnstock.equity_profile import (
@@ -1983,7 +1984,18 @@ def _historical_unit_exclusions(
     source_rows: list[tuple[str, list[EquityHistoricalData]]],
 ) -> list[EquityHistoricalData]:
     expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
-    return [row for _, rows in source_rows for row in rows if row.price_unit != expected_unit]
+    # The recent Redis window is populated from StockPrice. Keep distinct
+    # versions and independent provider/Mongo observations, not identical copies.
+    sql_rejections = {
+        (row.symbol, row.time): row
+        for source, rows in source_rows if source in {"cache", "db"}
+        for row in rows if row.price_unit != expected_unit
+    }
+    return [
+        row for source, rows in source_rows for row in rows
+        if row.price_unit != expected_unit
+        and (source != "recent_cache" or row != sql_rejections.get((row.symbol, row.time)))
+    ]
 
 
 def _historical_session_coverage(
@@ -2056,7 +2068,7 @@ def _historical_resolution_meta(
     source_counts: dict[str, int],
     mongo_docs: list[dict[str, Any]],
     warnings: list[str],
-    excluded: list[EquityHistoricalData] | None = None,
+    excluded_candidate_dates: list[date] | None = None,
     source_adjusted: bool = False,
 ) -> HistoricalMetaData:
     normalized_interval = (interval or "1D").upper()
@@ -2067,7 +2079,7 @@ def _historical_resolution_meta(
         default=None,
     )
     coverage = _historical_session_coverage(rows, start_date, end_date, normalized_interval, warnings)
-    excluded_candidates = [row.time for row in excluded or [] if start_date <= row.time <= end_date]
+    excluded_candidates = [day for day in excluded_candidate_dates or () if start_date <= day <= end_date]
     if isinstance(mongo_docs, MongoReadRows):
         for doc in mongo_docs.metadata["candidates"]:
             payload = _mongo_historical_payload(doc)
@@ -2215,6 +2227,7 @@ async def _load_historical_from_recent_cache(
                 "symbol": symbol.upper(),
                 "interval": "1D",
                 **row,
+                "price_source": row.get("price_source") or (row["source"] if isinstance(row.get("source"), str) else None),
             },
             adjustment_mode=adjustment_mode,
         )
@@ -4277,7 +4290,7 @@ async def _enrich_missing_ratio_metrics(
 
 
 @router.get("/historical", response_model=HistoricalResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v8_session_admission")
+@cached(key_prefix="historical_v9_session_admission")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
@@ -4356,6 +4369,7 @@ async def get_historical_prices(
     if release_read and db.in_transaction():
         await db.rollback()
     provider_error: Exception | None = None
+    provider_excluded_dates: list[date] | None = None
     if not _historical_rows_cover_request(merged, start_date, end_date, interval):
         try:
             params = EquityHistoricalQueryParams(
@@ -4369,6 +4383,8 @@ async def get_historical_prices(
                 VnstockEquityHistoricalFetcher.fetch(params),
                 timeout=min(10, _provider_timeout_budget()),
             )
+            if isinstance(provider_data, HistoricalProviderRows):
+                provider_excluded_dates = provider_data.unit_excluded_dates
             source_rows.append(
                 (
                     "provider",
@@ -4393,9 +4409,14 @@ async def get_historical_prices(
                 exc,
             )
     merged, source_counts = _merge_historical_rows(source_rows)
-    # For the real Mongo reader, count candidates from before date deduplication.
-    exclusion_sources = source_rows[1:] if isinstance(mongo_docs, MongoReadRows) else source_rows
-    excluded = _historical_unit_exclusions(symbol_upper, exclusion_sources)
+    # Prefer candidate-level evidence over the rows that survived conversion.
+    exclusion_sources = [
+        (name, rows) for name, rows in source_rows
+        if not (name == "mongo" and isinstance(mongo_docs, MongoReadRows))
+        and not (name == "provider" and provider_excluded_dates is not None)
+    ]
+    excluded_dates = [row.time for row in _historical_unit_exclusions(symbol_upper, exclusion_sources)]
+    excluded_dates.extend(provider_excluded_dates or ())
     if merged:
         source_adjusted = _has_common_source_adjustment(merged, corporate_actions)
         merged = _apply_corporate_action_adjustments(merged, corporate_actions, adjustment_mode)
@@ -4410,7 +4431,7 @@ async def get_historical_prices(
                 source_counts=source_counts,
                 mongo_docs=mongo_docs,
                 warnings=warnings,
-                excluded=excluded,
+                excluded_candidate_dates=excluded_dates,
                 source_adjusted=source_adjusted,
             ),
         )
@@ -4435,7 +4456,7 @@ async def get_historical_prices(
         source_counts={},
         mongo_docs=mongo_docs,
         warnings=warnings,
-        excluded=excluded,
+        excluded_candidate_dates=excluded_dates,
     )
     return HistoricalResponse[list[EquityHistoricalData]](
         data=[],
