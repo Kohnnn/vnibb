@@ -1,6 +1,8 @@
 """The census report is observational: stored rows never imply admission."""
 from datetime import UTC, date, datetime
 
+import pytest
+
 from scripts.readiness_census import reconcile_census
 
 
@@ -43,6 +45,57 @@ def test_census_ignores_float_roundoff_but_reports_real_cache_difference():
 
     assert "redis_screener_price_mismatch" not in report["rows"][0]["reasons"]
     assert "redis_screener_volume_mismatch" in report["rows"][0]["reasons"]
+
+
+@pytest.mark.parametrize(
+    ("price_row", "comparison_reasons"),
+    [
+        (None, []),
+        ({}, []),
+        ({"time": "2026-10-25", "close": 20000, "source": "vietcap_vnd"}, ["mongo_sql_price_date_mismatch"]),
+        ({"time": "2026-10-26", "close": 20000, "source": "vietcap_vnd"}, ["mongo_sql_price_value_mismatch"]),
+        ({"time": "2026-10-26", "close": 10000, "source": "vietcap_vnd"}, []),
+    ],
+    ids=["sql-absent", "sql-empty", "date-mismatch", "value-mismatch", "matching"],
+)
+@pytest.mark.parametrize(
+    ("marker", "value", "invalid"),
+    [
+        ("raw", {}, True),
+        ("sourceUnitEvidence", None, True),
+        ("priceUnit", "USD", True),
+        (None, None, False),
+    ],
+    ids=["missing-raw", "missing-unit-evidence", "wrong-unit", "valid-lineage"],
+)
+def test_census_checks_mongo_eod_lineage_independently_of_sql(price_row, comparison_reasons, marker, value, invalid):
+    eod = {"tradeDate": "2026-10-26", "close": 10000, "raw": {"close": 10000}, "sourceUnitEvidence": {"unit": "VND"}, "priceUnit": "VND"}
+    if marker is not None:
+        eod[marker] = value
+    rows = [{"symbol": "AAA", "price_row": price_row, "snapshot_row": None}]
+    report = reconcile_census(rows, {"AAA": {"eod": eod}}, {}, [], {"count": 0}, date(2026, 10, 26), datetime(2026, 10, 26, 10, tzinfo=UTC))
+
+    reasons = [reason for reason in report["rows"][0]["reasons"] if reason.startswith(("mongo_eod_", "mongo_sql_price_"))]
+    lineage_reason = "mongo_eod_unit_or_raw_lineage_invalid"
+    assert reasons == comparison_reasons + ([lineage_reason] if invalid else [])
+    assert report["reason_counts"].get(lineage_reason, 0) == int(invalid)
+
+
+@pytest.mark.parametrize(
+    ("eod", "price_row", "expected_reasons"),
+    [
+        (None, None, ["mongo_eod_missing"]),
+        (None, {"time": "2026-10-26", "close": 10000}, ["mongo_eod_missing"]),
+        ({}, None, ["mongo_eod_unit_or_raw_lineage_invalid"]),
+        ({}, {"time": "2026-10-26", "close": 10000}, ["mongo_sql_price_date_mismatch", "mongo_eod_unit_or_raw_lineage_invalid"]),
+    ],
+    ids=["absent-no-sql", "absent-with-sql", "present-empty-no-sql", "present-empty-with-sql"],
+)
+def test_census_distinguishes_absent_and_present_empty_mongo_eod(eod, price_row, expected_reasons):
+    rows = [{"symbol": "AAA", "price_row": price_row, "snapshot_row": None}]
+    report = reconcile_census(rows, {"AAA": {"eod": eod}}, {}, [], {"count": 0}, date(2026, 10, 26), datetime(2026, 10, 26, 10, tzinfo=UTC))
+
+    assert [reason for reason in report["rows"][0]["reasons"] if reason.startswith(("mongo_eod_", "mongo_sql_price_"))] == expected_reasons
 
 
 def test_census_reports_a_completed_member_qualified_receipt():

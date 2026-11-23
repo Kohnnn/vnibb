@@ -163,10 +163,10 @@ def reconcile_census(rows, raw, cache, receipts, admitted, expected, now):
         elif price and _day(eod.get("tradeDate")) == _day(price.get("time")):
             if not _same_value(eod.get("close"), price.get("close")):
                 reasons.append("mongo_sql_price_value_mismatch")
-            if not eod.get("raw") or not eod.get("sourceUnitEvidence") or eod.get("priceUnit") != "VND":
-                reasons.append("mongo_eod_unit_or_raw_lineage_invalid")
         elif price:
             reasons.append("mongo_sql_price_date_mismatch")
+        if eod is not None and (not eod.get("raw") or not eod.get("sourceUnitEvidence") or eod.get("priceUnit") != "VND"):
+            reasons.append("mongo_eod_unit_or_raw_lineage_invalid")
         reasons.extend(_price_reasons(price, "sql_price", expected))
         reasons.extend(_price_reasons(snapshot, "sql_snapshot", expected, snapshot=True))
         if not receipts:
