@@ -2,7 +2,6 @@
 from datetime import UTC, date, datetime
 
 import pytest
-
 from scripts.readiness_census import reconcile_census
 
 
