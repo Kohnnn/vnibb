@@ -235,9 +235,9 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     interpretation: 'Frequent fills can favor mean reversion. Persistent unfilled gaps can indicate stronger directional conviction.',
   },
   gap_fill_stats: {
-    purpose: 'Focuses specifically on the probability and speed of gap fills.',
-    calculation: 'Tracks recent gap events and records whether price returned to the prior close within the same session or shortly after.',
-    interpretation: 'Higher fill rates make gaps less durable. Lower fill rates imply gaps may carry more trend information.',
+    purpose: 'Describes observed opening-gap fills and how long they took.',
+    calculation: 'Compares consecutive verified trading sessions. A gap fills if price reaches or crosses the prior close on the opening session or over the next 20 trading sessions. A missing session stops follow-up.',
+    interpretation: 'The fill rate covers only resolved outcomes; average time covers observed fills only. Neither is a forecast.',
   },
   momentum: {
     purpose: 'Combines multiple return windows to show how strong the trend is across timeframes.',

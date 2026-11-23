@@ -54,7 +54,7 @@ jobs:
           export VNIBB_HISTORY_CONTRACT_REPLAY="$(mktemp)"
           trap 'rm -f "$VNIBB_HISTORY_CONTRACT_REPLAY"' EXIT
           PYTHONPATH=apps/api python -m pytest -q apps/api/tests/test_api/test_historical_session_admission.py
-          pnpm --filter frontend exec jest --runInBand --runTestsByPath src/components/widgets/ATRRegimeWidget.route.test.tsx
+          pnpm --filter frontend exec jest --runInBand --runTestsByPath src/components/widgets/ATRRegimeWidget.route.test.tsx src/components/widgets/GapFillStatsWidget.route.test.tsx
       - name: Run root CI gate
         run: pnpm run ci:gate
 

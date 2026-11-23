@@ -596,7 +596,7 @@ export const widgetDefinitions: WidgetDefinition[] = [
     {
         type: 'gap_fill_stats',
         name: 'Gap Fill Stats',
-        description: 'Gap-up/down fill probability and average days to fill',
+        description: 'Resolved opening-gap fill rates and average time to fill in trading sessions',
         category: 'quant',
         defaultConfig: {},
         defaultLayout: { w: 6, h: 7, minW: 4, minH: 5 }
