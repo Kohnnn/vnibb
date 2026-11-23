@@ -11,21 +11,19 @@ Give the working agent this prompt:
 
 ```text
 swarm ready: <one measurable repository objective>
-Read SWARM_READY.md and the applicable AGENTS.md. Continue the current owned
-work or ready issue, establish the baseline and acceptance check, then prepare
-a bounded worker handoff. Use existing authorized tools and capacity. Report
-what is documented, implemented, tested, and observed separately.
+Read SWARM_READY.md, the README's agent section, and any applicable local
+AGENTS.md. Continue the current owned work or ready issue. Establish the
+baseline, acceptance check and bounded handoff. Report what is documented,
+implemented, tested and observed separately.
 ```
 
 If a `swarm-ready` skill is installed, load it. Otherwise execute the documented workflow directly. Treat the phrase as an agent instruction unless the installed CLI explicitly advertises it. Inspect help/version before using optional command adapters.
 
 ## Repository starting point
 
-Read: [README.md](README.md), [package.json](package.json), [docs](docs), [scripts](scripts), [.github](.github).
+Start at the [README's agent section](README.md#for-ai-coding-agents) and [docs hub](docs/README.md). The [continuation handoff](docs/VNIBB_VNSTOCK_CONTINUATION_HANDOFF.md) and [#241](https://github.com/Kohnnn/vnibb/issues/241) describe the integration route. For data-quality work, read the latest comments and linked PRs in [#274](https://github.com/Kohnnn/vnibb/issues/274) (coverage), [#111](https://github.com/Kohnnn/vnibb/issues/111) (consumer QA), and [#270](https://github.com/Kohnnn/vnibb/issues/270) (widget provenance).
 
-Reproduce one current data-quality defect from the existing QA issues before changing the UI. Trace provider response, normalization, storage, API, and widget display; preserve period, unit, scale, freshness, and missing-versus-zero.
-
-Partition independent data domains or failure cases. Keep shared schema and ingestion contracts under one integration owner. Acceptance needs a cited source-to-database-to-API-to-widget reconciliation and the relevant regression.
+For a data-quality task, reproduce one open defect with a deterministic fixture or independently verify its incumbent fix. Trace the fixture or provider through normalization, storage, API/MCP, and derived output where applicable. Preserve fiscal period and basis, units/scales, provenance, and observation versus fetch time. Keep actual zero distinct from missing, and report partial, stale, unsupported, and failed states without inventing coverage. A fixture or sampled ticker replay does not establish database-wide or serving acceptance.
 
 Do not copy README example test names such as 'bug description' or 'test_name' into executable evidence. Select existing tests after inspecting the touched component.
 
@@ -40,6 +38,10 @@ The base above is an inspection snapshot, not a permanent working branch. Refres
 5. **Implement and measure.** Make the smallest coherent change. Use differential checks when a trusted reference exists, and deterministic failure simulation when it materially improves reproduction. Record the seed/configuration and counterexamples. Do not weaken tests, rewrite baselines or hide pre-existing failures to claim success.
 6. **Verify and integrate.** Verify the exact returned commit independently in a clean environment. Recheck the final integrated revision when changes interact. Follow existing review, merge and deployment rules; a green worker report alone cannot override them. Use the narrowest checks that resolve a concrete risk.
 7. **Checkpoint and finish.** Save candidate SHA, evidence, measured outcome, remaining blockers and a precise next action before context/lease expiry. Reconcile lost or duplicate completions before retrying. Release only the run's owned resources after preserving evidence. Stop when the requested outcome is met or a concrete blocker prevents the next required action.
+
+### Source-only integration
+
+Use the existing [#241 integration route](https://github.com/Kohnnn/vnibb/issues/241#issuecomment-6947010920) with its incumbent owner. Refresh the exact heads and effective provider/hook settings for `main` and `codex/project-integration-20261110` before publication. The named disables in [`apps/web/vercel.json`](apps/web/vercel.json) and `turbo-ignore` are not proof of the effective deployment settings or a guarantee for other branches. Keep leaf changes local unless their permitted route is verified. Source integration is not authorization for releases, provider calls, acquisition/backfill, production writes, or scheduler changes.
 
 ## Verification starting point
 
