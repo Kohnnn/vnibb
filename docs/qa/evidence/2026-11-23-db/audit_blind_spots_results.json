@@ -1,0 +1,149 @@
+{
+  "evidence_version": 1,
+  "scope": "Synthetic exact-source probes; no database access",
+  "source": {
+    "repository": "Kohnnn/vnibb",
+    "commit": "df6a6d6f35c1e5bcee60d67b79c81c351530d425",
+    "path": "apps/api/vnibb/services/data_quality.py",
+    "expected_git_blob": "9b36b6734964842dc7ca219fbcf3ef096988294d",
+    "actual_git_blob": "9b36b6734964842dc7ca219fbcf3ef096988294d",
+    "sha256": "f639943376f6d1ef05d70e25d34a8364581e58b1a01a606c453aba406747d2ee",
+    "blob_verified": true
+  },
+  "fixed_audit_date": "2026-11-23",
+  "actual_threshold_5y": "2021-12-23",
+  "execution": {
+    "source_module_imported": false,
+    "application_modules_imported": false,
+    "provider_calls": 0,
+    "database_connections": 0,
+    "production_partitions_scanned": 0,
+    "synthetic_cases": 6
+  },
+  "extracted_source": {
+    "mongo_status_helper": {
+      "start_line": 139,
+      "end_line": 154,
+      "source": "def _mongo_eod_quality_status(summary: dict[str, int]) -> tuple[str, list[str]]:\n    failures = [\n        key\n        for key in (\n            \"missing_or_non_vnd_price_unit\",\n            \"invalid_ohlcv\",\n            \"missing_provenance\",\n            \"exact_duplicates\",\n            \"same_source_duplicates\",\n        )\n        if summary.get(key, 0)\n    ]\n    warnings = [\"cross_source_overlaps\"] if summary.get(\"cross_source_overlaps\", 0) else []\n    if summary.get(\"audited_documents\", 0) == 0:\n        warnings.append(\"empty_sample\")\n    return (\"failed\" if failures else \"warning\" if warnings else \"ok\", failures + warnings)"
+    },
+    "threshold_assignment": {
+      "start_line": 490,
+      "end_line": 490,
+      "source": "threshold_5y = date.today().replace(year=date.today().year - 5) + timedelta(days=30)"
+    },
+    "history_count_assignment": {
+      "start_line": 529,
+      "end_line": 529,
+      "source": "top_with_5y = sum(1 for row in price_span if row.min_date and row.min_date <= threshold_5y)"
+    }
+  },
+  "mongo_status_results": [
+    {
+      "case": "one_clean_symbol_of_twenty",
+      "synthetic_summary": {
+        "audited_symbols": 20,
+        "audited_documents": 1,
+        "coverage_symbols": 1,
+        "missing_or_non_vnd_price_unit": 0,
+        "invalid_ohlcv": 0,
+        "missing_provenance": 0,
+        "exact_duplicates": 0,
+        "same_source_duplicates": 0,
+        "cross_source_overlaps": 0
+      },
+      "actual_output": {
+        "status": "ok",
+        "issues": []
+      }
+    },
+    {
+      "case": "empty_sample_control",
+      "synthetic_summary": {
+        "audited_symbols": 20,
+        "audited_documents": 0,
+        "coverage_symbols": 0,
+        "missing_or_non_vnd_price_unit": 0,
+        "invalid_ohlcv": 0,
+        "missing_provenance": 0,
+        "exact_duplicates": 0,
+        "same_source_duplicates": 0,
+        "cross_source_overlaps": 0
+      },
+      "actual_output": {
+        "status": "warning",
+        "issues": [
+          "empty_sample"
+        ]
+      }
+    },
+    {
+      "case": "invalid_ohlcv_control",
+      "synthetic_summary": {
+        "audited_symbols": 20,
+        "audited_documents": 1,
+        "coverage_symbols": 1,
+        "missing_or_non_vnd_price_unit": 0,
+        "invalid_ohlcv": 1,
+        "missing_provenance": 0,
+        "exact_duplicates": 0,
+        "same_source_duplicates": 0,
+        "cross_source_overlaps": 0
+      },
+      "actual_output": {
+        "status": "failed",
+        "issues": [
+          "invalid_ohlcv"
+        ]
+      }
+    }
+  ],
+  "five_year_history_results": [
+    {
+      "case": "one_ancient_row_only",
+      "synthetic_retained_dates": [
+        "2020-01-01"
+      ],
+      "synthetic_aggregate_row": {
+        "min_date": "2020-01-01",
+        "max_date": "2020-01-01"
+      },
+      "actual_output": {
+        "top_with_5y_prices": 1
+      }
+    },
+    {
+      "case": "ancient_and_current_endpoints_only",
+      "synthetic_retained_dates": [
+        "2020-01-01",
+        "2026-11-23"
+      ],
+      "synthetic_aggregate_row": {
+        "min_date": "2020-01-01",
+        "max_date": "2026-11-23"
+      },
+      "actual_output": {
+        "top_with_5y_prices": 1
+      }
+    },
+    {
+      "case": "recent_row_only_control",
+      "synthetic_retained_dates": [
+        "2026-11-23"
+      ],
+      "synthetic_aggregate_row": {
+        "min_date": "2026-11-23",
+        "max_date": "2026-11-23"
+      },
+      "actual_output": {
+        "top_with_5y_prices": 0
+      }
+    }
+  ],
+  "limitations": [
+    "Mongo cases execute the status helper, not a MongoDB aggregation.",
+    "History cases execute the exact threshold and count assignments using synthetic min/max aggregates, not a SQL query.",
+    "The Mongo result is a subreport status; other daily checks can still make the complete report warning or failed.",
+    "These cases establish no current production counts, missing eligible records, financial truth, or source freshness.",
+    "No repository test suite or rendered application test was run."
+  ]
+}
