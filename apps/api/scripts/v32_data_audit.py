@@ -33,7 +33,11 @@ from vnibb.models.news import CompanyEvent, CompanyNews
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
-from vnibb.services.data_quality import PRICE_ROW_5Y_METRIC, price_row_five_year_cutoff
+from vnibb.services.data_quality import (
+    PRICE_ROW_5Y_CUTOFF_POLICY,
+    PRICE_ROW_5Y_METRIC,
+    price_row_five_year_cutoff,
+)
 
 
 @dataclass
@@ -51,6 +55,7 @@ class CoverageSummary:
     latest_company_news: str | None
     latest_company_event: str | None
     price_row_five_year_cutoff: str
+    price_row_five_year_cutoff_policy: str = PRICE_ROW_5Y_CUTOFF_POLICY
     historical_session_coverage_status: str = "not_assessed"
 
 
@@ -276,6 +281,7 @@ def print_report(report: dict[str, Any]) -> None:
         "top_with_prices",
         PRICE_ROW_5Y_METRIC,
         "price_row_five_year_cutoff",
+        "price_row_five_year_cutoff_policy",
         "historical_session_coverage_status",
         "top_with_ratios",
         "top_with_company_news",

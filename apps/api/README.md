@@ -269,8 +269,9 @@ python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 10 
 # 3) Resumable fundamentals/news/events recovery (timeboxed)
 python scripts/backfill_fundamentals_v34.py --limit 200 --batch-size 10 --types ratios --max-runtime-minutes 15 --call-timeout-seconds 60 --report-json scripts/v36_ratios_backfill_run.json
 
-# 4) Compare retained counts, not continuous history, with the V34 baseline
-python scripts/v34_coverage_delta.py --run-current-audit --min-old-price-row-improvement 1 --fail-on-miss
+# 4) Inspect the committed audit reports without overwriting them
+audit_dir=$(mktemp -d)
+python scripts/v34_coverage_delta.py --output-json "$audit_dir/delta.json"
 
 # 5) Daily coverage + freshness quality check
 python scripts/data_quality_check.py --top-limit 200 --max-stale-days 7 --output-json scripts/data_quality_report.json
@@ -279,8 +280,10 @@ python scripts/data_quality_check.py --top-limit 200 --max-stale-days 7 --output
 Notes:
 - Never run unbounded backfills in shared/dev sessions; use `--max-runtime-minutes` on every run.
 - `backfill_historical_v34.py` now includes a hard-timeout watchdog that force-exits after the runtime window + grace period and still writes checkpoint/report.
-- `top_with_price_row_at_or_before_5y_cutoff` counts sampled symbols with at least one retained SQL price row dated on or before the audit host's date minus five years plus 30 days. It does not check daily intervals, unit validity, a recent endpoint, or intervening sessions. Historical session coverage is `not_assessed`; V34 reads archived `top_with_5y_prices` only as the same old-row measure, not as coverage.
-- A partial Mongo EOD audit sample warns even when the returned documents pass integrity checks. `no_row_symbols` means no row matched the sample query, not that an eligible trading record is missing. A failed or unavailable read does not establish no-row counts.
+- `top_with_price_row_at_or_before_5y_cutoff` counts sampled symbols with at least one retained SQL price row dated on or before the reported cutoff. New audits use the audit host's date minus five years plus 30 days. This does not check daily intervals, units, a recent endpoint, or intervening sessions. Historical session coverage is `not_assessed`.
+- The archived V34 baseline used a strict five-year cutoff; V35 added the 30-day allowance. V34 delta reports the policy and date on each side and withholds the old-row delta and target when either is unknown or differs. Legacy `top_with_5y_prices` is retained-row evidence, not a comparable result by itself. The exact V32/V34/V35 archives identify their policies but did not record cutoff dates. Matching cutoffs alone do not establish that the sampled symbol sets are identical.
+- Replace the retired `--min-5y-improvement` flag with `--min-old-price-row-improvement`. With `--fail-on-miss`, an unknown or incomparable cutoff exits nonzero even with `--allow-regression`. Use fresh paths for `--output-json` and (with `--run-current-audit`) `--current-json`. Without `--run-current-audit`, both inputs must exist and no live audit is run.
+- Mongo EOD audits use one matched stream for sample representation and returned-row integrity. Clean partial samples warn. `no_row_symbols` means a successful sample query found no row for those symbols, not that eligible sessions lack data. Setup failures and disabled readers leave the symbols unknown; after an attempted failed query they are counted as failed reads. The durable `/admin/data-health` run and trend retain the sample outcome and counts without row details; older reports without those fields show `mongo_eod_quality: null` (unknown).
 
 ---
 
