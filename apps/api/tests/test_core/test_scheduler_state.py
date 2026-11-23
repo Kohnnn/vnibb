@@ -63,6 +63,72 @@ async def test_scheduled_mongo_sync_persists_failures_and_zero_write_recovery(te
 
 
 @pytest.mark.asyncio
+async def test_scheduled_rs_rating_persists_failures_and_recovery(test_engine, monkeypatch, caplog):
+    from vnibb.models.scheduler_state import SchedulerJobState
+    from vnibb.services.rs_rating_service import RSRatingService
+
+    class UnavailableLock:
+        def __init__(self, *_):
+            pass
+
+        async def acquire(self):
+            return "unavailable"
+
+    sessions = async_sessionmaker(test_engine, expire_on_commit=False)
+    monkeypatch.setattr(scheduler, "async_session_factory", sessions)
+    monkeypatch.setattr(scheduler, "_scheduler", AsyncIOScheduler(timezone="UTC"))
+    monkeypatch.setattr(scheduler, "_job_guards", {})
+    monkeypatch.setattr(scheduler.settings, "scheduler_lock_mode", "best_effort")
+    monkeypatch.setattr(scheduler, "DistributedJobLock", UnavailableLock)
+
+    private_error = "https://provider.invalid/?token=private-rs-token"
+    calculate = AsyncMock(side_effect=[
+        {"success": True, "total_stocks": 3},
+        {"success": False, "error": "No market data available"},
+        {"success": False, "error": private_error},
+        {"success": True, "total_stocks": 0},
+        {"success": False, "error": private_error},
+        {"success": True, "total_stocks": 3},
+    ])
+    monkeypatch.setattr(RSRatingService, "calculate_all_rs_ratings", calculate)
+    scheduler.configure_scheduler()
+    job_id = "rs_rating_sync"
+    job = scheduler.get_scheduler().get_job(job_id)
+    assert job is not None
+
+    try:
+        async with sessions.begin() as session:
+            await session.execute(
+                SchedulerJobState.__table__.delete().where(SchedulerJobState.id == job_id)
+            )
+        for run_number, (outcome, failures) in enumerate([
+            ("ok", 0), ("failed", 1), ("failed", 2),
+            ("ok", 0), ("failed", 1), ("ok", 0),
+        ], start=1):
+            await job.func()
+            assert calculate.await_count == run_number
+            calculate.assert_awaited_with()
+            async with sessions() as session:
+                state = await session.get(SchedulerJobState, job_id)
+                assert state is not None
+                assert state.last_outcome == outcome
+                assert state.consecutive_failures == failures
+                assert state.last_at is not None
+                if outcome == "failed":
+                    assert state.last_detail == "RuntimeError"
+                else:
+                    assert state.last_detail.startswith("completed in ")
+                assert "private-rs-token" not in state.last_detail
+                assert "provider.invalid" not in state.last_detail
+        assert private_error not in caplog.text
+    finally:
+        async with sessions.begin() as session:
+            await session.execute(
+                SchedulerJobState.__table__.delete().where(SchedulerJobState.id == job_id)
+            )
+
+
+@pytest.mark.asyncio
 async def test_api_reads_worker_outcome_from_separate_session(test_engine, monkeypatch):
     sessions = async_sessionmaker(test_engine, expire_on_commit=False)
     monkeypatch.setattr(scheduler, "async_session_factory", sessions)
