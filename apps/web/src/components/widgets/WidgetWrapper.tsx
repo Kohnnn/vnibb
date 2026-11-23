@@ -404,7 +404,7 @@ export function WidgetWrapper({
     const isDashboardPriceChart = widgetType === 'price_chart' && currentWidget?.type === 'price_chart';
     const priceChartScope = usePriceChartScope(displaySymbol, currentWidget?.config, isDashboardPriceChart && !isCollapsed);
     const { request: chartRequest, controls: chartControls } = priceChartScope;
-    const usesSymbolScopedHistory = widgetType === 'atr_regime';
+    const usesSymbolScopedHistory = widgetType === 'atr_regime' || widgetType === 'gap_fill_stats';
     const internalData = useMemo(() => {
         // Keep the widget fallback separate so the child's own empty/withheld state wins.
         if (usesSymbolScopedHistory) {

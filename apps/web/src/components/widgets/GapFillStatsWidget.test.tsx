@@ -1,147 +1,323 @@
-import type { UseQueryResult } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import type { UseQueryResult } from '@tanstack/react-query';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
-import { useHistoricalPrices } from '@/lib/queries'
-import type { EquityHistoricalResponse } from '@/types/equity'
-import { GapFillStatsWidget } from './GapFillStatsWidget'
+import { exportToCSV, exportToJSON } from '@/lib/exportWidget';
+import { useHistoricalPrices } from '@/lib/queries';
+import { getWidgetExportData, type WidgetDataPayload } from '@/lib/widgetRuntime';
+import type { EquityHistoricalData, EquityHistoricalResponse } from '@/types/equity';
+import { GapFillStatsWidget } from './GapFillStatsWidget';
+import { WidgetWrapper } from './WidgetWrapper';
 
-jest.mock('@/lib/queries', () => ({ useHistoricalPrices: jest.fn() }))
-jest.mock('@/hooks/useLoadingTimeout', () => ({
-  useLoadingTimeout: () => ({ timedOut:false, resetTimeout: jest.fn() }),
-}))
+jest.mock('@/lib/queries', () => ({ useHistoricalPrices: jest.fn(), useProfile: () => ({}) }));
+jest.mock('@/lib/exportWidget', () => ({ exportToCSV: jest.fn(), exportToJSON: jest.fn() }));
+jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
+jest.mock('@/lib/dashboardIntelligence', () => ({ getWidgetLayoutInsight: () => null }));
+jest.mock('@/contexts/DashboardContext', () => ({
+  useDashboard: () => ({ state: { dashboards: [{ id: 'dashboard', isEditable: false, tabs: [] }] } }),
+}));
+jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({
+  useGlobalMarketsSymbol: () => ({ setGlobalMarketsSymbol: jest.fn() }),
+}));
+jest.mock('@/contexts/WidgetGroupContext', () => ({
+  useWidgetGroups: () => ({ getSymbolForGroup: () => 'MSR', tickerOverrideFor: () => null }),
+}));
+jest.mock('./TickerCombobox', () => ({ TickerCombobox: () => null }));
 
-const historicalQuery = jest.mocked(useHistoricalPrices)
+const historicalQuery = jest.mocked(useHistoricalPrices);
+const NOW = Date.parse('2026-11-09T12:00:00Z');
+const HORIZON_DATES = [
+  '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06',
+  '2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13',
+  '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20',
+  '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-26', '2026-11-27',
+  '2026-11-30', '2026-12-01', '2026-12-02',
+];
 
-// The Sep 21 2026 bar is the deployed QA01 case: a unit-contaminated session that
-// produced a +99,900% gap in a range whose units were never resolved.
-// Rows carry explicit price_unit markers so the certified cases exercise the same
-// row-level proof the widget now requires. `meta.unit_status` alone is a claim about
-// the range, not proof that each consumed session was resolved.
-const candles = [
-  { symbol: 'MSR', time: '2026-09-14', open: 65500, high: 66000, low: 65000, close: 65200, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-15', open: 65300, high: 65500, low: 65000, close: 65100, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-16', open: 65100, high: 65200, low: 64800, close: 64900, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-17', open: 64900, high: 65100, low: 64700, close: 65000, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-18', open: 65000, high: 65200, low: 64800, close: 65100, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-21', open: 65, high: 66, low: 64, close: 65, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-22', open: 65, high: 66, low: 64, close: 65, volume: 1000, price_unit: 'VND' },
-  { symbol: 'MSR', time: '2026-09-23', open: 65, high: 66, low: 64, close: 65, volume: 1000, price_unit: 'VND' },
-]
+beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(NOW));
+afterEach(() => jest.restoreAllMocks());
 
-function showGapFill(response: Record<string, unknown>, queryError: Error | null = null) {
-  historicalQuery.mockReturnValue({
-    data: response,
-    isLoading:false,
-    isFetching:false,
-    error: queryError,
-    refetch: jest.fn(),
-    dataUpdatedAt: Date.parse('2026-10-07T10:00:00Z'),
-  } as unknown as UseQueryResult<EquityHistoricalResponse, Error>)
-  render(<GapFillStatsWidget symbol="MSR" />)
+function bar(time: string, price: number, changes: Partial<EquityHistoricalData> = {}): EquityHistoricalData {
+  return {
+    symbol: 'MSR', time, open: price, high: price + 5, low: price - 5, close: price, volume: 1000,
+    price_unit: 'VND', adjustment_mode: 'adjusted', adjustment_applied: true, ...changes,
+  };
 }
 
-describe('GapFillStatsWidget unit safety', () => {
-  it('withholds derived gap statistics when the range declares mixed units', () => {
-    showGapFill({ data: candles, meta: { count: candles.length, unit_status: 'mixed', freshness_as_of: '2026-09-23' } })
+function history(
+  data: EquityHistoricalData[],
+  expectedDates = data.map(row => row.time),
+  meta: Partial<NonNullable<EquityHistoricalResponse['meta']>> = {},
+): EquityHistoricalResponse {
+  return {
+    data,
+    meta: {
+      count: data.length,
+      unit_status: 'confirmed_vnd', session_basis: 'adjusted', adjustment_mode: 'adjusted',
+      calendar_verified: true, expected_session_dates: expectedDates,
+      completeness_status: data.length === expectedDates.length ? 'complete' : 'partial',
+      requested_start_date: expectedDates[0], requested_end_date: expectedDates.at(-1),
+      excluded_row_count: 0, unresolved_session_count: 0, unresolved_excluded_dates: [], replaced_excluded_dates: [],
+      ...meta,
+    },
+  };
+}
 
-    expect(screen.getByText('Gap statistics withheld')).toBeInTheDocument()
-    expect(screen.getByText(/Mixed historical price units/)).toBeInTheDocument()
-    expect(screen.queryByText('Fill Rate')).not.toBeInTheDocument()
-    expect(screen.queryByText(/99,900/)).not.toBeInTheDocument()
-  })
+function setHistoricalResponse(response: EquityHistoricalResponse, error: Error | null = null) {
+  const result: Pick<UseQueryResult<EquityHistoricalResponse, Error>,
+    'data' | 'isLoading' | 'isFetching' | 'dataUpdatedAt' | 'error' | 'refetch'> = {
+    data: response, isLoading: false, isFetching: false, dataUpdatedAt: NOW, error, refetch: jest.fn(),
+  };
+  historicalQuery.mockReturnValue(result as UseQueryResult<EquityHistoricalResponse, Error>);
+}
 
-  it('withholds derived gap statistics when units are unconfirmed', () => {
-    showGapFill({ data: candles, meta: { count: candles.length, unit_status: 'unconfirmed' } })
+function showGapFill(response: EquityHistoricalResponse, queryError: Error | null = null) {
+  setHistoricalResponse(response, queryError);
+  const publish = jest.fn<void, [WidgetDataPayload]>();
+  render(<GapFillStatsWidget symbol="msr" onDataChange={publish} />);
+  const payload = publish.mock.lastCall?.[0];
+  if (!payload) throw new Error('Expected Gap Fill Stats to publish its runtime');
+  return { runtime: payload.__widgetRuntime, exported: getWidgetExportData(payload) };
+}
 
-    expect(screen.getByText('Gap statistics withheld')).toBeInTheDocument()
-    expect(screen.getByText(/Historical price units unconfirmed/)).toBeInTheDocument()
-    expect(screen.queryByText('Fill Rate')).not.toBeInTheDocument()
-  })
+function historyWithInteriorExclusion() {
+  // Nov 6 touches the pre-gap close, but the missing Nov 5 prevents confirming that fill.
+  return history([
+    bar('2026-11-02', 1000), bar('2026-11-03', 1100), bar('2026-11-04', 1100),
+    bar('2026-11-06', 1100, { low: 990 }), bar('2026-11-09', 1000, { high: 1100 }),
+  ], HORIZON_DATES.slice(0, 6), {
+    excluded_row_count: 2, unresolved_session_count: 1, unresolved_excluded_dates: ['2026-11-05'],
+    missing_session_count: 1, missing_leading_sessions: 0, missing_interior_sessions: 1, missing_trailing_sessions: 0,
+  });
+}
 
-  it('renders gap statistics for a confirmed VND range', () => {
-    showGapFill({ data: candles, meta: { count: candles.length, unit_status: 'confirmed_vnd', freshness_as_of: '2026-09-23' } })
+it('requests adjusted daily history and measures one elapsed session across an exchange holiday and weekend', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-04-28', 20000), bar('2026-04-29', 30000), bar('2026-05-04', 30000, { low: 20000 }),
+  ], undefined, { fallback_used: true, warnings: ['Admitted observations include a verified fallback'] }));
 
-    expect(screen.getByText('Fill Rate')).toBeInTheDocument()
-    expect(screen.queryByText('Gap statistics withheld')).not.toBeInTheDocument()
-  })
+  expect(historicalQuery).toHaveBeenCalledWith('MSR', expect.objectContaining({ adjustmentMode: 'adjusted', interval: '1D' }));
+  expect(screen.getByText('+50.00%')).toBeInTheDocument();
+  expect(screen.getByText('Filled: 1 trading session')).toBeInTheDocument();
+  expect(screen.getByText(/Complete historical window.*2026-04-28 to 2026-05-04/)).toBeInTheDocument();
+  expect(runtime?.provenance).toMatchObject({
+    coverage: 'complete', adjustmentMode: 'adjusted', updatedAt: '2026-05-04',
+    coverageDetail: {
+      requestedStart: '2026-04-28', requestedEnd: '2026-05-04', observedSessions: 3,
+      requestedSessions: 3, gapSessions: 0, calendarVerified: true,
+    },
+    warnings: expect.arrayContaining(['Historical source fallback used', 'Admitted observations include a verified fallback']),
+  });
+  expect(exported).toMatchObject({
+    eligibleComparisons: 2, excludedComparisons: 0, comparisonStart: '2026-04-29', comparisonEnd: '2026-05-04',
+    gaps: 1, resolvedGaps: 1, fillRatePct: 100, avgFillTradingSessions: 1, followUpTradingSessions: 20,
+  });
+});
 
-  it('withholds derived gaps when the range claims VND but the rows carry no unit proof', () => {
-    // Deployed PROD case: meta.unit_status says confirmed_vnd while every historical
-    // row omits price_unit, so the derived gaps are unproven and must not render.
-    const markerless = candles.map(({ price_unit: _unit, ...row }) => row)
-    showGapFill({ data: markerless, meta: { count: markerless.length, unit_status: 'confirmed_vnd' } })
+it('withholds when sparse rows cannot form any overnight comparison', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-02', 1000), bar('2026-11-06', 1100), bar('2026-11-16', 1100, { low: 990 }),
+  ], HORIZON_DATES.slice(0, 11)));
 
-    expect(screen.getByText('Gap statistics withheld')).toBeInTheDocument()
-    expect(screen.queryByText('Fill Rate')).not.toBeInTheDocument()
-    expect(screen.queryByText(/99,900/)).not.toBeInTheDocument()
-  })
+  expect(screen.getByText(/0 eligible comparisons · 10 excluded/)).toBeInTheDocument();
+  expect(screen.getByText('Gap statistics withheld')).toBeInTheDocument();
+  expect(screen.queryByText('Fill rate (resolved)')).not.toBeInTheDocument();
+  expect(runtime).toMatchObject({
+    layoutHint: { empty: true },
+    provenance: { coverage: 'partial', observationStatus: 'unavailable', coverageDetail: { gapSessions: 8 } },
+  });
+  expect(exported).toBeNull();
+});
 
-  it('withholds derived gaps when a single consumed row lacks unit proof', () => {
-    const partial = candles.map((row, index) => (index === 3 ? { ...row, price_unit: 'unknown' } : row))
-    showGapFill({ data: partial, meta: { count: partial.length, unit_status: 'confirmed_vnd' } })
+it('stops follow-up at an unresolved session, keeping a later eligible same-session fill', () => {
+  const { runtime, exported } = showGapFill(historyWithInteriorExclusion());
 
-    expect(screen.getByText('Gap statistics withheld')).toBeInTheDocument()
-    expect(screen.queryByText('Fill Rate')).not.toBeInTheDocument()
-  })
+  expect(screen.getByText('Censored after 2026-11-04')).toBeInTheDocument();
+  expect(screen.getByText('Filled: same session (0)')).toBeInTheDocument();
+  expect(screen.getByText('0.0')).toBeInTheDocument();
+  expect(screen.getByText(/1 filled · 0 unfilled · 1 censored/)).toBeInTheDocument();
+  expect(runtime?.provenance).toMatchObject({
+    coverage: 'partial',
+    coverageDetail: { requestedSessions: 6, observedSessions: 5, gapSessions: 1, observedEnd: '2026-11-09' },
+    warnings: expect.arrayContaining([
+      expect.stringContaining('0 leading, 1 interior, 0 trailing'),
+      expect.stringContaining('excluded rows: 2; replaced dates: 0; unresolved dates: 1'),
+      expect.stringContaining('excluded from fill rates'),
+    ]),
+  });
+  expect(exported).toMatchObject({
+    eligibleComparisons: 3, excludedComparisons: 2, gaps: 2,
+    filledGaps: 1, unfilledGaps: 0, censoredGaps: 1, resolvedGaps: 1, fillRatePct: 100, avgFillTradingSessions: 0,
+    upResolvedGaps: 0, upFillRatePct: null, downResolvedGaps: 1, downFillRatePct: 100,
+  });
+});
 
-  it('keeps refresh-failure fallback and partial coverage distinct in the banner', () => {
-    showGapFill(
-      { data: candles, meta: { count: candles.length, unit_status: 'confirmed_vnd', completeness_status: 'partial' } },
-      new Error('Refresh failed'),
-    )
+it('censors at the requested endpoint despite complete historical coverage', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-02', 1000), bar('2026-11-03', 1100), bar('2026-11-04', 1100),
+  ]));
 
-    expect(screen.getByText(/Partial historical coverage/)).toBeInTheDocument()
-    expect(screen.getByText(/Latest historical refresh failed/)).toBeInTheDocument()
-    expect(screen.getByText('Fill Rate')).toBeInTheDocument()
-  })
+  expect(screen.getByText('Censored after 2026-11-04')).toBeInTheDocument();
+  expect(screen.queryByText('0.0%')).not.toBeInTheDocument();
+  expect(runtime?.provenance?.coverage).toBe('complete');
+  expect(exported).toMatchObject({
+    filledGaps: 0, unfilledGaps: 0, censoredGaps: 1, resolvedGaps: 0, fillRatePct: null, avgFillTradingSessions: null,
+  });
+});
 
-  it('shows the response-level reason instead of a generic empty state', () => {
-    showGapFill({ data: [], error: 'No qualifying VND-certified sessions in the requested window.' })
+it.each([
+  ['2026-12-01', 'Filled: 20 trading sessions', 1, 0, 100, 20],
+  ['2026-12-02', 'Unfilled through 2026-12-01', 0, 1, 0, null],
+] as const)('resolves a fully observed horizon when the first price touch is on %s', (fillDate, label, filled, unfilled, rate, average) => {
+  const { exported } = showGapFill(history(HORIZON_DATES.map((time, i) =>
+    bar(time, i === 0 ? 1000 : 1100, time === fillDate ? { low: 1000 } : {}),
+  )));
 
-    expect(screen.getByText('No qualifying VND-certified sessions in the requested window.')).toBeInTheDocument()
-  })
+  expect(screen.getByText(label)).toBeInTheDocument();
+  expect(exported).toMatchObject({
+    gaps: 1, resolvedGaps: 1, filledGaps: filled, unfilledGaps: unfilled, censoredGaps: 0,
+    fillRatePct: rate, avgFillTradingSessions: average,
+  });
+});
 
-  const unsafeMetas: Array<[string, Record<string, unknown>]> = [
-    ['unresolved exclusions', { unit_status: 'confirmed_vnd', unresolved_excluded_dates: ['2026-09-21'] }],
-    ['unavailable quality', { unit_status: 'confirmed_vnd', quality_status: 'unavailable' }],
-    ['explicit unavailable', { unit_status: 'confirmed_vnd', unavailable:true }],
-  ]
+it('computes rates over fills and observed failures, and includes zero-session fills in the mean', () => {
+  const { exported } = showGapFill(history(HORIZON_DATES.map((time, i) => {
+    if (i === 0) return bar(time, 1000);
+    if (i === 2) return bar(time, 1100, { open: 1080, low: 1075 });
+    if (i === 3) return bar(time, 1070);
+    if (i === 4) return bar(time, 1070, { high: 1100 });
+    return bar(time, i === 22 ? 1200 : i > 4 ? 1070 : 1100);
+  })));
 
-  it.each(unsafeMetas)('withholds all derived statistics for %s', (_reason, meta) => {
-    showGapFill({ data: candles, meta })
+  expect(screen.getByText('2 filled · 1 unfilled · 1 censored')).toBeInTheDocument();
+  expect(screen.getByText('66.7%')).toBeInTheDocument();
+  expect(screen.getByText('0.5')).toBeInTheDocument();
+  expect(exported).toMatchObject({
+    gaps: 4, resolvedGaps: 3, avgFillTradingSessions: 0.5,
+    upResolvedGaps: 1, upFillRatePct: 0, downResolvedGaps: 2, downFillRatePct: 100,
+  });
+});
 
-    expect(screen.queryByText('Fill Rate')).not.toBeInTheDocument()
-    expect(screen.queryByText('-99.90%')).not.toBeInTheDocument()
-  })
+it('keeps a proven fill despite boundary holes and discloses a failed refresh separately', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-03', 1000), bar('2026-11-04', 1100, { low: 1000 }), bar('2026-11-05', 1100),
+  ], HORIZON_DATES.slice(0, 5)), new Error('Refresh failed'));
 
-  it('marks a numeric legacy range without structured unit proof unknown', () => {
-    showGapFill({ data: candles, meta: { count: candles.length } })
+  expect(screen.getByText(/1 leading, 0 interior, 1 trailing.*Latest historical refresh failed/)).toBeInTheDocument();
+  expect(runtime?.provenance).toMatchObject({
+    coverage: 'partial', refreshStatus: 'failed', cached: true, updatedAt: '2026-11-05',
+    coverageDetail: { observedStart: '2026-11-03', observedEnd: '2026-11-05', gapSessions: 2 },
+  });
+  expect(exported).toMatchObject({ gaps: 1, filledGaps: 1, censoredGaps: 0, avgFillTradingSessions: 0 });
+});
 
-    expect(screen.getAllByText(/Legacy quality unknown/).length).toBeGreaterThan(0)
-    expect(screen.queryByText('Fill Rate')).not.toBeInTheDocument()
-  })
+it('lets an admitted same-date replacement restore continuity without ignoring source exclusions', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-02', 1000), bar('2026-11-03', 1000), bar('2026-11-04', 1100, { low: 1000 }),
+  ], undefined, { excluded_row_count: 2, replaced_excluded_dates: ['2026-11-03'] }));
 
-  it('preserves a certified large gap while disclosing benign range warnings', () => {
-    // A real corporate-action-scale move in a VND-certified range: +50% overnight
-    // gap that fills the next session. Magnitude is never treated as a quality signal.
-    const largeMove = [
-      { symbol: 'MSR', time: '2026-09-14', open: 19800, high: 20200, low: 19700, close: 20000, volume: 1000, price_unit: 'VND' },
-      { symbol: 'MSR', time: '2026-09-15', open: 30000, high: 31500, low: 29900, close: 31000, volume: 1000, price_unit: 'VND' },
-      { symbol: 'MSR', time: '2026-09-16', open: 30500, high: 30800, low: 19000, close: 19500, volume: 1000, price_unit: 'VND' },
-    ]
-    showGapFill({
-      data: largeMove,
-      meta: {
-        unit_status: 'confirmed_vnd', warnings: ['Latest quote appended', 'Requested history truncated'],
-        fallback_used:true, excluded_price_unit_dates: ['2025-01-02'], unresolved_excluded_dates: [],
-      },
-    })
+  expect(screen.getByText(/excluded rows: 2; replaced dates: 1; unresolved dates: 0/)).toBeInTheDocument();
+  expect(runtime?.provenance?.coverage).toBe('complete');
+  expect(exported).toMatchObject({ eligibleComparisons: 2, excludedComparisons: 0, filledGaps: 1 });
+});
 
-    expect(screen.getByText('Fill Rate')).toBeInTheDocument()
-    expect(screen.getByText('+50.00%')).toBeInTheDocument()
-    expect(screen.getByText('Filled 1d')).toBeInTheDocument()
-    expect(screen.getByText(/Latest quote appended/)).toBeInTheDocument()
-    expect(screen.getByText(/Requested history truncated/)).toBeInTheDocument()
-    expect(screen.getByText(/Historical source fallback used/)).toBeInTheDocument()
-  })
-})
+it('treats malformed OHLC as a hole even when the producer reports complete rows', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-02', 1000), bar('2026-11-03', 1100, { low: 1110 }),
+    bar('2026-11-04', 1100), bar('2026-11-05', 1100),
+  ]));
+
+  expect(screen.getByText(/Unusable OHLC rows: 1/)).toBeInTheDocument();
+  expect(runtime?.provenance?.coverage).toBe('partial');
+  expect(exported).toMatchObject({ eligibleComparisons: 1, excludedComparisons: 2, gaps: 0 });
+});
+
+it('reports an observed zero gap count, not a zero rate or duration, on eligible index-point history', () => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-02', 1000, { price_unit: 'index_points', adjustment_applied: false, raw_close: 1000 }),
+    bar('2026-11-03', 1000, { price_unit: 'index_points', adjustment_applied: false, raw_close: 1000 }),
+  ], undefined, { unit_status: 'not_applicable', session_basis: 'not_applicable' }));
+
+  expect(screen.getByText('No qualifying gaps among eligible comparisons')).toBeInTheDocument();
+  expect(runtime?.provenance?.basis).toMatch(/^Index points \(adjustment not applicable\)/);
+  expect(exported).toMatchObject({ eligibleComparisons: 1, gaps: 0, fillRatePct: null, avgFillTradingSessions: null });
+});
+
+it.each([
+  { name: 'unknown calendar in the selected 1Y window', meta: { calendar_verified: false, expected_session_dates: null },
+    reason: /Exchange sessions are not certified for the selected 1Y window/ },
+  { name: 'a raw/unverified basis', meta: { session_basis: 'unverified', adjustment_mode: 'raw' }, reason: /price basis is unverified/ },
+  { name: 'mixed series units', meta: { unit_status: 'mixed' }, reason: /price units were not certified/ },
+  { name: 'unconfirmed series units', meta: { unit_status: 'unconfirmed' }, reason: /price units were not certified/ },
+  { name: 'a missing per-row unit marker', row: { price_unit: undefined }, reason: /price units were not certified/ },
+  { name: 'a raw/adjusted discontinuity despite an adjusted envelope', row: { adjustment_mode: 'raw', adjustment_applied: false },
+    reason: /price basis is unverified or mixed/ },
+] satisfies {
+  name: string; meta?: Partial<NonNullable<EquityHistoricalResponse['meta']>>; row?: Partial<EquityHistoricalData>; reason: RegExp;
+}[])('withholds metrics for $name even when the surviving rows look plausible', ({ meta, row, reason }) => {
+  const { runtime, exported } = showGapFill(history([
+    bar('2026-11-02', 20000), bar('2026-11-03', 30000, { low: 20000, ...row }),
+  ], undefined, meta));
+
+  expect(screen.getByText(reason)).toBeInTheDocument();
+  expect(screen.getByText('Gap statistics withheld')).toBeInTheDocument();
+  expect(screen.queryByText('Fill rate (resolved)')).not.toBeInTheDocument();
+  expect(runtime?.provenance?.observationStatus).toBe('unavailable');
+  expect(exported).toBeNull();
+});
+
+it('honors an envelope error even with otherwise qualified rows without publishing transport detail', () => {
+  const { runtime, exported } = showGapFill({
+    ...history([bar('2026-11-02', 1000), bar('2026-11-03', 1100)]),
+    error: 'Provider transport diagnostic',
+  });
+
+  expect(screen.getByText('Historical price request failed.')).toBeInTheDocument();
+  expect(screen.queryByText('Provider transport diagnostic')).not.toBeInTheDocument();
+  expect(runtime?.provenance).toMatchObject({ observationStatus: 'unavailable', refreshStatus: 'failed', admissionReason: 'Historical price request failed.' });
+  expect(screen.getByText('Gap statistics unavailable')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
+  expect(exported).toBeNull();
+});
+
+it('gives the toolbar, CSV/JSON and VniAgent the same summary and replaces it when withheld', async () => {
+  setHistoricalResponse(historyWithInteriorExclusion());
+  const askAgent = jest.fn();
+  const user = userEvent.setup();
+  render(
+    <WidgetWrapper id="gap" widgetType="gap_fill_stats" title="Gap Fill Stats" dashboardId="dashboard" tabId="tab"
+      showGroupLabels={false} onCopilotClick={askAgent} data={{ rawFallback: 999 }}>
+      <GapFillStatsWidget symbol="MSR" />
+    </WidgetWrapper>
+  );
+  const exportSummary = async (format: 'CSV' | 'JSON') => {
+    await user.click(screen.getByRole('button', { name: 'Widget actions for Gap Fill Stats' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Export' }));
+    await user.click(screen.getByRole('menuitem', { name: `Export as ${format}` }));
+  };
+  const provenance = expect.objectContaining({
+    coverage: 'partial', observationStatus: 'available', basis: expect.stringContaining('20 trading sessions'),
+    coverageDetail: expect.objectContaining({ gapSessions: 1, calendarVerified: true }),
+  });
+  const metrics = expect.objectContaining({ gaps: 2, filledGaps: 1, censoredGaps: 1, resolvedGaps: 1, avgFillTradingSessions: 0 });
+
+  await screen.findByRole('button', { name: 'Data status: Partial coverage' });
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  expect(askAgent).toHaveBeenLastCalledWith(expect.objectContaining({ dataSample: metrics, dataProvenance: provenance }));
+  await exportSummary('CSV');
+  expect(exportToCSV).toHaveBeenLastCalledWith([metrics], expect.any(String), provenance);
+  await exportSummary('JSON');
+  expect(exportToJSON).toHaveBeenLastCalledWith(metrics, expect.any(String), provenance);
+
+  setHistoricalResponse(history([bar('2026-11-02', 1000)], undefined, { calendar_verified: false, expected_session_dates: null }));
+  await user.click(screen.getByRole('button', { name: '6M' }));
+  await screen.findByRole('button', { name: 'Data status: Unavailable' });
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  const unavailable = expect.objectContaining({ observationStatus: 'unavailable', admissionReason: expect.stringContaining('selected 6M window') });
+  expect(askAgent).toHaveBeenLastCalledWith(expect.objectContaining({ dataSample: null, dataProvenance: unavailable }));
+  await exportSummary('JSON');
+  expect(exportToJSON).toHaveBeenLastCalledWith(null, expect.any(String), unavailable);
+  jest.mocked(exportToCSV).mockClear();
+  await exportSummary('CSV');
+  expect(exportToCSV).not.toHaveBeenCalled();
+});
