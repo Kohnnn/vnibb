@@ -68,6 +68,13 @@ def test_ambiguous_legacy_provenance_never_guesses_from_magnitude(source):
     assert row["close"] == 0.5
 
 
+@pytest.mark.parametrize("source", ["dnse", "dnse_unknown", "dnse_vnd"])
+def test_dnse_provenance_alone_cannot_certify_price_units(source: str) -> None:
+    row = persisted_price_record(bar(source=source))
+    assert row["price_unit"] == "unknown"
+    assert row["close"] == 0.5
+
+
 def test_known_legacy_source_and_new_source_markers_are_distinct():
     assert persisted_price_record(SimpleNamespace(**bar(source="KBS")))["close"] == 500
     row = persisted_price_record(SimpleNamespace(**bar(source="vnstock_vnd:KBS")))
