@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from math import isfinite, sqrt
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from vnibb.core.config import settings
 from vnibb.core.price_units import normalize_price_record
-from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+from vnibb.services.intraday_availability import (
+    FEED_ERROR_COPY,
+    IntradayFeed,
+    intraday_feed,
+    observation_time,
+    provider_feed_failure,
+    retained_tick_feed,
+    retained_trade_time,
+)
+from vnibb.services.mongo_market_data_service import MongoReadError, get_mongo_market_data_service
+
+logger = logging.getLogger(__name__)
+TRADE_FEATURES = {"deep_trades", "volume_profile", "vwap", "footprint"}
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -24,20 +39,8 @@ def _to_float(value: Any, default: float = 0.0) -> float:
 def _to_int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
-
-
-def _parse_time(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        return value
-    if not value:
-        return None
-    raw = str(value).replace("Z", "+00:00")
-    try:
-        return datetime.fromisoformat(raw)
-    except ValueError:
-        return None
 
 
 def _interval_seconds(interval: str) -> int:
@@ -56,9 +59,11 @@ def _bar_key(ts: datetime, interval: str) -> str:
     return datetime.fromtimestamp(floored, tz=ts.tzinfo).isoformat()
 
 
-def _normalize_trade(row: dict[str, Any]) -> dict[str, Any] | None:
-    raw = row.get("raw") or {}
-    trade_time = _parse_time(raw.get("time") or row.get("observedAt"))
+def _normalize_trade(row: dict[str, Any], market_tz: ZoneInfo, now: datetime) -> dict[str, Any] | None:
+    raw = row.get("raw")
+    if not isinstance(raw, dict):
+        return None
+    trade_time = observation_time(retained_trade_time(row), naive_tz=market_tz)
     admitted = normalize_price_record(
         {"price": raw.get("price"), "price_unit": row.get("price_unit", row.get("priceUnit", "unknown"))},
         symbol=str(row.get("symbol") or ""), source=row.get("price_source") or row.get("source"),
@@ -67,11 +72,11 @@ def _normalize_trade(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
     price = _to_float(admitted.get("price"))
     volume = _to_int(raw.get("volume"))
-    if trade_time is None or price <= 0 or volume <= 0:
+    if trade_time is None or trade_time > now or price <= 0 or volume <= 0:
         return None
     return {
-        "time": trade_time.isoformat(),
-        "timestamp": trade_time,
+        "time": trade_time.astimezone(market_tz).isoformat(),
+        "timestamp": trade_time.astimezone(market_tz),
         "price": price,
         "volume": volume,
         "match_type": str(raw.get("match_type") or "Unknown"),
@@ -105,8 +110,19 @@ class MicrostructureAnalysisService:
     ) -> dict[str, Any]:
         symbol_upper = symbol.upper()
         requested = self._normalize_features(features)
-        raw_trades, raw_depth, eod_prices = await self._load_inputs(symbol_upper, lookback_days, requested)
-        trades = [trade for row in raw_trades if (trade := _normalize_trade(row))]
+        raw_trades, raw_depth, eod_prices, trade_feed, input_errors = await self._load_inputs(
+            symbol_upper, lookback_days, requested,
+        )
+        now = datetime.now(UTC)
+        market_tz = ZoneInfo(settings.vn_timezone)
+        trades = [trade for row in raw_trades if (trade := _normalize_trade(row, market_tz, now))]
+        if trade_feed is None:
+            trade_feed = retained_tick_feed(
+                raw_trades, symbol_upper, lookback_days=lookback_days, now=now,
+                admitted_times=[trade["timestamp"] for trade in trades],
+            )
+            if trade_feed["status"] == "unusable":
+                input_errors.append(FEED_ERROR_COPY["unusable"])
 
         deep_trades = self._calculate_deep_trades(trades, interval) if "deep_trades" in requested else self._empty_deep_trades()
         volume_profile = self._calculate_volume_profile(raw_depth, trades, value_area_pct) if "volume_profile" in requested else self._empty_volume_profile()
@@ -115,15 +131,17 @@ class MicrostructureAnalysisService:
         footprint = self._calculate_footprint(trades, interval, imbalance_ratio) if "footprint" in requested else self._empty_footprint()
 
         unsupported = []
-        if not trades:
-            unsupported.append("No Mongo quote.intraday rows available for this symbol/lookback window.")
-        if not raw_depth:
-            unsupported.append("No Mongo quote.price_depth rows available for this symbol.")
-        unsupported.append("True liquidity heat map requires time-stamped Level 2 snapshots; current Mongo depth rows are not time-stamped snapshots.")
+        if requested & TRADE_FEATURES and trade_feed["status"] == "empty":
+            unsupported.append("No retained trade ticks returned for this symbol and lookback.")
+        if "volume_profile" in requested and not raw_depth:
+            unsupported.append("No retained price-depth rows returned for this symbol.")
+        unsupported.append("True liquidity heat maps require time-stamped Level 2 snapshots.")
 
         return {
             "symbol": symbol_upper,
             "source": "mongodb:frb",
+            "trade_feed": trade_feed,
+            "input_errors": input_errors,
             "data_quality": {
                 "deep_trades": "match_type_proxy" if trades else "unavailable",
                 "volume_profile": volume_profile["quality"],
@@ -161,19 +179,42 @@ class MicrostructureAnalysisService:
         symbol: str,
         lookback_days: int,
         features: set[str],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-        needs_trades = bool(features & {"deep_trades", "volume_profile", "vwap", "footprint"})
-        needs_depth = "volume_profile" in features
-        needs_eod = "price_action" in features
-
-        raw_trades, raw_depth, eod_prices = await asyncio.gather(
-            self.mongo.get_intraday_trades(symbol, lookback_days=lookback_days) if needs_trades else self._empty_async_list(),
-            self.mongo.get_price_depth(symbol) if needs_depth else self._empty_async_list(),
-            self.mongo.get_eod_prices(symbol, lookback_days=max(lookback_days, 365)) if needs_eod else self._empty_async_list(),
+    ) -> tuple[list[dict], list[dict], list[dict], IntradayFeed | None, list[str]]:
+        trades, depth, eod = await asyncio.gather(
+            self.mongo.get_intraday_trades(symbol, lookback_days=lookback_days) if features & TRADE_FEATURES else self._not_requested(),
+            self.mongo.get_price_depth(symbol) if "volume_profile" in features else self._not_requested(),
+            self.mongo.get_eod_prices(symbol, lookback_days=max(lookback_days, 365)) if "price_action" in features else self._not_requested(),
+            return_exceptions=True,
         )
-        return raw_trades, raw_depth, eod_prices
+        now = datetime.now(UTC)
+        errors = []
+        for label, result in (("Trade ticks", trades), ("Price depth", depth), ("Daily prices", eod)):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            if isinstance(result, Exception):
+                logger.warning("Microstructure %s read failed for %s: %s", label, symbol, type(result).__name__)
+                errors.append(f"{label}: {self._input_failure(result)[1]}")
 
-    async def _empty_async_list(self) -> list[dict[str, Any]]:
+        feed = None
+        if not features & TRADE_FEATURES or isinstance(trades, Exception):
+            feed = intraday_feed(
+                self._input_failure(trades)[0] if isinstance(trades, Exception) else "not_requested",
+                source="mongodb" if isinstance(trades, Exception) else None,
+                delivery="retained", fetched_at=now,
+            )
+        return (
+            trades if isinstance(trades, list) else [], depth if isinstance(depth, list) else [],
+            eod if isinstance(eod, list) else [], feed, errors,
+        )
+
+    @staticmethod
+    def _input_failure(exc: Exception):
+        if isinstance(exc, MongoReadError) and exc.state == "timeout":
+            return "timeout", FEED_ERROR_COPY["timeout"]
+        return provider_feed_failure(exc)
+
+    @staticmethod
+    async def _not_requested() -> list[dict[str, Any]]:
         return []
 
     def _empty_deep_trades(self) -> dict[str, Any]:

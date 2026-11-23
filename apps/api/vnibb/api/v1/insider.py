@@ -258,19 +258,15 @@ async def get_block_trades(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get recent large block trades.
+    """Latest N retained detector rows by trade time, optionally for one symbol.
 
-    Args:
-        symbol: Optional stock symbol filter
-        limit: Maximum number of trades to return
-
-    Returns:
-        List of block trades
+    No date or publication filter is applied. The detector reads retained
+    intraday prints, not an exchange publication feed. A successful empty list
+    means no rows were returned from storage, not zero exchange activity.
     """
     try:
         service = InsiderTrackingService(db)
-        trades = await service.get_recent_block_trades(symbol=symbol, limit=limit)
+        trades = await service.get_recent_block_trades(symbol=symbol.strip().upper() if symbol else None, limit=limit)
 
         return [BlockTradeResponse.model_validate(trade) for trade in trades]
 

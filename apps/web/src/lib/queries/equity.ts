@@ -4,10 +4,12 @@
 
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../api';
+import { retainIntraday } from '../intradayAvailability';
 import { logClientError } from '../clientLogger';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '../pollingPolicy';
 import { useDataSources } from '@/contexts/DataSourcesContext';
 import type { VnstockSource } from '@/contexts/DataSourcesContext';
+import type { IntradayResponse } from '@/types/equity';
 
 // Helper hook to get the preferred VnStock source
 export function useVnstockSource(): VnstockSource {
@@ -144,7 +146,11 @@ export function useIntraday(
 ) {
     return useQuery({
         queryKey: equityQueryKeys.intraday(symbol, options?.limit),
-        queryFn: () => api.getIntraday(symbol, { limit: options?.limit }),
+        queryFn: async ({ client, queryKey, signal }) => retainIntraday(
+            await api.getIntraday(symbol, { limit: options?.limit, signal }),
+            client.getQueryData<IntradayResponse>(queryKey),
+            (rows) => Array.isArray(rows) && rows.length > 0,
+        ),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 30 * 1000,
     });
@@ -153,7 +159,11 @@ export function useIntraday(
 export function usePriceDepth(symbol: string, enabled = true) {
     return useQuery({
         queryKey: equityQueryKeys.priceDepth(symbol),
-        queryFn: () => api.getPriceDepth(symbol),
+        queryFn: async ({ client, queryKey, signal }) => retainIntraday(
+            await api.getPriceDepth(symbol, signal),
+            client.getQueryData<api.PriceDepthResponse>(queryKey),
+            (depth) => Number(depth?.entries?.length) > 0,
+        ),
         enabled: enabled && !!symbol,
         staleTime: 5 * 1000,
     });

@@ -143,11 +143,11 @@ export async function getOfficers(symbol: string): Promise<OfficersResponse> {
 
 export async function getIntraday(
     symbol: string,
-    options?: { interval?: string; signal?: AbortSignal }
+    options?: { limit?: number; signal?: AbortSignal }
 ): Promise<IntradayResponse> {
     return fetchAPI<IntradayResponse>(`/equity/${symbol}/intraday`, {
         params: {
-            interval: options?.interval,
+            limit: options?.limit,
         },
         signal: options?.signal,
     });

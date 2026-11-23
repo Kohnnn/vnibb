@@ -2242,7 +2242,9 @@ async def test_orderbook_endpoint_uses_cached_payload_before_provider(client, mo
     assert response.status_code == 200
     payload = response.json()
     assert payload["meta"]["count"] == 1
-    assert payload["meta"]["last_data_date"] == "2026-03-17T14:45:00"
+    assert payload["meta"]["last_data_date"] is None
+    assert payload["meta"]["feed"]["snapshot_at"] == "2026-03-17T14:45:00+00:00"
+    assert payload["meta"]["feed"]["delivery"] == "cache"
     assert payload["data"]["entries"][0]["bid_vol"] == 12000
 
 
@@ -2292,7 +2294,9 @@ async def test_orderbook_endpoint_falls_back_when_live_has_volume_without_prices
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["is_stale"] is True
-    assert payload["data"]["market_status"] == "closed"
+    assert payload["data"]["market_status"] == payload["meta"]["market_session"]["state"]
+    assert payload["meta"]["feed"]["status"] == "unusable"
+    assert payload["meta"]["feed"]["delivery"] == "retained"
     assert payload["data"]["entries"][0]["price"] == 25.0
     assert payload["data"]["last_price"] == 25.0
 
@@ -2336,7 +2340,10 @@ async def test_orderbook_endpoint_uses_latest_close_when_no_priced_snapshot(clie
     assert response.status_code == 200
     payload = response.json()
     assert payload["data"]["is_stale"] is True
-    assert payload["data"]["market_status"] == "closed"
+    assert payload["data"]["market_status"] == payload["meta"]["market_session"]["state"]
+    assert payload["meta"]["feed"]["status"] == "unusable"
+    assert payload["meta"]["feed"]["delivery"] == "reference"
+    assert payload["meta"]["feed"]["source_as_of"] is None
     assert payload["data"]["price_source"] == "latest_price"
     assert payload["data"]["entries"][0]["price"] == 25.0
     assert payload["data"]["entries"][0]["price_status"] == "reference"

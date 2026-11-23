@@ -5,10 +5,12 @@ import { useIntraday } from '@/lib/queries';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { VirtualizedTable, type VirtualizedColumn } from '@/components/ui/VirtualizedTable';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
-import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
-import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { IntradayEmpty, IntradayStatus } from '@/components/ui/IntradayStatus';
+import { useIntradayAvailability } from '@/hooks/useIntradayAvailability';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { priceColorClass } from '@/lib/priceColor';
 import { memo, useEffect, useMemo } from 'react';
+import type { IntradayTradeData } from '@/types/equity';
 
 interface IntradayTradesWidgetProps {
     id: string;
@@ -20,11 +22,8 @@ interface IntradayTradesWidgetProps {
 
 function formatTime(timeStr: string | null | undefined): string {
     if (!timeStr) return 'n/a';
-    const parts = timeStr.split(':');
-    if (parts.length >= 2) {
-        return `${parts[0]}:${parts[1]}:${parts[2]?.split('.')[0] || '00'}`;
-    }
-    return timeStr;
+    const clock = /(?:^|[T ])(\d{2}:\d{2}:\d{2})/.exec(timeStr)?.[1];
+    return clock ?? timeStr;
 }
 
 function formatPrice(price: number | null | undefined): string {
@@ -39,19 +38,6 @@ function formatVolume(vol: number | null | undefined): string {
     return vol.toLocaleString('vi-VN');
 }
 
-/**
- * Vietnam HOSE/HNX market hours awareness.
- * Delegates to the shared marketHours module so widgets stay in sync
- * about the actual HOSE schedule (09:00–11:30 + 13:00–14:45 ICT).
- * (QA-v3 T4/T6 — IntradayTrades, VWAP, Footprint must agree on the
- * canonical session boundaries.)
- */
-import { isMarketClosedNowVnt as _isMarketClosedNowVnt, getMarketState } from '@/lib/marketHours';
-
-function isMarketClosedNowVnt(): boolean {
-    return _isMarketClosedNowVnt();
-}
-
 function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: IntradayTradesWidgetProps) {
     const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useIntraday(symbol, { limit: 1000 });
 
@@ -63,16 +49,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
             return timeB.localeCompare(timeA);
         });
     }, [data]);
-    const lastDataDate = useMemo(() => trades.reduce<string | null>((latest, trade) => {
-        const time = trade.time;
-        if (!time || !/^\d{4}-\d{2}-\d{2}/.test(time)) return latest;
-        const observedAt = new Date(time).getTime();
-        return Number.isFinite(observedAt) && (latest === null || observedAt > new Date(latest).getTime())
-            ? time
-            : latest;
-    }, null), [trades]);
-
-    const columns = useMemo((): VirtualizedColumn<any>[] => [
+    const columns = useMemo((): VirtualizedColumn<IntradayTradeData>[] => [
         {
             id: 'time',
             header: 'Time',
@@ -132,22 +109,19 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
     ], []);
 
     const hasData = trades.length > 0;
-    const isFallback = Boolean(error && hasData);
+    const availability = useIntradayAvailability({ response: data, error, hasData, isLoading, isFetching, dataUpdatedAt });
 
     useEffect(() => {
-        onDataChange?.({
-            __widgetRuntime: {
-                layoutHint: {
-                    empty: !hasData,
-                    compactHeight: 4,
-                },
-                provenance: {
-                    updatedAt: lastDataDate,
-                    fetchedAt: dataUpdatedAt,
-                },
-            },
-        });
-    }, [hasData, onDataChange, lastDataDate, dataUpdatedAt]);
+        onDataChange?.(buildWidgetRuntime({
+            ...availability.runtime,
+            empty: !hasData,
+            compactHeight: 5,
+            apiGroup: '/equity',
+            endpoint: `/equity/${symbol}/intraday?limit=1000`,
+            sourceLabel: availability.source ?? 'Intraday trade prints',
+            exportData: hasData ? trades : undefined,
+        }));
+    }, [availability, hasData, onDataChange, symbol, trades]);
 
     return (
         <WidgetContainer
@@ -159,56 +133,23 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
             noPadding
             widgetId={id}
             showLinkToggle
-            exportData={trades}
-            exportFilename={`trades_${symbol}_${new Date().toISOString().split('T')[0]}`}
         >
             <div className="h-full flex flex-col bg-[var(--bg-primary)]">
                 <div className="border-b border-[var(--border-subtle)] px-3 py-2">
-                    <WidgetMeta
-                        updatedAt={lastDataDate}
-                        fetchedAt={dataUpdatedAt}
-                        isFetching={isFetching && hasData}
-                        isCached={isFallback}
-                        note="Live tape"
-                        align="right"
-                    />
+                    <IntradayStatus availability={availability} hasData={hasData} isFetching={isFetching} />
                 </div>
                 <div className="flex-1 overflow-hidden">
                     {isLoading && !hasData ? (
                         <WidgetSkeleton variant="table" lines={6} />
-                    ) : error && !hasData ? (
-                        <WidgetError error={error as Error} onRetry={() => refetch()} />
                     ) : !hasData ? (
-                        (() => {
-                            const state = getMarketState();
-                            const closed = !state.isOpen;
-                            const phaseDescription = (() => {
-                                switch (state.phase) {
-                                    case 'pre-open':
-                                        return 'Pre-open · live tape resumes at 09:00 ICT (HOSE 09:00–11:30 + 13:00–14:45 ICT, Mon–Fri).';
-                                    case 'lunch':
-                                        return 'Lunch break (11:30–13:00 ICT) · live tape resumes at 13:00 ICT.';
-                                    case 'after-close':
-                                        return 'Session closed (14:45 ICT) · live tape resumes 09:00 ICT next trading day.';
-                                    case 'weekend':
-                                        return 'Weekend · HOSE trades Mon–Fri, 09:00–11:30 + 13:00–14:45 ICT.';
-                                    default:
-                                        return 'Intraday tape will appear here once trade prints are available.';
-                                }
-                            })();
-                            return (
-                                <WidgetEmpty
-                                    message={closed ? `Market ${state.phase === 'lunch' ? 'on lunch break' : 'closed'}` : `No trades for ${symbol}`}
-                                    detail={
-                                        closed
-                                            ? phaseDescription
-                                            : 'Intraday tape will appear here once trade prints are available.'
-                                    }
-                                    icon={<Activity size={18} />}
-                                    size="compact"
-                                />
-                            );
-                        })()
+                        <IntradayEmpty
+                            availability={availability}
+                            unavailable="Intraday trade data unavailable"
+                            empty="No trade ticks returned"
+                            detail="The response does not establish trade coverage for this symbol."
+                            icon={<Activity size={18} />}
+                            onRetry={() => refetch()}
+                        />
                     ) : (
                         <VirtualizedTable data={trades} columns={columns} rowHeight={30} />
                     )}
@@ -218,11 +159,7 @@ function IntradayTradesWidgetComponent({ id, symbol, onRemove, onDataChange }: I
                     <div className="flex items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5">
                         <div className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-tighter text-[var(--text-muted)]">
                             <Activity size={10} />
-                            Total {trades.length.toLocaleString()} Ticks
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-positive-bg)] animate-pulse" />
-                            <span className="text-[9px] font-bold uppercase text-[var(--text-muted)]">Live</span>
+                            {trades.length.toLocaleString()} ticks shown
                         </div>
                     </div>
                 ) : null}

@@ -1,5 +1,6 @@
 // TypeScript types for equity/stock data from backend API
 import type { MarketCapProvenance } from '@/lib/marketCap';
+import type { IntradayEnvelope } from '@/types/intraday';
 
 export interface EquityHistoricalData {
   symbol: string;
@@ -263,9 +264,9 @@ export interface IntradayTradeData {
   match_type?: string;
 }
 
-export interface IntradayResponse {
-  symbol: string;
-  count: number;
+export interface IntradayResponse extends IntradayEnvelope {
+  symbol?: string;
+  count?: number;
   data: IntradayTradeData[];
 }
 

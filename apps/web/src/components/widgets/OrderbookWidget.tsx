@@ -5,13 +5,15 @@ import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Too
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
-import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
-import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { WidgetEmpty } from '@/components/ui/widget-states';
+import { IntradayEmpty, IntradayStatus } from '@/components/ui/IntradayStatus';
 import type { PriceDepthResponse } from '@/lib/api';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { usePriceDepth } from '@/lib/queries';
 import { EMPTY_VALUE, formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+import { useIntradayAvailability } from '@/hooks/useIntradayAvailability';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface OrderbookWidgetProps {
   symbol?: string;
@@ -29,7 +31,7 @@ type DepthEntry = PriceDepthResponse['data']['entries'][number];
 function toFiniteOrderPrice(...values: unknown[]): number | null {
   for (const value of values) {
     const parsed = typeof value === 'number' ? value : Number(value);
-    if (Number.isFinite(parsed) && parsed !== 0) return parsed;
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return null;
 }
@@ -64,23 +66,18 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
     dataUpdatedAt,
   } = usePriceDepth(symbol, Boolean(symbol));
 
-  const entries = (orderbook?.data?.entries || []) as DepthEntry[];
-  const hasData = entries.length > 0;
-  const isFallback = Boolean(error && hasData);
+  const entries = orderbook?.data?.entries;
   const lastPriceRaw = orderbook?.data?.last_price;
   const lastPrice = lastPriceRaw === null || lastPriceRaw === undefined
     ? null
     : toFiniteOrderPrice(lastPriceRaw);
-  const isStale = Boolean(orderbook?.data?.is_stale);
-  const marketStatus = orderbook?.data?.market_status || null;
-  const snapshotTime = orderbook?.data?.snapshot_time || null;
-  const fetchedAt = dataUpdatedAt || snapshotTime;
+  const legacyRetained = Boolean(!orderbook?.meta?.feed && orderbook?.data?.is_stale);
   const priceSource = orderbook?.data?.price_source || null;
   const hasReferencePrices = priceSource === 'latest_price'
-    || entries.some((entry) => (entry as DepthEntry & Record<string, unknown>).price_status === 'reference');
+    || entries?.some((entry) => entry.price_status === 'reference');
 
   const maxVolume = useMemo(() => {
-    if (entries.length === 0) return 1;
+    if (!entries?.length) return 1;
     return Math.max(
       1,
       ...entries.map((entry) => Math.max(Number(entry.bid_vol) || 0, Number(entry.ask_vol) || 0))
@@ -90,49 +87,28 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   // Backend is now canonical (raw VND -> thousand VND normalization happens
   // in equity._normalize_orderbook_units). Frontend just reads the price.
   const normalizedEntries = useMemo(
-    () => entries.map((entry) => ({ ...entry, price: getEntryPrice(entry) })),
+    () => (entries ?? []).map((entry) => ({ ...entry, price: getEntryPrice(entry) })),
     [entries]
   );
 
-  const metaNote = useMemo(() => {
-    if (hasReferencePrices) {
-      return 'Reference pricing only';
-    }
-    if (isStale && marketStatus === 'closed') {
-      const timeLabel = snapshotTime ? ` as of ${snapshotTime.slice(0, 16).replace('T', ' ')}` : '';
-      return `Market closed — last snapshot${timeLabel}`;
-    }
-    return 'Depth snapshot';
-  }, [hasReferencePrices, isStale, marketStatus, snapshotTime]);
-
-  const healthState: WidgetHealthState | undefined = useMemo(() => {
-    if (hasReferencePrices) {
-      return {
-        status: 'limited',
-        label: 'Reference close',
-        detail: 'Provider depth had no priced levels. Prices use the latest close as a reference and are not true level-by-level bid/ask quotes.',
-      };
-    }
-    if (isStale) {
-      return {
-        status: 'cached',
-        label: marketStatus === 'closed' ? 'Closed-market snapshot' : 'Cached depth',
-        detail: marketStatus === 'closed'
-          ? 'Showing the latest priced depth snapshot available after market close.'
-          : 'Showing a cached depth snapshot while live refresh catches up.',
-      };
-    }
-    return undefined;
-  }, [hasReferencePrices, isStale, marketStatus]);
+  const hasData = normalizedEntries.some((entry) => entry.price !== null);
+  const availability = useIntradayAvailability({
+    response: orderbook, error, hasData, isLoading, isFetching, dataUpdatedAt, legacyRetained,
+  });
+  const health: WidgetHealthState | undefined = hasReferencePrices ? {
+    status: 'limited',
+    label: 'Reference close',
+    detail: 'The displayed prices use the latest close, not level-by-level bid/ask quotes.',
+  } : undefined;
 
   const depthSeries = useMemo(() => {
     const normalized = normalizedEntries
       .map((entry) => ({
-        price: Number(entry.price),
+        price: entry.price,
         bidVol: Number(entry.bid_vol) || 0,
         askVol: Number(entry.ask_vol) || 0,
       }))
-      .filter((entry) => Number.isFinite(entry.price))
+      .filter((entry): entry is typeof entry & { price: number } => entry.price !== null)
       .sort((a, b) => a.price - b.price);
 
     if (!normalized.length) return [];
@@ -158,24 +134,18 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
   }, [normalizedEntries]);
 
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: {
-          empty: !hasData,
-          compactHeight: 6,
-        },
-        provenance: {
-          sourceLabel: 'Order book depth',
-          apiGroup: '/equity',
-          endpoint: `/equity/${symbol}/orderbook`,
-          stale: isStale,
-          localOnly: false,
-          updatedAt: null,
-          fetchedAt,
-        },
-      },
-    });
-  }, [hasData, onDataChange, symbol, isStale, fetchedAt]);
+    onDataChange?.(buildWidgetRuntime({
+      ...availability.runtime,
+      empty: !hasData,
+      compactHeight: 6,
+      sourceLabel: availability.source ?? 'Order book depth',
+      apiGroup: '/equity',
+      endpoint: `/equity/${symbol}/orderbook`,
+      basis: hasReferencePrices ? 'Retained close used as a reference, not a priced order book' : undefined,
+      units: 'Price: thousand VND; volume: shares',
+      exportData: hasData ? normalizedEntries : undefined,
+    }));
+  }, [availability, hasData, hasReferencePrices, normalizedEntries, onDataChange, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view order book" />;
@@ -191,26 +161,25 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
     >
       <div className="h-full flex flex-col">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
-          <WidgetMeta
-            updatedAt={null}
-            fetchedAt={fetchedAt}
-            isFetching={isFetching && hasData}
-            isCached={isFallback && !healthState}
-            isStale={isStale && !healthState}
-            health={healthState}
-            note={metaNote}
-            align="right"
+          <IntradayStatus
+            availability={availability}
+            hasData={hasData}
+            isFetching={isFetching}
+            health={health}
+            label={hasReferencePrices ? 'Reference pricing only' : undefined}
           />
         </div>
 
         {isLoading && !hasData ? (
           <WidgetSkeleton lines={6} />
-        ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty
-            message="Order book data not available yet"
-            detail="Market closed - showing this panel when the exchange publishes the next depth snapshot."
+          <IntradayEmpty
+            availability={availability}
+            unavailable="Order book data unavailable"
+            empty="No priced depth returned"
+            detail="This response does not establish order book coverage."
+            allowZero={false}
+            onRetry={() => refetch()}
           />
         ) : (
           <>
@@ -222,7 +191,7 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
               ) : null}
               <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
                 <span>Cumulative Depth</span>
-                <span>{lastPrice !== null ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : '10 levels'}</span>
+                <span>{lastPrice !== null ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : `${normalizedEntries.length} levels`}</span>
               </div>
               {depthSeries.length < 2 ? (
                 <div className="text-[10px] text-[var(--text-secondary)]">Need at least two levels to draw depth.</div>

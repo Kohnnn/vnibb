@@ -35,6 +35,7 @@ export interface WidgetRuntimeInput {
   expectedClosedSession?: boolean
   observationStatus?: ExportProvenance['observationStatus']
   refreshStatus?: ExportProvenance['refreshStatus']
+  intraday?: ExportProvenance['intraday']
   adjustmentMode?: string
   /** Reporting period the figures belong to (e.g. 'FY', 'Q2', 'TTM'). */
   period?: string
@@ -104,6 +105,7 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     expectedClosedSession: input.expectedClosedSession,
     observationStatus: input.observationStatus,
     refreshStatus: input.refreshStatus,
+    intraday: input.intraday,
     localOnly: input.derived || undefined,
     cached: input.cached,
     stale: input.stale,

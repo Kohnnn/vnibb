@@ -54,9 +54,12 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /equity/{symbol}/ownership`
 - `GET /equity/{symbol}/rating`
 - `GET /equity/{symbol}/orderbook`
+- `GET /equity/{symbol}/price-depth` (alias of `/orderbook`)
 - `GET /equity/{symbol}/peers` (V50)
 - `GET /equity/{symbol}/ttm` (V50)
 - `GET /equity/{symbol}/growth` (V50)
+
+Intraday tape, depth, and `GET /microstructure/{symbol}` responses separate exchange session evidence (`meta.market_session`) from the result of the feed read (`meta.feed`). A timeout or unavailable feed may return HTTP 200 with an `error` and retained observations. Keep those observations and disclose the failure. `source_as_of` dates the observation, `snapshot_at` dates a retained snapshot, and `fetched_at` dates the read; none implies the others. An empty read is not proof of zero trades unless `covered_window` explicitly supports the dated zero-trade session. When the session cannot be verified independently, the state is `unknown`.
 
 Operational Vietnamese provider requests use Vietcap IQ as the primary source and free VCI as the only secondary provider. Frontend source query options and settings accept `VCI` only; browser-saved selections from retired providers are replaced with `VCI`, while historical response source labels remain unchanged. An HTTP 200 financial-ratios fallback may include usable `data` alongside `error`; consumers retain the table, disclose that warning, and mark the served data as a fallback rather than normal success.
 
@@ -266,6 +269,8 @@ Prediction markets notes:
 - `GET /alerts/insider`
 - `POST /alerts/{alertId}/read`
 - `GET /alerts/settings`
+
+`GET /insider/block-trades` returns the latest retained detector rows, optionally filtered by symbol and bounded by `limit`, with no date filter. An empty list does not establish exchange coverage or a publication delay.
 
 ### AI / Technical / RS
 - `POST /copilot/ask`

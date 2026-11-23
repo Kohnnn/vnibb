@@ -4,6 +4,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../api';
+import { retainIntraday } from '../intradayAvailability';
 import type { Timeframe } from '@/types/technical';
 
 // ============ Query Keys ============
@@ -97,7 +98,16 @@ export function useMicrostructureAnalysis(
 
     return useQuery({
         queryKey: technicalQueryKeys.microstructure(symbol, params),
-        queryFn: () => api.getMicrostructureAnalysis(symbol, params),
+        queryFn: async ({ client, queryKey, signal }) => {
+            const response = await api.getMicrostructureAnalysis(symbol, params, signal);
+            // These panels use a tick-only read. Other microstructure requests may have independent inputs.
+            if (!params.features?.length || params.features.some((feature) => feature !== 'vwap' && feature !== 'footprint')) {
+                return response;
+            }
+            return retainIntraday(response, client.getQueryData<api.MicrostructureResponse>(queryKey), (data) =>
+                Boolean(data?.vwap?.points?.length || data?.footprint?.bars?.length),
+            );
+        },
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 30 * 1000,
         retry: 1,

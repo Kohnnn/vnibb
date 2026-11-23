@@ -28,7 +28,7 @@ interface VirtualizedTableProps<T> {
   onSort?: (field: string, order: 'asc' | 'desc') => void;
 }
 
-export function VirtualizedTable<T extends { id?: string | number | any }>({
+export function VirtualizedTable<T>({
   data,
   columns,
   rowHeight = 40,

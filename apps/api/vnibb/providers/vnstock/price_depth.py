@@ -97,14 +97,23 @@ class VnstockPriceDepthFetcher:
         """
         from vnibb.providers.vnstock.runtime import import_vnstock_symbol, validate_source
 
-        source = validate_source(source)
+        try:
+            source = validate_source(source)
+        except ValueError as exc:
+            raise ProviderError(
+                "Depth source is unsupported", provider="vnstock", capability="price_depth_unavailable"
+            ) from exc
         try:
             def _fetch():
                 market = import_vnstock_symbol("Market")[0]()
                 df = market.equity(symbol.upper()).order_book(source=source)
-                if df is not None and len(df) > 0 and str(df.attrs.get("price_unit", "")).upper() != "VND":
-                    raise ValueError("VCI order book price unit is unavailable")
-                return df.to_dict(orient="records") if df is not None and len(df) > 0 else []
+                if df is None:
+                    raise ValueError("Missing VCI order book response")
+                if not df.empty and str(df.attrs.get("price_unit", "")).upper() != "VND":
+                    raise ProviderError(
+                        "VCI order book price unit is unavailable", provider="vnstock", details={"feed_status": "unusable"}
+                    )
+                return df.to_dict(orient="records")
 
             loop = asyncio.get_event_loop()
             records = await loop.run_in_executor(None, _fetch)
@@ -166,7 +175,9 @@ class VnstockPriceDepthFetcher:
                             OrderLevel(price=float(ask_price), volume=int(ask_vol or 0))
                         )
             if not bids and not asks:
-                raise ValueError("Unrecognized VCI order book response")
+                raise ProviderError(
+                    "Unrecognized VCI order book response", provider="vnstock", details={"feed_status": "unusable"}
+                )
 
 
             return PriceDepthData(
@@ -182,8 +193,10 @@ class VnstockPriceDepthFetcher:
                 raw_levels=records,
             )
 
-        except Exception as e:
-            logger.error(f"Price depth fetch failed for {symbol}: {e}")
+        except (ProviderError, TimeoutError):
+            raise
+        except (Exception, SystemExit) as e:
+            logger.warning("Price depth acquisition failed for %s: %s", symbol, type(e).__name__)
             # Only the order_book boundary signals an absent capability: the
             # method is missing, or the runtime refuses it with a tier message.
             # Any other AttributeError/NotImplementedError is a genuine SDK,

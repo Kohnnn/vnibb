@@ -5,10 +5,9 @@ import { Activity } from 'lucide-react';
 import { useMicrostructureAnalysis } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
-import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { IntradayEmpty, IntradayStatus } from '@/components/ui/IntradayStatus';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
-import { useMarketState } from '@/hooks/useMarketState';
-import { describeIntradayUnavailable } from '@/lib/marketHours';
+import { useIntradayAvailability } from '@/hooks/useIntradayAvailability';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface VWAPBandsWidgetProps {
@@ -22,26 +21,18 @@ function formatPrice(value: number | null | undefined): string {
 
 export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
-  const marketState = useMarketState();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMicrostructureAnalysis(upperSymbol, {
     features: ['vwap'],
     interval: '5m',
     lookbackDays: 7,
     enabled: Boolean(upperSymbol),
   });
-  const points = data?.data?.vwap?.points || [];
-  const vwapBlock = data?.data?.vwap as { source?: string; quality?: string } | undefined;
-  // Backend reports availability via `quality` ('available' / 'unavailable' /
-  // 'not_requested'). The legacy `source` key is a fallback. (QA-v2 T2)
-  const vwapStatus = vwapBlock?.quality || vwapBlock?.source;
-  const isUnavailable =
-    vwapStatus === 'unavailable' ||
-    (Array.isArray(data?.data?.unsupported_reasons) && data.data.unsupported_reasons.length > 0 && points.length === 0);
-  const hasData = points.length > 0;
+  const points = data?.data?.vwap?.points;
+  const hasData = Boolean(points?.length);
+  const availability = useIntradayAvailability({ response: data, error, hasData, isLoading, isFetching, dataUpdatedAt });
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
-  const latest = points[points.length - 1];
-  const lastDataDate = null;
-  const recent = points.slice(-20);
+  const latest = points?.at(-1);
+  const recent = points?.slice(-20) ?? [];
   const values = recent.flatMap((point) => [point.lower2, point.upper2]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const minValue = values.length ? Math.min(...values) : 0;
   const maxValue = values.length ? Math.max(...values) : 1;
@@ -50,16 +41,16 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
+        ...availability.runtime,
         empty: !hasData,
         apiGroup: '/microstructure',
         endpoint: `/microstructure/${upperSymbol}?features=vwap&interval=5m&lookback_days=7`,
-        sourceLabel: 'VWAP bands · trade ticks',
-        lastDataDate,
-        fetchedAt: dataUpdatedAt,
-        extra: hasData ? { points: points.length, quality: vwapStatus } : undefined,
+        sourceLabel: availability.source ?? 'Retained trade ticks',
+        basis: 'VWAP bands calculated from retained trade ticks',
+        exportData: hasData ? points : undefined,
       }),
     );
-  }, [onDataChange, hasData, lastDataDate, dataUpdatedAt, upperSymbol, points.length, vwapStatus]);
+  }, [availability, hasData, onDataChange, points, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view VWAP bands" icon={<Activity size={18} />} />;
@@ -73,20 +64,19 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
     return <WidgetSkeleton variant="chart" />;
   }
 
-  if (error && !hasData) {
-    return <WidgetError error={error as Error} onRetry={() => refetch()} />;
-  }
-
   if (!hasData) {
-    const unavailableCopy = describeIntradayUnavailable(marketState);
     return (
-      <WidgetEmpty
-        message={isUnavailable ? `Intraday VWAP not available · ${unavailableCopy.primary}` : 'No intraday VWAP data yet'}
-        detail={isUnavailable ? unavailableCopy.detail : 'Waiting for trade ticks. Try refresh in a few minutes.'}
-        icon={<Activity size={18} />}
-        size="compact"
-        action={{ label: 'Refresh', onClick: () => refetch() }}
-      />
+      <div className="flex h-full flex-col">
+        <IntradayStatus availability={availability} hasData={false} isFetching={isFetching} />
+        <IntradayEmpty
+          availability={availability}
+          unavailable="VWAP trade ticks unavailable"
+          empty="No trade ticks returned for VWAP"
+          detail="Trade coverage is unverified for the requested 7-day lookback."
+          icon={<Activity size={18} />}
+          onRetry={() => refetch()}
+        />
+      </div>
     );
   }
 
@@ -97,7 +87,7 @@ export function VWAPBandsWidget({ symbol, onDataChange }: VWAPBandsWidgetProps) 
           <Activity size={12} className="text-[var(--color-accent-primary)]" />
           <span>VWAP Bands</span>
         </div>
-        <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo trade ticks" align="right" />
+        <IntradayStatus availability={availability} hasData={hasData} isFetching={isFetching} />
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-[10px] mb-2">

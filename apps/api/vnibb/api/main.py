@@ -242,6 +242,8 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(r"^/live/?$"),
         re.compile(r"^/ready/?$"),
         re.compile(r"^/api/v1/equity/[^/]+/quote/?$"),
+        re.compile(r"^/api/v1/equity/[^/]+/(intraday|orderbook|price-depth)/?$"),
+        re.compile(r"^/api/v1/microstructure(/|$)"),
         re.compile(r"^/api/v1/ws(/|$)"),
     )
 
@@ -249,7 +251,7 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(r"^/api/v1/screener(/|$)"),
         re.compile(r"^/api/v1/alerts(/|$)"),
         re.compile(r"^/api/v1/sectors(/|$)"),
-        re.compile(r"^/api/v1/equity/[^/]+/(historical|intraday|metrics/history)(/|$)"),
+        re.compile(r"^/api/v1/equity/[^/]+/(historical|metrics/history)(/|$)"),
     )
 
     STATICISH_PATTERNS = (

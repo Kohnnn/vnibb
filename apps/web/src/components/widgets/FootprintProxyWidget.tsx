@@ -5,10 +5,9 @@ import { Rows3 } from 'lucide-react';
 import { useMicrostructureAnalysis } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
-import { WidgetMeta } from '@/components/ui/WidgetMeta';
+import { IntradayEmpty, IntradayStatus } from '@/components/ui/IntradayStatus';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
-import { useMarketState } from '@/hooks/useMarketState';
-import { describeIntradayUnavailable } from '@/lib/marketHours';
+import { useIntradayAvailability } from '@/hooks/useIntradayAvailability';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { signedToneClass } from '@/lib/priceColor';
 
@@ -27,40 +26,31 @@ function formatCompact(value: number): string {
 
 export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWidgetProps) {
   const upperSymbol = symbol?.toUpperCase() || '';
-  const marketState = useMarketState();
   const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useMicrostructureAnalysis(upperSymbol, {
     features: ['footprint'],
     interval: '5m',
     lookbackDays: 7,
     enabled: Boolean(upperSymbol),
   });
-  const bars = data?.data?.footprint?.bars || [];
-  const lastDataDate = null;
-  const footprintBlock = data?.data?.footprint as { source?: string; quality?: string } | undefined;
-  // Backend reports availability via `quality` ('available' / 'unavailable' /
-  // 'not_requested'). Map both keys so we surface a typed empty state instead
-  // of a permanently blank panel. (QA-v2 T2)
-  const footprintStatus = footprintBlock?.quality || footprintBlock?.source;
-  const isUnavailable =
-    footprintStatus === 'unavailable' ||
-    (Array.isArray(data?.data?.unsupported_reasons) && data.data.unsupported_reasons.length > 0 && bars.length === 0);
-  const hasData = bars.length > 0;
+  const bars = data?.data?.footprint?.bars;
+  const hasData = Boolean(bars?.length);
+  const availability = useIntradayAvailability({ response: data, error, hasData, isLoading, isFetching, dataUpdatedAt });
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
-  const recent = bars.slice(-8).reverse();
+  const recent = bars?.slice(-8).reverse() ?? [];
 
   useEffect(() => {
     onDataChange?.(
       buildWidgetRuntime({
+        ...availability.runtime,
         empty: !hasData,
         apiGroup: '/microstructure',
         endpoint: `/microstructure/${upperSymbol}?features=footprint&interval=5m&lookback_days=7`,
-        sourceLabel: 'Footprint proxy · trade ticks',
-        lastDataDate,
-        fetchedAt: dataUpdatedAt,
-        extra: hasData ? { bars: bars.length, quality: footprintStatus } : undefined,
+        sourceLabel: availability.source ?? 'Retained trade ticks',
+        basis: 'Match-type proxy calculated from retained trade ticks',
+        exportData: hasData ? bars : undefined,
       }),
     );
-  }, [onDataChange, hasData, lastDataDate, dataUpdatedAt, upperSymbol, bars.length, footprintStatus]);
+  }, [availability, bars, hasData, onDataChange, upperSymbol]);
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view footprint proxy" icon={<Rows3 size={18} />} />;
@@ -74,20 +64,19 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
     return <WidgetSkeleton lines={8} />;
   }
 
-  if (error && !hasData) {
-    return <WidgetError error={error as Error} onRetry={() => refetch()} />;
-  }
-
   if (!hasData) {
-    const unavailableCopy = describeIntradayUnavailable(marketState);
     return (
-      <WidgetEmpty
-        message={isUnavailable ? `Footprint proxy not available · ${unavailableCopy.primary}` : 'No footprint proxy data yet'}
-        detail={isUnavailable ? unavailableCopy.detail : 'Waiting for trade ticks. Try refresh in a few minutes.'}
-        icon={<Rows3 size={18} />}
-        size="compact"
-        action={{ label: 'Refresh', onClick: () => refetch() }}
-      />
+      <div className="flex h-full flex-col">
+        <IntradayStatus availability={availability} hasData={false} isFetching={isFetching} />
+        <IntradayEmpty
+          availability={availability}
+          unavailable="Footprint trade ticks unavailable"
+          empty="No trade ticks returned for Footprint"
+          detail="Trade coverage is unverified for the requested 7-day lookback."
+          icon={<Rows3 size={18} />}
+          onRetry={() => refetch()}
+        />
+      </div>
     );
   }
 
@@ -98,7 +87,7 @@ export function FootprintProxyWidget({ symbol, onDataChange }: FootprintProxyWid
           <Rows3 size={12} className="text-[var(--color-accent-primary)]" />
           <span>Footprint Proxy</span>
         </div>
-        <WidgetMeta updatedAt={lastDataDate} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasData} note="Mongo match-type proxy" align="right" />
+        <IntradayStatus availability={availability} hasData={hasData} isFetching={isFetching} label="Match-type proxy" />
       </div>
 
       <div className="flex-1 overflow-auto space-y-2 pr-1">

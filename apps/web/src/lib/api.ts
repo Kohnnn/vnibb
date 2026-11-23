@@ -5,6 +5,7 @@ import { isSupabaseConfigured, supabase } from './supabase';
 import type { AISettings } from './aiSettings';
 import type { MatrixHandoff, MatrixSelection } from '@/types/matrix';
 import type { MarketCapProvenance } from '@/lib/marketCap';
+import type { IntradayEnvelope } from '@/types/intraday';
 
 const LOCALHOST_OR_LOOPBACK_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i
 const SSLIP_HOST_RE = /^[0-9]+(?:[.-][0-9]+){3}\.sslip\.io$/i
@@ -680,10 +681,11 @@ export async function getOfficers(symbol: string): Promise<OfficersResponse> {
 
 export async function getIntraday(
     symbol: string,
-    options?: { limit?: number }
+    options?: { limit?: number; signal?: AbortSignal }
 ): Promise<IntradayResponse> {
     return fetchAPI<IntradayResponse>(`/equity/${symbol}/intraday`, {
         params: { limit: options?.limit },
+        signal: options?.signal,
     });
 }
 
@@ -1378,7 +1380,7 @@ export async function getDerivativesHistory(
 
 // ============ Additional Equity Endpoints ============
 
-export interface PriceDepthResponse {
+export interface PriceDepthResponse extends IntradayEnvelope {
     data: {
         symbol: string;
         entries: Array<{
@@ -1399,11 +1401,6 @@ export interface PriceDepthResponse {
         price_source?: string | null;
         unit_corrected?: boolean;
     };
-    meta?: {
-        count: number;
-        last_data_date?: string | null;
-    };
-    error?: string | null;
 }
 
 export interface InsiderDealsResponse {
@@ -1463,8 +1460,7 @@ export interface TradingStatsResponse {
     };
 }
 
-export interface MicrostructureResponse {
-    error: boolean;
+export interface MicrostructureResponse extends IntradayEnvelope {
     data: {
         symbol: string;
         source: string;
@@ -1532,7 +1528,8 @@ export async function getMicrostructureAnalysis(
         valueAreaPct?: number;
         fractalWindow?: number;
         imbalanceRatio?: number;
-    }
+    },
+    signal?: AbortSignal,
 ): Promise<MicrostructureResponse> {
     return fetchAPI<MicrostructureResponse>(`/microstructure/${symbol}`, {
         params: {
@@ -1544,11 +1541,12 @@ export async function getMicrostructureAnalysis(
             imbalance_ratio: options?.imbalanceRatio,
         },
         timeout: 45000,
+        signal,
     });
 }
 
-export async function getPriceDepth(symbol: string): Promise<PriceDepthResponse> {
-    return fetchAPI<PriceDepthResponse>(`/equity/${symbol}/orderbook`);
+export async function getPriceDepth(symbol: string, signal?: AbortSignal): Promise<PriceDepthResponse> {
+    return fetchAPI<PriceDepthResponse>(`/equity/${symbol}/orderbook`, { signal });
 }
 
 export async function getInsiderDeals(
