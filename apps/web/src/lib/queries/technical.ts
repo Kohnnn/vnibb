@@ -4,6 +4,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../api';
+import { retainMicrostructure, type MicrostructureResult } from '../microstructureAvailability';
 import type { Timeframe } from '@/types/technical';
 
 // ============ Query Keys ============
@@ -97,7 +98,10 @@ export function useMicrostructureAnalysis(
 
     return useQuery({
         queryKey: technicalQueryKeys.microstructure(symbol, params),
-        queryFn: () => api.getMicrostructureAnalysis(symbol, params),
+        queryFn: async ({ client, queryKey, signal }) => {
+            const response = await api.getMicrostructureAnalysis(symbol, params, signal);
+            return retainMicrostructure(response, client.getQueryData<MicrostructureResult>(queryKey));
+        },
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 30 * 1000,
         retry: 1,

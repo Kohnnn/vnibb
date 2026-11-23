@@ -13,13 +13,15 @@ Endpoints:
 """
 
 import logging
-from typing import Any, List, Optional
 from datetime import datetime
+from typing import Any, List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel, Field, model_validator
 
+from vnibb.core.config import settings
 from vnibb.core.database import get_db
 from vnibb.services.insider_tracking import InsiderTrackingService
 
@@ -91,6 +93,12 @@ class BlockTradeResponse(BaseModel):
     volume_ratio: Optional[float]
     is_foreign: bool
     is_proprietary: bool
+
+    @field_validator("trade_time")
+    @classmethod
+    def _trade_time_with_source_zone(cls, value: datetime) -> datetime:
+        # The detector copies trade_time from SQL IntradayTrade: exchange-local wall time.
+        return value.replace(tzinfo=ZoneInfo(settings.vn_timezone)) if value.utcoffset() is None else value
 
     class Config:
         from_attributes = True
@@ -258,19 +266,15 @@ async def get_block_trades(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Get recent large block trades.
+    """Latest N retained detector rows by trade time, optionally for one symbol.
 
-    Args:
-        symbol: Optional stock symbol filter
-        limit: Maximum number of trades to return
-
-    Returns:
-        List of block trades
+    No date or publication filter is applied. The detector reads retained
+    intraday prints, not an exchange publication feed. A successful empty list
+    means no rows were returned from storage, not zero exchange activity.
     """
     try:
         service = InsiderTrackingService(db)
-        trades = await service.get_recent_block_trades(symbol=symbol, limit=limit)
+        trades = await service.get_recent_block_trades(symbol=symbol.strip().upper() if symbol else None, limit=limit)
 
         return [BlockTradeResponse.model_validate(trade) for trade in trades]
 

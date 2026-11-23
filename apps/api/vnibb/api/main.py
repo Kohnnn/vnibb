@@ -244,6 +244,8 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(r"^/api/v1/equity/[^/]+/quote/?$"),
         # Retain observations in the widget, not in an HTTP cache that masks refresh outcomes.
         re.compile(r"^/api/v1/equity/[^/]+/(officers|subsidiaries)/?$"),
+        re.compile(r"^/api/v1/equity/[^/]+/(intraday|orderbook|price-depth)/?$"),
+        re.compile(r"^/api/v1/microstructure(/|$)"),
         re.compile(r"^/api/v1/ws(/|$)"),
     )
 
@@ -251,7 +253,7 @@ class ResponseCacheControlMiddleware(BaseHTTPMiddleware):
         re.compile(r"^/api/v1/screener(/|$)"),
         re.compile(r"^/api/v1/alerts(/|$)"),
         re.compile(r"^/api/v1/sectors(/|$)"),
-        re.compile(r"^/api/v1/equity/[^/]+/(historical|intraday|metrics/history)(/|$)"),
+        re.compile(r"^/api/v1/equity/[^/]+/(historical|metrics/history)(/|$)"),
     )
 
     STATICISH_PATTERNS = (

@@ -64,7 +64,7 @@ describe('OrderbookWidget', () => {
     render(<OrderbookWidget symbol="VCI" />);
 
     expect(screen.getByText('Reference close')).toBeInTheDocument();
-    expect(screen.getByText('Reference pricing only')).toBeInTheDocument();
+    expect(screen.getByText(/Reference pricing only/)).toBeInTheDocument();
     expect(screen.getByText(/not live bid\/ask depth/i)).toBeInTheDocument();
     expect(screen.getByText('Ref Price')).toBeInTheDocument();
   });

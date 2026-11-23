@@ -54,9 +54,16 @@ These are the paths used by `apps/web/src/lib/api.ts`.
 - `GET /equity/{symbol}/ownership`
 - `GET /equity/{symbol}/rating`
 - `GET /equity/{symbol}/orderbook`
+- `GET /equity/{symbol}/price-depth` (alias of `/orderbook`)
 - `GET /equity/{symbol}/peers` (V50)
 - `GET /equity/{symbol}/ttm` (V50)
 - `GET /equity/{symbol}/growth` (V50)
+
+Intraday tape, depth, and `GET /microstructure/{symbol}` responses separate exchange session evidence (`meta.market_session`) from the result of the feed read (`meta.feed`). A timeout or unavailable feed may return HTTP 200 with an `error` and retained observations. Keep those observations and disclose the failure. `source_as_of` dates the observation, `snapshot_at` dates a retained snapshot, and `fetched_at` dates the read; none implies the others. Without independent session evidence, the state is `unknown`.
+
+A successful empty read is not proof of zero trades. A `covered_window` identifies the date and basis of a supported zero; a `vietcap_board` zero is limited to the board record and does not establish odd-lot or put-through activity. For mixed microstructure responses, `meta.input_errors` identifies unsuccessful inputs (`trade_ticks`, `price_depth`, `daily_prices`) independently of the other series and the top-level error.
+
+For microstructure, `meta.trade_as_of_basis` qualifies the trade clock: `admitted_trade_time` for an accepted print, `completed_tick_session` for an exact session receipt, or `null` if neither is known. The trade clock does not date the depth profile, and neither a recent fetch nor a retained print establishes a live feed.
 
 Operational Vietnamese provider requests use Vietcap IQ as the primary source and free VCI as the only secondary provider. Frontend source query options and settings accept `VCI` only; browser-saved selections from retired providers are replaced with `VCI`, while historical response source labels remain unchanged. An HTTP 200 financial-ratios fallback may include usable `data` alongside `error`; consumers retain the table, disclose that warning, and mark the served data as a fallback rather than normal success.
 
@@ -276,6 +283,8 @@ Prediction markets notes:
 - `GET /alerts/insider`
 - `POST /alerts/{alertId}/read`
 - `GET /alerts/settings`
+
+`GET /insider/block-trades` returns the latest retained detector rows, optionally filtered by symbol and bounded by `limit`, with no date filter. The response includes the offset for exchange-local detector `trade_time` values. An empty list does not establish exchange coverage or a publication delay.
 
 ### AI / Technical / RS
 - `POST /copilot/ask`

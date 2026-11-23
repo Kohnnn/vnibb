@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ArrowDownToLine, ArrowUpToLine, Scale } from 'lucide-react'
 import { useHistoricalPrices, useMicrostructureAnalysis } from '@/lib/queries'
+import { sourceObservation } from '@/lib/intradayAvailability'
+import { microstructureFailures, microstructureProvenance, microstructureTickFailure } from '@/lib/microstructureAvailability'
 import type { EquityHistoricalData } from '@/types/equity'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
@@ -10,6 +12,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { signedToneClass } from '@/lib/priceColor'
+import { deriveWidgetHealth } from '@/lib/widgetHealth'
 import { isObservedVolume } from '@/lib/volumeObservation'
 
 interface VolumeDeltaWidgetProps {
@@ -182,18 +185,17 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
   const historyExpectedUnit = historyUnitStatus === 'confirmed_vnd' ? 'VND' : 'index_points'
   // Only per-row `price_unit` markers certify the OHLC fallback; a response-level
   // `unit_status` cannot certify rows that carry no marker (QA #98).
-  const historyWithheld = Boolean(data) && !(
-    (data?.data?.length ?? 0) > 0
-    && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
-    && (data?.data ??[]).every((row) => row.price_unit === historyExpectedUnit)
+  const historyWithheld = (data?.data?.length ?? 0) > 0 && !(
+    ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
+    && (data?.data ?? []).every((row) => row.price_unit === historyExpectedUnit)
   )
   const candles = historyWithheld ? [] : (data?.data ?? [])
   const microBars = microstructure?.data?.deep_trades?.bars || []
   const hasMicroData = microBars.length > 0
-  const lastDataDate = hasMicroData
-    ? null
-    : data?.meta?.freshness_as_of ?? data?.meta?.last_data_date ?? candles[candles.length - 1]?.time ?? null
-  const fetchedAt = hasMicroData ? microUpdatedAt : dataUpdatedAt
+  const tickFeed = microstructure?.meta?.feed
+  const failures = microstructureFailures(microstructure)
+  const tickFailure = microError?.message || microstructureTickFailure(microstructure, failures)
+  const historyFailure = error?.message || data?.error || undefined
   // The monthly averages and exported cumulative delta depend on the full returned set.
   const historicalDelta = hasMicroData ? null : calculateVolumeDelta(candles)
   const deltaSeries = hasMicroData ? aggregateMicroBars(microBars) : (historicalDelta ?? [])
@@ -202,8 +204,28 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
     : historicalDelta === null ? 'Volume delta unavailable: incomplete historical observations.' : undefined
   const lastPoint = deltaSeries.at(-1)
   const hasData = !!lastPoint && (hasMicroData || deltaSeries.length > 30)
-  const isFallback = Boolean((error || microError || !hasMicroData) && hasData)
+  const usesTicks = hasMicroData || (!hasData && !historyFailure && Boolean(tickFailure || isMicroLoading))
+  const refreshFailure = usesTicks ? tickFailure : historyFailure
+  const alternateWarning = usesTicks && historyFailure ? `Historical prices: ${historyFailure}`
+    : usesTicks ? undefined : tickFailure
+  const unscopedWarning = failures.unscoped !== refreshFailure && failures.unscoped !== alternateWarning
+    ? failures.unscoped : undefined
+  const lastDataDate = hasData ? usesTicks
+    ? sourceObservation(tickFeed?.source_as_of)
+    : data?.meta?.freshness_as_of ?? data?.meta?.last_data_date ?? candles.at(-1)?.time ?? null
+    : null
+  const fetchedAt = usesTicks ? sourceObservation(tickFeed?.fetched_at) ?? microUpdatedAt : dataUpdatedAt
+  const seriesFetching = usesTicks ? isMicroFetching : isFetching
+  const isRetained = hasData && (usesTicks
+    ? Boolean(microError || tickFeed?.fallback) : Boolean(historyFailure))
   const primaryLoading = isMicroLoading || (!hasMicroData && isLoading)
+  const observationStatus = hasData ? 'available' : primaryLoading ? 'loading'
+    : refreshFailure || unavailableReason ? 'unavailable' : 'empty'
+  const refreshStatus = refreshFailure ? 'failed' : seriesFetching ? 'refreshing'
+    : (usesTicks ? microstructure : data) ? 'succeeded' : undefined
+  const intraday = useMemo(() => usesTicks
+    ? microstructureProvenance(microstructure, 'trade_ticks', { hasData, failure: tickFailure, requestError: microError })
+    : undefined, [usesTicks, microstructure, hasData, tickFailure, microError])
   const { timedOut, resetTimeout } = useLoadingTimeout(primaryLoading && !hasData, { timeoutMs: 8_000 })
 
   const rollingPoints = hasMicroData ? deltaSeries : deltaSeries.slice(-LOOKBACK_DAYS)
@@ -226,24 +248,32 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
     onDataChange?.(
       buildWidgetRuntime({
         empty: !hasData,
-        apiGroup: '/microstructure',
-        endpoint: hasMicroData
+        apiGroup: usesTicks ? '/microstructure' : '/equity',
+        endpoint: usesTicks
           ? `/microstructure/${upperSymbol}?interval=5m&lookback_days=7`
           : `/equity/historical?symbol=${upperSymbol}`,
-        sourceLabel: hasMicroData ? 'Volume delta · trade ticks' : 'Volume delta (derived)',
-        basis: !hasMicroData && hasData ? 'Cumulative delta uses all returned bars; 20D flow uses the latest 20 bars.' : undefined,
+        sourceLabel: usesTicks ? 'Volume delta · trade ticks' : 'Volume delta (derived)',
+        basis: !usesTicks && hasData ? 'Cumulative delta uses all returned bars; 20D flow uses the latest 20 bars.' : undefined,
         lastDataDate,
         fetchedAt,
-        stale: isFallback,
-        derived: !hasMicroData,
+        cached: isRetained,
+        coverage: 'unknown',
+        observationStatus,
+        refreshStatus,
+        intraday,
+        warnings: [refreshFailure, alternateWarning, unscopedWarning].filter((reason): reason is string => Boolean(reason)),
+        derived: hasData && !usesTicks,
         extra: cumulativeDelta !== undefined ? { cumulativeDelta } : undefined,
       }),
     )
-  }, [onDataChange, hasData, hasMicroData, isFallback, lastDataDate, fetchedAt, upperSymbol, cumulativeDelta])
+  }, [onDataChange, hasData, usesTicks, isRetained, lastDataDate, fetchedAt, upperSymbol, cumulativeDelta,
+    observationStatus, refreshStatus, intraday, refreshFailure, alternateWarning, unscopedWarning])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume delta" icon={<Scale size={18} />} />
   }
+
+  const warning = [hasData && refreshFailure, alternateWarning, unscopedWarning].filter(Boolean).join('; ')
 
   return (
     <div className="h-full flex flex-col">
@@ -255,12 +285,18 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
         <WidgetMeta
           updatedAt={lastDataDate}
           fetchedAt={fetchedAt}
-          isFetching={(hasMicroData ? isMicroFetching : isFetching) && hasData}
-          isCached={isFallback}
+          isFetching={seriesFetching && hasData}
+          isCached={isRetained}
+          health={intraday && hasData ? deriveWidgetHealth({
+            intraday, observationStatus, refreshStatus, updatedAt: lastDataDate, cached: isRetained, coverage: 'unknown',
+          }) : undefined}
           note={hasMicroData ? 'Mongo match-type proxy' : 'OHLC proxy'}
           align="right"
         />
       </div>
+      {warning && !primaryLoading && (
+        <p role="status" className="mb-1 text-[11px] text-[var(--color-warning)]">{warning}</p>
+      )}
 
       <div className="flex-1 overflow-auto space-y-1 pr-1">
         {timedOut && primaryLoading && !hasData ? (
@@ -275,8 +311,8 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
           />
         ) : primaryLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
-        ) : (microError || error) && !hasData ? (
-          <WidgetError title={unavailableReason} error={(microError || error) as Error} onRetry={() => { refetchMicro(); refetch() }} />
+        ) : refreshFailure && !hasData ? (
+          <WidgetError title={unavailableReason ?? 'Volume delta unavailable'} error={new Error(refreshFailure)} onRetry={() => { refetchMicro(); refetch() }} />
         ) : !lastPoint || !divergence ? (
           <WidgetEmpty
             message={unavailableReason ?? 'Not enough historical candles'}

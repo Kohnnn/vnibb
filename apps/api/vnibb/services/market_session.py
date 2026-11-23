@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, date, datetime, time, timedelta
 from math import isfinite
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 from zoneinfo import ZoneInfo
 
 from vnibb.core.config import settings
@@ -99,6 +99,33 @@ def verified_market_closure(*, now: datetime, latest_session: date) -> LatestClo
             }
         next_session += timedelta(days=1)
     return None  # The interval cannot certify a reopening in an unverified year.
+
+
+class IntradayMarketSession(TypedDict):
+    state: Literal["open", "closed", "holiday", "unknown"]
+    basis: Literal["exchange_status", "verified_calendar_interval", "market_calendar"] | None
+    checked_at: str
+    valid_until: str | None
+
+
+def intraday_market_session(now: datetime) -> IntradayMarketSession:
+    """Report a calendar-backed closure, not open status inferred from a schedule."""
+    market_tz = ZoneInfo(settings.vn_timezone)
+    market_day = now.astimezone(market_tz).date()
+    checked_at = now.astimezone(UTC).isoformat()
+    if market_day in _market_holidays():
+        midnight = datetime.combine(market_day + timedelta(days=1), time.min, tzinfo=market_tz)
+        return {
+            "state": "holiday", "basis": "market_calendar", "checked_at": checked_at,
+            "valid_until": midnight.astimezone(UTC).isoformat(),
+        }
+    closure = verified_market_closure(now=now, latest_session=expected_market_session(now=now))
+    if closure:
+        return {
+            "state": "closed", "basis": "verified_calendar_interval", "checked_at": checked_at,
+            "valid_until": closure["valid_until"],
+        }
+    return {"state": "unknown", "basis": None, "checked_at": checked_at, "valid_until": None}
 
 
 def market_sessions_are_adjacent(earlier: Any, later: Any) -> bool:

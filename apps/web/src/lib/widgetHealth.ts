@@ -19,7 +19,7 @@ export interface WidgetHealthState {
 
 export interface DeriveHealthInput extends Pick<ExportProvenance,
   'cached' | 'stale' | 'localOnly' | 'updatedAt' | 'coverage' | 'marketClosed' |
-  'expectedClosedSession' | 'observationStatus' | 'refreshStatus' | 'sourceLabel'
+  'expectedClosedSession' | 'observationStatus' | 'refreshStatus' | 'sourceLabel' | 'intraday'
 > {
   isFetching?: boolean
   /** Age in seconds beyond which a non-cached snapshot is considered stale. */
@@ -104,6 +104,10 @@ export function deriveWidgetHealth(input: DeriveHealthInput): WidgetHealthState 
       detail: `Only part of the requested coverage is available${detailSource}.${unknownDate}${cacheDetail}${input.marketClosed ? ' Market is closed.' : ''}`,
     }
   }
+  if (input.intraday && updatedMs !== null) {
+    return { status: 'unknown', label: 'Observed', detail: `Dated market observation${detailSource}. This does not establish a live feed.` }
+  }
+
   if (updatedMs !== null && input.marketClosed && input.expectedClosedSession !== false) {
     return {
       status: 'awaiting_update',

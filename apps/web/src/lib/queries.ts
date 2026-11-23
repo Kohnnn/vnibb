@@ -137,18 +137,6 @@ export function useShareholders(symbol: string, enabled = true) {
     });
 }
 
-export function useIntraday(
-    symbol: string,
-    options?: { limit?: number; enabled?: boolean }
-) {
-    return useQuery({
-        queryKey: queryKeys.intraday(symbol, options?.limit),
-        queryFn: () => api.getIntraday(symbol, { limit: options?.limit }),
-        enabled: options?.enabled !== false && !!symbol,
-        staleTime: 30 * 1000, // 30 seconds - refresh frequently
-    });
-}
-
 export function useFinancialRatios(
     symbol: string,
     options?: { period?: string; enabled?: boolean }
@@ -788,46 +776,6 @@ export function useDerivativesHistory(
     });
 }
 
-// ============ Additional Equity Queries ============
-
-export function usePriceDepth(symbol: string, enabled = true) {
-    return useQuery({
-        queryKey: queryKeys.priceDepth(symbol),
-        queryFn: () => api.getPriceDepth(symbol),
-        enabled: enabled && !!symbol,
-        staleTime: 5 * 1000, // 5 seconds - real-time order book
-    });
-}
-
-export function useMicrostructureAnalysis(
-    symbol: string,
-    options?: {
-        features?: string[];
-        interval?: string;
-        lookbackDays?: number;
-        valueAreaPct?: number;
-        fractalWindow?: number;
-        imbalanceRatio?: number;
-        enabled?: boolean;
-    }
-) {
-    const params = {
-        features: options?.features,
-        interval: options?.interval ?? '5m',
-        lookbackDays: options?.lookbackDays ?? 7,
-        valueAreaPct: options?.valueAreaPct ?? 0.7,
-        fractalWindow: options?.fractalWindow ?? 2,
-        imbalanceRatio: options?.imbalanceRatio ?? 3,
-    };
-
-    return useQuery({
-        queryKey: queryKeys.microstructure(symbol, params),
-        queryFn: () => api.getMicrostructureAnalysis(symbol, params),
-        enabled: options?.enabled !== false && !!symbol,
-        staleTime: 30 * 1000,
-        retry: 1,
-    });
-}
 
 export function useInsiderDeals(
     symbol: string,
