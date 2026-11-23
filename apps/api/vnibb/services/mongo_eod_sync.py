@@ -21,6 +21,7 @@ from vnibb.services.data_pipeline import data_pipeline
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.vietcap_client import VietcapClient
 from vnibb.services.vietcap_financials import (
+    ListingPersistenceOutcome,
     persist_vietcap_financials,
     persist_vietcap_listings,
     persist_vietcap_prices,
@@ -219,7 +220,14 @@ async def run_mongo_eod_sync(
             upsert_listing_rows, service._get_database(), trading_rows, search_rows,
             dry_run=False,
         )
-        summary["structured_rows"] += await persist_vietcap_listings(trading_rows, search_rows)
+        listing_evidence: ListingPersistenceOutcome = {}
+        summary["structured_rows"] += await persist_vietcap_listings(
+            trading_rows, search_rows, outcome=listing_evidence,
+        )
+        withheld = listing_evidence.get("withheld", [])
+        if withheld:
+            summary["listings_withheld"] = len(withheld)
+            raise ValueError(f"Canonical listing evidence withheld for {len(withheld)} stocks")
     except Exception as exc:
         summary["structured_rows"] += getattr(exc, "persisted_rows", 0)
         summary["failures"] += 1

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -417,15 +418,19 @@ def upsert_ratio_rows(
 def upsert_listing_rows(db: Any, trading_rows: list[dict[str, Any]], search_rows: list[dict[str, Any]], *, dry_run: bool) -> int:
     from pymongo import UpdateOne
 
-    trading = {str(row["symbol"]).upper(): row for row in trading_rows if row.get("symbol")}
+    trading: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in trading_rows:
+        if symbol := str(row.get("symbol") or "").strip().upper():
+            trading[symbol].append(row)
     search = {str(row.get("code") or row.get("ticker")).upper(): row for row in search_rows if row.get("code") or row.get("ticker")}
     received_at = _now()
     ops = []
     for symbol in sorted(trading.keys() | search.keys()):
-        meta, company = trading.get(symbol, {}), search.get(symbol, {})
+        observations = trading.get(symbol, [])
+        meta, company = (observations[-1] if observations else {}), search.get(symbol, {})
         record_key = f"vietcap:reference.listings:market:{symbol}"
         raw = {**meta, **company, "symbol": symbol, "ticker": symbol,
-               "trading": meta, "searchBar": company}
+               "trading": meta, "tradingRows": observations, "searchBar": company}
         doc = {
             "dataset": "reference.listings", "datasetVariant": "reference.listings", "datasetGroup": "reference",
             "symbol": symbol, "scopeKey": "market", "scopeType": "market",

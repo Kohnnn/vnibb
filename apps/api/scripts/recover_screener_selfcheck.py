@@ -39,7 +39,8 @@ def load_pipeline():
              "vnibb.models.technical_indicator", "vnibb.models.trading",
              "vnibb.providers.vnstock.financial_ratios", "vnibb.providers.vnstock.financials",
              "vnibb.services.data_quality", "vnibb.services.financial_service",
-             "vnibb.services.prediction_market_retention", "vnibb.services.realtime_pipeline")
+             "vnibb.services.prediction_market_retention", "vnibb.services.realtime_pipeline",
+             "vnibb.services.price_acquisition", "vnibb.services.stock_listing")
     for name in names:
         for end in range(1, len(name.split(".")) + 1):
             full = ".".join(name.split(".")[:end])

@@ -533,7 +533,7 @@ def test_cli_applied_stock_prices_reach_structured_bridge(monkeypatch, capsys, f
     captured = []
     order = []
 
-    async def persist_listing(trading, search):
+    async def persist_listing(trading, search, *, outcome):
         order.append("listing")
         return 1
 
@@ -558,6 +558,78 @@ def test_cli_applied_stock_prices_reach_structured_bridge(monkeypatch, capsys, f
     assert order == ["listing", "prices"]
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_explicit_historical_ohlc_uses_existing_inactive_fk_without_listing_update(
+    monkeypatch, tmp_path, fake_mongo, existing,
+):
+    import asyncio
+    from datetime import date
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from vnibb.core import database
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.services import cache_manager, vietcap_ingestion
+
+    class DelistedClient(FakeVietcapClient):
+        def get_all_symbols(self):
+            return [{"symbol": "AAA", "type": "STOCK", "board": "DELISTED"}]
+
+        def get_ohlc(self, symbol, *, count_back, to_epoch):
+            acquired.append(symbol)
+            return {"symbol": symbol, "o": [10], "h": [12], "l": [9], "c": [11], "v": [3], "t": [1720000000]}
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'historical.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    dates = date(2010, 1, 1), date(2025, 1, 1)
+
+    async def prepare():
+        async with engine.begin() as connection:
+            await connection.run_sync(Stock.__table__.create)
+            await connection.run_sync(StockPrice.__table__.create)
+        if existing:
+            async with sessions() as db:
+                db.add(Stock(id=1, symbol="AAA", exchange="DELISTED", is_active=0,
+                             listing_date=dates[0], delisting_date=dates[1], empty_sync_count=7))
+                await db.commit()
+        await engine.dispose()
+
+    async def retained():
+        try:
+            async with sessions() as db:
+                stock = await db.get(Stock, 1)
+                prices = (await db.scalars(select(StockPrice))).all()
+            return stock, prices
+        finally:
+            await engine.dispose()
+
+    asyncio.run(prepare())
+    acquired = []
+    monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(database, "async_session_maker", sessions)
+    monkeypatch.setattr(cache_manager, "async_session_factory", sessions)
+    monkeypatch.setattr(backfill_vietcap, "load_env_file", lambda _: None)
+    monkeypatch.setattr(backfill_vietcap, "VietcapClient", DelistedClient)
+    monkeypatch.setattr(backfill_vietcap, "upsert_eod_rows", lambda db, name, symbol, rows, **kw: len(rows))
+    monkeypatch.setattr(vietcap_ingestion, "upsert_listing_rows", lambda *args, **kwargs: 1)
+    monkeypatch.setattr(sys, "argv", ["backfill_vietcap.py", "--symbols", "AAA", "--datasets", "ohlc", "--apply"])
+    assert backfill_vietcap.main() == (0 if existing else 1)
+    state = backfill_vietcap.json.loads((tmp_path / "checkpoint.json").read_text())
+    assert state["receipts"]["__universe__"]["listing"]["outcome"] == "withheld"
+    assert state["receipts"]["AAA"]["ohlc"]["outcome"] == ("succeeded" if existing else "withheld")
+    stock, prices = asyncio.run(retained())
+    if existing:
+        assert acquired == ["AAA"]
+        assert [(p.stock_id, p.symbol, p.source) for p in prices] == [(1, "AAA", "vietcap_vnd")]
+        assert (stock.is_active, stock.exchange, stock.listing_date, stock.delisting_date, stock.empty_sync_count) == (
+            0, "DELISTED", *dates, 7,
+        )
+    else:
+        assert acquired == prices == []
+        assert stock is None
+
+
 def test_cli_records_invalid_ohlc_source_identity_as_failed(monkeypatch, fake_mongo):
     from vnibb.services import vietcap_financials, vietcap_ingestion
     from vnibb.services.vietcap_client import VietcapClient
@@ -571,7 +643,7 @@ def test_cli_records_invalid_ohlc_source_identity_as_failed(monkeypatch, fake_mo
     def unexpected_write(*args, **kwargs):
         raise AssertionError("Invalid source identity must not be persisted")
 
-    async def listings(trading, search):
+    async def listings(trading, search, *, outcome):
         return 1
 
     monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
@@ -615,7 +687,7 @@ def test_cli_only_persists_ohlc_within_inclusive_requested_window(monkeypatch, f
         sql_dates.extend(row["tradeDate"].date() for row in rows)
         return len(rows)
 
-    async def listings(trading, search):
+    async def listings(trading, search, *, outcome):
         return 1
 
     monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
@@ -649,7 +721,7 @@ def test_selected_listing_persists_before_first_stock_price(monkeypatch, fake_mo
 
     order = []
 
-    async def listings(trading, search):
+    async def listings(trading, search, *, outcome):
         order.append("listing")
         return 1
 
@@ -704,7 +776,7 @@ def test_persisted_pair_cursor_resumes_company_after_recurring_ohlc_failure(monk
     monkeypatch.setattr(backfill_vietcap, "upsert_eod_rows", pack)
     monkeypatch.setattr(vietcap_ingestion, "upsert_listing_rows", lambda *a, **k: 1)
 
-    async def listings(trading, search):
+    async def listings(trading, search, *, outcome):
         return len(trading)
 
     monkeypatch.setattr(vietcap_financials, "persist_vietcap_listings", listings)
@@ -749,7 +821,7 @@ def test_cli_retains_invalid_source_bars_and_reports_failed_partial_window(monke
     cache = AsyncMock()
     cache.store_historical_prices.return_value = 1
 
-    async def listings(trading, search):
+    async def listings(trading, search, *, outcome):
         return 1
 
     monkeypatch.setenv("MONGODB_URL", "mongodb://fixture")
