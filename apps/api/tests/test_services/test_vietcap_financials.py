@@ -411,7 +411,7 @@ async def test_listing_bridge_withholds_unverified_delisting_and_rejects_nonstoc
     trading = [{"symbol": "OLD", "type": "STOCK", "board": "DELISTED", "organName": "Old"}, {"symbol": "CW1", "type": "CW", "board": "HSX"}]
     outcome = {}
     assert await persist_vietcap_listings(trading, [], cache_manager=cache, outcome=outcome) == 0
-    assert outcome == {"expected": ["OLD"], "withheld": ["OLD"], "persisted": []}
+    assert outcome == {"expected": ["OLD"], "withheld": ["OLD"], "persisted": {}}
     cache.store_listing_data.assert_not_awaited()
     assert "Withheld 1 IQ stock identities" in caplog.text
 

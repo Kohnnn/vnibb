@@ -7,7 +7,7 @@ import unicodedata
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 from vnibb.core.ratio_units import PERCENT_RATIO_FIELDS
 from vnibb.providers.vnstock.balance_sheet import BalanceSheetData
@@ -524,9 +524,15 @@ def listing_projection(row: Mapping[str, Any], company: Mapping[str, Any]) -> di
             "sector": sector.get("name") if isinstance(sector, Mapping) else None}
 
 
+class ListingPersistenceOutcome(TypedDict, total=False):
+    expected: list[str]
+    withheld: list[str]
+    persisted: dict[str, str]  # Symbol to observed board, not the retained canonical board.
+
+
 async def persist_vietcap_listings(
     trading_rows: Sequence[Mapping[str, Any]], search_rows: Sequence[Mapping[str, Any]], *,
-    cache_manager=None, outcome: dict[str, list[str]] | None = None,
+    cache_manager=None, outcome: ListingPersistenceOutcome | None = None,
 ) -> int:
     from vnibb.services.cache_manager import CacheManager
 
@@ -557,5 +563,8 @@ async def persist_vietcap_listings(
     if count != len(projected):
         raise RuntimeError(f"Incomplete IQ listing persistence: {count}/{len(projected)} PostgreSQL rows")
     if outcome is not None:
-        outcome.update(expected=sorted(expected), withheld=sorted(withheld), persisted=sorted(projected))
+        outcome.update(
+            expected=sorted(expected), withheld=sorted(withheld),
+            persisted={symbol: boards[symbol] for symbol in projected},
+        )
     return count

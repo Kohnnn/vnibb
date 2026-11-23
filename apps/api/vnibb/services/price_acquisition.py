@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _KEY_PREFIX = "acquisition:daily_prices:"
 _EMPTY_LIMIT = 5
 _RETRY_DELAY = timedelta(hours=1)
-_WINDOW_LIMIT = 8
+_RECENT_WINDOW_LIMIT = 8
 _DB_TIMEOUT_SECONDS = 5
 _EMPTY_SIGNALS = ("dữ liệu trống", "du lieu trong", "no data", "empty data", "no records")
 
@@ -46,7 +46,7 @@ def history_failure_reason(error: Exception | SystemExit) -> str:
 
 
 class PriceHistoryAcquisition:
-    """Bounded retry state per requested window within a daily-price symbol key."""
+    """Retry state per window; retain live deferrals and cap ordinary receipts."""
 
     def __init__(self, sessions: async_sessionmaker, start: str, end: str):
         self._sessions = sessions
@@ -87,11 +87,14 @@ class PriceHistoryAcquisition:
                 row = await session.scalar(select(AppKeyValue).where(AppKeyValue.key == key).with_for_update())
                 windows = dict((row.value or {}).get("windows", {}))
                 windows[self._window_key] = self._transition(windows.get(self._window_key, {}), attempt, reason)
-                # Keep active deferrals ahead of ordinary last observations, then evict oldest first.
-                retained = sorted(windows, key=lambda item: (
-                    self.retry_after(windows[item]) is not None, windows[item]["last_attempt"],
-                ), reverse=True)[:_WINDOW_LIMIT]
-                row.value = {"windows": {item: windows[item] for item in retained}}
+                live, recent = {}, {}
+                for window, receipt in windows.items():
+                    (live if self.retry_after(receipt) is not None else recent)[window] = receipt
+                # Live fences do not consume slots needed for another window's streak.
+                live.update(sorted(
+                    recent.items(), key=lambda item: item[1]["last_attempt"], reverse=True,
+                )[:_RECENT_WINDOW_LIMIT])
+                row.value = {"windows": live}
                 row.updated_at = datetime.now(UTC).replace(tzinfo=None)
                 await session.commit()
         except Exception as exc:

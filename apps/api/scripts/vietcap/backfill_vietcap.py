@@ -443,10 +443,13 @@ def _main(runner: Any) -> int:
             if missing:
                 raise ValueError(f"Listing type unavailable for {','.join(missing)}")
             totals["listing_rows"] = w.upsert_listing_rows(db, trading, search, dry_run=not args.apply)
-            from vnibb.services.vietcap_financials import persist_vietcap_listings
+            from vnibb.services.vietcap_financials import (
+                ListingPersistenceOutcome,
+                persist_vietcap_listings,
+            )
 
             stock_symbols = {symbol for symbol in listing_symbols if universe[symbol].get("type") == "STOCK"}
-            evidence: dict[str, list[str]] = {}
+            evidence: ListingPersistenceOutcome = {}
             totals["structured_listing_rows"] = (
                 runner.run(persist_vietcap_listings(trading, search, outcome=evidence)) if stock_symbols else 0
             )

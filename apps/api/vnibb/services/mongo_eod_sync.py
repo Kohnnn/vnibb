@@ -21,6 +21,7 @@ from vnibb.services.data_pipeline import data_pipeline
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.vietcap_client import VietcapClient
 from vnibb.services.vietcap_financials import (
+    ListingPersistenceOutcome,
     persist_vietcap_financials,
     persist_vietcap_listings,
     persist_vietcap_prices,
@@ -219,7 +220,7 @@ async def run_mongo_eod_sync(
             upsert_listing_rows, service._get_database(), trading_rows, search_rows,
             dry_run=False,
         )
-        listing_evidence: dict[str, list[str]] = {}
+        listing_evidence: ListingPersistenceOutcome = {}
         summary["structured_rows"] += await persist_vietcap_listings(
             trading_rows, search_rows, outcome=listing_evidence,
         )

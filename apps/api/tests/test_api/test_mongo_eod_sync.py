@@ -314,7 +314,7 @@ async def test_run_mongo_eod_sync_counts_structured_listings(iq_sync):
 @pytest.mark.asyncio
 async def test_run_mongo_eod_sync_reports_withheld_listings_as_partial(iq_sync):
     async def listing_bridge(trading, search, *, outcome):
-        outcome.update(withheld=["SSI"], persisted=["VCI"])
+        outcome.update(withheld=["SSI"], persisted={"VCI": "HOSE"})
         return 1
 
     iq_sync.listing_bridge.side_effect = listing_bridge

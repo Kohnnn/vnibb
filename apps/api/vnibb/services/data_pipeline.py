@@ -971,20 +971,20 @@ class DataPipeline:
 
         await self._cache_set_json(cache_key, payload, ttl)
 
-    async def _cache_listing_rows(self, symbols: list[str], *, whole_refresh: bool) -> None:
-        """Refresh observed identities only; leave the aggregate untouched on a partial refresh."""
-        if not symbols:
+    async def _cache_listing_rows(self, observed_boards: dict[str, str], *, whole_refresh: bool) -> None:
+        """Renew cache entries only when the observed board agrees with canonical SQL."""
+        if not observed_boards:
             return
         async with async_session_maker() as session:
             stocks = (await session.scalars(select(Stock).where(
-                Stock.symbol.in_(symbols), Stock.is_active == 1, Stock.delisting_date.is_(None),
+                Stock.symbol.in_(observed_boards.keys()), Stock.is_active == 1, Stock.delisting_date.is_(None),
             ))).all()
             listing = [
                 {"symbol": stock.symbol, "organ_name": stock.company_name,
                  "exchange": stock.exchange, "industry": stock.industry, "sector": stock.sector}
-                for stock in stocks if equity_board(stock.exchange)
+                for stock in stocks if equity_board(stock.exchange) == observed_boards[stock.symbol]
             ]
-        if whole_refresh and len(listing) == len(symbols):
+        if whole_refresh and len(listing) == len(observed_boards):
             await self._cache_set_json(build_cache_key("vnibb", "listing", "symbols", "VCI"), listing, CACHE_TTL_LISTING)
         for item in listing:
             await self._cache_set_json(build_cache_key("vnibb", "listing", "symbol", item["symbol"]), item, CACHE_TTL_LISTING)
@@ -998,7 +998,10 @@ class DataPipeline:
         """Refresh source-backed IQ stock listings; free VCI supplements outages."""
         from vnibb.providers import market_data
         from vnibb.services.vietcap_client import VietcapClient
-        from vnibb.services.vietcap_financials import persist_vietcap_listings
+        from vnibb.services.vietcap_financials import (
+            ListingPersistenceOutcome,
+            persist_vietcap_listings,
+        )
 
         client = VietcapClient()
         trading_rows = await self._fetch_trading_listing_rows(client)
@@ -1013,7 +1016,7 @@ class DataPipeline:
                 search_rows = []
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
-            outcome: dict[str, list[str]] = {}
+            outcome: ListingPersistenceOutcome = {}
             count = await persist_vietcap_listings(trading_rows, search_rows, outcome=outcome)
             rejected = len(outcome["withheld"])
             await self._cache_listing_rows(outcome["persisted"], whole_refresh=not rejected)
@@ -1107,7 +1110,7 @@ class DataPipeline:
             )
             progress["listing_withheld"] = sorted(withheld_symbols)
 
-        persisted_symbols: list[str] = []
+        persisted_boards: dict[str, str] = {}
         async with async_session_maker() as session:
             count = 0
             for idx in range(start_index, len(symbols)):
@@ -1135,7 +1138,7 @@ class DataPipeline:
                 try:
                     await session.execute(stock_metadata_upsert(session, values))
                     count += 1
-                    persisted_symbols.append(symbol)
+                    persisted_boards[symbol] = exchange_value
                     if progress is not None:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["stock_list"]["success"] += 1
@@ -1155,7 +1158,7 @@ class DataPipeline:
             await session.commit()
         if withheld_symbols:
             logger.warning("Withheld %d VCI stock identities with missing or contradictory listing evidence", len(withheld_symbols))
-        await self._cache_listing_rows(persisted_symbols, whole_refresh=len(persisted_symbols) == len(symbols))
+        await self._cache_listing_rows(persisted_boards, whole_refresh=len(persisted_boards) == len(symbols))
 
         if progress is not None and sync_id is not None:
             progress["last_symbol"] = None

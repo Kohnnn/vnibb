@@ -1,10 +1,11 @@
 import sys
 import types
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
+
 import vnibb.services.data_pipeline as data_pipeline_module
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.price_board import PriceBoardData
@@ -1027,6 +1028,60 @@ async def test_iq_conflicting_listing_cannot_seed_or_refresh_cache(monkeypatch, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["vietcap", "VCI"])
+async def test_listing_board_mismatch_does_not_refresh_symbol_or_aggregate_cache(
+    monkeypatch, scheduled_price_database, source,
+):
+    from vnibb.models.stock import Stock
+    from vnibb.providers import market_data
+    from vnibb.services.cache_manager import CacheManager
+    from vnibb.services.vietcap_client import VietcapClient
+
+    listing_date = date(2010, 1, 4)
+    async with scheduled_price_database() as db:
+        (await db.get(Stock, 1)).listing_date = listing_date
+        await db.commit()
+
+    observed = [("VNM", "HNX"), ("FPT", "HSX")]
+    if source == "vietcap":
+        trading = [{"symbol": symbol, "type": "STOCK", "board": board} for symbol, board in observed]
+
+        async def session(self):
+            return scheduled_price_database()
+
+        monkeypatch.setattr(CacheManager, "_get_session", session)
+        monkeypatch.setattr(VietcapClient, "get_company_search_bar", lambda self: [{"code": "VNM", "name": "Observed"}])
+    else:
+        trading = [
+            {"symbol": symbol, "type": "STOCK", "exchange": board, "_listing_source": "VCI"}
+            for symbol, board in observed
+        ]
+
+        def listing(requested_source, *, view=None):
+            assert requested_source == "VCI"
+            if view == "symbols_by_exchange":
+                return pd.DataFrame(trading)
+            if view == "symbols_by_industries":
+                return pd.DataFrame()
+            return pd.DataFrame([{"symbol": symbol, "organName": "Observed"} for symbol, _ in observed])
+
+        monkeypatch.setattr(market_data, "listing", listing)
+
+    pipeline = DataPipeline()
+    cache = AsyncMock()
+    monkeypatch.setattr(pipeline, "_fetch_trading_listing_rows", AsyncMock(return_value=trading))
+    monkeypatch.setattr(pipeline, "_cache_set_json", cache)
+    assert await pipeline.sync_stock_list() == 2
+    assert [call.args[0] for call in cache.await_args_list] == ["vnibb:listing:symbol:FPT"]
+    assert cache.await_args.args[1]["exchange"] == "HOSE"
+    async with scheduled_price_database() as db:
+        stock = await db.get(Stock, 1)
+        assert (stock.exchange, stock.is_active, stock.listing_date, stock.delisting_date) == (
+            "HOSE", 1, listing_date, None,
+        )
+
+
+@pytest.mark.asyncio
 async def test_vci_listing_requires_observed_board_and_keeps_initial_board(monkeypatch, scheduled_price_database):
     from sqlalchemy import select
     from vnibb.models.stock import Stock
@@ -1351,3 +1406,27 @@ async def test_out_of_window_vci_retry_does_not_persist_or_clear_deferral(monkey
     recovered = {}
     assert await sync(recovered) == 1
     assert "price_retry_deferred" not in recovered
+
+
+@pytest.mark.asyncio
+async def test_ninth_live_history_deferral_does_not_reopen_first_window(monkeypatch, scheduled_price_database):
+    pipeline = DataPipeline()
+    history = AsyncMock(return_value=pd.DataFrame())
+    monkeypatch.setattr(pipeline, "_fetch_quote_history_frame", history)
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
+    first_day = date(2026, 3, 17)
+
+    async def sync(day, progress=None):
+        return await pipeline.sync_daily_prices(
+            ["VNM"], start_date=day, end_date=day, progress=progress, cache_recent=False,
+        )
+
+    for offset in range(9):
+        for _ in range(5):
+            assert await sync(first_day + timedelta(days=offset)) == 0
+    for day in (first_day, first_day + timedelta(days=8)):
+        progress = {}
+        assert await sync(day, progress) == 0
+        assert progress["price_retry_deferred"][0]["symbol"] == "VNM"
+    assert history.await_count == 45
