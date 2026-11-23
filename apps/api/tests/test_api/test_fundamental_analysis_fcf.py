@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import AsyncMock
 
 import httpx
@@ -22,6 +22,7 @@ from vnibb.services.llm_service import MAX_CONTEXT_CHARS
 from vnibb.services.mongo_market_data_service import MongoMarketDataService
 
 SNAPSHOT_DATE = date(2026, 6, 15)
+COMPUTED_AT = "2026-06-15T09:11:23.456000+00:00"
 LATEST_YEAR = 2024
 
 
@@ -29,13 +30,18 @@ def _cash_row(year, capex):
     return {"yearReport": year, "operating_cash_flow": 100, "capex": capex}
 
 
-def _retained_document(capex, *, reject_capex=False):
+def _retained_document(capex, *, reject_capex=False, price=None, sector=None):
     latest = _cash_row(LATEST_YEAR, capex)
     if reject_capex:
         latest["unit_metadata"] = {"capex": {"unavailable_reason": "legacy_unit_basis_unconfirmed"}}
     periods = range(2019, 2025)
     snapshot = compute_fundamental_snapshot(FundamentalInputs(
         symbol="FPT",
+        sector=sector,
+        price=price,
+        price_unit="VND" if price is not None else None,
+        shares_outstanding=10,
+        shares_unit="shares",
         statement_unit="VND",
         income_statements=[
             {"yearReport": year, "net_profit_after_tax": 20, "revenue": 200, "gross_profit": 60}
@@ -46,7 +52,7 @@ def _retained_document(capex, *, reject_capex=False):
             for year in periods
         ],
         cash_flows=[_cash_row(2022, 10), _cash_row(2023, 20), latest],
-        unit_lineage={"statements": [{
+        unit_lineage={"price": {"unit": "VND"} if price is not None else {}, "statements": [{
             "period": LATEST_YEAR,
             "source": {
                 "dataset": DATASET_CASH_FLOW,
@@ -56,7 +62,7 @@ def _retained_document(capex, *, reject_capex=False):
             },
         }]},
     ))
-    return to_document(snapshot, SNAPSHOT_DATE)
+    return {**to_document(snapshot, SNAPSHOT_DATE), "observedAt": datetime.fromisoformat(COMPUTED_AT)}
 
 
 @pytest.fixture
@@ -211,22 +217,68 @@ async def test_conflicting_retained_statement_withholds_either_fcf_sign_path(ana
 
 
 @pytest.mark.asyncio
-async def test_legacy_dcf_window_cannot_certify_coverage(analysis_route):
-    doc = _retained_document(100)
+@pytest.mark.parametrize(("method", "base"), [
+    ("dcf", "legacy"), ("dcf", "conflict"), ("dcf", "partial"),
+    ("dcf", "absent"), ("dcf", "complete"), ("rim", "legacy"),
+])
+async def test_fundamental_analysis_withholds_only_valuation_dependent_on_rejected_dcf_base(analysis_route, method, base):
+    doc = _retained_document(100, price=50, sector="Banking" if method == "rim" else None)
+    assert doc["valuationMethod"] == method and doc["intrinsicValue"] > 0
     coverage = doc["inputs"]["derivedCoverage"]["fcf"]
-    # Some v4 documents chose the newest complete rows, skipping incomplete ones.
-    del coverage["incompleteWindowYears"]
-    coverage.update(baseYears=[2021, 2022, 2024], excluded=[{
-        "year": 2023, "incomplete": [{"component": "capex", "reason": "missing"}],
-    }])
+    if base == "legacy":
+        # Historical v4 chose three complete rows, skipping the rejected FY2023.
+        del coverage["incompleteWindowYears"]
+        coverage.update(baseYears=[2021, 2022, 2024], excluded=[{
+            "year": 2023, "incomplete": [{"component": "capex", "reason": "missing"}],
+        }])
+    elif base == "conflict":
+        statements = doc["inputs"]["unitLineage"]["statements"]
+        statements.append({**statements[0], "period": 2023, "conflictingFields": ["capex"]})
+    elif base == "partial":
+        coverage.update(status="partial", baseYears=[2022, 2024], incompleteWindowYears=[2023])
+    elif base == "absent":
+        del doc["inputs"]["derivedCoverage"]["fcf"]
 
     data = await _get_analysis(analysis_route, doc)
-    fcf = data["competitive_advantage"]["fcf"]
-    assert fcf["status"] == "not_positive"
-    assert fcf["input_coverage"] == "complete"  # FY2024 is still admitted.
-    assert fcf["dcf_base_admitted_years"] is None
-    published = data["fundamental_snapshot"]["inputs"]["derivedCoverage"]["fcf"]
-    assert published["baseYears"] is published["baseFcf"] is published["status"] is None
+    retained = data["fundamental_snapshot"]
+    derived = data["latest_fundamental_snapshot"]["derived"]
+    quality = data["competitive_advantage"]
+    assert quality["fcf"]["status"] == ("unavailable" if base == "absent" else "not_positive")
+    assert quality["quality_metrics"]["roe"] == 20
+    assert retained["price"] == 50
+    if method == "dcf" and base != "complete":
+        assert data["valuation"] is derived is None
+        assert "Retained DCF base coverage" in data["section_errors"]["valuation"]
+        assert all(retained[field] is None for field in ("intrinsicValue", "marginOfSafety", "valuationVerdict", "valuationMethod"))
+        assert "intrinsic_value" not in retained["computedFields"]
+        assert retained["inputs"]["baseFcf"] is None
+        if base != "absent":
+            assert retained["inputs"]["derivedCoverage"]["fcf"]["baseFcf"] is None
+        assert doc["inputs"]["baseFcf"] > 0 and doc["intrinsicValue"] > 0
+    else:
+        assert data["valuation"]["valuation_method"] == method
+        assert data["valuation"]["intrinsic_value"] == doc["intrinsicValue"]
+        assert derived == retained
+    if base == "legacy":
+        assert quality["fcf"]["dcf_base_admitted_years"] is None
+        published = retained["inputs"]["derivedCoverage"]["fcf"]
+        assert published["baseYears"] is published["baseFcf"] is published["status"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("observed", "expected"), [
+    (datetime(2026, 6, 15, 9, 11, 23, 456000), COMPUTED_AT),  # BSON decodes UTC without tzinfo.
+    ("2026-06-15T22:40:17.654321+07:00", "2026-06-15T22:40:17.654321+07:00"),
+    ("2026-06-15", None),
+    (None, None),
+])
+async def test_quality_lineage_identifies_the_retained_computation_not_just_its_date(analysis_route, observed, expected):
+    doc = _retained_document(100)
+    doc.update(observedAt=observed, updatedAt="2026-06-16T03:00:00Z")
+    quality = (await _get_analysis(analysis_route, doc))["competitive_advantage"]
+    assert quality["lineage"]["snapshot_date"] == "2026-06-15"
+    assert quality["lineage"]["snapshot_computed_at"] == expected
+    assert quality["fcf"]["source_financial_date"] is None
 
 
 @pytest.mark.asyncio
@@ -324,6 +376,7 @@ async def test_agent_prompt_keeps_retained_evidence_under_context_limit(analysis
     assert fcf["status"] == evidence
     assert fcf["amount"] == (0 if evidence == "zero" else None)
     assert bool(fcf["unavailable_reason"]) == (evidence == "unavailable")
+    assert quality["lineage"]["snapshot_computed_at"] == COMPUTED_AT
 
     # Mirror the bounded widget attachment: the wrapper test exercises the
     # browser producer, and this test crosses the actual SSE and model seams.
@@ -372,5 +425,7 @@ async def test_agent_prompt_keeps_retained_evidence_under_context_limit(analysis
     context_blob = messages[2]["content"].split("```json\n", 1)[1].removesuffix("\n```")
     assert len(context_blob) == MAX_CONTEXT_CHARS + 3 and context_blob.endswith("...")
     assert json.dumps(sample, ensure_ascii=True) in context_blob
+    assert f'"snapshot_computed_at": "{COMPUTED_AT}"' in context_blob
+    assert '"fetchedAt": "2026-06-16T08:00:00.000Z"' in context_blob
     assert '"updatedAt": null' in context_blob
     assert "not-for-prompt" not in context_blob

@@ -201,6 +201,7 @@ export interface RetainedFcf {
 
 export interface RetainedQualityLineage {
   snapshot_date: string | null;
+  snapshot_computed_at?: string | null;
   snapshot_source: string | null;
   schema_version: number | null;
   moat_factor_years: number[] | null;

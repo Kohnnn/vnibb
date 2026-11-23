@@ -310,6 +310,7 @@ function RetainedQualityEvidence({ fcf, lineage }: { fcf: RetainedFcf; lineage?:
       <h3 className="font-bold text-[var(--text-primary)]">Retained quality snapshot</h3>
       {lineage ? <>
         <p>Snapshot date: {lineage.snapshot_date ?? 'not recorded'} · Snapshot source: {lineage.snapshot_source ?? 'not recorded'} · Schema: {lineage.schema_version ?? 'not recorded'}</p>
+        <p>Snapshot computed at: {lineage.snapshot_computed_at ?? 'not recorded'}</p>
         <p>Independent of this request’s statement sections and the shared FY/Q/TTM selector. Metric periods and source dates are shown only where recorded.</p>
         {windows.map(([label, value]) => value && <p key={label}>{label}: {value}</p>)}
       </> : <p>{lineage === null ? 'No retained quality snapshot available.' : 'The API did not report retained quality lineage.'}</p>}

@@ -20,8 +20,10 @@ jest.mock('./TickerCombobox', () => ({ TickerCombobox: () => null }));
 
 let mockSymbol = 'FPT';
 const mockAnalysis = useFundamentalAnalysis as jest.Mock;
+const snapshotComputedAt = '2026-06-15T09:11:23.456000+00:00';
 const lineage: RetainedQualityLineage = {
   snapshot_date: '2026-06-15', snapshot_source: 'vnibb-fundamental-engine', schema_version: 4,
+  snapshot_computed_at: snapshotComputedAt,
   moat_factor_years: [2020, 2021, 2022, 2023, 2024], revenue_cagr_window: [2019, 2024], profit_cagr_window: null,
 };
 const positivityTest: RetainedFcf = {
@@ -67,6 +69,7 @@ test.each(signedCases)('renders the admitted %d VND amount as %s', (amount, stat
   expect(within(retained).getByText(status, { exact: true })).toBeVisible();
   expect(retained).toHaveTextContent(`${reason}: ${amount} VND.`);
   expect(retained).toHaveTextContent('Snapshot date: 2026-06-15');
+  expect(retained).toHaveTextContent(`Snapshot computed at: ${snapshotComputedAt}`);
   expect(retained).toHaveTextContent('Source financial date: 2025-03-20');
 });
 
@@ -181,13 +184,17 @@ test.each<{ fcf: RetainedFcf; cashflowFailure: string }>([
   expect(exported.data).toMatchObject({
     symbol: 'FPT',
     fcf: { ...fcf, dcf_base_admitted_years: fcf.dcf_base_admitted_years?.map(year => `FY${year}`).join(', ') },
-    retained_quality_snapshot: { snapshot_date: '2026-06-15', schema_version: 4, revenue_cagr_window: 'FY2019–FY2024' },
+    retained_quality_snapshot: {
+      snapshot_date: '2026-06-15', snapshot_computed_at: snapshotComputedAt,
+      schema_version: 4, revenue_cagr_window: 'FY2019–FY2024',
+    },
     cashflow_section_error: cashflowFailure,
   });
   const csv = await download(user, 'CSV');
   expect(csv).toContain(`"status"":""${fcf.status}""`);
   expect(csv).toContain(`"amount"":${fcf.amount}`);
   expect(csv).toContain('"snapshot_date"":""2026-06-15""');
+  expect(csv).toContain(`"snapshot_computed_at"":""${snapshotComputedAt}""`);
   expect(csv).toContain(cashflowFailure);
   expect(csv).toContain(fcf.source_financial_date
     ? `"source_financial_date"":""${fcf.source_financial_date}""`

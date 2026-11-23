@@ -414,22 +414,23 @@ function getFriendlyModelLabel(rawModel: string | null | undefined): string {
 function getWidgetAwareIntro(widgetContext?: string, activeTabName?: string, symbol?: string): string {
     const widgetKey = normalizeWidgetKey(widgetContext);
     const tabLabel = activeTabName || 'current workspace';
+    const issuerLabel = symbol ? ` for ${symbol}` : '';
     if (widgetContext && widgetKey === 'comparison') {
-        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to rank the names, explain valuation gaps, or pick the strongest thesis.`;
+        return `Connected to @${widgetContext} on ${tabLabel}${issuerLabel}. Ask me to rank the names, explain valuation gaps, or pick the strongest thesis.`;
     }
     if (widgetContext && widgetKey === 'price_chart') {
-        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to read the setup, define levels, or turn this chart into a trade plan.`;
+        return `Connected to @${widgetContext} on ${tabLabel}${issuerLabel}. Ask me to read the setup, define levels, or turn this chart into a trade plan.`;
     }
     if (widgetContext && widgetKey === 'foreign_trading') {
-        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to decode foreign flow, persistence, and what it means for positioning.`;
+        return `Connected to @${widgetContext} on ${tabLabel}${issuerLabel}. Ask me to decode foreign flow, persistence, and what it means for positioning.`;
     }
     if (widgetContext && widgetKey === 'market_breadth') {
         return `Connected to @${widgetContext} on ${tabLabel}. Ask me to explain sector rotation, breadth health, or what the market is signaling.`;
     }
     if (widgetContext) {
-        return `Connected to @${widgetContext} on ${tabLabel} for ${symbol}. Ask me to explain the widget, call out anomalies, or connect it to the broader thesis.`;
+        return `Connected to @${widgetContext} on ${tabLabel}${issuerLabel}. Ask me to explain the widget, call out anomalies, or connect it to the broader thesis.`;
     }
-    return `Ask VniAgent about ${symbol}: fundamentals, valuation, technical setup, risks, or what changed in this workspace.`;
+    return `Ask VniAgent${symbol ? ` about ${symbol}` : ''}: fundamentals, valuation, technical setup, risks, or what changed in this workspace.`;
 }
 
 function getInputPlaceholder(widgetContext?: string): string {
@@ -451,7 +452,7 @@ function formatSessionTimestamp(value: string): string {
 export function AICopilot({
     isOpen,
     onClose,
-    currentSymbol,
+    currentSymbol: dashboardSymbol,
     widgetContext,
     widgetContextData,
     activeTabName,
@@ -520,9 +521,9 @@ export function AICopilot({
 
     // Data fetching for context
     const useLiveContext = !memoryOnly && !matrixDraft;
-    const { data: profile } = useProfile(currentSymbol, useLiveContext);
-    const { data: quote } = useStockQuote(currentSymbol, useLiveContext);
-    const { data: ratios } = useFinancialRatios(currentSymbol, { enabled: useLiveContext });
+    const { data: profile } = useProfile(dashboardSymbol, useLiveContext);
+    const { data: quote } = useStockQuote(dashboardSymbol, useLiveContext);
+    const { data: ratios } = useFinancialRatios(dashboardSymbol, { enabled: useLiveContext });
 
     const activeTabKey = useMemo(() => normalizeTabKey(activeTabName), [activeTabName]);
     const activeWidgetKey = useMemo(() => normalizeWidgetKey(widgetContext), [widgetContext]);
@@ -530,12 +531,14 @@ export function AICopilot({
         () => getWidgetSummary(widgetContext, widgetContextData),
         [widgetContext, widgetContextData]
     );
-    const focusedSymbol = useMemo(() => buildVniAgentWorkspaceContext({
+    const workspaceContext = useMemo(() => ({
         widgetType: widgetContext || 'Dashboard',
         widgetTypeKey: widgetSummary?.widgetTypeKey || null,
-        symbol: currentSymbol,
+        activeTab: activeTabName || null,
+        symbol: dashboardSymbol,
         widgetPayload: widgetContextData,
-    }).symbol, [currentSymbol, widgetContext, widgetContextData, widgetSummary?.widgetTypeKey]);
+    }), [activeTabName, dashboardSymbol, widgetContext, widgetContextData, widgetSummary?.widgetTypeKey]);
+    const focusedSymbol = useMemo(() => buildVniAgentWorkspaceContext(workspaceContext).symbol, [workspaceContext]);
     const widgetDataPreview = useMemo(() => getWidgetDataPreview(widgetSummary), [widgetSummary]);
     const latestResolvedResponseMeta = useMemo(
         () => [...messages].reverse().find((message) => message.role === 'assistant' && message.responseMeta)?.responseMeta,
@@ -554,8 +557,8 @@ export function AICopilot({
         [messages]
     );
     const relevantRecentSessions = useMemo(
-        () => recentSessions.filter((session) => !currentSymbol || session.symbol === currentSymbol).slice(0, 4),
-        [currentSymbol, recentSessions]
+        () => recentSessions.filter((session) => session.symbol === (focusedSymbol || 'UNKNOWN')).slice(0, 4),
+        [focusedSymbol, recentSessions]
     );
     const activeModelLabel = aiSettings.mode === 'browser_key'
         ? aiSettings.model || 'browser model not set'
@@ -581,7 +584,7 @@ export function AICopilot({
         } catch {
             setMessages([]);
         }
-    }, [sessionKey, workspaceContextKey, activeTabName, currentSymbol, widgetContext, cancelActiveRequest]);
+    }, [sessionKey, workspaceContextKey, activeTabName, dashboardSymbol, widgetContext, cancelActiveRequest]);
 
 
 
@@ -635,11 +638,11 @@ export function AICopilot({
         }
 
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptLibraryOpened, {
-            symbol: currentSymbol,
+            symbol: focusedSymbol,
             tab_name: activeTabName,
             widget_context: widgetContext,
         });
-    }, [activeTabName, currentSymbol, isPromptLibraryOpen, widgetContext]);
+    }, [activeTabName, focusedSymbol, isPromptLibraryOpen, widgetContext]);
 
     useEffect(() => {
         const syncSettings = () => setAISettings(readStoredAISettings());
@@ -711,11 +714,11 @@ export function AICopilot({
             {
                 id: `${Date.now()}-context`,
                 role: 'assistant',
-                content: getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol),
+                content: getWidgetAwareIntro(widgetContext, activeTabName, focusedSymbol),
                 timestamp: new Date(),
             },
         ]);
-    }, [activeTabName, currentSymbol, isOpen, messages.length, sessionKey, widgetContext]);
+    }, [activeTabName, focusedSymbol, isOpen, messages.length, sessionKey, widgetContext]);
 
 
 
@@ -792,7 +795,7 @@ export function AICopilot({
         dispatchOnboardingMeaningfulAction('prompt_submit');
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptSubmitted, {
             source: promptSource,
-            symbol: currentSymbol,
+            symbol: focusedSymbol,
             tab_name: activeTabName,
             widget_context: widgetContext,
             provider: aiSettings.provider,
@@ -855,17 +858,14 @@ export function AICopilot({
 
         try {
             const requestContext = selection ? undefined : buildVniAgentWorkspaceContext({
-                widgetType: widgetContext || 'Dashboard',
-                widgetTypeKey: widgetSummary?.widgetTypeKey || null,
-                activeTab: activeTabName || null,
-                symbol: currentSymbol,
+                ...workspaceContext,
                 dataSnapshot: {
                     profile: profile?.data || null,
                     quote: quote || null,
                     ratios: ratios?.data || null,
                 },
                 widgetPayload: {
-                    ...(widgetContextData || {}),
+                    ...workspaceContext.widgetPayload,
                     documentContexts: attachedDocuments,
                 },
             });
@@ -936,7 +936,7 @@ export function AICopilot({
                     setCurrentStatus(null);
                     setResponseStatus('VniAgent response ready.');
                     captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseCompleted, {
-                        symbol: currentSymbol,
+                        symbol: focusedSymbol,
                         tab_name: activeTabName,
                         widget_context: widgetContext,
                         provider: event.responseMeta?.provider || runtimeConfig?.provider || aiSettings.provider,
@@ -983,7 +983,7 @@ export function AICopilot({
                             ),
                         );
                         recordVniAgentRun({
-                            symbol: currentSymbol || 'UNKNOWN',
+                            symbol: focusedSymbol || 'UNKNOWN',
                             widgetContext,
                             activeTabName,
                             prompt: messageText,
@@ -1026,7 +1026,7 @@ export function AICopilot({
             setCurrentStatus(null);
             setResponseStatus('VniAgent response failed.');
             captureAnalyticsEvent(ANALYTICS_EVENTS.copilotResponseFailed, {
-                symbol: currentSymbol,
+                symbol: focusedSymbol,
                 tab_name: activeTabName,
                 widget_context: widgetContext,
                 provider: aiSettings.provider,
@@ -1040,7 +1040,7 @@ export function AICopilot({
             ));
             try {
                 recordVniAgentRun({
-                    symbol: currentSymbol || 'UNKNOWN',
+                    symbol: focusedSymbol || 'UNKNOWN',
                     widgetContext,
                     activeTabName,
                     prompt: messageText,
@@ -1070,9 +1070,9 @@ export function AICopilot({
         if (message.role !== 'assistant' || !message.responseMeta || !message.content.trim()) return;
         addNotebookItem({
             kind: 'agent_answer',
-            title: `VniAgent answer — ${currentSymbol || 'UNKNOWN'}`,
+            title: `VniAgent answer — ${focusedSymbol || 'UNKNOWN'}`,
             body: sanitizeCopilotContent(message.content),
-            symbol: currentSymbol || undefined,
+            symbol: focusedSymbol || undefined,
             agent: {
                 provider: message.responseMeta?.provider || runtimeConfig?.provider || aiSettings.provider,
                 model: message.responseMeta?.model || runtimeConfig?.model || aiSettings.model,
@@ -1100,7 +1100,7 @@ export function AICopilot({
         if (messages.length === 0 || memoryOnlyRef.current || messages.some((message) => message.memoryOnly)) return;
 
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotExported, {
-            symbol: currentSymbol,
+            symbol: focusedSymbol,
             tab_name: activeTabName,
             widget_context: widgetContext,
             message_count: messages.length,
@@ -1114,7 +1114,7 @@ export function AICopilot({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `vniagent-chat-${currentSymbol}-${new Date().toISOString().slice(0, 10)}.md`;
+        a.download = `vniagent-chat-${focusedSymbol || 'unscoped'}-${new Date().toISOString().slice(0, 10)}.md`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -1126,7 +1126,7 @@ export function AICopilot({
             setRecentSessions(
                 archiveVniAgentSession({
                     sessionKey,
-                    symbol: currentSymbol || 'UNKNOWN',
+                    symbol: focusedSymbol || 'UNKNOWN',
                     widgetContext,
                     activeTabName,
                     messages: messages.map(toPersistedMessage),
@@ -1135,7 +1135,7 @@ export function AICopilot({
         }
 
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotNewChatStarted, {
-            symbol: currentSymbol,
+            symbol: focusedSymbol,
             tab_name: activeTabName,
             widget_context: widgetContext,
             previous_message_count: messages.length,
@@ -1209,7 +1209,7 @@ export function AICopilot({
             setAttachedDocuments((prev) => [...prev, response.document]);
             setCurrentStatus(null);
             captureAnalyticsEvent(ANALYTICS_EVENTS.copilotDocumentAttached, {
-                symbol: currentSymbol,
+                symbol: focusedSymbol,
                 tab_name: activeTabName,
                 widget_context: widgetContext,
                 file_type: file.type || file.name.split('.').pop() || 'unknown',
@@ -1318,12 +1318,12 @@ export function AICopilot({
                         </span>
                     ) : null}
                     <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2.5 py-1 font-semibold">
-                        {matrixSelection ? 'Selected results only' : currentSymbol}
+                        {matrixSelection ? 'Selected results only' : focusedSymbol || 'No issuer selected'}
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[var(--text-muted)]">
                         <Clock3 size={11} /> {memoryOnly ? 'Memory-only chat — not saved' : currentSessionMessageCount > 0
                             ? `${currentSessionMessageCount} saved message${currentSessionMessageCount === 1 ? '' : 's'} in this context`
-                            : 'Fresh context for this symbol'}
+                            : 'Fresh conversation context'}
                     </span>
                 </div>
                 {aiSettings.mode === 'browser_key' ? (
@@ -1362,7 +1362,7 @@ export function AICopilot({
                         </div>
                     </div>
                     <div className="text-[11px] text-[var(--text-secondary)]">
-                        {getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)}
+                        {getWidgetAwareIntro(widgetContext, activeTabName, focusedSymbol)}
                     </div>
                     {widgetDataPreview && (
                         <div className="rounded-md border border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] text-[var(--text-secondary)]">
@@ -1513,7 +1513,7 @@ export function AICopilot({
                             <Sparkles size={40} className="mx-auto mb-3 text-[var(--text-muted)]" />
                             <div className="text-sm font-semibold text-[var(--text-primary)]">{matrixSelection ? 'Review your Matrix draft, then Send' : 'Start with evidence from the VniBB database'}</div>
                             <p className="mx-auto mt-2 max-w-[26rem] text-xs leading-5">
-                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, currentSymbol)} Responses prioritize your configured VniBB database, attached documents, and the active workspace context before external sources.`}
+                                {matrixSelection ? 'Only the attached frozen selection will be used. Access is checked again when you send.' : `${getWidgetAwareIntro(widgetContext, activeTabName, focusedSymbol)} Responses prioritize your configured VniBB database, attached documents, and the active workspace context before external sources.`}
                             </p>
                         </div>
 
@@ -1754,7 +1754,7 @@ export function AICopilot({
                 onClose={() => setIsPromptLibraryOpen(false)}
                 onSelectPrompt={(prompt, workflow, metadata) => {
                     captureAnalyticsEvent(ANALYTICS_EVENTS.copilotPromptLibrarySelected, {
-                        symbol: currentSymbol,
+                        symbol: focusedSymbol,
                         tab_name: activeTabName,
                         widget_context: widgetContext,
                     });

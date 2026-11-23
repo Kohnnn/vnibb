@@ -342,6 +342,11 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
     async def fake_events(symbol, limit, db):
         return StandardResponse(data=[], error="events unavailable")
 
+    derived_coverage = {"cagr": {}, "fcf": {
+        "status": "complete", "latestYear": 2024, "positive": True, "baseFcf": 50_000,
+        "baseRows": 3, "baseYears": [2022, 2023, 2024], "incompleteWindowYears": [], "positiveReason": None,
+    }}
+
     async def fake_snapshot(symbol):
         return {
             "symbol": symbol,
@@ -353,7 +358,7 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
             "price": 90000,
             # The real v4 document always carries the coverage block; admission
             # requires it, so the fixture must model it too.
-            "inputs": {**snapshot_inputs, "derivedCoverage": {"cagr": {}, "fcf": {}}},
+            "inputs": {**snapshot_inputs, "baseFcf": 50_000, "derivedCoverage": derived_coverage},
             "moat": "wide",
             "roe": 22.5,
             "netMargin": 15.0,
@@ -385,7 +390,7 @@ async def test_fundamental_analysis_composes_sections_and_degrades(monkeypatch, 
         assert response.data["section_errors"].pop("valuation")
     assert response.data["fundamental_snapshot"]["intrinsicValue"] == 120000
     assert response.data["fundamental_snapshot"]["inputs"] == {
-        **snapshot_inputs, "derivedCoverage": {"cagr": {}, "fcf": {}},
+        **snapshot_inputs, "baseFcf": 50_000, "derivedCoverage": derived_coverage,
     }
     assert response.data["latest_fundamental_snapshot"]["derived"] == (
         response.data["fundamental_snapshot"] if valuation_available else None
@@ -1277,7 +1282,11 @@ async def test_fundamental_analysis_never_publishes_superseded_derived_values(mo
         "moat": "wide", "moatScore": 95.0, "roe": 22.5,
         "inputs": {
             "unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
-            "derivedCoverage": {"cagr": {}, "fcf": {"latestYear": 2025, "positive": True}},
+            "baseFcf": 50_000,
+            "derivedCoverage": {"cagr": {}, "fcf": {
+                "status": "complete", "latestYear": 2025, "positive": True, "baseFcf": 50_000,
+                "baseRows": 3, "baseYears": [2023, 2024, 2025], "incompleteWindowYears": [],
+            }},
         },
     }
 

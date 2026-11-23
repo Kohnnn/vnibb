@@ -134,17 +134,22 @@ follow the same admission decision. The stored document is unchanged.
   evidence. The writer is unchanged.
 - Old schema, absent admission, and rejected latest-year inputs produce
   `unavailable` with a reason, not zero. Latest-year admission is separate from
-  DCF base coverage. The projection omits conflicting years and does not certify
-  a legacy window that lacks `incompleteWindowYears`. The DCF average is not the
+  DCF base coverage. Fundamental Analysis omits conflicting years and withholds
+  DCF outputs from a rejected base, including a legacy window that lacks
+  `incompleteWindowYears`. Independently admitted latest-year FCF and residual
+  income (RIM) valuation do not depend on that base. The DCF average is not the
   latest-period amount.
-- Snapshot date and schema identify the retained computation. The FCF fiscal
-  year, matching cash-flow provider and explicit statement source date are
-  separate fields; absent source lineage stays null. Receipt time, other
-  statement dates, and the shared FY/Q/TTM selector do not fill those gaps.
+- Snapshot date and schema describe the retained computation; `snapshot_computed_at`
+  preserves its exact stored timestamp (`observedAt`) when recorded. The FCF
+  fiscal year, matching cash-flow provider and explicit statement source date
+  are separate fields. Receipt time, other statement dates, and the shared
+  FY/Q/TTM selector do not fill missing lineage.
   Moat-factor periods and the published five-year CAGR windows are only shown
   where recorded; they are not dates for the other quality metrics.
 
 The widget's CSV/JSON and VniAgent attachment carry this same qualified result.
+When a widget's issuer differs from the dashboard issuer, VniAgent labels and
+records the conversation under the attached issuer.
 The read-only MCP statement tools do not expose the retained quality snapshot;
 their cash-flow rows are not substitutes for this observation.
 

@@ -2285,6 +2285,7 @@ _RETAINED_FCF_REASONS = {
     "not_positive": "FCF not positive",
     "unavailable": "FCF unavailable",
 }
+_RETAINED_DCF_BASE_REASON = "Retained DCF base coverage could not be confirmed as complete."
 
 
 def _retained_analysis_block(value: Any) -> dict[str, Any]:
@@ -2311,6 +2312,17 @@ def _retained_financial_date(value: Any) -> str | None:
     if isinstance(value, str) and re.match(r"^\d{4}-\d{2}-\d{2}(?:$|[T ])", value):
         observation = _coerce_meta_datetime(value)
         if observation is not None:
+            return value
+    return None
+
+
+def _retained_computed_at(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        # PyMongo normally decodes BSON UTC timestamps as naive datetimes.
+        return (value if value.tzinfo is not None else value.replace(tzinfo=UTC)).isoformat()
+    if isinstance(value, str) and re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", value):
+        computed = _coerce_meta_datetime(value)
+        if computed is not None and computed.tzinfo is not None:
             return value
     return None
 
@@ -2482,28 +2494,53 @@ def _build_retained_fcf(snapshot: dict[str, Any] | None, snapshot_error: str | N
 
 
 def _project_snapshot_fcf(snapshot: dict[str, Any] | None, fcf: dict[str, Any]) -> dict[str, Any] | None:
-    """Keep FCF claims consistent in every response copy of the retained snapshot."""
+    """Keep FCF and dependent DCF claims consistent in every response copy."""
     if not snapshot:
         return snapshot
     projected = {**snapshot, "fcfPositive": fcf["positive"]}
     inputs = _retained_analysis_block(snapshot.get("inputs"))
     coverage = _retained_analysis_block(inputs.get("derivedCoverage"))
     stored_fcf = _retained_analysis_block(coverage.get("fcf"))
-    if not stored_fcf:
-        return projected
-
-    published_fcf = {**stored_fcf, "positive": fcf["positive"], "positiveReason": fcf["unavailable_reason"]}
-    if "latestFcf" in stored_fcf and fcf["evidence"] != "signed_amount":
-        published_fcf["latestFcf"] = None
     admitted_years = fcf["dcf_base_admitted_years"]
-    if stored_fcf.get("baseYears") != admitted_years:
-        published_fcf.update(
-            status="partial" if admitted_years is not None else None,
-            baseYears=admitted_years,
-            baseFcf=None,
-            reason="Retained DCF base coverage could not be confirmed as complete.",
-        )
-    projected["inputs"] = {**inputs, "derivedCoverage": {**coverage, "fcf": published_fcf}}
+    base_amount = inputs.get("baseFcf")
+    base_complete = (
+        admitted_years is not None
+        and len(set(admitted_years)) == len(admitted_years) == fcf["dcf_base_required_rows"]
+        and fcf["fiscal_year"] in admitted_years
+        and admitted_years == stored_fcf.get("baseYears")
+        and stored_fcf.get("status") == "complete"
+        and stored_fcf.get("incompleteWindowYears") == []
+    )
+    rejected_dcf = snapshot.get("valuationMethod") == "dcf" and (
+        not base_complete or type(base_amount) not in (int, float) or not 0 < base_amount < math.inf
+        or stored_fcf.get("baseFcf") != base_amount or isinstance(stored_fcf.get("baseFcf"), bool)
+    )
+    projected_inputs = dict(inputs)
+    if (not base_complete or rejected_dcf) and "baseFcf" in inputs:
+        projected_inputs["baseFcf"] = None
+    if stored_fcf:
+        published_fcf = {**stored_fcf, "positive": fcf["positive"], "positiveReason": fcf["unavailable_reason"]}
+        if "latestFcf" in stored_fcf and fcf["evidence"] != "signed_amount":
+            published_fcf["latestFcf"] = None
+        if not base_complete or rejected_dcf:
+            published_fcf["baseFcf"] = None
+        if admitted_years != stored_fcf.get("baseYears") or (stored_fcf.get("status") == "complete" and not base_complete):
+            published_fcf.update(
+                status="partial" if admitted_years is not None else None,
+                baseYears=admitted_years,
+                reason=_RETAINED_DCF_BASE_REASON,
+            )
+        projected_inputs["derivedCoverage"] = {**coverage, "fcf": published_fcf}
+    if rejected_dcf:
+        projected.update(intrinsicValue=None, marginOfSafety=None, valuationMethod=None, valuationVerdict=None)
+        if isinstance(computed := snapshot.get("computedFields"), list):
+            projected["computedFields"] = [
+                field for field in computed
+                if field not in ("intrinsic_value", "margin_of_safety", "valuation_method", "valuation_verdict")
+            ]
+        projected_inputs["derivedUnavailableReason"] = _RETAINED_DCF_BASE_REASON
+    if projected_inputs != inputs:
+        projected["inputs"] = projected_inputs
     return projected
 
 
@@ -2578,6 +2615,7 @@ def _build_competitive_advantage_section(
         "fcf": fcf,
         "lineage": {
             "snapshot_date": _retained_financial_date(snapshot.get("snapshotDate")),
+            "snapshot_computed_at": _retained_computed_at(snapshot.get("observedAt")),
             "snapshot_source": _retained_text(snapshot.get("source")),
             "schema_version": snapshot["schemaVersion"] if type(snapshot.get("schemaVersion")) is int else None,
             "moat_factor_years": _retained_years(moat_factors.get("periods_used")),
@@ -5225,13 +5263,13 @@ async def get_fundamental_analysis(
     subsidiaries = subsidiaries_task.result()
     news = news_task.result()
     fundamental_snapshot = snapshot_task.result()
-    valuation_reason = fundamental_valuation_unavailable_reason(fundamental_snapshot)
-    if valuation_reason:
-        section_errors["valuation"] = valuation_reason
     competitive_advantage = _build_competitive_advantage_section(
         fundamental_snapshot, section_errors.get("fundamental_snapshot"),
     )
     fundamental_snapshot = _project_snapshot_fcf(fundamental_snapshot, competitive_advantage["fcf"])
+    valuation_reason = fundamental_valuation_unavailable_reason(fundamental_snapshot)
+    if valuation_reason:
+        section_errors["valuation"] = valuation_reason
     valuation = _build_fundamental_valuation_section(fundamental_snapshot)
 
     latest_ratio = ratios[-1] if isinstance(ratios, list) and ratios else None

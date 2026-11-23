@@ -499,7 +499,8 @@ class LlmService:
                 "A false positivity test means not positive, not necessarily negative. Only an admitted "
                 "signed amount distinguishes zero from negative. Unavailable or null is not zero. "
                 "Report the retained fiscal year, source, basis and coverage where recorded. "
-                "The retained snapshot date and retrieval time are not the statement's financial source date. "
+                "Keep the retained snapshot date and exact computation timestamp separate from the "
+                "statement's financial source date and the browser's retrieval time. "
                 "A failed statement section or a shared FY/Q/TTM selection does not change retained snapshot evidence. "
                 "Do not substitute a DCF base, another cash-flow row or an inferred date for missing retained evidence."
             )
