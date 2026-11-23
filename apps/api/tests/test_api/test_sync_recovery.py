@@ -994,8 +994,10 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
             assert not (await session.scalars(select(SyncStatus).where(SyncStatus.sync_type == "screener_universe"))).all()
             assert not (await CacheManager(db=session).get_screener_data()).hit
         assert progress.get("last_index") is None and progress.get("last_symbol") is None
+        assert progress["cohort_published"] is False
         monkeypatch.setattr(pipeline, "_save_progress", original_save)
         assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=sync_id) == 22
+        assert progress["cohort_published"] is True
         async with sessions() as session:
             reader = await CacheManager(db=session).get_screener_data()
             assert reader.hit and {row.symbol for row in reader.data} == set(symbols)
@@ -1005,6 +1007,7 @@ async def test_file_sqlite_acquired_sessions_keep_prices_on_interruption(tmp_pat
             assert (await session.get(SyncStatus, sync_id)).additional_data["committed_count"] == 22
             before_replay = sorted((row.id, row.symbol, row.price, row.extended_metrics, row.created_at) for row in reader.data)
         assert await pipeline.sync_screener_data(enrich_ratios=False, acquire_sessions=True, progress=progress, sync_id=sync_id) == 22
+        assert progress["cohort_published"] is True
         async with sessions() as session:
             replay = await CacheManager(db=session).get_screener_data()
             assert replay.hit
@@ -1061,6 +1064,7 @@ async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(sc
     progress = {}
     with pytest.raises(asyncio.CancelledError):
         await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123)
+    assert progress["cohort_published"] is False
     async with sessions() as session:
         reader = await CacheManager(db=session).get_screener_data()
         assert reader.hit and len(reader.data) == 50
@@ -1071,6 +1075,7 @@ async def test_cancelled_final_commit_keeps_previous_same_day_admitted_cohort(sc
     assert progress.get("last_index") is None and progress.get("last_symbol") is None
     interrupt[0] = False
     assert await pipeline.sync_screener_data(enrich_ratios=False, progress=progress, sync_id=123) == 50
+    assert progress["cohort_published"] is True
     async with sessions() as session:
         reader = await CacheManager(db=session).get_screener_data()
         assert reader.hit and len(reader.data) == 50

@@ -920,6 +920,11 @@ Preserve those distinctions: page exhaustion is not a complete trading session,
 a listing page is not an entitled universe, and unknown-unit prices stay null.
 Financials, ratios, news and other unmatched capabilities remain HOLD.
 
+Any future daily-bar importer must demonstrate that bounded replay cannot
+overwrite or restamp existing bars and that receipts never include credentials
+or upstream response bodies. The proposed `dnse_vnd` label is not evidence of
+currency or scale. None of these criteria changes today's acquisition hold.
+
 The pure request helper follows official SDK commit
 `aa55a5117de2534707bca6165b6738e1cc6fc6a4`, version `2026-07-23`, path-only signing
 and `Date`. The rendered endpoint schema instead names `X-Aux-Date`; that

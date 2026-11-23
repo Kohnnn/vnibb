@@ -44,6 +44,18 @@ def test_history_rejects_invalid_types(field, value):
         market_data.dnse_history("FPT", history(**{field: value}))
 
 
+@pytest.mark.parametrize("stamp", [-10**12, 10**12])
+def test_history_rejects_int64_timestamps_outside_the_datetime_range(stamp: int) -> None:
+    with pytest.raises(ValueError, match="^Malformed DNSE timestamp$"):
+        market_data.dnse_history("FPT", history(t=[stamp, 0]))
+
+
+@pytest.mark.parametrize("volume", [None, "", "3", 1.5])
+def test_history_rejects_missing_or_coercible_volume(volume: object) -> None:
+    with pytest.raises(ValueError, match="^Malformed DNSE volume$"):
+        market_data.dnse_history("FPT", history(v=[volume, 3]))
+
+
 def test_history_rejects_invalid_envelopes_and_nonterminal_empty():
     for payload in (None, {}, history(v=[1]), history(symbol="VCB"), history(t=[], o=[], h=[], l=[], c=[], v=[], nextTime=4)):
         with pytest.raises(ValueError):
@@ -141,6 +153,11 @@ def test_error_classification_and_unavailable_capabilities_are_sanitized():
         assert result["available"] is False and result["capability"] == capability and result["reason"]
     with pytest.raises(ValueError):
         dnse.dnse_error(True)
+
+
+@pytest.mark.parametrize("code", ["OA-401 with extra text", "OA-999", "synthetic upstream detail"])
+def test_unrecognized_error_codes_do_not_change_or_leak_into_classification(code: str) -> None:
+    assert dnse.dnse_error(403, code) == {"source": "DNSE", "status": 403, "reason": "forbidden"}
 
 
 def test_adapter_imports_only_stdlib_and_has_no_io_calls():
