@@ -6,6 +6,7 @@
   "git": {
     "deploymentEnabled": {
       "main": false,
+      "codex/241-backend-integration": false,
       "codex/249-ownership-freshness-20261116": false,
       "codex/241-post-release-advisories-20261111": false,
       "codex/project-integration-20261110": false
