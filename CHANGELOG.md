@@ -12,6 +12,7 @@ build, Jest) plus backend `ruff` and `pytest`. Individual verification logs
 live in `docs/`.
 
 ## [Unreleased]
+- Record failed relative-strength calculations as scheduler failures instead of reporting success when calculation data is unavailable (#172).
 - Distinguish intraday feed failures, successful empty reads, and verified zero-trade sessions. Preserve retained observations and disclose their age independently of market session status. Keep priced order-book levels on legacy reference-only refreshes, and include the retained fallback in depth-profile exports after a failed refresh (#284).
 
 - Distinguish unavailable officers and subsidiaries from successful empty returns, keep previously fetched records for the same company on refresh failure, and carry the original source and fetch dates and separate failure reason through status, exports and VniAgent (#280).
