@@ -127,6 +127,8 @@ export interface CompanyEventsResponse {
   data: CompanyEventData[];
   meta?: {
     count: number;
+    dividend_scope?: 'unreconciled_observations';
+    dividend_history_endpoint?: string;
   };
   error?: string | null;
 }

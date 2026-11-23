@@ -8,7 +8,9 @@ import { useDividends } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { formatDividendPayout, formatDividendYield } from '@/lib/formatters';
+import { DividendCoverageNotice } from './DividendCoverageNotice';
+import { admittedDividendRows, dividendCoverageBasis, dividendDistributionExport, dividendExport, dividendRowLabel, readDividendCoverage } from '@/lib/dividendHistory';
+import { formatDividendPayout } from '@/lib/formatters';
 import { EMPTY_VALUE } from '@/lib/units';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
@@ -25,14 +27,6 @@ interface DividendPaymentWidgetProps {
     onDataChange?: (data: WidgetDataPayload) => void;
 }
 
-function formatDividendType(type: string | null | undefined): string {
-    if (!type) return 'Dividend';
-    const normalized = type.toLowerCase();
-    if (normalized === 'cash') return 'Cash';
-    if (normalized === 'stock') return 'Stock';
-    if (normalized === 'mixed') return 'Mixed';
-    return 'Other';
-}
 
 export function DividendPaymentWidget({ symbol, onDataChange }: DividendPaymentWidgetProps) {
     const isEnabled = Boolean(symbol);
@@ -45,56 +39,55 @@ export function DividendPaymentWidget({ symbol, onDataChange }: DividendPaymentW
         dataUpdatedAt,
     } = useDividends(symbol, isEnabled);
 
-    const rows = (data?.data || []).filter(
-        (row) =>
-            (row.cash_dividend !== null && row.cash_dividend !== undefined) ||
-            (row.stock_dividend !== null && row.stock_dividend !== undefined) ||
-            (row.value !== null && row.value !== undefined) ||
-            (row.dividend_ratio !== null && row.dividend_ratio !== undefined)
-    );
+    const coverage = readDividendCoverage(data);
+    const rows = admittedDividendRows(data);
     const hasData = rows.length > 0;
-    const isFallback = Boolean(error && hasData);
-    // Dividend ex/record/payment dates are action schedules, not source
-    // observations, so freshness stays unknown and receipts go to fetchedAt.
+    const failure = error?.message || data?.error;
+    const isFallback = Boolean(failure && hasData);
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
             empty: !hasData,
             apiGroup: '/equity',
             endpoint: `/equity/${symbol}/dividends`,
-            sourceLabel: 'Dividend payment history',
+            sourceLabel: 'Retained dividend observations',
             lastDataDate: null,
             fetchedAt: dataUpdatedAt,
-            stale: isFallback,
+            cached: isFallback,
+            refreshStatus: isFallback ? 'failed' : undefined,
+            coverage: coverage?.status === 'partial' ? 'partial' : 'unknown',
+            observationStatus: isLoading && !hasData ? 'loading' : hasData ? 'available' : 'unavailable',
+            basis: dividendCoverageBasis(coverage),
+            exportData: dividendExport(coverage, rows.map(dividendDistributionExport)),
             extra: { rows: rows.length },
         }));
-    }, [data?.data, dataUpdatedAt, hasData, isFallback, onDataChange, rows.length, symbol]);
+    }, [coverage, dataUpdatedAt, hasData, isFallback, isLoading, onDataChange, rows, symbol]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view dividends" icon={<Calendar size={18} />} />;
     }
 
     return (
-        <div aria-label="Dividend payment history" className="h-full flex flex-col">
+        <div aria-label="Dividend payment observations" className="h-full flex flex-col">
             <div className="pb-2 border-b border-[var(--border-subtle)]">
                 <WidgetMeta
                     updatedAt={null}
                     fetchedAt={dataUpdatedAt}
                     isFetching={isFetching && hasData}
                     isCached={isFallback}
-                    note="Yield uses latest close"
                     align="right"
                 />
             </div>
 
-            <div className="flex-1 overflow-x-auto pt-3">
+            <div className="min-h-0 flex-1 overflow-auto space-y-2 pt-3">
+                {(!isLoading || coverage) && <DividendCoverageNotice coverage={coverage} failed={Boolean(failure)} />}
                 {isLoading && !hasData ? (
                     <WidgetSkeleton variant="table" lines={6} />
-                ) : error && !hasData ? (
-                    <WidgetError error={error as Error} onRetry={() => refetch()} />
+                ) : failure && !hasData ? (
+                    <WidgetError error={new Error(failure)} onRetry={() => refetch()} />
                 ) : !hasData ? (
                     <WidgetEmpty
-                        message={`No dividend data for ${symbol}`}
+                        message={`No qualified dividend observations for ${symbol}`}
                         icon={<Calendar size={18} />}
                     />
                 ) : (
@@ -104,24 +97,20 @@ export function DividendPaymentWidget({ symbol, onDataChange }: DividendPaymentW
                                 <th className="pb-2 pr-3">Ex Date</th>
                                 <th className="pb-2 pr-3">Record Date</th>
                                 <th className="pb-2 pr-3">Payment Date</th>
-                                <th className="pb-2 pr-3">Type</th>
-                                <th className="pb-2 pr-3">Year</th>
-                                <th className="pb-2 pr-3 text-right">Yield</th>
+                                <th className="pb-2 pr-3">Distribution</th>
                                 <th className="pb-2 text-right">Payout</th>
                             </tr>
                         </thead>
                         <tbody>
                             {rows.map((row, idx) => (
                                 <tr
-                                    key={`${row.ex_date}-${idx}`}
+                                    key={`${row.dataset}-${row.observation_id ?? idx}`}
                                     className="border-t border-[var(--border-subtle)] hover:bg-[var(--bg-hover)]"
                                 >
-                                    <td className="py-2 pr-3 text-[var(--text-primary)]">{row.ex_date || '-'}</td>
-                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.record_date || '-'}</td>
-                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.payment_date || '-'}</td>
-                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{formatDividendType(row.dividend_type || row.type)}</td>
-                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.year || row.fiscal_year || row.issue_year || '-'}</td>
-                                    <td className="py-2 pr-3 text-right text-[var(--text-secondary)]">{formatDividendYield(row.dividend_yield)}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-primary)]">{row.ex_date || EMPTY_VALUE}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.record_date || EMPTY_VALUE}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{row.payment_date || EMPTY_VALUE}</td>
+                                    <td className="py-2 pr-3 text-[var(--text-secondary)]">{dividendRowLabel(row)}</td>
                                     <td className="py-2 text-right font-medium">{payoutCell(row)}</td>
                                 </tr>
                             ))}

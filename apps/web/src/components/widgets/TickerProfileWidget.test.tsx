@@ -42,6 +42,7 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import type { EquityProfileResponse } from '@/types/equity'
 import type { ScreenerResponse } from '@/types/screener'
 import type { DividendsResponse } from '@/lib/api'
+import { cashTerms, qualifiedDividendHistory, stockTerms } from './__fixtures__/dividendHistory'
 
 import {
   useProfile,
@@ -117,34 +118,34 @@ describe('TickerProfileWidget', () => {
     setupReturns()
   })
 
-  test.each([0.25, 0, 388])('renders endpoint-computed dividend percent %s without scaling', dividendYield => {
+  test('does not display a legacy payout or yield without the dividend coverage contract', () => {
     mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({
-      symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' },
+      symbol: 'HPG', data: { symbol: 'HPG', company_name: 'Hoa Phat Group' },
     }))
-    mockDividends.mockReturnValue(queryResult<DividendsResponse>({
-      data: [{ symbol: 'VNM', dividend_type: 'cash', cash_dividend: 1000, dividend_yield: dividendYield }],
-    }))
+    const oldResponse = { data: [{ symbol: 'HPG', type: 'cash', cash_dividend: 500, dividend_yield: 2.35 }] }
+    mockDividends.mockReturnValue(queryResult(oldResponse as unknown as DividendsResponse))
 
-    render(<TickerProfileWidget symbol="VNM" />)
+    render(<TickerProfileWidget symbol="HPG" />)
 
-    expect(screen.getByText(`Cash • ${dividendYield.toFixed(2)}%`)).toBeInTheDocument()
+    expect(screen.getByText(/No qualified history was delivered/i)).toBeInTheDocument()
+    expect(screen.queryByText(/VND500|2\.35%/)).not.toBeInTheDocument()
   })
 
   test.each([
-    [0, 'stock', '10.00% stock'],
-    [1000, 'mixed', 'VND1,000 + 10.00% stock'],
+    [0, 'stock', '10% stock'],
+    [1000, 'mixed', 'VND1,000/share + 10% stock'],
   ] as const)('renders reported stock payout with %s cash (%s)', (cashDividend, type, payout) => {
     mockProfile.mockReturnValue(queryResult<EquityProfileResponse>({
       symbol: 'VNM', data: { symbol: 'VNM', company_name: 'Vietnam Dairy Products' },
     }))
-    mockDividends.mockReturnValue(queryResult<DividendsResponse>({
-      data: [{ cash_dividend: cashDividend, stock_dividend: 10, type }],
-    }))
+    mockDividends.mockReturnValue(queryResult(qualifiedDividendHistory([
+      { ...cashTerms, ...stockTerms, cash_dividend: cashDividend, stock_dividend: 10, type },
+    ])))
 
     render(<TickerProfileWidget symbol="VNM" />)
 
     expect(screen.getByText(payout)).toBeInTheDocument()
-    expect(screen.queryByText('VND0')).not.toBeInTheDocument()
+    expect(screen.queryByText('VND0/share')).not.toBeInTheDocument()
   })
 
   test('shows loading skeleton while initial profile loads', () => {

@@ -11,7 +11,9 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { CompanyLogo } from '@/components/ui/CompanyLogo';
 import { Building2, Globe, Users, Calendar, MapPin, AlertTriangle } from 'lucide-react';
 import { formatTimestamp } from '@/lib/formatDate';
-import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
+import { DividendCoverageNotice } from './DividendCoverageNotice';
+import { admittedDividendRows, dividendActionText, dividendCoverageBasis, dividendDistributionExport, dividendExport, dividendRowLabel, readDividendCoverage } from '@/lib/dividendHistory';
+import { formatDividendPayout, formatNumber, formatVND } from '@/lib/formatters';
 import { EMPTY_VALUE, formatLargeNumber } from '@/lib/units';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
 
@@ -22,13 +24,6 @@ interface TickerProfileWidgetProps {
     onDataChange?: (data: WidgetDataPayload) => void;
 }
 
-function formatDividendType(type: string | null | undefined): string {
-    const normalized = String(type || '').toLowerCase();
-    if (normalized === 'cash') return 'Cash';
-    if (normalized === 'stock') return 'Stock';
-    if (normalized === 'mixed') return 'Mixed';
-    return 'Other';
-}
 
 function cleanText(value: string | null | undefined): string | null {
     const trimmed = String(value ?? '').trim()
@@ -93,7 +88,9 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
         { label: 'Profile', value: profile?.market_cap, provenance: profile?.market_cap_provenance },
         { label: 'Screener', value: screenerRow?.market_cap, provenance: screenerRow?.market_cap_provenance },
     ), [profile, screenerRow]);
-    const dividends = dividendsData?.data ?? [];
+    const dividendCoverage = readDividendCoverage(dividendsData);
+    const dividends = admittedDividendRows(dividendsData);
+    const dividendFailure = Boolean(dividendsError || dividendsData?.error);
     const insiderDeals = insiderDealsData ?? [];
     const hasData = Boolean(profile);
     const isFallback = Boolean(error && hasData);
@@ -104,13 +101,8 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
     const fetchedAt = [dataUpdatedAt, dividendsUpdatedAt, insiderUpdatedAt]
         .filter(Boolean)
         .sort((a, b) => Number(b) - Number(a))[0];
-    const showDividendsSection = dividendsLoading || Boolean(dividendsError) || dividends.length > 0;
     const showInsiderDealsSection = insiderLoading || Boolean(insiderError) || insiderDeals.length > 0;
-    // Dividends are pulled from the dedicated /dividends endpoint. A direct
-    // CAFEF/vietstock scraper may be wired later for richer coverage (split
-    // history, AGM resolutions, etc.) but the standard corporate-action view
-    // is already covered.
-    const showCorporateActions = showDividendsSection || showInsiderDealsSection;
+    const showCorporateActions = Boolean(symbol) || showInsiderDealsSection;
 
     useEffect(() => {
         onDataChange?.(buildWidgetRuntime({
@@ -120,9 +112,15 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
             lastDataDate: null,
             fetchedAt,
             stale: isFallback,
+            basis: dividendCoverageBasis(dividendCoverage),
+            exportData: {
+                profile,
+                marketCap,
+                ...dividendExport(dividendCoverage, dividends.slice(0, 2).map(dividendDistributionExport)),
+            },
             extra: { sections: showCorporateActions ? 3 : 1, marketCap },
         }));
-    }, [fetchedAt, hasData, isFallback, marketCap, onDataChange, showCorporateActions, symbol]);
+    }, [dividendCoverage, dividends, fetchedAt, hasData, isFallback, marketCap, onDataChange, profile, showCorporateActions, symbol]);
 
     if (timedOut && isLoading && !hasData) {
         return (
@@ -266,38 +264,32 @@ export function TickerProfileWidget({ symbol, onDataChange }: TickerProfileWidge
 
                 {showCorporateActions && (
                     <div className="grid grid-cols-1 gap-3">
-                        {showDividendsSection && (
+                        {symbol && (
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Dividends</span>
-                                    <span className="text-[10px] text-[var(--text-muted)]">{dividends.length} records</span>
+                                    <span className="text-[10px] text-[var(--text-muted)]">{Math.min(dividends.length, 2)} shown</span>
                                 </div>
+                                {(!dividendsLoading || dividendCoverage) && (
+                                    <DividendCoverageNotice coverage={dividendCoverage} failed={dividendFailure} />
+                                )}
                                 {dividendsLoading && dividends.length === 0 ? (
                                     <WidgetSkeleton lines={2} />
-                                ) : dividendsError && dividends.length === 0 ? (
-                                    <div className="flex items-center gap-2 text-xs text-[var(--color-negative)]">
-                                        <AlertTriangle size={12} />
-                                        Unable to load dividends
-                                    </div>
-                                ) : (
+                                ) : dividends.length > 0 && (
                                     <div className="space-y-2">
                                         {dividends.slice(0, 2).map((dividend, idx) => (
                                             <div
-                                                key={`${dividend.ex_date}-${idx}`}
-                                                className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
+                                                key={`${dividend.dataset}-${dividend.observation_id ?? idx}`}
+                                                className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                                             >
                                                 <div>
                                                     <div className="text-xs font-semibold text-[var(--text-primary)]">{formatDividendPayout(dividend)}</div>
                                                     <div className="text-[10px] text-[var(--text-muted)]">
-                                                        {formatDividendType(dividend.dividend_type || dividend.type)}
-                                                        {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
-                                                            ? ` • ${formatDividendYield(dividend.dividend_yield)}`
-                                                            : ''}
-                                                        {dividend.ex_date ? ` • Ex ${formatDateOnly(dividend.ex_date)}` : ''}
+                                                        {dividendRowLabel(dividend)}
                                                     </div>
                                                 </div>
-                                                {dividend.payment_date && (
-                                                    <div className="text-[10px] text-[var(--text-muted)]">Pay {formatDateOnly(dividend.payment_date)}</div>
+                                                {dividendActionText(dividend).length > 0 && (
+                                                    <div className="text-[10px] text-[var(--text-muted)]">{dividendActionText(dividend).join(' · ')}</div>
                                                 )}
                                             </div>
                                         ))}

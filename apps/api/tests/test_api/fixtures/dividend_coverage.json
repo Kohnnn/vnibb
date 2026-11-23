@@ -1,0 +1,49 @@
+{
+  "app_observations": {
+    "basis": "Issue #279, app UI observations; reconstructed rows for regression, not an export of the production stores or issuer evidence.",
+    "issue": "https://github.com/Kohnnn/vnibb/issues/279",
+    "observed_on": "2026-11-23",
+    "retained": [
+      {"id": 1, "symbol": "HPG", "issue_method": "cash", "dividend_value": 500, "exercise_date": "2022-06-17", "payment_date": "2022-07-06"},
+      {"id": 2, "symbol": "HPG", "issue_method": "cash", "dividend_value": 500, "exercise_date": "2021-05-31"},
+      {"id": 3, "symbol": "HPG", "issue_method": "cash", "dividend_value": 500, "exercise_date": "2020-07-29"}
+    ],
+    "calendar": [
+      {"id": 10, "symbol": "HPG", "event_type": "CASH_DIVIDEND", "ex_date": "2026-05-11", "value": 500, "raw_data": {"fiscal_year": 2025, "currency": "VND"}},
+      {"id": 11, "symbol": "HPG", "event_type": "STOCK_DIVIDEND", "ex_date": "2026-05-25", "value": 10},
+      {"id": 12, "symbol": "HPG", "event_type": "STOCK_DIVIDEND", "ex_date": "2025-06-26", "value": 20}
+    ],
+    "stale_price_observation": {"close": 21250, "time": "2026-11-03"}
+  },
+  "notices": {
+    "basis": "Typed transcriptions of the cited primary notices, not an export of the retained company-event rows. Announced/scheduled terms do not prove payment or receipt.",
+    "events": [
+      {"id": 20, "symbol": "HPG", "event_type": "CASH_DIVIDEND", "record_date": "2026-05-12", "payment_date": "2026-06-03", "raw_data": {"source": "VSDC", "source_event_id": "195102", "source_url": "https://vsdc.vn/vi/ad/195102", "verified": true, "status": "announced", "fiscal_year": 2025, "published_at": "2026-05-04T09:22:27", "cash_dividend": 500, "currency": "VND", "value_unit": "VND/share"}},
+      {"id": 21, "symbol": "HPG", "event_type": "STOCK_DIVIDEND", "record_date": "2026-05-26", "raw_data": {"source": "VSDC", "source_event_id": "195426", "source_url": "https://vsdc.vn/vi/ad/195426", "verified": true, "status": "announced", "fiscal_year": 2025, "published_at": "2026-05-11T16:45:48", "stock_dividend_percent": 10}},
+      {"id": 22, "symbol": "HPG", "event_type": "STOCK_DIVIDEND", "ex_date": "2025-06-26", "record_date": "2025-06-27", "raw_data": {"source": "issuer", "source_event_id": "hpg-fy2024-stock-notice", "source_url": "https://www.hoaphat.com.vn/tin-tuc/hpg-thong-bao-ngay-chot-danh-sach-co-dong-de-thuc-hien-quyen-nhan-co-tuc-bang-co-phieu-nam-2024.html", "verified": true, "status": "announced", "fiscal_year": 2024, "published_at": "2025-06-05T16:00", "stock_dividend_percent": 20}}
+    ]
+  },
+  "synthetic": {
+    "basis": "Artificial stored-input acceptance cases; not actual FPT distributions.",
+    "cash_evidence": {"source": "VCI", "verified": true, "status": "scheduled", "fiscal_year": 2025, "cash_dividend": 500, "currency": "VND", "value_unit": "VND/share"},
+    "cases": [
+      {"id": 30, "event_type": "cash_dividend", "event_date": "2026-05-02", "ex_date": "2026-05-08", "raw_data": {"source_event_id": "first", "revision": 1}},
+      {"id": 31, "event_type": "CASH_DIVIDEND", "event_date": "2026-05-03", "ex_date": "2026-05-08", "raw_data": {"source_event_id": "first", "revision": 1}},
+      {"id": 32, "event_type": "cash_dividend", "event_date": "2026-05-04", "record_date": "2026-05-13", "payment_date": "2026-06-04", "raw_data": {"source_event_id": "first", "revision": 2, "cash_dividend": 750}},
+      {"id": 33, "event_type": "cash_dividend", "event_date": "2026-05-05", "record_date": "2026-05-20", "raw_data": {"source_event_id": "second", "revision": 1}},
+      {"id": 34, "event_type": "CANCELLED", "event_date": "2026-05-06", "raw_data": {"source_event_id": "second", "revision": 2, "status": "cancelled", "cash_dividend": null}},
+      {"id": 35, "event_type": "cash_dividend", "event_date": "2026-05-07", "record_date": "2026-05-13", "payment_date": "2026-06-04", "raw_data": {"source_event_id": "distinct", "cash_dividend": 750}},
+      {"id": 36, "event_type": "cash_dividend", "event_date": "2026-05-08", "record_date": "2026-06-01", "raw_data": {"source_event_id": "currency", "currency": "USD", "value_unit": "USD/share"}},
+      {"id": 37, "event_type": "cash_dividend", "event_date": "2026-05-09", "payment_date": "2026-05-09", "raw_data": {"source_event_id": "dates", "public_date": "2026-05-09", "payment_date_basis": "publication_date"}},
+      {"id": 38, "event_type": "DIVIDEND", "event_date": "2026-05-10", "record_date": "2026-05-30", "raw_data": {"source_event_id": "type", "dividend_ratio": "5%", "cash_dividend": null}},
+      {"id": 39, "event_type": "cash_dividend", "event_date": "2026-05-11", "record_date": "2026-06-19", "raw_data": {"source_event_id": "no-status", "status": null}},
+      {"id": 40, "event_type": "cash_dividend", "event_date": "2026-05-12", "record_date": "2026-06-20", "raw_data": {"source_event_id": "other-issuer", "symbol": "HPG"}},
+      {"id": 41, "event_type": "cash_dividend", "event_date": "2026-05-13", "record_date": "2026-06-26", "value": 5, "raw_data": {"source_event_id": "untyped-cash", "cash_dividend": null, "exercise_ratio": 5}},
+      {"id": 42, "event_type": "cash_dividend", "event_date": "2026-05-14", "record_date": "2026-05-27", "raw_data": {"source_event_id": "duplicate"}},
+      {"id": 43, "event_type": "dividend", "event_date": "2026-05-15", "record_date": "2026-05-27", "raw_data": {"source_event_id": "duplicate", "action_subtype": "cash_dividend"}},
+      {"id": 44, "event_type": "cash_dividend", "event_date": "2026-05-16", "ex_date": "2026-06-04", "raw_data": {"source_event_id": "collision", "currency": null}},
+      {"id": 45, "event_type": "cash_dividend", "event_date": "2026-05-17", "ex_date": "2026-06-04", "raw_data": {"source_event_id": "collision", "cash_dividend": 700}},
+      {"id": 46, "event_type": "cash_dividend", "event_date": "2026-05-18", "record_date": "2026-06-25", "raw_data": {"source_event_id": "revised-unspecified", "status": "revised"}}
+    ]
+  }
+}
