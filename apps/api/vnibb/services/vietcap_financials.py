@@ -14,7 +14,12 @@ from vnibb.providers.vnstock.balance_sheet import BalanceSheetData
 from vnibb.providers.vnstock.cash_flow import CashFlowData
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.income_statement import IncomeStatementData
-from vnibb.services.stock_listing import equity_board, withhold_listing_status
+from vnibb.services.stock_listing import (
+    equity_board,
+    listing_board_evidence,
+    listing_symbol,
+    withhold_listing_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -519,29 +524,38 @@ def listing_projection(row: Mapping[str, Any], company: Mapping[str, Any]) -> di
             "sector": sector.get("name") if isinstance(sector, Mapping) else None}
 
 
-async def persist_vietcap_listings(trading_rows: Sequence[Mapping[str, Any]], search_rows: Sequence[Mapping[str, Any]], *, cache_manager=None) -> int:
+async def persist_vietcap_listings(
+    trading_rows: Sequence[Mapping[str, Any]], search_rows: Sequence[Mapping[str, Any]], *,
+    cache_manager=None, outcome: dict[str, list[str]] | None = None,
+) -> int:
     from vnibb.services.cache_manager import CacheManager
 
+    boards, withheld = listing_board_evidence(trading_rows)
     search = defaultdict(list)
     for row in search_rows:
-        symbol = row.get("code") or row.get("ticker")
-        if isinstance(symbol, str):
-            search[symbol.upper()].append(row)
-    rows = []
-    withheld = 0
+        symbol = listing_symbol({"symbol": row.get("code"), "ticker": row.get("ticker")})
+        if symbol:
+            search[symbol].append(row)
+    expected: set[str] = set()
+    projected: dict[str, dict[str, Any]] = {}
     for row in trading_rows:
-        if row.get("type") == "STOCK" and withhold_listing_status(row):
-            withheld += 1
+        symbol = listing_symbol(row)
+        if row.get("type") != "STOCK" or symbol is None:
             continue
-        matches = search.get(str(row.get("symbol") or "").upper(), [])
-        projected = listing_projection(row, matches[0] if len(matches) == 1 else {})
-        if projected is not None:
-            rows.append(projected)
+        expected.add(symbol)
+        if symbol in withheld or symbol not in boards:
+            continue
+        matches = search[symbol]
+        if candidate := listing_projection(row, matches[0] if len(matches) == 1 else {}):
+            projected[symbol] = candidate
+    withheld = expected - projected.keys()
     if withheld:
-        logger.warning("Withheld %d IQ listing status claims without authoritative evidence", withheld)
-    if (trading_rows or search_rows) and not rows:
-        raise ValueError("IQ listings unavailable: explicit listed stock and exchange board required")
-    count = await (cache_manager or CacheManager()).store_listing_data(rows, source="vietcap") if rows else 0
-    if rows and count == 0:
-        raise RuntimeError("IQ listing persistence affected no PostgreSQL rows")
+        logger.warning("Withheld %d IQ stock identities with missing or contradictory listing evidence", len(withheld))
+    if (trading_rows or search_rows) and not expected:
+        raise ValueError("IQ listings unavailable: explicit stock instrument identities required")
+    count = await (cache_manager or CacheManager()).store_listing_data(list(projected.values()), source="vietcap") if projected else 0
+    if count != len(projected):
+        raise RuntimeError(f"Incomplete IQ listing persistence: {count}/{len(projected)} PostgreSQL rows")
+    if outcome is not None:
+        outcome.update(expected=sorted(expected), withheld=sorted(withheld), persisted=sorted(projected))
     return count

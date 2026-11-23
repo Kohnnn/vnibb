@@ -13,7 +13,7 @@ from vnibb.services.cache_manager import CacheManager
 
 
 @pytest.mark.asyncio
-async def test_listing_duplicate_absent_symbols_keep_other_rows_and_last_nonempty_values(test_db):
+async def test_listing_sparse_duplicate_keeps_observed_metadata_and_cannot_seed_bare_symbol(test_db):
     suffix = uuid4().hex[:7].upper()
     duplicate, other = f"D{suffix}", f"O{suffix}"
 
@@ -27,18 +27,17 @@ async def test_listing_duplicate_absent_symbols_keep_other_rows_and_last_nonempt
 
     rows = await test_db.execute(select(Stock).where(Stock.symbol.in_([duplicate, other])))
     by_symbol = {row.symbol: row for row in rows.scalars()}
-    assert stored == 3
-    assert set(by_symbol) == {duplicate, other}
+    assert stored == 2
+    assert set(by_symbol) == {duplicate}
     assert by_symbol[duplicate].company_name == "Last"
     assert by_symbol[duplicate].exchange == "HNX"
     assert by_symbol[duplicate].industry == "Banks"
     assert by_symbol[duplicate].sector == "Finance"
-    assert by_symbol[other].company_name == "Other Co"
     await test_db.execute(Stock.__table__.delete().where(Stock.symbol.in_([duplicate, other])))
     await test_db.commit()
 
 @pytest.mark.asyncio
-async def test_listing_conflict_preserves_created_at_and_sparse_existing_fields(test_db):
+async def test_listing_conflict_preserves_existing_board_and_created_at(test_db):
     symbol = f"E{uuid4().hex[:7]}".upper()
     original_created_at = datetime(2020, 1, 1)
     test_db.add(Stock(symbol=symbol, company_name="Original", exchange="HOSE", created_at=original_created_at))
@@ -49,7 +48,7 @@ async def test_listing_conflict_preserves_created_at_and_sparse_existing_fields(
     ) == 1
     stock = (await test_db.execute(select(Stock).where(Stock.symbol == symbol))).scalar_one()
     assert stock.company_name == "Updated"
-    assert stock.exchange == "HNX"
+    assert stock.exchange == "HOSE"
     assert stock.created_at == original_created_at
     await test_db.execute(Stock.__table__.delete().where(Stock.symbol == symbol))
     await test_db.commit()

@@ -992,6 +992,71 @@ async def test_scheduled_listing_persists_trading_stocks_when_iq_descriptions_fa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_iq_conflicting_listing_cannot_seed_or_refresh_cache(monkeypatch, scheduled_price_database, reverse):
+    from sqlalchemy import select
+    from vnibb.models.stock import Stock
+    from vnibb.services.cache_manager import CacheManager
+    from vnibb.services.vietcap_client import VietcapClient
+
+    def trading(symbol, board):
+        return {"symbol": symbol, "type": "STOCK", "board": board, "organName": "New description"}
+
+    rows = [trading("NEW", "HSX"), trading("new", "DELISTED"), trading("FPT", "DELISTED"), trading("VNM", "HSX")]
+    if reverse:
+        rows.reverse()
+
+    async def session(self):
+        return scheduled_price_database()
+
+    pipeline = DataPipeline()
+    cache = AsyncMock()
+    monkeypatch.setattr(pipeline, "_fetch_trading_listing_rows", AsyncMock(return_value=rows))
+    monkeypatch.setattr(pipeline, "_cache_set_json", cache)
+    monkeypatch.setattr(CacheManager, "_get_session", session)
+    monkeypatch.setattr(VietcapClient, "get_company_search_bar", lambda self: [{"code": "VNM", "name": "Observed"}])
+    progress = {}
+    assert await pipeline.sync_stock_list(progress=progress) == 1
+    async with scheduled_price_database() as db:
+        by_symbol = {s.symbol: s for s in (await db.scalars(select(Stock))).all()}
+        assert set(by_symbol) == {"FPT", "VNM"}
+        assert (by_symbol["FPT"].is_active, by_symbol["FPT"].company_name) == (1, None)
+        assert by_symbol["VNM"].company_name == "Observed"
+    assert progress["stage_stats"]["stock_list"] == {"success": 1, "errors": 2, "total": 3}
+    assert [call.args[0] for call in cache.await_args_list] == ["vnibb:listing:symbol:VNM"]
+
+
+@pytest.mark.asyncio
+async def test_vci_listing_requires_observed_board_and_keeps_initial_board(monkeypatch, scheduled_price_database):
+    from sqlalchemy import select
+    from vnibb.models.stock import Stock
+    from vnibb.providers import market_data
+
+    pipeline = DataPipeline()
+    initial = [
+        {"symbol": "NEW", "type": "STOCK", "exchange": "HSX", "_listing_source": "VCI"},
+        {"symbol": "UNK", "type": "STOCK", "_listing_source": "VCI"},
+    ]
+
+    def supplementary(source, *, view=None):
+        if view == "symbols_by_exchange":
+            raise RuntimeError("optional lookup failed")
+        if view == "symbols_by_industries":
+            return pd.DataFrame()
+        return pd.DataFrame([{"symbol": s, "organName": s} for s in ("NEW", "UNK", "BARE")])
+
+    monkeypatch.setattr(pipeline, "_fetch_trading_listing_rows", AsyncMock(return_value=initial))
+    monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
+    monkeypatch.setattr(market_data, "listing", supplementary)
+    progress = {}
+    assert await pipeline.sync_stock_list(progress=progress) == 1
+    async with scheduled_price_database() as db:
+        rows = (await db.execute(select(Stock.symbol, Stock.exchange, Stock.is_active).order_by(Stock.symbol))).all()
+        assert rows == [("FPT", "HOSE", 1), ("NEW", "HOSE", 1), ("VNM", "HOSE", 1)]
+    assert progress["stage_stats"]["stock_list"] == {"success": 1, "errors": 1, "total": 2}
+
+
+@pytest.mark.asyncio
 async def test_scheduled_price_partial_failure_keeps_committed_symbol_rows(monkeypatch, scheduled_price_database):
     from datetime import UTC, datetime
 
@@ -1098,10 +1163,10 @@ async def test_price_deferral_leaves_default_price_and_financial_cohorts_intact(
     monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
     monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
 
-    async def receipt():
+    async def receipt(window_day=day):
         async with scheduled_price_database() as session:
             row = await session.get(AppKeyValue, "acquisition:daily_prices:VNM")
-            return row.value
+            return row.value["windows"][f"{window_day}:{window_day}"]
 
     for count in range(1, 6):
         progress = {}
@@ -1141,12 +1206,14 @@ async def test_price_deferral_leaves_default_price_and_financial_cohorts_intact(
     # A different date must not be deferred by the old interval.
     assert await pipeline.sync_daily_prices(start_date=next_day, end_date=next_day) == 1
     assert calls[-1] == ("VNM", next_day.isoformat())
-    state = await receipt()
+    state = await receipt(next_day)
     assert (state["reason"], state["consecutive_empty"], state["retry_at"]) == ("persisted", 0, None)
+    # Window B's success must not erase A's active deferral.
+    deferred_again = {}
+    assert await pipeline.sync_daily_prices(start_date=day, end_date=day, progress=deferred_again) == 0
+    assert deferred_again["price_retry_deferred"] == deferred["price_retry_deferred"]
+    assert calls == [("VNM", day.isoformat())] * 5 + [("VNM", next_day.isoformat())]
 
-    outcome = "empty"
-    for _ in range(5):
-        await pipeline.sync_daily_prices(["VNM"], start_date=day, end_date=day)
     outcome = "success"
     with pytest.raises(ValueError, match="explicit symbols"):
         await pipeline.sync_daily_prices(start_date=day, end_date=day, retry_quarantined=True)
@@ -1184,6 +1251,103 @@ async def test_price_transport_failures_remain_retryable(monkeypatch, scheduled_
     assert calls == ["VNM"] * 6
     async with scheduled_price_database() as session:
         row = await session.get(AppKeyValue, "acquisition:daily_prices:VNM")
-        assert (row.value["reason"], row.value["consecutive_empty"], row.value["retry_at"]) == (reason, 0, None)
+        state = row.value["windows"][f"{day}:{day}"]
+        assert (state["reason"], state["consecutive_empty"], state["retry_at"]) == (reason, 0, None)
         stock = await session.get(Stock, 1)
         assert (stock.is_active, stock.delisting_date) == (1, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overlap", ["two_empty", "newer_success", "older_success"])
+async def test_price_retry_orders_overlapping_attempts(monkeypatch, scheduled_price_database, overlap):
+    import asyncio
+
+    day = date(2026, 3, 17)
+    valid = pd.DataFrame([{
+        "time": day, "open": 60000, "high": 61000, "low": 59000,
+        "close": 60500, "volume": 100, "price_unit": "VND", "price_source": "vnstock_history:VCI",
+    }])
+    pipeline = DataPipeline()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    provider_calls = 0
+
+    async def history(**kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 5:
+            return valid if overlap == "newer_success" else pd.DataFrame()
+        if provider_calls == 4:
+            entered.set()
+            await release.wait()
+            return valid if overlap == "older_success" else pd.DataFrame()
+        return pd.DataFrame()
+
+    monkeypatch.setattr(pipeline, "_fetch_quote_history_frame", history)
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
+
+    async def sync(progress=None):
+        return await pipeline.sync_daily_prices(
+            ["VNM"], start_date=day, end_date=day, progress=progress, cache_recent=False,
+        )
+
+    for _ in range(3):
+        assert await sync() == 0
+    older = asyncio.create_task(sync())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        assert await sync() == int(overlap == "newer_success")
+    finally:
+        release.set()
+        await asyncio.wait_for(older, timeout=3)
+    assert older.result() == int(overlap == "older_success")
+
+    progress = {}
+    assert await sync(progress) == 0
+    if overlap == "two_empty":
+        assert progress["price_retry_deferred"][0]["symbol"] == "VNM"
+        assert provider_calls == 5
+    else:
+        assert "price_retry_deferred" not in progress
+        assert provider_calls == 6
+
+
+@pytest.mark.asyncio
+async def test_out_of_window_vci_retry_does_not_persist_or_clear_deferral(monkeypatch, scheduled_price_database):
+    from sqlalchemy import select
+    from vnibb.models.stock import StockPrice
+
+    day, earlier = date(2026, 3, 17), date(2026, 3, 16)
+    pipeline = DataPipeline()
+    history = AsyncMock(return_value=pd.DataFrame())
+    monkeypatch.setattr(pipeline, "_fetch_quote_history_frame", history)
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
+
+    async def sync(progress=None, *, retry=False):
+        return await pipeline.sync_daily_prices(
+            ["VNM"], start_date=day, end_date=day, progress=progress,
+            retry_quarantined=retry, cache_recent=False,
+        )
+
+    for _ in range(5):
+        assert await sync() == 0
+    prior = {}
+    assert await sync(prior) == 0
+    row = {"time": earlier, "open": 60000, "high": 61000, "low": 59000,
+           "close": 60500, "volume": 100, "price_unit": "VND", "price_source": "vnstock_history:VCI"}
+    history.return_value = pd.DataFrame([row])
+    assert await sync(retry=True) == 0
+    after = {}
+    assert await sync(after) == 0
+    assert after["price_retry_deferred"] == prior["price_retry_deferred"]
+    assert history.await_count == 6
+
+    history.return_value = pd.DataFrame([row, {**row, "time": day}])
+    assert await sync(retry=True) == 1
+    async with scheduled_price_database() as session:
+        assert (await session.scalars(select(StockPrice.time))).all() == [day]
+    recovered = {}
+    assert await sync(recovered) == 1
+    assert "price_retry_deferred" not in recovered

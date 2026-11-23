@@ -11,7 +11,7 @@ from vnibb.providers import market_data
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from vnibb.core.database import async_session_maker
 from vnibb.models import Stock
-from vnibb.services.stock_listing import equity_board, listed_exchange_update, withhold_listing_status
+from vnibb.services.stock_listing import listing_board_evidence, listing_symbol, listed_exchange_update
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,15 +33,18 @@ async def seed_all_stocks():
             
         total_stocks = len(df)
         logger.info(f"Found {total_stocks} stocks. Starting database seeding...")
+        rows = df.to_dict(orient="records")
+        boards, withheld = listing_board_evidence(rows)
+        if withheld:
+            logger.warning("Withheld %d VCI identities with contradictory listing evidence", len(withheld))
         
         async with async_session_maker() as session:
             count = 0
-            for _, row in df.iterrows():
-                symbol = row.get('symbol')
-                exchange = equity_board(row.get('exchange'))
-                if not isinstance(symbol, str) or not 1 <= len(symbol.strip()) <= 10 or exchange is None or row.get('type') != 'STOCK' or withhold_listing_status(row):
+            for row in rows:
+                symbol = listing_symbol(row)
+                if symbol not in boards or row.get("type") != "STOCK":
                     continue
-                symbol = symbol.strip().upper()
+                exchange = boards[symbol]
 
                 company_name = row.get('organ_name')
                 short_name = row.get('organ_short_name')

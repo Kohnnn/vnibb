@@ -409,10 +409,11 @@ async def test_listing_bridge_withholds_unverified_delisting_and_rejects_nonstoc
     cache = AsyncMock()
     cache.store_listing_data.return_value = 1
     trading = [{"symbol": "OLD", "type": "STOCK", "board": "DELISTED", "organName": "Old"}, {"symbol": "CW1", "type": "CW", "board": "HSX"}]
-    with pytest.raises(ValueError, match="explicit listed stock"):
-        await persist_vietcap_listings(trading, [], cache_manager=cache)
+    outcome = {}
+    assert await persist_vietcap_listings(trading, [], cache_manager=cache, outcome=outcome) == 0
+    assert outcome == {"expected": ["OLD"], "withheld": ["OLD"], "persisted": []}
     cache.store_listing_data.assert_not_awaited()
-    assert "listing status claims without authoritative evidence" in caplog.text
+    assert "Withheld 1 IQ stock identities" in caplog.text
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 """Persist stock reference metadata without granting it listing-status authority."""
 
-from collections.abc import Mapping
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from numbers import Real
 from typing import Any
@@ -43,11 +44,41 @@ def withhold_listing_status(record: Mapping[str, Any]) -> bool:
     )
 
 
+def listing_symbol(record: Mapping[str, Any]) -> str | None:
+    for field in ("symbol", "ticker"):
+        value = record.get(field)
+        if isinstance(value, str) and 1 <= len(value.strip()) <= 10:
+            return value.strip().upper()
+    return None
+
+
+def listing_board_evidence(records: Iterable[Mapping[str, Any]]) -> tuple[dict[str, str], set[str]]:
+    """Reduce a reference snapshot; no positive row may override a contradictory sibling."""
+    boards: dict[str, set[str]] = defaultdict(set)
+    instrument_types: dict[str, set[str]] = defaultdict(set)
+    withheld: set[str] = set()
+    for record in records:
+        symbol = listing_symbol(record)
+        if symbol is None:
+            continue
+        if withhold_listing_status(record):
+            withheld.add(symbol)
+        instrument_type = _label(record.get("type"))
+        if instrument_type:
+            instrument_types[symbol].add(instrument_type)
+        for field in ("exchange", "board", "comGroupCode"):
+            if board := equity_board(record.get(field)):
+                boards[symbol].add(board)
+    withheld.update(symbol for symbol, types in instrument_types.items() if len(types) > 1)
+    withheld.update(symbol for symbol, observed in boards.items() if len(observed) > 1)
+    return {symbol: next(iter(observed)) for symbol, observed in boards.items() if symbol not in withheld}, withheld
+
+
 def listed_exchange_update(exchange):
-    """Enrich the board of a currently listed row, never erase a retained status marker."""
+    """Fill a missing board on a current row without reclassifying an established listing."""
     return case(
         (and_(Stock.is_active == 1, Stock.delisting_date.is_(None),
-              func.upper(Stock.exchange).not_in(_UNVERIFIED_STATES)), exchange),
+              func.upper(Stock.exchange) == "UNKNOWN"), exchange),
         else_=Stock.exchange,
     )
 
@@ -58,14 +89,15 @@ def stock_metadata_upsert(session: AsyncSession, record: Mapping[str, Any]):
         raise ValueError("A listing refresh cannot change membership status")
     now = datetime.utcnow()
     board = equity_board(record.get("exchange"))
+    if board is None:
+        raise ValueError("A listing refresh requires a supported equity board")
     fields = ("company_name", "short_name", "industry", "sector")
     insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
     stmt = insert(Stock).values(
-        symbol=record["symbol"], exchange=board or "UNKNOWN", is_active=1,
+        symbol=record["symbol"], exchange=board, is_active=1,
         created_at=now, updated_at=now, **{key: record.get(key) for key in fields},
     )
     updates = {key: func.coalesce(stmt.excluded[key], getattr(Stock, key)) for key in fields}
     updates["updated_at"] = now
-    if board:
-        updates["exchange"] = listed_exchange_update(stmt.excluded.exchange)
+    updates["exchange"] = listed_exchange_update(stmt.excluded.exchange)
     return stmt.on_conflict_do_update(index_elements=[Stock.symbol], set_=updates)

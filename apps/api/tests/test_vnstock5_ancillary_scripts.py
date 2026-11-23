@@ -61,6 +61,10 @@ async def test_stock_seeder_uses_exchange_metadata_without_inventing_exchange(mo
                 {"symbol": "VCB", "exchange": "HSX", "type": "STOCK", "organ_name": "Issuer"},
                 {"symbol": "ETF1", "exchange": "HNX", "type": "ETF"},
                 {"symbol": "BAD", "exchange": None, "type": "STOCK"},
+                {"symbol": "AMB", "exchange": "HOSE", "type": "STOCK"},
+                {"symbol": "amb", "exchange": "DELISTED", "type": "STOCK"},
+                {"symbol": "MULTI", "exchange": "HNX", "type": "STOCK"},
+                {"symbol": "MULTI", "exchange": "HNX", "type": "ETF"},
             ])
 
     class Session:

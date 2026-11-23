@@ -71,19 +71,27 @@ async def test_fallback_preserves_status_and_persists_available_metadata(
         count = await pipeline.sync_stock_list(progress=progress)
         async with sessions() as session:
             stocks = (await session.scalars(select(Stock).order_by(Stock.symbol))).all()
+        if unavailable == "symbols_by_exchange":
+            assert count == 0
+            assert [stock.symbol for stock in stocks] == (["ZZZ"] if already_inactive else [])
+            if already_inactive:
+                assert (stocks[0].is_active, stocks[0].exchange, stocks[0].delisting_date) == (0, "DELISTED", delisted)
+            assert progress["listing_withheld"] == ["ZZZ"]
+            assert progress["stage_stats"]["stock_list"] == {"success": 0, "errors": 1, "total": 1}
+            assert progress["error_count"] == 2
+            assert writes == {}
+            return
         assert count == 1
         assert [stock.symbol for stock in stocks] == ["ZZZ"]
         assert stocks[0].is_active == (0 if already_inactive else 1)
         assert stocks[0].delisting_date == (delisted if already_inactive else None)
-        expected_board = "UNKNOWN" if unavailable == "symbols_by_exchange" else "HNX"
-        assert stocks[0].exchange == ("DELISTED" if already_inactive else expected_board)
+        assert stocks[0].exchange == ("DELISTED" if already_inactive else "HNX")
         assert stocks[0].industry == (None if unavailable == "symbols_by_industries" else "Bank")
         assert stocks[0].sector == (None if unavailable == "symbols_by_industries" else "Ngân hàng")
         assert progress.get("error_count", 0) == (0 if unavailable is None else 1)
         assert progress["stage_stats"]["stock_list"] == {"success": 1, "errors": 0, "total": 1}
         if already_inactive:
-            assert writes["vnibb:listing:symbols:VCI"] == []
-            assert "vnibb:listing:symbol:ZZZ" not in writes
+            assert writes == {}
         else:
             assert writes["vnibb:listing:symbol:ZZZ"]["exchange"] == stocks[0].exchange
     finally:

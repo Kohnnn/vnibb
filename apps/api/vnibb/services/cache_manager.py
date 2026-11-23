@@ -28,7 +28,7 @@ from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.services.market_session import expected_market_session, session_coverage
 from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
-from vnibb.services.stock_listing import equity_board, stock_metadata_upsert, withhold_listing_status
+from vnibb.services.stock_listing import listing_board_evidence, listing_symbol, stock_metadata_upsert
 
 logger = logging.getLogger(__name__)
 
@@ -988,24 +988,18 @@ class CacheManager:
 
         try:
             count = 0
-            withheld = 0
+            boards, withheld = listing_board_evidence(data)
 
             for record in data:
-                symbol = record.get("symbol") or record.get("ticker")
-                if not isinstance(symbol, str) or not 1 <= len(symbol.strip()) <= 10:
-                    continue
-                if withhold_listing_status(record):
-                    withheld += 1
-                    continue
-                board = equity_board(record.get("exchange"))
-                if source == "vietcap" and board is None:
+                symbol = listing_symbol(record)
+                if symbol not in boards or record.get("type") not in (None, "STOCK"):
                     continue
 
                 values = {
-                    "symbol": symbol.strip().upper(),
+                    "symbol": symbol,
                     "company_name": record.get("company_name") or record.get("organ_name") or None,
                     "short_name": record.get("short_name") or None,
-                    "exchange": board,
+                    "exchange": boards[symbol],
                     "industry": record.get("industry") or record.get("industry_name") or None,
                     "sector": record.get("sector") or None,
                 }
@@ -1014,7 +1008,7 @@ class CacheManager:
 
             await session.commit()
             if withheld:
-                logger.warning("Withheld %d %s listing status claims without authoritative evidence", withheld, source)
+                logger.warning("Withheld %d %s ambiguous listing identities", len(withheld), source)
             logger.info(f"Stored {count} listing records in cache (source={source})")
             return count
 
