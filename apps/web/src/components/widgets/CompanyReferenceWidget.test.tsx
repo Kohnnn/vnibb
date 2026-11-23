@@ -2,6 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useCallback } from 'react';
+import html2canvas from 'html2canvas';
+import { Toaster } from 'sonner';
+import { exportToPNG } from '@/lib/exportWidget';
 import { buildVniAgentWorkspaceContext } from '@/lib/vniagentWorkspace';
 import { formatAbsoluteTimestamp } from '@/lib/formatDate';
 import type { WidgetDataPayload } from '@/lib/widgetRuntime';
@@ -11,6 +14,7 @@ import { WidgetWrapper } from './WidgetWrapper';
 
 let mockSymbol = 'HPG';
 
+jest.mock('html2canvas', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('@/lib/env', () => ({ env: { apiUrl: 'https://api.example.test' } }));
 jest.mock('@/lib/supabase', () => ({ isSupabaseConfigured: false, supabase: null }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
@@ -52,12 +56,14 @@ function httpJson(body: unknown, status = 200): Response {
 
 const referenceFetch = jest.fn<Promise<Response>, [string]>();
 const captureDownload = jest.fn<string, [Blob]>(() => 'blob:reference');
+const capturePixels = jest.mocked(html2canvas);
 let clock: jest.SpyInstance<number, []>;
 
 beforeEach(() => {
   mockSymbol = 'HPG';
   referenceFetch.mockReset();
   captureDownload.mockClear();
+  capturePixels.mockReset();
   clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse(firstFetch));
   globalThis.fetch = jest.fn(async (input: RequestInfo | URL) => {
     const path = new URL(String(input)).pathname;
@@ -102,12 +108,19 @@ function mount({ Widget, title, type }: typeof cases[number]) {
   );
   const view = render(tree());
 
+  const requestExport = async (format: 'CSV' | 'JSON' | 'PNG') => {
+    await user.click(screen.getByRole('button', { name: `Widget actions for ${title}` }));
+    await user.click(screen.getByRole('menuitem', { name: 'Export' }));
+    await user.click(screen.getByRole('menuitem', { name: `Export as ${format}` }));
+  };
+
   return {
     client, user,
     body: () => within(screen.getByRole('region', { name: `${title} content` })),
     published: () => publish.mock.lastCall?.[0].__widgetRuntime,
     select: (symbol: string) => { mockSymbol = symbol; view.rerender(tree()); },
     dispose: () => { view.unmount(); client.clear(); },
+    requestExport,
     async agent() {
       await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
       const widgetPayload = onCopilotClick.mock.lastCall?.[0];
@@ -116,9 +129,7 @@ function mount({ Widget, title, type }: typeof cases[number]) {
     },
     async download(format: 'CSV' | 'JSON') {
       captureDownload.mockClear();
-      await user.click(screen.getByRole('button', { name: `Widget actions for ${title}` }));
-      await user.click(screen.getByRole('menuitem', { name: 'Export' }));
-      await user.click(screen.getByRole('menuitem', { name: `Export as ${format}` }));
+      await requestExport(format);
       const [blob] = captureDownload.mock.lastCall ?? [];
       if (!blob) throw new Error(`No ${format} downloaded`);
       const { promise, resolve, reject } = Promise.withResolvers<string>();
@@ -190,6 +201,61 @@ describe.each(cases)('$title', fixture => {
       expect(emptyCSV.trimEnd().split('\n').every(line => line.startsWith('# '))).toBe(true);
       expect(referenceFetch.mock.calls).toEqual([[`/api/v1/equity/HPG/${route}`], [`/api/v1/equity/HPG/${route}`]]);
     } finally {
+      widget.dispose();
+    }
+  });
+
+  test('qualifies an unreadable HTTP 200 as invalid data, not a network failure', async () => {
+    referenceFetch.mockResolvedValueOnce({ ...httpJson(null), json: async () => JSON.parse(`<html>${debug}</html>`) });
+    const widget = mount(fixture);
+    try {
+      expect(await widget.body().findByText('Invalid company reference response')).toBeInTheDocument();
+      expect(widget.body().queryByText(/Could not reach the server|No records returned/)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Data status: Unavailable' })).toBeInTheDocument();
+      expect(widget.body().getByRole('button', { name: 'Retry' })).toBeEnabled();
+      const provenance = { observationStatus: 'unavailable', failureKind: 'envelope', warnings: ['Invalid company reference response'] };
+      expect(await widget.agent()).toMatchObject({ dataSample: null, dataProvenance: provenance });
+      expect(JSON.parse(await widget.download('JSON'))).toMatchObject({ data: null, _provenance: provenance });
+    } finally {
+      widget.dispose();
+    }
+  });
+
+  test.each(['ticker change while queued', 'retry during capture'])('refuses a mixed PNG after %s', async change => {
+    referenceFetch.mockResolvedValueOnce(httpJson({ ...empty, error: 'Provider unavailable' }));
+    const widget = mount(fixture);
+    const toaster = render(<Toaster />);
+    const held = Promise.withResolvers<HTMLCanvasElement>();
+    jest.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    jest.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(callback => callback(new Blob(['png'])));
+    capturePixels.mockImplementation(async () => document.createElement('canvas')).mockReturnValueOnce(held.promise);
+    const otherWidget = document.body.appendChild(document.createElement('div'));
+    const queued = change === 'ticker change while queued';
+    const issuer = queued ? 'FPT' : 'HPG';
+    try {
+      await widget.body().findByText('Provider unavailable');
+      const otherExport = queued ? exportToPNG(otherWidget, 'other-widget') : null;
+      await widget.requestExport('PNG');
+      await waitFor(() => expect(capturePixels).toHaveBeenCalledTimes(1));
+
+      referenceFetch.mockResolvedValueOnce(httpJson({ ...empty, data: [{ ...row, symbol: issuer }] }));
+      if (queued) widget.select(issuer);
+      else await widget.user.click(widget.body().getByRole('button', { name: 'Retry' }));
+      await widget.body().findByText(name);
+      await act(async () => { held.resolve(document.createElement('canvas')); await otherExport; });
+
+      expect(await screen.findByText('The widget changed during PNG export. Export again.')).toBeInTheDocument();
+      expect(captureDownload).toHaveBeenCalledTimes(queued ? 1 : 0);
+      expect(capturePixels).toHaveBeenCalledTimes(1);
+
+      await widget.requestExport('PNG');
+      await waitFor(() => expect(captureDownload).toHaveBeenCalledTimes(queued ? 2 : 1));
+      const lastAnchor = jest.mocked(HTMLAnchorElement.prototype.click).mock.contexts.at(-1);
+      expect(lastAnchor).toHaveProperty('download', expect.stringContaining(`_${issuer}_`));
+    } finally {
+      held.resolve(document.createElement('canvas'));
+      otherWidget.remove();
+      toaster.unmount();
       widget.dispose();
     }
   });

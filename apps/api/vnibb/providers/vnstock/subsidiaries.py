@@ -57,6 +57,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
     provider_name = "vnstock"
     requires_credentials = False
     propagate_provider_errors = True
+    fail_on_provider_exit = True
     
     @staticmethod
     def transform_query(params: SubsidiariesQueryParams) -> dict[str, Any]:
@@ -80,7 +81,7 @@ class VnstockSubsidiariesFetcher(BaseFetcher[SubsidiariesQueryParams, Subsidiary
                 return frame.to_dict("records")
             except (TimeoutError, ProviderError):
                 raise
-            except (Exception, SystemExit) as exc:
+            except Exception as exc:
                 logger.warning("vnstock subsidiaries fetch error: %s", exc)
                 raise ProviderError(
                     str(exc), provider="vnstock", details={"symbol": query["symbol"]}

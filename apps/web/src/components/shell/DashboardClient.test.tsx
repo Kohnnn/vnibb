@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DashboardPage from './DashboardClient';
@@ -6,6 +7,7 @@ import { consumeCopilotStream, openCopilotChatStream, type FreshnessResponse } f
 import type { ResearchStarter, StarterPromptKey } from '@/lib/researchStarters';
 import type { Dashboard, DashboardTab } from '@/types/dashboard';
 import type { DashboardContextValue } from '@/contexts/DashboardContext/types';
+import { WidgetWrapper as LiveWidgetWrapper, type WidgetWrapperProps } from '@/components/widgets/WidgetWrapper';
 
 let mockWalkthroughEligible = false;
 let mockActiveDashboard: Dashboard | null = null;
@@ -13,6 +15,7 @@ let mockActiveTab: DashboardTab | null = null;
 let mockDashboards: Dashboard[] = [];
 let mockCatalogueReady = true;
 let mockFreshness: FreshnessResponse | undefined;
+let mockReferenceSymbol = 'HPG';
 const LOCAL_SYNC = { enabled: false, status: 'idle', loadPaused: false } as const;
 let mockBackendSync: DashboardContextValue['backendSync'] = LOCAL_SYNC;
 const mockSetActiveDashboard = jest.fn();
@@ -56,7 +59,12 @@ jest.mock('@/contexts/DashboardContext', () => ({
   }),
 }));
 jest.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'owner' }, isAdmin: false }) }));
-jest.mock('@/contexts/WidgetGroupContext', () => ({ useWidgetGroups: () => ({ setGlobalSymbol: jest.fn() }) }));
+jest.mock('@/contexts/WidgetGroupContext', () => ({
+  useWidgetGroups: () => ({
+    setGlobalSymbol: jest.fn(), groups: {}, getColorForGroup: () => 'transparent',
+    getSymbolForGroup: () => mockReferenceSymbol, tickerOverrideFor: () => null,
+  }),
+}));
 jest.mock('@/contexts/SymbolLinkContext', () => ({ useSymbolLink: () => ({ globalSymbol: 'VNM', setGlobalSymbol: jest.fn() }) }));
 jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({ useGlobalMarketsSymbol: () => ({ globalMarketsSymbol: 'AMEX:SPY', setGlobalMarketsSymbol: jest.fn() }) }));
 jest.mock('@/contexts/UnitContext', () => ({ useUnit: () => ({ config: { display: 'auto' }, setUnit: jest.fn() }) }));
@@ -70,13 +78,17 @@ jest.mock('@/lib/userPreferences', () => ({
 }));
 jest.mock('@/lib/backendHealth', () => ({ probeBackendReadiness: jest.fn().mockResolvedValue({ healthOk: true, dataOk: true }) }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
+jest.mock('@/lib/supabase', () => ({ isSupabaseConfigured: false, supabase: null }));
 jest.mock('@/lib/queries', () => ({
+  useOfficers: jest.requireActual('@/lib/queries/equity').useOfficers,
+  useSubsidiaries: jest.requireActual('@/lib/queries/equity').useSubsidiaries,
   useProfile: () => ({ data: undefined }),
   useStockQuote: () => ({ data: undefined }),
   useFinancialRatios: () => ({ data: undefined }),
   useMarketFreshness: () => ({ data: mockFreshness, isLoading: false, isError: false }),
 }));
 jest.mock('@/lib/api', () => ({
+  ...jest.requireActual('@/lib/api'),
   openCopilotChatStream: jest.fn(),
   consumeCopilotStream: jest.fn(),
   getCopilotRuntimeConfig: jest.fn().mockResolvedValue({ provider: 'openrouter', model: 'test-model' }),
@@ -97,10 +109,16 @@ jest.mock('@/components/layout', () => ({
 jest.mock('@/components/layout/DashboardGrid', () => ({
   ResponsiveDashboardGrid: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
-// Render the tile shell so the unsupported-widget branch is observable, and use
-// the real registry: only IDs missing from it should hit that branch.
+// Drive reference attachments through their real toolbar, publisher and query.
+// Keep the shell stand-in for the unsupported-widget test.
 jest.mock('@/components/widgets', () => ({
-  WidgetWrapper: ({ children, id }: { children: ReactNode; id: string }) => <div data-testid={`widget-${id}`}>{children}</div>,
+  WidgetWrapper: (props: WidgetWrapperProps) => {
+    const { id, widgetType, children } = props;
+    if (widgetType !== 'officers_management' && widgetType !== 'subsidiaries') {
+      return <div data-testid={`widget-${id}`}>{children}</div>;
+    }
+    return <div data-testid={`widget-${id}`}><LiveWidgetWrapper {...props} /></div>;
+  },
   WidgetLibrary: () => null,
   widgetRegistry: jest.requireActual('@/components/widgets/WidgetRegistry').widgetRegistry,
 }));
@@ -358,6 +376,109 @@ describe.each([
     expect(screen.queryByRole('button', { name: 'Remove Matrix selection' })).not.toBeInTheDocument();
     expect(openCopilotChatStream).not.toHaveBeenCalled();
     expect(consumeCopilotStream).not.toHaveBeenCalled();
+  });
+});
+
+describe.each([
+  { width: 1440, type: 'officers_management', route: 'officers', row: { symbol: 'HPG', name: 'Recovered officer' } },
+  { width: 390, type: 'subsidiaries', route: 'subsidiaries', row: { symbol: 'HPG', company_name: 'Recovered subsidiary' } },
+] as const)('DashboardPage $route live attachment', ({ width, type, route, row }) => {
+  afterEach(() => {
+    mockActiveDashboard = null;
+    mockActiveTab = null;
+    mockDashboards = [];
+    mockReferenceSymbol = 'HPG';
+    jest.restoreAllMocks();
+  });
+
+  it('sends the current reference observation and revokes it on leaving the mounted tile', async () => {
+    jest.clearAllMocks();
+    localStorage.clear();
+    sessionStorage.clear();
+    setViewport(width);
+    const tab = (id: string, name: string): DashboardTab => ({
+      id, name, order: 0, widgets: [{ id: 'reference', tabId: id, type, config: {}, layout: { i: 'reference', x: 0, y: 0, w: 8, h: 6 } }],
+    });
+    const ownership = tab('ownership', 'Ownership');
+    const other = tab('other-ownership', 'Other workspace view');
+    mockActiveTab = ownership;
+    mockActiveDashboard = {
+      id: 'fixture', name: 'Company', order: 0, isDefault: false, isEditable: false, showGroupLabels: false,
+      tabs: [ownership, other], syncGroups: [], createdAt: '2026-11-23T00:00:00Z', updatedAt: '2026-11-23T00:00:00Z',
+    };
+    mockDashboards = [mockActiveDashboard];
+
+    const fpt = Promise.withResolvers<unknown>();
+    const hpg = jest.fn<Promise<unknown>, []>()
+      .mockResolvedValueOnce({ data: [], error: 'Provider unavailable' })
+      .mockResolvedValueOnce({ data: [row], meta: { count: 1, last_data_date: '2026-10-30' }, error: null });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      const json = path.endsWith(`/HPG/${route}`) ? hpg
+        : path.endsWith(`/FPT/${route}`) ? () => fpt.promise : undefined;
+      if (!json) throw new Error(`Unexpected fetch: ${path}`);
+      return { ok: true, status: 200, json } as Response;
+    });
+    jest.mocked(openCopilotChatStream).mockResolvedValue({ ok: true } as Response);
+    jest.mocked(consumeCopilotStream).mockImplementation(async (_response, handlers) => {
+      handlers?.onChunk?.('Fixture answer');
+      handlers?.onDone?.({ done: true });
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = () => <QueryClientProvider client={client}><DashboardPage /></QueryClientProvider>;
+    const view = render(tree());
+    async function send(question: string) {
+      await act(async () => {
+        fireEvent.change(screen.getByRole('textbox', { name: 'VniAgent message' }), { target: { value: question } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+      });
+      const request = jest.mocked(openCopilotChatStream).mock.lastCall?.[0];
+      expect(request?.message).toBe(question);
+      return request?.context;
+    }
+    try {
+      await screen.findByText('Data unavailable for HPG');
+      fireEvent.click(within(screen.getByTestId('widget-reference')).getByRole('button', { name: 'Open VniAgent' }));
+      await screen.findByText('Connected Widget');
+      expect(await send('What failed?')).toMatchObject({ symbol: 'HPG', widgetPayload: {
+        dataSample: null, dataProvenance: { observationStatus: 'unavailable', warnings: ['Provider unavailable'] },
+      } });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(await screen.findByText('1 sampled rows attached')).toBeInTheDocument();
+      expect(await send('What recovered?')).toMatchObject({ symbol: 'HPG', widgetPayload: {
+        dashboardId: 'fixture', tabId: 'ownership', widgetId: 'reference', dataSample: [row],
+        dataProvenance: { observationStatus: 'available', updatedAt: '2026-10-30' },
+      } });
+
+      mockReferenceSymbol = 'FPT';
+      view.rerender(tree());
+      expect(await send('What is loading?')).toMatchObject({ symbol: 'FPT', widgetPayload: {
+        dataSample: null, dataProvenance: { observationStatus: 'loading' },
+      } });
+      await act(async () => fpt.resolve({ data: [], error: null }));
+      await screen.findByText('No records returned for FPT');
+      expect(await send('What was returned?')).toMatchObject({ symbol: 'FPT', widgetPayload: {
+        dataSample: null, dataProvenance: { observationStatus: 'empty', coverage: 'unknown' },
+      } });
+
+      mockActiveTab = other; // This tab has a different tile with the same saved ID and type.
+      view.rerender(tree());
+      expect(screen.queryByText('Connected Widget')).not.toBeInTheDocument();
+      const detached = await send('What is attached now?');
+      expect(detached).toMatchObject({ widgetTypeKey: null });
+      expect(detached?.widgetPayload).not.toHaveProperty('dataSample');
+      expect(detached?.widgetPayload).not.toHaveProperty('dataProvenance');
+
+      mockActiveTab = ownership;
+      view.rerender(tree());
+      expect(screen.queryByText('Connected Widget')).not.toBeInTheDocument();
+    } finally {
+      view.unmount();
+      client.clear();
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

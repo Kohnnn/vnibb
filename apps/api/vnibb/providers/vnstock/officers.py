@@ -58,6 +58,7 @@ class VnstockOfficersFetcher(BaseFetcher[OfficersQueryParams, OfficerData]):
     provider_name = "vnstock"
     requires_credentials = False
     propagate_provider_errors = True
+    fail_on_provider_exit = True
     
     @staticmethod
     def transform_query(params: OfficersQueryParams) -> dict[str, Any]:
@@ -81,7 +82,7 @@ class VnstockOfficersFetcher(BaseFetcher[OfficersQueryParams, OfficerData]):
                 return frame.to_dict("records")
             except (TimeoutError, ProviderError):
                 raise
-            except (Exception, SystemExit) as exc:
+            except Exception as exc:
                 logger.warning("vnstock officers fetch error: %s", exc)
                 raise ProviderError(
                     str(exc), provider="vnstock", details={"symbol": query["symbol"]}

@@ -70,6 +70,7 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
     # Whether this provider requires authentication
     requires_credentials: bool = False
     propagate_provider_errors: bool = False
+    fail_on_provider_exit: bool = False
 
     @staticmethod
     @abstractmethod
@@ -161,6 +162,10 @@ class BaseFetcher(ABC, Generic[QueryT, DataT]):
             # Step 3: Transform to standardized models
             return cls.transform_data(params, raw_data)
         except SystemExit as e:
+            if cls.fail_on_provider_exit:
+                # Keep the SDK exit intact during extraction for acquisition receipts.
+                # At the serving boundary, it must not look like an empty dataset.
+                raise ProviderError("Provider request aborted", provider=cls.provider_name) from e
             _log_throttled(
                 logging.WARNING,
                 (cls.__name__, "system_exit"),

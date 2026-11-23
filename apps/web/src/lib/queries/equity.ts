@@ -15,7 +15,12 @@ export class CompanyReferenceEnvelopeError extends Error {
 }
 
 async function requireReferenceResponse<Row>(request: Promise<CompanyReferenceResponse<Row>>) {
-    const response = await request;
+    const response = await request.catch((error: unknown) => {
+        if (error instanceof api.APIResponseDecodeError) {
+            throw new CompanyReferenceEnvelopeError('Invalid company reference response');
+        }
+        throw error;
+    });
     if (response?.error != null) {
         // Older servers put upstream diagnostics here. Only publish known public reasons.
         const timedOut = typeof response.error === 'string' && /timed out|timeout|deadline exceeded/i.test(response.error);

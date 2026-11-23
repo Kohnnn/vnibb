@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, type ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { APIError } from '@/lib/api';
 import { CompanyReferenceEnvelopeError } from '@/lib/queries/equity';
@@ -67,7 +67,8 @@ export function CompanyReferenceWidget<Row>({
     dataUpdatedAt, reason, failureKind, errorUpdatedAt, rows, exportRow]);
   const provenance = runtime.__widgetRuntime?.provenance;
 
-  useEffect(() => { onDataChange?.(runtime); }, [onDataChange, runtime]);
+  // Commit availability with the visible records before a toolbar action can consume it.
+  useLayoutEffect(() => { onDataChange?.(runtime); }, [onDataChange, runtime]);
 
   if (!symbol) return <WidgetEmpty message={`Select a symbol to view ${label.toLowerCase()}`} icon={icon} />;
 

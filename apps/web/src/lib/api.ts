@@ -99,6 +99,13 @@ export class APIError extends Error {
     }
 }
 
+export class APIResponseDecodeError extends APIError {
+    constructor(status: number) {
+        super('Could not read the response as JSON', status);
+        this.name = 'APIResponseDecodeError';
+    }
+}
+
 /**
  * Specialized error for 429 Rate Limit responses
  */
@@ -267,8 +274,11 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
             throw new APIError(errorMessage, response.status, response.statusText, errorData);
         }
 
-        if (timeoutIncludesBody) return await response.json();
-        return response.json();
+        if (!timeoutIncludesBody) return response.json();
+        return await response.json().catch((error: unknown) => {
+            if (requestSignal.aborted) throw error;
+            throw new APIResponseDecodeError(response.status);
+        });
     } catch (error: any) {
         // Handle timeout
         if (error.name === 'AbortError') {

@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
+import React, { useCallback, useState, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { withInjectedWidgetProps } from './widgetChildProps';
 import {
@@ -180,6 +180,7 @@ export interface WidgetWrapperProps {
 
     onSettingsClick?: () => void;
     onCopilotClick?: (context?: Record<string, unknown>) => void;
+    onCopilotContextChange?: (context: Record<string, unknown> | undefined) => void;
 }
 
 type ResolvedWidgetProps = {
@@ -223,6 +224,7 @@ export function WidgetWrapper({
     onSymbolChange,
     onSettingsClick,
     onCopilotClick,
+    onCopilotContextChange,
     isCollapsed: initialCollapsed = false,
 }: WidgetWrapperProps) {
     const { state, addWidget, cloneWidget, updateWidget } = useDashboard();
@@ -707,6 +709,12 @@ export function WidgetWrapper({
         }
     };
 
+    const referenceCaptureRevision = useRef(0);
+    useLayoutEffect(() => {
+        if (!referenceWidgetType) return;
+        return () => { referenceCaptureRevision.current += 1; };
+    }, [dashboardId, displaySymbol, id, isCollapsed, isContentVisible, isMaximized, referenceWidgetType, tabId, title, widgetRuntime]);
+
     const handleExport = async (format: 'csv' | 'json' | 'png') => {
         const filename = `${title.replace(/\s+/g, '_')}_${displaySymbol}_${new Date().toISOString().split('T')[0]}`;
 
@@ -742,13 +750,22 @@ export function WidgetWrapper({
                     exportToJSON(dataToExport, filename, provenance);
                 }
                 break;
-            case 'png':
-                await exportToPNG(id, filename, provenance);
+            case 'png': {
+                if (referenceWidgetType) {
+                    const target = contentHostRef.current;
+                    const revision = referenceCaptureRevision.current;
+                    await exportToPNG(target ?? id, filename, provenance, () => (
+                        referenceCaptureRevision.current === revision && target !== null && widgetHost?.parentElement === target
+                    ));
+                } else {
+                    await exportToPNG(id, filename, provenance);
+                }
                 break;
+            }
         }
     };
 
-    const buildCopilotContext = (): Record<string, unknown> => {
+    const buildCopilotContext = useCallback((): Record<string, unknown> => {
         // Empty widgets can export an explicit coverage summary, but it is not an observation sample.
         const sourceData = widgetRuntime?.layoutHint?.empty || (Array.isArray(dataToExport) && dataToExport.length === 0)
             ? null
@@ -779,8 +796,16 @@ export function WidgetWrapper({
             ...(ratioSample?.dataSampleOmissions && { dataSampleOmissions: ratioSample.dataSampleOmissions }),
             ...(publishedProvenance && { dataProvenance: projectAgentProvenance(publishedProvenance, widgetType) }),
         };
-    };
+    }, [chartControls, chartRequest, currentWidget?.config, dashboardId, dataToExport, displaySymbol,
+        id, publishedProvenance, tabId, title, widgetGroup, widgetRuntime?.layoutHint?.empty, widgetType]);
 
+    useLayoutEffect(() => {
+        if (referenceWidgetType && onCopilotContextChange) return () => onCopilotContextChange(undefined);
+    }, [onCopilotContextChange, referenceWidgetType]);
+
+    useLayoutEffect(() => {
+        if (referenceWidgetType) onCopilotContextChange?.(isCollapsed ? undefined : buildCopilotContext());
+    }, [buildCopilotContext, isCollapsed, onCopilotContextChange, referenceWidgetType]);
 
     return (
         <>
