@@ -233,7 +233,11 @@ async def test_mongo_eod_quality_failure_is_explicit(monkeypatch, error, expecte
     result = await get_mongo_eod_quality_summary(["FPT"])
 
     assert result["status"] == expected_status
+    assert result["read_outcome"] == "read_failed"
     assert result["summary_counts"]["audited_documents"] == 0
+    assert result["integrity_status"] == "not_assessed"
+    assert result["sample_coverage"]["failed_read_symbols"] == 1
+    assert result["sample_coverage"]["no_row_symbols"] == 0
     assert result["details"]["max_time_ms"] == 1_500
 
 
@@ -248,9 +252,7 @@ async def test_mongo_eod_quality_marks_empty_provenance_as_failed(monkeypatch):
 
         def aggregate(self, pipeline, maxTimeMS):
             self.pipelines.append(pipeline)
-            if any("$set" in stage for stage in pipeline):
-                return [{"audited_documents": 1, "missing_provenance": 1}]
-            return []
+            return [{"quality_by_symbol": [{"symbol": "FPT", "documents": 1, "missing_provenance": 1}]}]
 
     class Service:
         enabled = True
@@ -266,10 +268,9 @@ async def test_mongo_eod_quality_marks_empty_provenance_as_failed(monkeypatch):
 
     result = await get_mongo_eod_quality_summary(["FPT"])
 
-    pipeline = next(
-        pipeline for pipeline in service.collection.pipelines if any("$set" in stage for stage in pipeline)
-    )
-    missing_provenance = pipeline[2]["$set"]["missing_provenance"]["$or"]
+    (pipeline,) = service.collection.pipelines
+    checks = pipeline[-1]["$facet"]["quality_by_symbol"][0]["$set"]
+    missing_provenance = checks["missing_provenance"]["$or"]
     assert result["status"] == "failed"
     assert result["issues"] == ["missing_provenance"]
     assert {"$eq": ["$source", ""]} in missing_provenance

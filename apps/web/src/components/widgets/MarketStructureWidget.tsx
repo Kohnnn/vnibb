@@ -10,6 +10,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { buildVolumeProfile, type ProfileBar } from '@/lib/marketStructure'
 import { EMPTY_VALUE, formatPercent } from '@/lib/units'
 import { signedToneClass } from '@/lib/priceColor'
+import { isObservedVolume } from '@/lib/volumeObservation'
 
 interface MarketStructureWidgetProps {
   symbol: string
@@ -113,15 +114,20 @@ export function MarketStructureWidget({ symbol, onDataChange }: MarketStructureW
   if (isLoading && !hasData) return <WidgetSkeleton />
   if (error && !hasData) return <WidgetError title="Failed to load price history" onRetry={() => refetch()} />
   if (!hasData) {
+    const volumeUnavailable = bars.some((bar) => !isObservedVolume(bar.volume))
     return (
       <WidgetEmpty
         message={derivedWithheld
           ? 'Market structure unavailable: historical price units were not certified.'
-          : `Not enough history for ${upperSymbol}`}
+          : volumeUnavailable
+            ? 'Market structure unavailable: volume is unknown for one or more returned sessions.'
+            : `Not enough history for ${upperSymbol}`}
         icon={<LayoutGrid size={18} />}
         detail={derivedWithheld
           ? 'Unmarked sessions are excluded; certified VND rows are required.'
-          : 'Market structure needs adjusted EOD bars to build a volume-by-price profile.'}
+          : volumeUnavailable
+            ? 'A volume profile needs measured volume for every returned session. A reported zero counts.'
+            : 'Market structure needs adjusted EOD bars to build a volume-by-price profile.'}
       />
     )
   }

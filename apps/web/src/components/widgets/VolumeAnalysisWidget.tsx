@@ -1,15 +1,15 @@
-// Volume Analysis Widget - Volume profile and analysis
-
 'use client';
 
-import { useEffect } from 'react';
-import { BarChart2, TrendingUp, TrendingDown } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { BarChart2, RefreshCw } from 'lucide-react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import { buildWidgetRuntime } from '@/lib/widgetRuntime';
-import { signedToneClass } from '@/lib/priceColor';
+import { buildWidgetRuntime, type WidgetDataPayload } from '@/lib/widgetRuntime';
+import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import { colorForDirection, priceDirection, signedToneClass } from '@/lib/priceColor';
+import { analyzeVolume, volumeHistoryWindow, VOLUME_SAMPLE_BASIS, VOLUME_UNCERTIFIED, type VolumeBar } from './volumeAnalysis';
 
 interface VolumeAnalysisWidgetProps {
     symbol: string;
@@ -25,7 +25,45 @@ function formatVolume(vol: number): string {
     return vol.toLocaleString();
 }
 
+const SOURCE_LABEL = 'Volume analysis (derived)';
+const CLOSE_MARKERS = { up: '↑', down: '↓', flat: '–', none: '?' } as const;
+const signedClose = new Intl.NumberFormat(undefined, { signDisplay: 'exceptZero', maximumSignificantDigits: 6 });
+const signedPercent = new Intl.NumberFormat(undefined, { style: 'percent', signDisplay: 'exceptZero', maximumFractionDigits: 1 });
+
+function formatRange(start: string | null, end: string | null): string {
+    if (start === end) return start ?? 'unknown';
+    return `${start ?? 'unknown'} to ${end ?? 'unknown'}`;
+}
+
+function RecentVolumeBar({ bar, maxVolume }: { bar: VolumeBar; maxVolume: number }) {
+    const { date, volume, closeChange } = bar;
+    const direction = priceDirection(closeChange);
+    const closeLabel = closeChange === null ? 'Close direction unknown' : `Close ${direction} (${signedClose.format(closeChange)})`;
+    return (
+        <li className="flex items-center gap-2">
+            <time dateTime={date ?? undefined} title={date ?? undefined} className="w-12 shrink-0 text-[10px] text-[var(--text-muted)]">
+                {date?.slice(5) ?? 'No date'}
+            </time>
+            <div className="relative h-5 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
+                {volume !== null && (
+                    <div aria-hidden="true" className="h-full" style={{
+                        width: `${(volume / maxVolume) * 100}%`,
+                        backgroundColor: direction === 'none' ? 'var(--border-default)' : colorForDirection(closeChange),
+                    }} />
+                )}
+                <span className="absolute right-1 top-0.5 text-[10px] text-[var(--text-secondary)]">
+                    {volume === null ? 'Unknown' : formatVolume(volume)}
+                </span>
+            </div>
+            <span role="img" aria-label={closeLabel} title={closeLabel} className={`w-4 shrink-0 text-center text-xs ${signedToneClass(closeChange)}`}>
+                {CLOSE_MARKERS[direction]}
+            </span>
+        </li>
+    );
+}
+
 export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWidgetProps) {
+    const { startDate, endDate } = volumeHistoryWindow(Date.now());
     const {
         data,
         isLoading,
@@ -33,155 +71,102 @@ export function VolumeAnalysisWidget({ symbol, onDataChange }: VolumeAnalysisWid
         refetch,
         isFetching,
         dataUpdatedAt,
-    } = useHistoricalPrices(symbol, {
-        startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    });
+    } = useHistoricalPrices(symbol, { startDate, endDate, interval: '1D' });
 
-    const historyUnitStatus = data?.meta?.unit_status ?? '';
-    const historyExpectedUnit = historyUnitStatus === 'confirmed_vnd' ? 'VND' : 'index_points';
-    // Only per-row `price_unit` markers certify the series; a response-level
-    // `unit_status` cannot certify rows that carry no marker (QA #98).
-    const historyCertified = (data?.data?.length ?? 0) > 0
-        && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
-        && (data?.data ??[]).every((row) => row.price_unit === historyExpectedUnit);
-    const derivedWithheld = Boolean(data) && !historyCertified;
-
-    const prices = derivedWithheld ?[] : data?.data || [];
-
-    const volumes = prices.map((p) => p.volume || 0);
-    const avgVolume = volumes.length > 0 ? volumes.reduce((a, b) => a + b, 0) / volumes.length : 0;
-    const maxVolume = Math.max(...volumes, 1);
-    const latestVolume = volumes[volumes.length - 1] || 0;
-    const volumeChange = avgVolume > 0 ? ((latestVolume - avgVolume) / avgVolume) * 100 : 0;
-
-    const recentData = prices.slice(-10).map((p, i) => ({
-        date: p.time || '',
-        volume: p.volume || 0,
-        close: p.close || 0,
-        change: prices[prices.length - 10 + i - 1]
-            ? ((p.close || 0) - (prices[prices.length - 10 + i - 1]?.close || 0))
-            : 0,
-    }));
-
-    const hasData = prices.length > 0;
-    const isFallback = Boolean(error && hasData);
-    const lastDataDate = [data?.meta?.freshness_as_of, data?.meta?.last_data_date, prices.at(-1)?.time]
-        .find((value) => value != null && value !== '' && !Number.isNaN(new Date(value).getTime())) ?? null;
+    const analysis = useMemo(() => analyzeVolume(data, startDate, endDate), [data, startDate, endDate]);
+    const { unitsWithheld, coverage, recent, maxVolume, sourceAsOf, coverageDetail, summary } = analysis;
+    const hasBars = recent.length > 0;
+    const loadFailed = Boolean(error || data?.error);
+    const isFallback = loadFailed && hasBars;
+    const observationStatus = isLoading && !data ? 'loading'
+        : unitsWithheld || (loadFailed && !hasBars) ? 'unavailable'
+        : summary.observationCount ? 'available' : 'empty';
+    const refreshStatus = loadFailed ? 'failed' : isFetching ? 'refreshing' : data ? 'succeeded' : undefined;
+    const stale = isFallback || deriveWidgetHealth({ updatedAt: sourceAsOf }).status === 'stale';
+    const health = deriveWidgetHealth({ updatedAt: sourceAsOf, coverage, observationStatus, refreshStatus, cached: isFallback, stale, sourceLabel: SOURCE_LABEL });
 
     useEffect(() => {
-        onDataChange?.(
-            buildWidgetRuntime({
-                empty: !hasData,
-                apiGroup: '/equity',
-                endpoint: `/equity/historical?symbol=${symbol}`,
-                sourceLabel: 'Volume analysis (derived)',
-                lastDataDate,
-                fetchedAt: dataUpdatedAt,
-                stale: isFallback,
-                derived: true,
-                extra: hasData ? { bars: prices.length, avgVolume } : undefined,
-            }),
-        );
-    }, [onDataChange, hasData, isFallback, dataUpdatedAt, lastDataDate, symbol, prices.length, avgVolume]);
+        onDataChange?.(buildWidgetRuntime({
+            empty: !hasBars,
+            apiGroup: '/equity',
+            endpoint: '/equity/historical',
+            endpointKind: 'route_summary',
+            sourceLabel: SOURCE_LABEL,
+            lastDataDate: sourceAsOf,
+            fetchedAt: dataUpdatedAt,
+            stale,
+            cached: isFallback,
+            coverage,
+            coverageDetail,
+            observationStatus,
+            refreshStatus,
+            adjustmentMode: data?.meta?.adjustment_mode,
+            basis: unitsWithheld ? VOLUME_UNCERTIFIED : VOLUME_SAMPLE_BASIS,
+            extra: data ? summary : undefined,
+            exportData: data ? summary : undefined,
+        }));
+    }, [onDataChange, hasBars, sourceAsOf, dataUpdatedAt, stale, isFallback, coverage, coverageDetail,
+        observationStatus, refreshStatus, data, unitsWithheld, summary]);
 
     if (!symbol) {
         return <WidgetEmpty message="Select a symbol to view volume" />;
     }
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="flex items-center justify-between px-1 py-1 mb-2">
-                <div className="flex items-center gap-2 text-xs">
-                    <BarChart2 size={12} className="text-[var(--color-accent-primary)]" />
-                    <span className="text-[var(--text-secondary)]">
-                        {derivedWithheld ? 'Units not certified' : `Avg: ${formatVolume(avgVolume)}`}
-                    </span>
-                    {!derivedWithheld && (
-                        <span className={signedToneClass(volumeChange)}>
-                            {Number(volumeChange) > 0 ? '+' : ''}{volumeChange.toFixed(0)}%
+        <div className="flex h-full min-h-0 flex-col">
+            <div className="mb-1 flex shrink-0 items-center justify-between gap-2 px-1 py-1">
+                <div className="flex flex-wrap items-center gap-x-2 text-xs text-[var(--text-secondary)]">
+                    <BarChart2 size={12} aria-hidden="true" className="text-[var(--color-accent-primary)]" />
+                    <span>{unitsWithheld ? 'Units not certified' : `Sample avg: ${summary.avgVolume === null ? 'unavailable' : formatVolume(summary.avgVolume)}`}</span>
+                    {!unitsWithheld && (
+                        <span className={signedToneClass(summary.volumeChangePct)}>
+                            Latest vs sample avg: {summary.volumeChangePct === null ? 'unavailable' : signedPercent.format(summary.volumeChangePct / 100)}
                         </span>
                     )}
                 </div>
                 <button
                     onClick={() => refetch()}
                     disabled={isFetching}
-                    className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                    className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-[var(--focus-ring-color)]"
+                    aria-label="Refresh volume analysis"
                     type="button"
                 >
-                    <BarChart2 size={12} className={isFetching ? 'animate-pulse' : ''} />
+                    <RefreshCw size={12} aria-hidden="true" className={isFetching ? 'animate-spin motion-reduce:animate-none' : ''} />
                 </button>
             </div>
 
-            <div className="border-b border-[var(--border-subtle)] pb-2">
-                <WidgetMeta
-                    updatedAt={lastDataDate}
-                    fetchedAt={dataUpdatedAt}
-                    isFetching={isFetching && hasData}
-                    isCached={isFallback}
-                    note="30-day volume"
-                    align="right"
-                />
-            </div>
+            <div role="region" aria-label="Volume analysis details" tabIndex={0} className="min-h-0 flex-1 space-y-2 overflow-auto">
+                <div className="space-y-1 border-b border-[var(--border-subtle)] px-1 pb-2 text-[10px] text-[var(--text-secondary)]">
+                    <p>Observed: {formatRange(coverageDetail.observedStart, coverageDetail.observedEnd)} · {summary.observationCount ?? 'unknown'} valid volume {summary.observationCount === 1 ? 'observation' : 'observations'} · {summary.excludedVolumeCount ?? 'unknown'} excluded for missing or invalid volume</p>
+                    {hasBars && <p>{VOLUME_SAMPLE_BASIS}</p>}
+                    <p>Requested (calendar): {formatRange(startDate, endDate)}</p>
+                    <p>Returned: {formatRange(summary.returnedStart, summary.returnedEnd)} · {summary.returnedCount ?? 'unknown'} {summary.returnedCount === 1 ? 'bar' : 'bars'}</p>
+                    <p>Expected sessions: {summary.expectedSessionCount ?? 'unknown'} · Missing sessions: {summary.missingSessionCount ?? 'unknown'} · Unresolved exclusions: {summary.unresolvedSessionCount ?? 'unknown'} · Replaced exclusions: {summary.replacedExclusionCount ?? 'unknown'}</p>
+                    <WidgetMeta updatedAt={sourceAsOf} fetchedAt={dataUpdatedAt} isFetching={isFetching && hasBars} health={health} />
+                    <p>Source age: {summary.sourceAgeDays === null ? 'unknown' : `${summary.sourceAgeDays} calendar ${summary.sourceAgeDays === 1 ? 'day' : 'days'}`}</p>
+                </div>
 
-            <div className="flex-1 overflow-auto pt-2">
-                {isLoading && !hasData ? (
+                {observationStatus === 'loading' ? (
                     <WidgetSkeleton lines={6} />
-                ) : error && !hasData ? (
-                    <WidgetError error={error as Error} onRetry={() => refetch()} />
-                ) : !hasData ? (
-                    <WidgetEmpty
-                        message={derivedWithheld
-                            ? 'Volume analysis unavailable: historical price units were not certified.'
-                            : 'No volume data'}
-                        icon={<BarChart2 size={18} />}
-                    />
+                ) : unitsWithheld ? (
+                    <WidgetEmpty message={VOLUME_UNCERTIFIED} icon={<BarChart2 size={18} />} />
+                ) : loadFailed && !hasBars ? (
+                    <WidgetError title="Failed to load historical volume" onRetry={() => refetch()} />
+                ) : !hasBars ? (
+                    <WidgetEmpty message="No historical bars returned" icon={<BarChart2 size={18} />} />
                 ) : (
-                    <div className="space-y-1">
-                        {recentData.map((day, i) => {
-                            const widthPct = maxVolume > 0 ? (day.volume / maxVolume) * 100 : 0;
-                            const isUp = day.change >= 0;
-                            const isAboveAvg = day.volume > avgVolume;
-
-                            return (
-                                <div key={i} className="flex items-center gap-2">
-                                    <div className="w-12 shrink-0 text-[10px] text-[var(--text-muted)]">
-                                        {day.date.slice(5)}
-                                    </div>
-                                    <div className="relative h-5 flex-1 overflow-hidden rounded bg-[var(--bg-tertiary)]">
-                                        <div
-                                            className={`h-full transition-all ${isUp
-                                                ? isAboveAvg ? 'bg-[var(--color-positive-bg)]' : 'bg-[var(--color-positive-bg)]'
-                                                : isAboveAvg ? 'bg-[var(--color-negative-bg)]' : 'bg-[var(--color-negative-bg)]'
-                                                }`}
-                                            style={{ width: `${widthPct}%` }}
-                                        />
-                                        <span className="absolute right-1 top-0.5 text-[10px] text-[var(--text-secondary)]">
-                                            {formatVolume(day.volume)}
-                                        </span>
-                                    </div>
-                                    <div className="w-8 shrink-0">
-                                        {isUp ? (
-                                            <TrendingUp size={12} className="text-[var(--color-positive)]" />
-                                        ) : (
-                                            <TrendingDown size={12} className="text-[var(--color-negative)]" />
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+                    <>
+                        <p className="px-1 text-[10px] text-[var(--text-muted)]">
+                            Showing {recent.length} of {summary.returnedCount} returned bars. Bar length shows volume.
+                        </p>
+                        <p className="px-1 text-[10px] text-[var(--text-muted)]">
+                            Color and arrows show close vs previous returned bar: ↑ Up · ↓ Down · – Flat · ? Unknown
+                        </p>
+                        <ul aria-label="Recent volume bars" className="space-y-1 px-1 pb-2">
+                            {recent.map((bar, i) => <RecentVolumeBar key={`${bar.date}-${i}`} bar={bar} maxVolume={maxVolume} />)}
+                        </ul>
+                    </>
                 )}
-            </div>
-
-            <div className="flex items-center justify-center gap-4 pt-2 text-[10px] text-[var(--text-muted)]">
-                <div className="flex items-center gap-1">
-                    <div className="w-3 h-2 bg-[var(--color-positive-bg)] rounded" />
-                    <span>↑ High Vol</span>
-                </div>
-                <div className="flex items-center gap-1">
-                    <div className="w-3 h-2 bg-[var(--color-negative-bg)] rounded" />
-                    <span>↓ Low Vol</span>
-                </div>
             </div>
         </div>
     );

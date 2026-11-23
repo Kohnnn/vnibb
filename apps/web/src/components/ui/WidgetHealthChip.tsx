@@ -69,6 +69,7 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
   const Icon = presentation.icon;
   const observation = formatSourceObservation(details?.updatedAt);
   const fetchedDate = toDate(details?.fetchedAt);
+  const failedDate = toDate(details?.failedAt);
 
   return (
     <Popover className="min-w-0">
@@ -126,6 +127,20 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
               <span className="text-right text-[var(--text-primary)]" suppressHydrationWarning title={formatTime(fetchedDate, true)}>
                 {formatAbsoluteTimestamp(fetchedDate)}
               </span>
+            </div>
+          )}
+          {details?.failureKind && details.warnings?.[0] && (
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Failure</span>
+              <span className="text-right text-[var(--text-primary)]">{details.warnings[0]}</span>
+            </div>
+          )}
+          {failedDate && (
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Failed at</span>
+              <time dateTime={failedDate.toISOString()} className="text-right text-[var(--text-primary)]" suppressHydrationWarning>
+                {formatAbsoluteTimestamp(failedDate)}
+              </time>
             </div>
           )}
           {details?.cached !== undefined && (

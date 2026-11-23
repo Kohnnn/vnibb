@@ -49,6 +49,7 @@ async def _main() -> int:
     print("# Data Quality Check")
     print(f"- Generated: {report['generated_at']}")
     print(f"- Status: {report['status']}")
+    print(f"- Historical session coverage: {report['historical_session_coverage_status']}")
     print("- Metrics:")
     for key, value in report["metrics"].items():
         target = report["targets"].get(key)

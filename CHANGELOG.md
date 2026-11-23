@@ -13,11 +13,13 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Distinguish unavailable officers and subsidiaries from successful empty returns, keep previously fetched records for the same company on refresh failure, and carry the original source and fetch dates and separate failure reason through status, exports and VniAgent (#280).
 - Tie chart status, exports and agent attachments to the active price-history request. Show the fiscal source of each valuation multiple and retain monetary units and omission notes in Financial Ratios attachments (#270).
 - Add a Company Research workspace and market-wide news to Market Scan. Report breadth over classified observations, align screener columns on narrow screens and preserve heatmap session dates (#272).
 - Distinguish issuer, peer, sector and market-wide news and exclude market-wide fallback articles from issuer momentum (#250).
 - Keep all unexpired price-history retry deferrals separate from stock membership. Listing refreshes preserve existing status and dated evidence, and a conflicting board cannot renew the listing cache (#286).
 - Serialize OCI backup runs, restrict retained pairs to private dated sets and allow the offline price-audit CLI to show help before loading timezone data (#171, #274).
+- Warn on partial Mongo EOD audit samples, measure representation and integrity together, and retain the read outcome in audit history. Label the historical price diagnostic as an old-row count, and withhold improvement claims when cutoffs differ or are unknown (#274).
 - Keep provider and IQ exception details in operator diagnostics rather than public financial-ratio, financial-statement and foreign-trading errors; retain available rows, lineage and failure distinctions (#111, #191, #249).
 - Preserve foreign-flow source dates, stale status and fallback warnings in Ownership Summary without treating retrieval time as source freshness (#249).
 - Carry article-sentiment provenance through news routes and widgets: distinguish locally computed heuristics, explicit provider classifications and unrecorded origins; preserve missing or null flow sentiment as null, never fabricated Neutral or implied stock-price impact (#250).
@@ -29,6 +31,7 @@ live in `docs/`.
 - Withhold FCF and DCF when the newest required capex observations are incomplete; calculate CAGR from comparable fiscal endpoints and clear obsolete formula-derived screener values while preserving independent facts (#247, #248).
 - Disclose unassessed valuation-model confidence separately from unit quality, input completeness and assumptions; preserve equivalent FCF/DCF results for positive and negative reported capex signs (#247).
 - Disclose foreign-flow session coverage and normal source overlap separately; preserve requested long windows and cap unwindowed merged results once. Keep coverage warnings, rows and Refresh reachable in compact mobile tiles using native scrolling. Keep RS price units and observation dates distinct from rating dates (#249, #251).
+- Keep unknown historical volume distinct from measured zero in Volume Analysis, history charts, and derived volume metrics. Volume Analysis compares closes with their actual predecessors and reports the sampled average, omissions, and source age in the widget, exports, and VniAgent attachments. Quant applies quotes by Vietnam market date, not receipt date (#282).
 - Separate direct-company, verified-peer, industry-only and general-market news evidence; strip source footers per field before normalization and retain available fallback rows when company context is unavailable (#250).
 - Order Dividend Ladder around the market-local date and preserve qualified Prediction Alerts baseline intervals, UTC observation clocks and threshold-independent coverage through activity records (#259, #260).
 - Retract Prediction Alerts no-movement and complete-coverage claims after failed revalidation; label the requested versus retained window without rewriting historical bell activity (#260).

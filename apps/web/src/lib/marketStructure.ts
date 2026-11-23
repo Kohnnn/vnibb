@@ -1,5 +1,7 @@
 'use client'
 
+import { isObservedVolume } from '@/lib/volumeObservation'
+
 /**
  * Volume-by-price profile + value area + key levels for the VN Market Structure
  * widget. Pure client-side computation over EOD bars already fetched from
@@ -41,6 +43,9 @@ export function buildVolumeProfile(
   numBins = 24,
   valueAreaPct = 0.7,
 ): VolumeProfileResult | null {
+  // The point of control and value area describe the whole returned sample.
+  if (!bars.every((bar): bar is ProfileBar & { volume: number } => isObservedVolume(bar.volume))) return null
+
   const clean = bars.filter(
     (b) => Number.isFinite(b.high) && Number.isFinite(b.low) && b.high >= b.low && b.high > 0,
   )
@@ -63,12 +68,11 @@ export function buildVolumeProfile(
 
   let totalVolume = 0
   for (const bar of clean) {
-    const volume = Number(bar.volume) || 0
     const mid = (bar.high + bar.low) / 2
     const idx = Math.min(Math.floor((mid - minPrice) / binSize), numBins - 1)
     if (idx >= 0 && idx < numBins) {
-      raw[idx].volume += volume
-      totalVolume += volume
+      raw[idx].volume += bar.volume
+      totalVolume += bar.volume
     }
   }
 
