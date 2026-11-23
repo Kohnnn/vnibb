@@ -58,11 +58,12 @@ import {
 import { getWidgetLayoutInsight } from '@/lib/dashboardIntelligence';
 import { ANALYTICS_EVENTS, captureAnalyticsEvent } from '@/lib/analytics';
 import { cn } from '@/lib/utils';
-import { exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@/lib/exportWidget';
+import { exportCompanyReferenceStatusCSV, exportToCSV, exportToJSON, exportToPNG, type ExportProvenance } from '@/lib/exportWidget';
 import { WidgetHealthChip } from '@/components/ui/WidgetHealthChip';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
 import { getWidgetExportData, type WidgetRuntime } from '@/lib/widgetRuntime';
 import { buildPriceHistoryRuntime, PriceChartScopeContext, usePriceChartScope } from '@/lib/priceChartScope';
+import { buildCompanyReferenceRuntime, isCompanyReferenceWidget } from '@/lib/companyReferenceRuntime';
 import { projectFinancialRatioAgentSample } from './financialRatioValues';
 
 type WidgetRuntimePayload = { readonly __widgetRuntime?: WidgetRuntime };
@@ -125,6 +126,14 @@ function projectAgentProvenance(provenance: Partial<ExportProvenance>, widgetTyp
         } else if (value instanceof Date && (key === 'updatedAt' || key === 'fetchedAt')) {
             publicFields[key] = value.toJSON();
         }
+    }
+
+    if (isCompanyReferenceWidget(widgetType) && provenance.failureKind) {
+        publicFields.failureKind = provenance.failureKind;
+        const failedAt = provenance.failedAt;
+        if (typeof failedAt === 'string') publicFields.failedAt = failedAt;
+        // These widgets publish only the bounded public reasons from their reference queries.
+        if (provenance.warnings?.length) publicFields.warnings = provenance.warnings.slice(0, 1);
     }
 
     // Cash Flow publishes admission/withholding notices here. Other publishers
@@ -402,9 +411,17 @@ export function WidgetWrapper({
             ? rawExchangeBadge
             : null;
     const isDashboardPriceChart = widgetType === 'price_chart' && currentWidget?.type === 'price_chart';
+    const referenceWidgetType = isCompanyReferenceWidget(widgetType) ? widgetType : null;
     const priceChartScope = usePriceChartScope(displaySymbol, currentWidget?.config, isDashboardPriceChart && !isCollapsed);
     const { request: chartRequest, controls: chartControls } = priceChartScope;
     const internalData = useMemo(() => {
+        if (referenceWidgetType) {
+            const scope = readWidgetRuntime(publishedData)?.requestScope;
+            if (scope && 'symbol' in scope && scope.symbol === displaySymbol &&
+                'widgetType' in scope && scope.widgetType === referenceWidgetType) return publishedData;
+            // Do not label an old ticker's rows (or a generic fallback) as the new ticker.
+            return buildCompanyReferenceRuntime(referenceWidgetType, displaySymbol);
+        }
         // Keep the widget fallback separate so the child's own empty/withheld state wins.
         if (!isDashboardPriceChart) return publishedData === undefined ? widgetData : publishedData;
         if (!chartRequest) return undefined;
@@ -413,14 +430,14 @@ export function WidgetWrapper({
             return { ...publishedData as WidgetRuntimePayload, chartType: chartControls.chartType };
         }
         return buildPriceHistoryRuntime(chartRequest, chartControls.chartType);
-    }, [chartControls.chartType, chartRequest, isDashboardPriceChart, publishedData, widgetData]);
+    }, [chartControls.chartType, chartRequest, displaySymbol, isDashboardPriceChart, publishedData, referenceWidgetType, widgetData]);
     const widgetRuntime = readWidgetRuntime(internalData);
     const dataToExport = useMemo(() => {
         const data = readAdmittedWidgetData(internalData, widgetRuntime);
         // An older publisher may supply only metadata in its runtime envelope.
-        return !isDashboardPriceChart && data === undefined && internalData !== widgetData
+        return !isDashboardPriceChart && !referenceWidgetType && data === undefined && internalData !== widgetData
             ? readAdmittedWidgetData(widgetData) : data;
-    }, [internalData, isDashboardPriceChart, widgetData, widgetRuntime]);
+    }, [internalData, isDashboardPriceChart, referenceWidgetType, widgetData, widgetRuntime]);
     const layoutInsight = useMemo(
         () => (currentWidget ? getWidgetLayoutInsight(currentWidget) : null),
         [currentWidget]
@@ -709,6 +726,10 @@ export function WidgetWrapper({
 
         switch (format) {
             case 'csv':
+                if (referenceWidgetType && (dataToExport == null || (Array.isArray(dataToExport) && dataToExport.length === 0))) {
+                    exportCompanyReferenceStatusCSV(filename, provenance);
+                    break;
+                }
                 if (dataToExport !== undefined && dataToExport !== null) {
                     const rows = Array.isArray(dataToExport)
                         ? dataToExport

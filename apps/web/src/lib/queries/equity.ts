@@ -8,6 +8,24 @@ import { logClientError } from '../clientLogger';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '../pollingPolicy';
 import { useDataSources } from '@/contexts/DataSourcesContext';
 import type { VnstockSource } from '@/contexts/DataSourcesContext';
+import type { CompanyReferenceResponse } from '@/types/equity';
+
+export class CompanyReferenceEnvelopeError extends Error {
+    readonly name = 'CompanyReferenceEnvelopeError';
+}
+
+async function requireReferenceResponse<Row>(request: Promise<CompanyReferenceResponse<Row>>) {
+    const response = await request;
+    if (response?.error != null) {
+        // Older servers put upstream diagnostics here. Only publish known public reasons.
+        const timedOut = typeof response.error === 'string' && /timed out|timeout|deadline exceeded/i.test(response.error);
+        throw new CompanyReferenceEnvelopeError(timedOut ? 'Provider request timed out' : 'Provider unavailable');
+    }
+    if (!Array.isArray(response?.data)) {
+        throw new CompanyReferenceEnvelopeError('Invalid company reference response');
+    }
+    return response;
+}
 
 // Helper hook to get the preferred VnStock source
 export function useVnstockSource(): VnstockSource {
@@ -130,9 +148,13 @@ export function useShareholders(symbol: string, enabled = true) {
 export function useOfficers(symbol: string, enabled = true) {
     return useQuery({
         queryKey: equityQueryKeys.officers(symbol),
-        queryFn: () => api.getOfficers(symbol),
+        queryFn: ({ signal }) => requireReferenceResponse(api.getOfficers(symbol, signal)),
         enabled: enabled && !!symbol,
         staleTime: 30 * 60 * 1000,
+        placeholderData: undefined,
+        // A bounded attempt ends in Retry even when the browser reports it is offline.
+        retry: false,
+        networkMode: 'always',
     });
 }
 
@@ -270,9 +292,12 @@ export function useMetricsHistory(
 export function useSubsidiaries(symbol: string, enabled = true) {
     return useQuery({
         queryKey: equityQueryKeys.subsidiaries(symbol),
-        queryFn: () => api.getSubsidiaries(symbol),
+        queryFn: ({ signal }) => requireReferenceResponse(api.getSubsidiaries(symbol, signal)),
         enabled: enabled && !!symbol,
         staleTime: 60 * 60 * 1000,
+        placeholderData: undefined,
+        retry: false,
+        networkMode: 'always',
     });
 }
 

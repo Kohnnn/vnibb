@@ -78,6 +78,7 @@ function withDashboardClientHeader(headers?: HeadersInit): HeadersInit {
 interface FetchOptions extends RequestInit {
     params?: Record<string, string | number | boolean | undefined>;
     timeout?: number; // Custom timeout in milliseconds
+    timeoutIncludesBody?: boolean;
     auth?: 'required' | 'optional' | 'none';
 }
 
@@ -120,7 +121,7 @@ export class RateLimitError extends APIError {
  * - Supports abort signals from calling code
  */
 export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
-    const { params, timeout = 30000, signal, auth = 'none', ...fetchOptions } = options;
+    const { params, timeout = 30000, timeoutIncludesBody = false, signal, auth = 'none', ...fetchOptions } = options;
 
     let url = `${API_BASE_URL}${endpoint}`;
 
@@ -215,16 +216,19 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
             body: requestBody,
         });
 
-        clearTimeout(timeoutId);
-        if (signal) signal.removeEventListener('abort', abortFromCaller);
+        if (!timeoutIncludesBody) {
+            clearTimeout(timeoutId);
+            if (signal) signal.removeEventListener('abort', abortFromCaller);
+        }
 
         if (!response.ok) {
             if (endpoint.startsWith('/admin/') && (response.status === 401 || response.status === 403) && isBrowser) {
                 window.dispatchEvent(new CustomEvent('vnibb:admin-access-denied', { detail: headers.get('Authorization') }));
             }
-            const errorData = await response.json().catch(() => ({
-                detail: response.statusText || 'Unknown error'
-            }));
+            const errorData = await response.json().catch((error: unknown) => {
+                if (timeoutIncludesBody && requestSignal.aborted) throw error;
+                return { detail: response.statusText || 'Unknown error' };
+            });
 
             const detailSource = errorData.detail ?? errorData.message ?? errorData.details ?? null;
             const normalizedDetail = Array.isArray(detailSource)
@@ -263,11 +267,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
             throw new APIError(errorMessage, response.status, response.statusText, errorData);
         }
 
+        if (timeoutIncludesBody) return await response.json();
         return response.json();
     } catch (error: any) {
-        clearTimeout(timeoutId);
-        if (signal) signal.removeEventListener('abort', abortFromCaller);
-
         // Handle timeout
         if (error.name === 'AbortError') {
             if (!timedOut) {
@@ -293,6 +295,9 @@ export async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}):
 
         // Generic fallback
         throw new APIError(error.message || 'An unexpected error occurred', 0, 'UnknownError');
+    } finally {
+        clearTimeout(timeoutId);
+        if (signal) signal.removeEventListener('abort', abortFromCaller);
     }
 }
 
@@ -674,8 +679,10 @@ export async function getShareholders(symbol: string): Promise<ShareholdersRespo
     return fetchAPI<ShareholdersResponse>(`/equity/${symbol}/shareholders`);
 }
 
-export async function getOfficers(symbol: string): Promise<OfficersResponse> {
-    return fetchAPI<OfficersResponse>(`/equity/${symbol}/officers`);
+const companyReferenceFetchOptions = { cache: 'no-store', timeoutIncludesBody: true } as const;
+
+export async function getOfficers(symbol: string, signal?: AbortSignal): Promise<OfficersResponse> {
+    return fetchAPI<OfficersResponse>(`/equity/${symbol}/officers`, { ...companyReferenceFetchOptions, signal });
 }
 
 export async function getIntraday(
@@ -838,8 +845,8 @@ export async function getCorrelationMatrix(
     });
 }
 
-export async function getSubsidiaries(symbol: string): Promise<SubsidiariesResponse> {
-    return fetchAPI<SubsidiariesResponse>(`/equity/${symbol}/subsidiaries`);
+export async function getSubsidiaries(symbol: string, signal?: AbortSignal): Promise<SubsidiariesResponse> {
+    return fetchAPI<SubsidiariesResponse>(`/equity/${symbol}/subsidiaries`, { ...companyReferenceFetchOptions, signal });
 }
 
 /**

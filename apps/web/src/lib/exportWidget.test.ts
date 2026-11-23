@@ -221,7 +221,7 @@ describe('exportToPNG', () => {
   });
 
 
-  it('paints the surrounding surface and stamps the source date and receipt time into the image', async () => {
+  it('stamps a retained reference result with its observation date, successful fetch and failed refresh', async () => {
     const options: Array<Record<string, unknown>> = [];
     const drawn: string[] = [];
     let stampedHeight = 0;
@@ -269,24 +269,44 @@ describe('exportToPNG', () => {
     widget.id = 'png-widget';
     host.appendChild(widget);
     document.body.appendChild(host);
+    const originalCreateURL = URL.createObjectURL;
+    const originalRevokeURL = URL.revokeObjectURL;
+    URL.createObjectURL = jest.fn(() => 'blob:reference');
+    URL.revokeObjectURL = jest.fn();
+    jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
     try {
       const { exportToPNG } = await import('./exportWidget');
-      await exportToPNG('png-widget', 'heatmap', {
-        sourceLabel: 'Market heatmap',
+      expect(await exportToPNG('png-widget', 'officers', {
+        widgetType: 'officers_management',
+        symbol: 'HPG',
+        sourceLabel: 'Officers and management',
         updatedAt: '2026-11-03',
-        fetchedAt: 1762000000000,
-      });
+        fetchedAt: '2026-11-23T05:00:00.000Z',
+        failedAt: '2026-11-23T05:20:00.000Z',
+        failureKind: 'envelope',
+        observationStatus: 'available',
+        refreshStatus: 'failed',
+        coverage: 'unknown',
+        warnings: ['Provider request timed out'],
+      })).toBe(true);
+      expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
       // Brand §14: exports are light. html2canvas 1.4.1 reads `backgroundColor`;
       // `background` is silently ignored.
       expect(options[0].backgroundColor).toBe('#ffffff');
       // The strip is added below the capture, so the widget's own layout is untouched.
       expect(stampedHeight).toBeGreaterThan(200);
-      expect(drawn.join(' ')).toContain('source: Market heatmap');
       const footer = drawn.join(' ');
       expect(footer).toMatch(/source_as_of: 2026-11-03\b(?!T)/);
-      expect(footer).toContain('fetched_at: 2025-11-01T12:26:40.000Z');
+      expect(footer).toContain('source: Officers and management');
+      expect(footer).toContain('fetched_at: 2026-11-23T05:00:00.000Z');
+      expect(footer).toContain('failed_at: 2026-11-23T05:20:00.000Z');
+      expect(footer).toContain('observation_status: available');
+      expect(footer).toContain('refresh_status: failed');
+      expect(footer).toContain('warnings: Provider request timed out');
     } finally {
+      URL.createObjectURL = originalCreateURL;
+      URL.revokeObjectURL = originalRevokeURL;
       jest.restoreAllMocks();
       host.remove();
       document.documentElement.style.removeProperty('--bg-primary');

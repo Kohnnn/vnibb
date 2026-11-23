@@ -23,6 +23,12 @@ const runtimeCaching = [
     handler: "NetworkOnly",
     method: "GET",
   },
+  {
+    urlPattern: ({ url }: { url: URL }) => /^\/api\/v1\/equity\/[^/]+\/(officers|subsidiaries)\/?$/.test(url.pathname),
+    handler: "NetworkOnly",
+    method: "GET",
+    options: { fetchOptions: { cache: "no-store" } },
+  },
   ...defaultCache,
 ];
 

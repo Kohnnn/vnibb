@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import { toast } from 'sonner';
 import { logClientError } from '@/lib/clientLogger';
 import { buildExportProvenance, provenanceLines, provenanceToMarkdown, type ExportProvenance } from '@/lib/widgetProvenance';
+import { isCompanyReferenceWidget } from '@/lib/companyReferenceRuntime';
 
 export { buildExportProvenance, provenanceToMarkdown, type ExportProvenance } from '@/lib/widgetProvenance';
 import { LIGHT_CAPTURE_ATTR, prepareLightCapture } from '@/lib/chartCapture';
@@ -51,6 +52,12 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
   const body = prefixLines.length ? `${prefixLines.join('\n')}\n${csv}` : csv;
   const blob = new Blob([body], { type: 'text/csv' });
   downloadBlob(blob, `${filename}.csv`);
+}
+
+/** A reference availability receipt has provenance, but no company entity rows. */
+export function exportCompanyReferenceStatusCSV(filename: string, provenance: ExportProvenance) {
+  const body = provenanceLines(provenance).map(([key, value]) => `# ${key},${serializeCSVCell(value)}`).join('\n');
+  downloadBlob(new Blob([`${body}\n`], { type: 'text/csv' }), `${filename}.csv`);
 }
 
 /**
@@ -149,6 +156,9 @@ export function exportToMarkdown(body: string, filename: string, provenance?: Ex
 /** The provenance facts a bitmap can carry without a sidecar file. */
 function provenanceFooterText(provenance?: ExportProvenance): string {
   const wanted = ['source', 'source_as_of', 'fetched_at', 'captured_at'];
+  if (provenance?.widgetType && isCompanyReferenceWidget(provenance.widgetType)) {
+    wanted.push('symbol', 'coverage', 'observation_status', 'refresh_status', 'failure_kind', 'failed_at', 'warnings');
+  }
   return provenanceLines(provenance)
     .filter(([key]) => wanted.includes(key))
     .map(([key, value]) => `${key}: ${value}`)
