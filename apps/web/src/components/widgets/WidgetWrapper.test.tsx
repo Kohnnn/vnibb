@@ -3,6 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { WidgetWrapper } from './WidgetWrapper';
 import { NotesWidget } from './NotesWidget';
+import { VolumeAnalysisWidget } from './VolumeAnalysisWidget';
+import { useHistoricalPrices } from '@/lib/queries';
 import { DEFAULT_GROUPS } from '@/types/widget';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatAbsoluteTimestamp } from '@/lib/formatDate';
@@ -32,7 +34,7 @@ jest.mock('@/contexts/WidgetGroupContext', () => ({
   }),
 }));
 jest.mock('@/contexts/GlobalMarketsSymbolContext', () => ({ useGlobalMarketsSymbol: () => ({ setGlobalMarketsSymbol: jest.fn() }) }));
-jest.mock('@/lib/queries', () => ({ useProfile: () => ({ data: undefined }) }));
+jest.mock('@/lib/queries', () => ({ useProfile: () => ({ data: undefined }), useHistoricalPrices: jest.fn() }));
 jest.mock('@/lib/dashboardIntelligence', () => ({ getWidgetLayoutInsight: () => null }));
 jest.mock('@/lib/analytics', () => ({ ANALYTICS_EVENTS: {}, captureAnalyticsEvent: jest.fn() }));
 jest.mock('@/hooks/useWidgetSymbolLink', () => ({ useWidgetSymbolLink: () => ({ setLinkedSymbol: jest.fn() }) }));
@@ -572,6 +574,65 @@ test('the wrapped Heatmap retains partial coverage on a cache hit in its toolbar
   expect(metadata.get('coverage')).toBe('partial');
   expect(metadata.get('cached')).toBe('true');
   expect(rows).toEqual(['groupBy,groupCount', 'sector,1']);
+});
+
+test('Volume Analysis exports and attaches the sample that its body actually reports', async () => {
+  const receipt = Date.parse('2026-11-23T07:00:00Z');
+  jest.spyOn(Date, 'now').mockReturnValue(receipt);
+  mockWidgetType = 'volume_analysis';
+  const title = 'Volume Analysis';
+  const user = userEvent.setup();
+  const onCopilotClick = jest.fn();
+  jest.mocked(useHistoricalPrices).mockReturnValue({
+    data: {
+      data: [
+        { time: '2026-11-02', volume: 0 },
+        { time: '2026-11-03', volume: null },
+        { time: '2026-11-05', volume: 200 },
+      ].map(row => ({ ...row, symbol: 'VCI', open: 100, high: 110, low: 90, close: 100, price_unit: 'VND' })),
+      meta: {
+        count: 3, unit_status: 'confirmed_vnd', freshness_as_of: '2026-11-05',
+        unresolved_session_count: 1, unresolved_excluded_dates: ['2026-11-04'], replaced_excluded_dates: [],
+      },
+    },
+    dataUpdatedAt: receipt,
+  } as unknown as ReturnType<typeof useHistoricalPrices>);
+
+  render(<WidgetWrapper id="screener" title={title} widgetType="volume_analysis" dashboardId="dashboard" tabId="tab"
+    onCopilotClick={onCopilotClick}>
+    <VolumeAnalysisWidget symbol="VCI" />
+  </WidgetWrapper>);
+
+  expect(await screen.findByText('Sample avg: 100')).toBeVisible();
+  expect(screen.getByText(/2 valid volume observations.*1 excluded/)).toBeVisible();
+  expect(screen.getByText(/Missing sessions: unknown.*Unresolved exclusions: 1.*Replaced exclusions: 0/)).toBeVisible();
+
+  const serialized = await captureWidgetExport(user, title, 'JSON');
+  const { data, _provenance: provenance } = JSON.parse(serialized ?? '{}');
+  expect(data).toMatchObject({
+    avgVolume: 100, volumeChangePct: 100, observationCount: 2, excludedVolumeCount: 1,
+    missingSessionCount: null, unresolvedSessionCount: 1, unresolvedExcludedDates: ['2026-11-04'],
+    sourceAgeDays: 18,
+  });
+  expect(provenance).toMatchObject({
+    updatedAt: '2026-11-05', basis: expect.stringContaining('Includes the latest returned bar when observed'),
+    coverageDetail: { requestedStart: '2026-10-24', requestedEnd: '2026-11-23', observedSessions: 2, gapSessions: null },
+  });
+
+  const csv = await downloadWidgetCSV(user, title);
+  const values = new Map(csv.rows[0].split(',').map((header, index) => [header, csv.rows[1].split(',')[index]]));
+  expect(values.get('avgVolume')).toBe('100');
+  expect(values.get('observationCount')).toBe('2');
+  expect(values.get('excludedVolumeCount')).toBe('1');
+  expect(values.get('missingSessionCount')).toBe('');
+  expect(values.get('unresolvedSessionCount')).toBe('1');
+  expect(csv.metadata.get('basis')).toBe(provenance.basis);
+
+  await user.click(screen.getByRole('button', { name: 'Open VniAgent' }));
+  expect(onCopilotClick).toHaveBeenCalledWith(expect.objectContaining({
+    widgetTypeKey: 'volume_analysis', dataSample: data,
+    dataProvenance: expect.objectContaining({ basis: provenance.basis, coverageDetail: provenance.coverageDetail }),
+  }));
 });
 
 test('Open VniAgent sends a bounded admitted sample with its source qualifications', async () => {

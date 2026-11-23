@@ -174,6 +174,26 @@ async def test_quant_endpoint_returns_requested_metrics(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("volume", [None, 0])
+async def test_volume_flow_keeps_unobserved_volumes_distinct_from_zero(client, monkeypatch, volume):
+    frame = _build_price_frame(30).assign(volume=float("nan") if volume is None else volume)
+    monkeypatch.setattr(quant, "_load_quant_frame_with_warning", AsyncMock(return_value=(frame, None)))
+
+    response = await client.get("/api/v1/quant/VNM/volume-flow")
+
+    assert response.status_code == 200
+    assert response.json()["error"] is None
+    metric = response.json()["data"]
+    assert metric["current_20d_cumulative_delta"] == volume
+    assert metric["cumulative"][-1]["delta"] == volume
+    assert metric["cumulative"][-1]["cumulative_delta"] == volume
+    if volume is None:
+        assert all(value is None for value in metric["monthly_avg"].values())
+        assert metric["strongest_buy_month"] is None
+        assert metric["strongest_sell_month"] is None
+
+
+@pytest.mark.asyncio
 async def test_quant_backtest_rejects_invalid_moving_average_windows(client, monkeypatch):
     async def fake_load_quant_frame_with_warning(**_kwargs):
         return _build_price_frame(180), None

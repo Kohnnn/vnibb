@@ -1579,9 +1579,8 @@ def _to_historical_data_from_payload(
     low_value = _coerce_optional_float(doc.get("low"))
     close_value = _coerce_optional_float(doc.get("close"))
     adj_close_value = _pick_optional_float(doc.get("adjusted_close"), doc.get("adj_close"), doc.get("adjClose"))
-    volume_value = _coerce_optional_int(doc.get("volume"))
 
-    if not time_value or None in {open_value, high_value, low_value, close_value, volume_value}:
+    if not time_value or None in {open_value, high_value, low_value, close_value}:
         return None
 
     adjusted_open, adjusted_high, adjusted_low, adjusted_close_resolved, factor, applied = (
@@ -1604,7 +1603,7 @@ def _to_historical_data_from_payload(
         high=adjusted_high,
         low=adjusted_low,
         close=adjusted_close_resolved,
-        volume=volume_value,
+        volume=doc.get("volume"),
         value=_coerce_optional_float(doc.get("value")),
         raw_close=close_value,
         adjusted_close=adj_close_value,

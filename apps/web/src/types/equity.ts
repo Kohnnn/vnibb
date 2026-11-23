@@ -8,7 +8,7 @@ export interface EquityHistoricalData {
   high: number;
   low: number;
   close: number;
-  volume: number;
+  volume: number | null;
   value?: number | null;
   raw_close?: number | null;
   adjusted_close?: number | null;

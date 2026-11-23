@@ -428,7 +428,7 @@ def _normalize_provider_history_rows(
                 high=float(getattr(row, "high")),
                 low=float(getattr(row, "low")),
                 close=float(close),
-                volume=int(getattr(row, "volume") or 0),
+                volume=getattr(row, "volume", None),
                 value=getattr(row, "value", None),
                 raw_close=float(raw_close) if raw_close is not None else float(close),
                 adjusted_close=float(adjusted_close) if adjusted_close is not None else None,
@@ -1781,11 +1781,11 @@ def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
     enriched["cumulative_delta"] = enriched["delta"].cumsum()
     enriched["month"] = enriched["time"].dt.month
 
-    monthly_avg = enriched.groupby("month")["delta"].mean()
+    monthly_avg = enriched.groupby("month")["delta"].mean().dropna()
     monthly_rollup = (
         enriched.assign(month_key=enriched["time"].dt.to_period("M"))
         .groupby("month_key", as_index=False)
-        .agg(delta=("delta", "sum"), close=("close", "last"))
+        .agg(delta=("delta", lambda values: values.sum(min_count=1)), close=("close", "last"))
     )
     monthly_rollup["close_change"] = monthly_rollup["close"].pct_change()
     monthly_rollup["divergence"] = (monthly_rollup["close_change"] > 0) & (
@@ -1806,7 +1806,9 @@ def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
             }
             for row in enriched.tail(252).itertuples(index=False)
         ],
-        "current_20d_cumulative_delta": _safe_float(enriched["delta"].tail(20).sum(), decimals=2),
+        "current_20d_cumulative_delta": _safe_float(
+            enriched["delta"].tail(20).sum(min_count=1), decimals=2
+        ),
         "divergence_months": int(monthly_rollup["divergence"].sum()),
         "strongest_buy_month": MONTH_LABELS.get(int(strongest_buy_month), None)
         if strongest_buy_month is not None
