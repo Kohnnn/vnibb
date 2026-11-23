@@ -28,6 +28,7 @@ from vnibb.models.stock import Stock
 from vnibb.models.sync_status import SyncStatus
 from vnibb.services.market_session import expected_market_session, session_coverage
 from vnibb.services.screener_metadata import reconcile_snapshot_cap, screener_metadata_updates
+from vnibb.services.stock_listing import equity_board, stock_metadata_upsert, withhold_listing_status
 
 logger = logging.getLogger(__name__)
 
@@ -968,9 +969,9 @@ class CacheManager:
         source: str = "VCI",
     ) -> int:
         """
-        Store listing data in database cache.
+        Store listing metadata without changing the status of an existing stock.
 
-        Uses upsert to update existing records or insert new ones.
+        Status claims are withheld pending independent dated listing evidence.
 
         Args:
             data: List of symbol/stock data records
@@ -986,43 +987,34 @@ class CacheManager:
         own_session = self._db is None
 
         try:
-            now = datetime.utcnow()
             count = 0
-            dialect_insert = insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+            withheld = 0
 
             for record in data:
                 symbol = record.get("symbol") or record.get("ticker")
-                if not symbol:
+                if not isinstance(symbol, str) or not 1 <= len(symbol.strip()) <= 10:
                     continue
-                if source == "vietcap" and record.get("exchange") not in {"HOSE", "HNX", "UPCOM", "DELISTED"}:
+                if withhold_listing_status(record):
+                    withheld += 1
+                    continue
+                board = equity_board(record.get("exchange"))
+                if source == "vietcap" and board is None:
                     continue
 
-                symbol = symbol.upper()
                 values = {
-                    "symbol": symbol,
+                    "symbol": symbol.strip().upper(),
                     "company_name": record.get("company_name") or record.get("organ_name") or None,
                     "short_name": record.get("short_name") or None,
-                    "exchange": record.get("exchange") or "HOSE",
+                    "exchange": board,
                     "industry": record.get("industry") or record.get("industry_name") or None,
                     "sector": record.get("sector") or None,
-                    "is_active": int(record.get("is_active", 1)) if source == "vietcap" else 1,
-                    "created_at": now,
-                    "updated_at": now,
                 }
-                stmt = dialect_insert(Stock).values(**values)
-                updates = {
-                    key: func.coalesce(stmt.excluded[key], getattr(Stock, key))
-                    for key in ("company_name", "short_name", "industry", "sector")
-                }
-                updates.update(is_active=values["is_active"], updated_at=now)
-                if record.get("exchange"):
-                    updates["exchange"] = stmt.excluded.exchange
-                result = await session.execute(
-                    stmt.on_conflict_do_update(index_elements=["symbol"], set_=updates).returning(Stock.id)
-                )
+                result = await session.execute(stock_metadata_upsert(session, values).returning(Stock.id))
                 count += len(result.scalars().all())
 
             await session.commit()
+            if withheld:
+                logger.warning("Withheld %d %s listing status claims without authoritative evidence", withheld, source)
             logger.info(f"Stored {count} listing records in cache (source={source})")
             return count
 

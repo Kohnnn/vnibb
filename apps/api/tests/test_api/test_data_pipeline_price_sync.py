@@ -1,6 +1,7 @@
 import sys
 import types
 from datetime import date
+from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
@@ -666,12 +667,16 @@ async def test_modular_screener_uses_explicit_community_vci_finance(monkeypatch)
 @pytest.fixture
 async def scheduled_price_database(monkeypatch, tmp_path):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from vnibb.models.app_kv import AppKeyValue
     from vnibb.models.stock import Stock
+    from vnibb.models.sync_status import SyncStatus
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'scheduled.db'}")
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(_create_stock_price_tables_for_sqlite)
+        await conn.run_sync(AppKeyValue.__table__.create)
+        await conn.run_sync(SyncStatus.__table__.create)
     async with sessions() as session:
         session.add_all([Stock(id=1, symbol="VNM", exchange="HOSE", is_active=1), Stock(id=2, symbol="FPT", exchange="HOSE", is_active=1)])
         await session.commit()
@@ -1025,3 +1030,160 @@ async def test_scheduled_price_partial_failure_keeps_committed_symbol_rows(monke
         rows = (await session.execute(select(StockPrice))).scalars().all()
         assert [(row.symbol, row.source) for row in rows] == [("VNM", "vietcap_vnd")]
     assert progress["stage_stats"]["prices"] == {"success": 1, "errors": 1, "total": 2}
+
+
+@pytest.mark.asyncio
+async def test_fifth_empty_failure_does_not_deactivate_legacy_stock(monkeypatch, scheduled_price_database):
+    from vnibb.models.stock import Stock
+    from vnibb.providers import market_data
+
+    async with scheduled_price_database() as session:
+        stock = await session.get(Stock, 1)
+        stock.empty_sync_count = 4
+        stock.listing_date = date(2010, 1, 4)
+        await session.commit()
+
+    def empty(*args, **kwargs):
+        raise ValueError("empty data (VCI)")
+
+    monkeypatch.setattr(market_data, "history", empty)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    day = date(2026, 3, 17)
+    assert await pipeline.sync_daily_prices(["VNM"], start_date=day, end_date=day) == 0
+
+    async with scheduled_price_database() as session:
+        stock = await session.get(Stock, 1)
+        assert stock.is_active == 1
+        assert stock.empty_sync_count == 4
+        assert stock.listing_date == date(2010, 1, 4)
+        assert stock.delisting_date is None
+
+
+@pytest.mark.asyncio
+async def test_price_deferral_leaves_default_price_and_financial_cohorts_intact(
+    monkeypatch, scheduled_price_database,
+):
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+    from vnibb.models.app_kv import AppKeyValue
+    from vnibb.models.stock import Stock, StockPrice
+    from vnibb.providers import market_data
+    from vnibb.providers.vnstock.financials import VnstockFinancialsFetcher
+
+    day = date(2026, 3, 17)
+    next_day = date(2026, 3, 18)
+    dated_delisting = date(2026, 3, 12)
+    async with scheduled_price_database() as session:
+        stock = await session.get(Stock, 2)
+        stock.is_active = 0
+        stock.delisting_date = dated_delisting
+        await session.commit()
+
+    calls = []
+    outcome = "empty"
+
+    def history(symbol, *args, start, **kwargs):
+        calls.append((symbol, start))
+        if outcome == "empty":
+            return pd.DataFrame()
+        return pd.DataFrame([{
+            "time": date.fromisoformat(start), "open": 60000, "high": 61000,
+            "low": 59000, "close": 60500, "volume": 100, "price_unit": "VND",
+        }])
+
+    pipeline = DataPipeline()
+    monkeypatch.setattr(market_data, "history", history)
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    monkeypatch.setattr(pipeline, "_cache_set_json", AsyncMock())
+
+    async def receipt():
+        async with scheduled_price_database() as session:
+            row = await session.get(AppKeyValue, "acquisition:daily_prices:VNM")
+            return row.value
+
+    for count in range(1, 6):
+        progress = {}
+        assert await pipeline.sync_daily_prices(start_date=day, end_date=day, progress=progress) == 0
+        assert progress["stage_stats"]["prices"] == {"success": 0, "errors": 1, "total": 1}
+        state = await receipt()
+        assert state["reason"] == "empty_history"
+        assert state["window"] == [day.isoformat(), day.isoformat()]
+        assert state["consecutive_empty"] == count
+        assert (state["retry_at"] is not None) == (count == 5)
+    assert datetime.fromisoformat(state["retry_at"]) > datetime.fromisoformat(state["attempted_at"]).astimezone(UTC)
+
+    deferred = {}
+    assert await pipeline.sync_daily_prices(start_date=day, end_date=day, progress=deferred) == 0
+    assert deferred["stage_stats"]["prices"] == {"success": 0, "errors": 1, "total": 1}
+    assert deferred["price_retry_deferred"] == [
+        {"symbol": "VNM", "reason": "empty_history", "retry_at": state["retry_at"]},
+    ]
+    assert calls == [("VNM", day.isoformat())] * 5
+    assert await receipt() == state
+
+    financial_calls = []
+
+    async def financials(query):
+        financial_calls.append(query["symbol"])
+        return []
+
+    monkeypatch.setattr(VnstockFinancialsFetcher, "extract_data", financials)
+    progress = {}
+    assert await pipeline.sync_financials(progress=progress, statement_types=["income"], count=1) == 0
+    assert financial_calls == ["VNM"]
+    cycle = progress["financial_acquisition"]
+    assert cycle["expected_symbols"] == cycle["attempted_symbols"] == ["VNM"]
+    assert cycle["complete"] is False
+
+    outcome = "success"
+    # A different date must not be deferred by the old interval.
+    assert await pipeline.sync_daily_prices(start_date=next_day, end_date=next_day) == 1
+    assert calls[-1] == ("VNM", next_day.isoformat())
+    state = await receipt()
+    assert (state["reason"], state["consecutive_empty"], state["retry_at"]) == ("persisted", 0, None)
+
+    outcome = "empty"
+    for _ in range(5):
+        await pipeline.sync_daily_prices(["VNM"], start_date=day, end_date=day)
+    outcome = "success"
+    with pytest.raises(ValueError, match="explicit symbols"):
+        await pipeline.sync_daily_prices(start_date=day, end_date=day, retry_quarantined=True)
+    assert await pipeline.sync_daily_prices(
+        ["VNM"], start_date=day, end_date=day, retry_quarantined=True,
+    ) == 1
+    state = await receipt()
+    assert (state["reason"], state["consecutive_empty"], state["retry_at"]) == ("persisted", 0, None)
+    async with scheduled_price_database() as session:
+        assert len((await session.scalars(select(StockPrice).where(StockPrice.symbol == "VNM"))).all()) == 2
+        active, delisted = await session.get(Stock, 1), await session.get(Stock, 2)
+        assert (active.is_active, active.delisting_date) == (1, None)
+        assert (delisted.is_active, delisted.delisting_date) == (0, dated_delisting)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error, reason", [(RuntimeError, "history_failed"), (TimeoutError, "history_timeout")])
+async def test_price_transport_failures_remain_retryable(monkeypatch, scheduled_price_database, error, reason):
+    from vnibb.models.app_kv import AppKeyValue
+    from vnibb.models.stock import Stock
+    from vnibb.providers import market_data
+
+    calls = []
+
+    def unavailable(symbol, *args, **kwargs):
+        calls.append(symbol)
+        raise error("transport unavailable")
+
+    monkeypatch.setattr(market_data, "history", unavailable)
+    pipeline = DataPipeline()
+    monkeypatch.setattr(pipeline, "_wait_for_rate_limit", AsyncMock())
+    day = date(2026, 3, 17)
+    for _ in range(6):
+        assert await pipeline.sync_daily_prices(["VNM"], start_date=day, end_date=day) == 0
+    assert calls == ["VNM"] * 6
+    async with scheduled_price_database() as session:
+        row = await session.get(AppKeyValue, "acquisition:daily_prices:VNM")
+        assert (row.value["reason"], row.value["consecutive_empty"], row.value["retry_at"]) == (reason, 0, None)
+        stock = await session.get(Stock, 1)
+        assert (stock.is_active, stock.delisting_date) == (1, None)

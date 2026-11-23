@@ -1,5 +1,6 @@
 """Descriptor-backed IQ financial decoding and structured storage bridges."""
 
+import logging
 import math
 import re
 import unicodedata
@@ -13,6 +14,9 @@ from vnibb.providers.vnstock.balance_sheet import BalanceSheetData
 from vnibb.providers.vnstock.cash_flow import CashFlowData
 from vnibb.providers.vnstock.financial_ratios import FinancialRatioData
 from vnibb.providers.vnstock.income_statement import IncomeStatementData
+from vnibb.services.stock_listing import equity_board, withhold_listing_status
+
+logger = logging.getLogger(__name__)
 
 
 class StructuredFinancialUnavailable(ValueError):
@@ -504,13 +508,13 @@ async def persist_vietcap_prices(symbol: str, rows: Sequence[Mapping[str, Any]],
 
 
 def listing_projection(row: Mapping[str, Any], company: Mapping[str, Any]) -> dict[str, Any] | None:
-    symbol, board = row.get("symbol"), row.get("board")
-    board = "HOSE" if board == "HSX" else board
-    if row.get("type") != "STOCK" or not isinstance(symbol, str) or not 1 <= len(symbol) <= 10 or board not in {"HOSE", "HNX", "UPCOM", "DELISTED"}:
+    symbol, board = row.get("symbol"), equity_board(row.get("board"))
+    if (row.get("type") != "STOCK" or not isinstance(symbol, str) or not 1 <= len(symbol.strip()) <= 10
+            or board is None or withhold_listing_status(row)):
         return None
     industry, sector = company.get("icbLv4"), company.get("icbLv1")
-    return {"symbol": symbol.upper(), "company_name": company.get("name") or row.get("organName"),
-            "short_name": row.get("organShortName"), "exchange": board, "is_active": int(board != "DELISTED"),
+    return {"symbol": symbol.strip().upper(), "company_name": company.get("name") or row.get("organName"),
+            "short_name": row.get("organShortName"), "exchange": board,
             "industry": industry.get("name") if isinstance(industry, Mapping) else None,
             "sector": sector.get("name") if isinstance(sector, Mapping) else None}
 
@@ -524,13 +528,19 @@ async def persist_vietcap_listings(trading_rows: Sequence[Mapping[str, Any]], se
         if isinstance(symbol, str):
             search[symbol.upper()].append(row)
     rows = []
+    withheld = 0
     for row in trading_rows:
+        if row.get("type") == "STOCK" and withhold_listing_status(row):
+            withheld += 1
+            continue
         matches = search.get(str(row.get("symbol") or "").upper(), [])
         projected = listing_projection(row, matches[0] if len(matches) == 1 else {})
         if projected is not None:
             rows.append(projected)
+    if withheld:
+        logger.warning("Withheld %d IQ listing status claims without authoritative evidence", withheld)
     if (trading_rows or search_rows) and not rows:
-        raise ValueError("IQ listings unavailable: explicit symbol and exchange board required")
+        raise ValueError("IQ listings unavailable: explicit listed stock and exchange board required")
     count = await (cache_manager or CacheManager()).store_listing_data(rows, source="vietcap") if rows else 0
     if rows and count == 0:
         raise RuntimeError("IQ listing persistence affected no PostgreSQL rows")

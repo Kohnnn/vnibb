@@ -11,6 +11,7 @@ from vnibb.providers import market_data
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from vnibb.core.database import async_session_maker
 from vnibb.models import Stock
+from vnibb.services.stock_listing import equity_board, listed_exchange_update, withhold_listing_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,13 +38,10 @@ async def seed_all_stocks():
             count = 0
             for _, row in df.iterrows():
                 symbol = row.get('symbol')
-                exchange = row.get('exchange')
-                if not isinstance(symbol, str) or not symbol.strip() or not isinstance(exchange, str) or not exchange.strip() or row.get('type') != 'STOCK':
+                exchange = equity_board(row.get('exchange'))
+                if not isinstance(symbol, str) or not 1 <= len(symbol.strip()) <= 10 or exchange is None or row.get('type') != 'STOCK' or withhold_listing_status(row):
                     continue
                 symbol = symbol.strip().upper()
-                exchange = exchange.strip().upper()
-                if exchange == 'HSX':
-                    exchange = 'HOSE'
 
                 company_name = row.get('organ_name')
                 short_name = row.get('organ_short_name')
@@ -51,7 +49,6 @@ async def seed_all_stocks():
                 # Truncate to fit DB constraints
                 if company_name: company_name = str(company_name)[:255]
                 if short_name: short_name = str(short_name)[:100]
-                if exchange: exchange = str(exchange)[:10]
                 
                 stmt = pg_insert(Stock).values(
                     symbol=symbol,
@@ -66,8 +63,7 @@ async def seed_all_stocks():
                     set_={
                         'company_name': company_name,
                         'short_name': short_name,
-                        'exchange': exchange,
-                        'is_active': 1,
+                        'exchange': listed_exchange_update(exchange),
                         'updated_at': datetime.utcnow(),
                     }
                 )

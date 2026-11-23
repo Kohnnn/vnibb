@@ -88,8 +88,14 @@ from vnibb.providers.vnstock.financials import (
 )
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.financial_service import admit_statement_rows
+from vnibb.services.price_acquisition import (
+    EmptyPriceHistory,
+    PriceHistoryAcquisition,
+    history_failure_reason,
+)
 from vnibb.services.prediction_market_retention import retention as prediction_market_retention
 from vnibb.services.realtime_pipeline import is_vietnam_market_open
+from vnibb.services.stock_listing import equity_board, listed_exchange_update, stock_metadata_upsert, withhold_listing_status
 
 async def _drain_screener_thread(operation, *args, **kwargs):
     """Do not release acquisition exclusion while a submitted blocking call lives."""
@@ -396,7 +402,7 @@ class DataPipeline:
 
         frame = await asyncio.wait_for(asyncio.to_thread(_fetch_sync), timeout=timeout_seconds)
         if frame is None or (bool(frame.empty) if hasattr(frame, "empty") else not bool(frame)):
-            raise ValueError("empty data (VCI)")
+            raise EmptyPriceHistory("empty data (VCI)")
         return frame
 
     async def _fetch_trading_listing_rows(self, client) -> List[Dict[str, Any]]:
@@ -954,6 +960,21 @@ class DataPipeline:
 
         await self._cache_set_json(cache_key, payload, ttl)
 
+    async def _cache_listing_rows(self, symbols: list[str]) -> None:
+        """Publish persisted active identities, not the unqualified refresh payload."""
+        async with async_session_maker() as session:
+            stocks = (await session.scalars(select(Stock).where(
+                Stock.symbol.in_(symbols), Stock.is_active == 1,
+            ))).all()
+            listing = [
+                {"symbol": stock.symbol, "organ_name": stock.company_name,
+                 "exchange": stock.exchange, "industry": stock.industry, "sector": stock.sector}
+                for stock in stocks
+            ]
+        await self._cache_set_json(build_cache_key("vnibb", "listing", "symbols", "VCI"), listing, CACHE_TTL_LISTING)
+        for item in listing:
+            await self._cache_set_json(build_cache_key("vnibb", "listing", "symbol", item["symbol"]), item, CACHE_TTL_LISTING)
+
     @with_retry(max_retries=3)
     async def sync_stock_list(
         self,
@@ -984,12 +1005,7 @@ class DataPipeline:
                 logger.warning("IQ listing persistence rejected %d of %d stock rows", rejected, len(stock_rows))
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + rejected
-            async with async_session_maker() as session:
-                stocks = (await session.execute(select(Stock).where(Stock.symbol.in_([row["symbol"] for row in stock_rows])))).scalars().all()
-                listing_cache = [{"symbol": stock.symbol, "organ_name": stock.company_name, "exchange": stock.exchange, "sector": stock.sector} for stock in stocks]
-            await self._cache_set_json(build_cache_key("vnibb", "listing", "symbols", "VCI"), listing_cache, CACHE_TTL_LISTING)
-            for item in listing_cache:
-                await self._cache_set_json(build_cache_key("vnibb", "listing", "symbol", item["symbol"]), item, CACHE_TTL_LISTING)
+            await self._cache_listing_rows([str(row.get("symbol") or "").strip().upper() for row in stock_rows])
             if progress is not None:
                 progress.setdefault("stage_stats", {})
                 progress["stage_stats"]["stock_list"] = {"success": count, "errors": rejected + (0 if search_rows else 1), "total": len(stock_rows)}
@@ -1000,12 +1016,14 @@ class DataPipeline:
                     await self._checkpoint(progress, sync_id)
             return count
 
-        listing_source = "VCI"
         df = await asyncio.to_thread(market_data.listing, settings.vnstock_source)
         if df is None or df.empty:
             raise ValueError("IQ and free VCI listings unavailable")
-        confirmed_symbols = {str(row.get("symbol") or "").upper() for row in stock_rows}
-        df = df[df["symbol"].astype(str).str.upper().isin(confirmed_symbols)]
+        confirmed_symbols = {str(row.get("symbol") or "").strip().upper() for row in stock_rows}
+        withheld_symbols = {
+            str(row.get("symbol") or "").strip().upper() for row in stock_rows if withhold_listing_status(row)
+        }
+        df = df[df["symbol"].astype(str).str.strip().str.upper().isin(confirmed_symbols)]
         if df.empty:
             raise ValueError("Free VCI listing has no confirmed stock instruments")
         exchange_df = pd.DataFrame()
@@ -1038,7 +1056,10 @@ class DataPipeline:
         if exchange_df is not None and not exchange_df.empty:
             for _, row in exchange_df.iterrows():
                 symbol_value = normalize_text(row.get("symbol") or row.get("ticker"))
-                exchange_value = normalize_text(row.get("exchange") or row.get("comGroupCode"))
+                if symbol_value and withhold_listing_status(row):
+                    withheld_symbols.add(symbol_value.upper())
+                    continue
+                exchange_value = equity_board(row.get("exchange")) or equity_board(row.get("comGroupCode"))
                 if symbol_value and exchange_value:
                     exchange_map[symbol_value.upper()] = exchange_value
 
@@ -1056,7 +1077,7 @@ class DataPipeline:
                     industry_map[symbol_value.upper()] = industry_value
 
         start_index = 0
-        symbols = df["symbol"].tolist() if "symbol" in df.columns else []
+        symbols = df["symbol"].astype(str).str.strip().str.upper().tolist()
         if progress and progress.get("stage") == "stock_list":
             last_index = progress.get("last_index")
             last_symbol = progress.get("last_symbol")
@@ -1066,7 +1087,6 @@ class DataPipeline:
                 start_index = symbols.index(last_symbol) + 1
 
         batch_size = 200
-        cache_batch: List[Dict[str, Any]] = []
 
         if progress is not None:
             progress.setdefault("stage_stats", {})
@@ -1079,15 +1099,19 @@ class DataPipeline:
 
         async with async_session_maker() as session:
             count = 0
+            withheld = 0
             for idx in range(start_index, len(df)):
                 row = df.iloc[idx]
-                symbol = str(row.get("symbol", row.get("ticker", ""))).upper()
-                if not symbol:
+                symbol = symbols[idx]
+                if not 1 <= len(symbol) <= 10 or symbol in withheld_symbols or withhold_listing_status(row):
+                    withheld += 1
+                    if progress is not None:
+                        progress["error_count"] = progress.get("error_count", 0) + 1
+                        progress["stage_stats"]["stock_list"]["errors"] += 1
                     continue
 
-                exchange_value = normalize_text(
-                    row.get("comGroupCode") or row.get("exchange")
-                ) or exchange_map.get(symbol)
+                exchange_value = (equity_board(row.get("comGroupCode"))
+                                  or equity_board(row.get("exchange")) or exchange_map.get(symbol))
                 industry_value = normalize_text(
                     row.get("industryName") or row.get("industry")
                 ) or industry_map.get(symbol)
@@ -1096,25 +1120,13 @@ class DataPipeline:
                 values = {
                     "symbol": symbol,
                     "company_name": normalize_text(row.get("organName") or row.get("organ_name")),
-                    "exchange": exchange_value or "UNKNOWN",
+                    "exchange": exchange_value,
                     "industry": industry_value,
                     "sector": sector_value,
-                    "is_active": 1,
-                    "updated_at": datetime.utcnow(),
                 }
                 try:
-                    stmt = get_upsert_stmt(Stock, ["symbol"], values, preserve_existing_on_null={"company_name", "industry", "sector", "short_name"})
-                    await session.execute(stmt)
+                    await session.execute(stock_metadata_upsert(session, values))
                     count += 1
-                    cache_batch.append(
-                        {
-                            "symbol": symbol,
-                            "company_name": values["company_name"],
-                            "exchange": values["exchange"],
-                            "industry": values["industry"],
-                            "sector": values["sector"],
-                        }
-                    )
                     if progress is not None:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["stock_list"]["success"] += 1
@@ -1126,52 +1138,23 @@ class DataPipeline:
 
                 if count > 0 and count % batch_size == 0:
                     await session.commit()
-                    for item in cache_batch:
-                        cache_key = build_cache_key("vnibb", "listing", "symbol", item["symbol"])
-                        await self._cache_set_json(cache_key, item, CACHE_TTL_LISTING)
-                    cache_batch = []
                     if progress is not None and sync_id is not None:
                         progress["last_symbol"] = symbol
                         progress["last_index"] = idx
                         await self._checkpoint(progress, sync_id)
 
             await session.commit()
-            for item in cache_batch:
-                cache_key = build_cache_key("vnibb", "listing", "symbol", item["symbol"])
-                await self._cache_set_json(cache_key, item, CACHE_TTL_LISTING)
+        if withheld:
+            logger.warning("Withheld %d VCI listing rows without valid identity or authorized status", withheld)
+        await self._cache_listing_rows(symbols)
 
-            listing_cache = [
-                {
-                    "symbol": str(row.get("symbol", row.get("ticker", ""))).upper(),
-                    "organ_name": row.get("organName") or row.get("organ_name"),
-                    "exchange": (
-                        row.get("comGroupCode")
-                        or row.get("exchange")
-                        or exchange_map.get(str(row.get("symbol", row.get("ticker", ""))).upper())
-                    ),
-                    "sector": resolve_sector_name(
-                        symbol=str(row.get("symbol", row.get("ticker", ""))).upper(),
-                        industry=(
-                            row.get("industryName")
-                            or row.get("industry")
-                            or industry_map.get(
-                                str(row.get("symbol", row.get("ticker", ""))).upper()
-                            )
-                        ),
-                    ),
-                }
-                for _, row in df.iterrows()
-            ]
-            list_cache_key = build_cache_key("vnibb", "listing", "symbols", listing_source)
-            await self._cache_set_json(list_cache_key, listing_cache, CACHE_TTL_LISTING)
+        if progress is not None and sync_id is not None:
+            progress["last_symbol"] = None
+            progress["last_index"] = None
+            await self._checkpoint(progress, sync_id)
 
-            if progress is not None and sync_id is not None:
-                progress["last_symbol"] = None
-                progress["last_index"] = None
-                await self._checkpoint(progress, sync_id)
-
-            logger.info(f"Synced {count} stocks.")
-            return count
+        logger.info("Synced %d stocks", count)
+        return count
 
     async def sync_screener_data(
         self,
@@ -2709,8 +2692,12 @@ class DataPipeline:
         progress: Optional[Dict[str, Any]] = None,
         sync_id: Optional[int] = None,
         cache_recent: bool = True,
+        *,
+        retry_quarantined: bool = False,
     ) -> int:
-        """Sync historical prices for specified symbols."""
+        """Sync history; temporary retry deferral is separate from listing membership."""
+        if retry_quarantined and not symbols:
+            raise ValueError("Retrying quarantined history requires explicit symbols")
         if not symbols:
             async with async_session_maker() as session:
                 result = await session.execute(select(Stock.symbol).where(Stock.is_active == 1))
@@ -2730,6 +2717,7 @@ class DataPipeline:
 
         start_date_str = resolved_start.strftime("%Y-%m-%d")
         end_date_str = resolved_end.strftime("%Y-%m-%d")
+        acquisition = PriceHistoryAcquisition(async_session_maker, start_date_str, end_date_str)
         effective_days = max((resolved_end - resolved_start).days, 0)
         logger.info(
             f"Syncing prices for {len(symbols)} symbols over {effective_days} days "
@@ -2755,6 +2743,9 @@ class DataPipeline:
         for idx in range(start_index, len(symbols)):
             symbol = symbols[idx]
             active_range: Optional[Tuple[str, str]] = None
+            previous_attempt = None
+            attempted_at = None
+            fetching_history = False
             try:
                 fetch_ranges: List[Tuple[date, date]] = [(resolved_start, resolved_end)]
                 existing_dates: set[date] = set()
@@ -2789,6 +2780,18 @@ class DataPipeline:
                         )
 
                 latest_row: Optional[Dict[str, Any]] = None
+                if fetch_ranges:
+                    previous_attempt = await acquisition.load(symbol)
+                    retry_at = None if retry_quarantined else acquisition.retry_after(previous_attempt)
+                    if retry_at is not None:
+                        if progress is not None:
+                            progress["error_count"] = progress.get("error_count", 0) + 1
+                            progress["stage_stats"]["prices"]["errors"] += 1
+                            progress.setdefault("price_retry_deferred", []).append({
+                                "symbol": symbol, "reason": "empty_history", "retry_at": retry_at.isoformat(),
+                            })
+                        continue
+                source_conflict = False
                 symbol_synced = 0
                 async with async_session_maker() as session:
                     stock_id_result = await session.execute(
@@ -2806,6 +2809,8 @@ class DataPipeline:
                         range_start_str = range_start.strftime("%Y-%m-%d")
                         range_end_str = range_end.strftime("%Y-%m-%d")
                         active_range = (range_start_str, range_end_str)
+                        attempted_at = attempted_at or datetime.now(UTC)
+                        fetching_history = True
                         if is_index_symbol(symbol):
                             range_df = await self._fetch_quote_history_frame(
                                 symbol=symbol, start=range_start_str, end=range_end_str,
@@ -2817,7 +2822,8 @@ class DataPipeline:
                                 instrument_type=metadata.get(symbol.upper(), {}).get("type"),
                             )
                         if range_df is None or range_df.empty:
-                            raise RuntimeError(f"Empty price acquisition for {symbol} ({range_start_str} -> {range_end_str})")
+                            raise EmptyPriceHistory(f"Empty price acquisition for {symbol}")
+                        fetching_history = False
 
                         conflicts = []
                         range_synced = 0
@@ -2867,6 +2873,7 @@ class DataPipeline:
                         if progress is not None:
                             progress["committed_count"] = total_synced
                         if conflicts:
+                            source_conflict = True
                             logger.warning("Price acquisition retained IQ-owned rows for %s: %s", symbol, conflicts)
                             if progress is not None:
                                 progress["error_count"] = progress.get("error_count", 0) + 1
@@ -2879,6 +2886,13 @@ class DataPipeline:
                         latest_row = persisted_price_record(latest_stored) if latest_stored else None
 
                     await session.commit()
+
+                if attempted_at is not None:
+                    await acquisition.record(
+                        symbol, attempted_at, "source_conflict" if source_conflict else "persisted",
+                        previous_attempt,
+                    )
+                    attempted_at = None
 
                 if latest_row:
                     latest_payload = {
@@ -2923,20 +2937,6 @@ class DataPipeline:
                     if progress is not None and symbol_synced > 0:
                         progress["success_count"] = progress.get("success_count", 0) + 1
                         progress["stage_stats"]["prices"]["success"] += 1
-                    if symbol_synced > 0:
-                        # Reset the empty-sync counter on a successful fetch
-                        # so a transient outage doesn't accumulate towards
-                        # auto-deactivation.
-                        try:
-                            async with async_session_maker() as reset_session:
-                                await reset_session.execute(
-                                    update(Stock)
-                                    .where(Stock.symbol == symbol)
-                                    .values(empty_sync_count=0)
-                                )
-                                await reset_session.commit()
-                        except Exception:  # noqa: BLE001
-                            pass
                 elif progress is not None:
                     if not fetch_ranges:
                         progress["success_count"] = progress.get("success_count", 0) + 1
@@ -2944,14 +2944,11 @@ class DataPipeline:
                     else:
                         progress["error_count"] = progress.get("error_count", 0) + 1
                         progress["stage_stats"]["prices"]["errors"] += 1
-            except SystemExit as exc:
-                logger.warning(f"Price sync aborted for {symbol}: {exc}")
-                if progress is not None:
-                    progress["error_count"] = progress.get("error_count", 0) + 1
-                    progress["stage_stats"]["prices"]["errors"] += 1
-                continue
-            except Exception as e:
-                error_details = self._describe_provider_exception(e)
+            except (Exception, SystemExit) as exc:
+                if attempted_at is not None:
+                    reason = history_failure_reason(exc) if fetching_history else "price_admission_or_storage_failed"
+                    await acquisition.record(symbol, attempted_at, reason, previous_attempt)
+                error_details = self._describe_provider_exception(exc)
                 if active_range is not None:
                     logger.error(
                         "Failed to sync prices for %s (%s -> %s): %s",
@@ -2963,53 +2960,7 @@ class DataPipeline:
                 else:
                     logger.error("Failed to sync prices for %s: %s", symbol, error_details)
                 logger.debug("Price sync traceback for %s", symbol, exc_info=True)
-                # Auto-deactivate symbols whose provider repeatedly returns
-                # "empty data" or "no data found". The daily_trading sync
-                # had been generating 700+ errors per day for delisted /
-                # warrant tickers; counting consecutive empty-data failures
-                # in the Stock model lets us drop them from the universe
-                # automatically.
-                error_text = (str(e) or "").lower()
-                empty_signals = (
-                    "dữ liệu trống",
-                    "du lieu trong",
-                    "no data",
-                    "empty data",
-                    "no records",
-                )
-                is_empty_signal = any(signal in error_text for signal in empty_signals)
-                if is_empty_signal:
-                    try:
-                        async with async_session_maker() as deactivation_session:
-                            await deactivation_session.execute(
-                                update(Stock)
-                                .where(Stock.symbol == symbol)
-                                .values(empty_sync_count=Stock.empty_sync_count + 1)
-                            )
-                            current = (
-                                await deactivation_session.execute(
-                                    select(Stock.empty_sync_count).where(Stock.symbol == symbol)
-                                )
-                            ).scalar_one_or_none()
-                            if current is not None and current >= 5:
-                                await deactivation_session.execute(
-                                    update(Stock)
-                                    .where(Stock.symbol == symbol)
-                                    .values(is_active=0)
-                                )
-                                logger.warning(
-                                    "Auto-deactivated %s after %d consecutive empty-data sync failures",
-                                    symbol,
-                                    current,
-                                )
-                            await deactivation_session.commit()
-                    except Exception as deactivation_err:  # noqa: BLE001
-                        # Column may not exist on older deployments; ignore.
-                        logger.debug(
-                            "Skipping auto-deactivation for %s: %s",
-                            symbol,
-                            deactivation_err,
-                        )
+                # Acquisition outcomes never change listing status or shrink the cohort.
                 if progress is not None:
                     progress["error_count"] = progress.get("error_count", 0) + 1
                     progress["stage_stats"]["prices"]["errors"] += 1
@@ -3394,8 +3345,9 @@ class DataPipeline:
                     }
                     if values.get("company_name"):
                         stock_updates["company_name"] = values["company_name"]
-                    if values.get("exchange"):
-                        stock_updates["exchange"] = values["exchange"]
+                    board = equity_board(values.get("exchange"))
+                    if board:
+                        stock_updates["exchange"] = listed_exchange_update(board)
                     if values.get("industry"):
                         stock_updates["industry"] = values["industry"]
                     if values.get("sector"):
@@ -7336,25 +7288,15 @@ class DataPipeline:
                 {"success": 0, "errors": 0, "total": len(symbols)},
             )
 
-        async with async_session_maker() as session:
-            for symbol in symbols:
-                values = {
-                    "symbol": symbol,
-                    "company_name": symbol,
-                    "exchange": "WARRANT",
-                    "is_active": 1,
-                    "created_at": datetime.utcnow(),
-                    "updated_at": datetime.utcnow(),
-                }
-                stmt = get_upsert_stmt(Stock, ["symbol"], values)
-                await session.execute(stmt)
-            await session.commit()
-
-        await self.sync_daily_prices(symbols=symbols, days=1)
+        # A configured price request is not warrant membership evidence.
+        price_progress: dict[str, Any] = {}
+        await self.sync_daily_prices(symbols=symbols, days=1, progress=price_progress)
 
         if progress is not None:
-            progress["success_count"] = progress.get("success_count", 0) + len(symbols)
-            progress["stage_stats"]["warrants"]["success"] += len(symbols)
+            prices = price_progress["stage_stats"]["prices"]
+            progress["success_count"] = progress.get("success_count", 0) + prices["success"]
+            progress["error_count"] = progress.get("error_count", 0) + prices["errors"]
+            progress["stage_stats"]["warrants"].update(success=prices["success"], errors=prices["errors"])
             if sync_id is not None:
                 await self._checkpoint(
                     progress,
@@ -7363,7 +7305,7 @@ class DataPipeline:
                     ttl=DAILY_TRADING_PROGRESS_TTL,
                 )
 
-        return len(symbols)
+        return price_progress["stage_stats"]["prices"]["success"]
 
     async def run_daily_trading_updates(
         self,
