@@ -126,8 +126,15 @@ export const MCP_TOOL_CATALOG: McpToolDescriptor[] = [
     sampleInput: { symbol: 'HPG' },
   },
   {
+    name: 'get_dividend_history',
+    description: 'Qualified retained dividend terms with partial coverage and typed dates. Not a complete payout window or yield basis.',
+    source: 'app_collections',
+    permission: 'read_only',
+    sampleInput: { symbol: 'HPG', limit: 20 },
+  },
+  {
     name: 'get_corporate_timeline',
-    description: 'Corporate events/timeline for a symbol.',
+    description: 'Corporate timeline; any dividend events are raw observations, not reconciled payouts.',
     source: 'app_collections',
     permission: 'read_only',
     sampleInput: { symbol: 'MWG' },

@@ -1,5 +1,6 @@
 // VND formatting utilities for Vietnam stock market data
 import { EMPTY_VALUE } from '@/lib/units'
+import type { DividendRecord } from '@/lib/api'
 
 /**
  * Format a number as VND currency with unit suffixes
@@ -41,23 +42,20 @@ export function formatVND(value: number | null | undefined, options?: {
     return `${sign}${prefix}${absValue.toFixed(decimals)}`;
 }
 
-export function formatDividendPayout(row: {
-    cash_dividend?: number | null;
-    stock_dividend?: number | null;
-    dividend_ratio?: number | string | null;
-    value?: number | null;
-}): string {
-    const cash = row.cash_dividend;
-    const stock = row.stock_dividend;
-    if (cash != null && cash !== 0 && stock != null && stock !== 0) {
-        return `${formatVND(cash)} + ${stock.toFixed(2)}% stock`;
+export function formatDividendPayout(row: DividendRecord): string {
+    const { cash_dividend: cash, stock_dividend: stock } = row;
+    const terms: string[] = [];
+    const kind = row.dividend_type ?? row.type;
+    const exact = { maximumSignificantDigits: 21 } as const;
+    if (kind !== 'stock' && row.currency === 'VND' && row.cash_unit === 'VND/share'
+        && typeof cash === 'number' && Number.isFinite(cash) && cash >= 0) {
+        terms.push(`VND${cash.toLocaleString('en-US', exact)}/share`);
     }
-    if (stock != null && stock !== 0) return `${stock.toFixed(2)}% stock`;
-    if (cash != null) return formatVND(cash);
-    if (stock != null) return `${stock.toFixed(2)}% stock`;
-    if (row.dividend_ratio != null) return String(row.dividend_ratio);
-    if (row.value != null) return formatVND(row.value);
-    return EMPTY_VALUE;
+    if (kind !== 'cash' && row.stock_unit === 'percent_of_existing_shares'
+        && typeof stock === 'number' && Number.isFinite(stock) && stock >= 0) {
+        terms.push(`${stock.toLocaleString('en-US', exact)}% stock`);
+    }
+    return terms.join(' + ') || EMPTY_VALUE;
 }
 
 /**

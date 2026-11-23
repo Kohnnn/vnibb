@@ -1,6 +1,7 @@
 // Insider Trading API endpoints
 
 import { fetchAPI } from '../client';
+import type { DividendsResponse } from '@/lib/api';
 import type {
     InsiderTrade,
     BlockTrade,
@@ -78,8 +79,8 @@ export async function updateAlertSettings(
     });
 }
 
-export async function getDividends(symbol: string): Promise<unknown> {
-    return fetchAPI<unknown>(`/equity/${symbol}/dividends`);
+export async function getDividends(symbol: string): Promise<DividendsResponse> {
+    return fetchAPI<DividendsResponse>(`/equity/${symbol}/dividends`);
 }
 
 export async function getTradingStats(symbol: string): Promise<unknown> {

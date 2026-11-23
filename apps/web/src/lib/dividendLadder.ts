@@ -32,7 +32,7 @@ export interface DividendLadderEvent {
   date: string
   payoutLabel: string
   payoutType: string
-  dividendYield: number | null | undefined
+  distribution: DividendRecord
   /** Source order; stable tiebreak for identical day+type rows. */
   sequence: number
 }
@@ -160,7 +160,7 @@ export function buildDividendEvents(
         date: String(raw),
         payoutLabel,
         payoutType,
-        dividendYield: row.dividend_yield,
+        distribution: row,
         sequence: sequence++,
       })
     })

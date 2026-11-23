@@ -23,14 +23,14 @@ DEFAULT_PROMPTS: list[dict[str, Any]] = [
     {
         "id": "dividend-analysis",
         "label": "Dividend Analysis",
-        "template": "Using {widget_or_symbol} as the primary context, analyze the trend in dividend payouts for {symbol} over the past 5 years. Include dividend yield, payout ratio, and sustainability assessment.",
+        "template": "Summarize qualified retained dividend observations for {symbol}. Separate cash per share from stock distributions, name the typed dates, and explain unresolved coverage. Report annual DPS or yield only when the evidence certifies the payout window and, for yield, the reference price and its observation date.",
         "category": "analysis",
         "recommendedWidgetKeys": ["financials"],
         "isDefault": True,
-        "revision": 1,
+        "revision": 2,
         "scope": "symbol",
-        "requiredEvidenceKinds": ["dividends", "income_statement", "cash_flow"],
-        "limits": ["Historical payouts are not a promise of future dividends.", "Unknown dates and missing payout history remain explicit limitations."],
+        "requiredEvidenceKinds": ["dividends"],
+        "limits": ["Calendar observations are not reconciled payouts. Announced terms do not confirm payment.", "Never annualize an incomplete series or combine stale prices with unrelated payout periods."],
         "source": "system",
     },
     {

@@ -8,7 +8,7 @@ import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries';
 import { formatTimestamp } from '@/lib/formatDate';
-import { formatDividendPayout, formatDividendYield, formatNumber, formatVND } from '@/lib/formatters';
+import { formatDividendPayout, formatNumber, formatVND } from '@/lib/formatters';
 import type { DividendRecord } from '@/lib/api';
 import { normalizeInsiderAction } from '@/lib/insiderActions';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
@@ -17,6 +17,19 @@ import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
 import { getSentimentProvenance } from '@/components/widgets/news/NewsCard';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE } from '@/lib/units';
+import {
+  admittedDividendRows,
+  dividendActionText,
+  dividendCoverageBasis,
+  dividendDistributionExport,
+  dividendExport,
+  dividendRowLabel,
+  dividendSourceLink,
+  readDividendCoverage,
+} from '@/lib/dividendHistory';
+import { DividendCoverageNotice } from './DividendCoverageNotice';
+
+const DIVIDEND_PREVIEW_LIMIT = 4;
 
 interface NewsCorporateActionsWidgetProps {
   id: string;
@@ -34,14 +47,6 @@ function getSentimentClasses(sentiment: string | null | undefined): string {
     return 'border-[var(--color-state-border)] bg-[var(--color-negative-bg)] text-[var(--color-negative)]';
   }
   return 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-muted)]';
-}
-
-function formatDividendType(type: string | null | undefined): string {
-  const normalized = String(type || '').toLowerCase();
-  if (normalized === 'cash') return 'Cash';
-  if (normalized === 'stock') return 'Stock';
-  if (normalized === 'mixed') return 'Mixed';
-  return 'Other';
 }
 
 /** #250: only direct-company/verified-peer rows carry a ranking number. */
@@ -86,7 +91,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
   } = useInsiderDeals(symbol, { limit: 6, enabled: Boolean(symbol) });
 
   const news = newsData?.data ?? [];
-  const dividends = dividendData?.data ?? [];
+  const dividendCoverage = readDividendCoverage(dividendData);
+  const dividends = admittedDividendRows(dividendData);
+  const dividendFailure = dividendsError?.message || dividendData?.error;
   const insiderDeals = insiderData ?? [];
 
   const hasNews = news.length > 0;
@@ -107,16 +114,15 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
   };
 
   const pinDividend = (dividend: DividendRecord, key: string) => {
-    const url = dividend.url || dividend.source_url;
+    const url = dividendSourceLink(dividend);
     if (!url || !dividend.source) return;
-    const eventDate = dividend.ex_date || dividend.record_date || dividend.payment_date || undefined;
     addNotebookItem({
       kind: 'news',
       title: `Dividend ${symbol} — ${formatDividendPayout(dividend)}`,
-      body: [formatDividendType(dividend.dividend_type || dividend.type), eventDate ? `Event date: ${eventDate}` : null, dividend.description].filter(Boolean).join('\n'),
+      body: [dividendRowLabel(dividend), ...dividendActionText(dividend), dividend.description].filter(Boolean).join('\n'),
       symbol,
-      sources: [{ label: dividend.source, sourceName: dividend.source, url, publishedAt: eventDate }],
-      dedupeKey: `company-dividend:${symbol}:${url}:${eventDate || ''}`,
+      sources: [{ label: dividend.source, sourceName: dividend.source, url, publishedAt: dividend.published_at || undefined }],
+      dedupeKey: `company-dividend:${symbol}:${url}:${dividend.source_event_id ?? dividend.observation_id ?? ''}`,
       provenance: { sourceLabel: dividend.source, apiGroup: '/equity', endpoint: `/api/v1/equity/${symbol}/dividends` },
     });
     setPinned((previous) => ({ ...previous, [key]: true }));
@@ -125,7 +131,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
 
   const isLoading = newsLoading || dividendsLoading || insiderLoading;
   const isFetching = newsFetching || dividendsFetching || insiderFetching;
-  const error = newsError || dividendsError || insiderError;
+  const error = newsError?.message || dividendFailure || insiderError?.message;
   const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
   // Source observation only: the newest genuine company-news publication date.
   // Query receipt times and corporate-action event dates (which may be future
@@ -156,6 +162,8 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
         lastDataDate: observation.lastDataDate,
         fetchedAt,
         coverage: observation.coverage,
+        basis: dividendCoverageBasis(dividendCoverage),
+        exportData: dividendExport(dividendCoverage, dividends.slice(0, DIVIDEND_PREVIEW_LIMIT).map(dividendDistributionExport)),
         cached: Boolean(error && hasData),
         stale: Boolean(error && hasData),
         warnings: observation.warning ? [observation.warning] : undefined,
@@ -172,7 +180,8 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
     error,
     symbol,
     recentNewsCount,
-    dividends.length,
+    dividendCoverage,
+    dividends,
     insiderDeals.length,
   ]);
 
@@ -207,6 +216,9 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
             align="right"
           />
         </div>
+        {!isLoading && !hasData && (
+          <div className="px-3 py-2"><DividendCoverageNotice coverage={dividendCoverage} failed={Boolean(dividendFailure)} /></div>
+        )}
 
         {timedOut && isLoading && !hasData ? (
           <WidgetError
@@ -222,7 +234,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
             <WidgetSkeleton lines={6} />
           </div>
         ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={handleRefresh} />
+          <WidgetError error={new Error(error)} onRetry={handleRefresh} />
         ) : !hasData ? (
           <WidgetEmpty message="No news or corporate actions available" icon={<Newspaper size={18} />} />
         ) : (
@@ -320,45 +332,44 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                   <BadgeDollarSign size={14} className="text-[var(--color-accent-primary)]" />
                   <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Corporate Actions</span>
                 </div>
-                <span className="text-[10px] text-[var(--text-muted)]">{dividends.length + insiderDeals.length} items</span>
+                <span className="text-[10px] text-[var(--text-muted)]">{Math.min(dividends.length, DIVIDEND_PREVIEW_LIMIT) + Math.min(insiderDeals.length, 4)} shown</span>
               </div>
 
               {dividendsLoading && insiderLoading && !hasActions ? (
                 <WidgetSkeleton lines={4} />
-              ) : dividendsError && insiderError && !hasActions ? (
-                <WidgetError error={(dividendsError || insiderError) as Error} onRetry={() => refetchDividends()} />
+              ) : dividendFailure && insiderError && !hasActions ? (
+                <WidgetError error={new Error(dividendFailure)} onRetry={handleRefresh} />
               ) : (
                 <div className="space-y-3">
                   <div className="space-y-2">
                     <div className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Dividends</div>
-                    {dividends.length === 0 ? (
-                      <div className="text-xs text-[var(--text-muted)]">No dividends available yet.</div>
+                    {(!dividendsLoading || dividendCoverage) && (
+                      <DividendCoverageNotice coverage={dividendCoverage} failed={Boolean(dividendFailure)} />
+                    )}
+                    {dividendsLoading && dividends.length === 0 ? (
+                      <WidgetSkeleton lines={2} />
+                    ) : dividends.length === 0 ? (
+                      <div className="text-xs text-[var(--text-muted)]">No qualified dividend observations shown.</div>
                     ) : (
                       <div className="space-y-2">
-                        {dividends.slice(0, 4).map((dividend, idx) => {
-                          const key = `dividend-${idx}`;
-                          const canPin = Boolean((dividend.url || dividend.source_url) && dividend.source);
+                        {dividends.slice(0, DIVIDEND_PREVIEW_LIMIT).map((dividend, idx) => {
+                          const key = `dividend-${symbol}-${dividend.dataset}-${dividend.observation_id ?? idx}`;
+                          const canPin = Boolean(dividendSourceLink(dividend));
                           return (
                           <div
-                            key={`${dividend.ex_date}-${idx}`}
-                            className="flex items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
+                            key={key}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2"
                           >
                             <div className="space-y-1">
                               <div className="text-xs font-semibold text-[var(--text-primary)]">
                                 {formatDividendPayout(dividend)}
                               </div>
                               <div className="text-[10px] text-[var(--text-muted)]">
-                                {formatDividendType(dividend.dividend_type || dividend.type)}
-                                {dividend.dividend_yield !== null && dividend.dividend_yield !== undefined
-                                  ? ` • ${formatDividendYield(dividend.dividend_yield)}`
-                                  : ''}
-                                {dividend.ex_date ? ` • Ex ${formatTimestamp(dividend.ex_date)}` : ''}
+                                {dividendRowLabel(dividend)}
                               </div>
+                              <div className="text-[10px] text-[var(--text-muted)]">{dividendActionText(dividend).join(' · ')}</div>
                             </div>
                             <div className="flex items-center gap-1">
-                              {dividend.payment_date && (
-                                <div className="text-[10px] text-[var(--text-muted)]">Pay {formatTimestamp(dividend.payment_date)}</div>
-                              )}
                               {canPin && (
                                 <button type="button" onClick={() => pinDividend(dividend, key)} className="inline-flex min-h-9 min-w-9 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--color-state-bg)] hover:text-[var(--color-accent-primary)]" aria-label="Save corporate action to Research Notebook" title="Save to Research Notebook">
                                   <BookMarked size={13} fill={pinned[key] ? 'currentColor' : 'none'} />
