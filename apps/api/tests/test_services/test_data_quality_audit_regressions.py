@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
-from scripts import v32_data_audit, v34_coverage_delta
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.services import data_quality, mongo_market_data_service
+
+from scripts import v32_data_audit, v34_coverage_delta
 
 OLD_ROW_METRIC = "top_with_price_row_at_or_before_5y_cutoff"
 
