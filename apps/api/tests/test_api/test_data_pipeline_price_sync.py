@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
-
 import vnibb.services.data_pipeline as data_pipeline_module
 from vnibb.core.config import settings
 from vnibb.providers.vnstock.price_board import PriceBoardData
