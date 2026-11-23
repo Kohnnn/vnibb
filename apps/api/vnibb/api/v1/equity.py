@@ -49,7 +49,6 @@ from vnibb.providers.vnstock.company_events import (
     _normalize_company_action_category,
     _parse_company_action_value,
 )
-from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 
 # Providers
 from vnibb.providers.vnstock.equity_historical import (
@@ -101,6 +100,12 @@ from vnibb.services.data_pipeline import (
     CACHE_TTL_ORDERBOOK_DAILY,
 )
 from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.dividend_history import (
+    RAW_DIVIDEND_SCOPE,
+    DividendCoverage,
+    DividendDistribution,
+    load_dividend_history,
+)
 from vnibb.services.financial_service import admit_statement_rows, build_ttm_statement_rows, get_financials_with_ttm, normalize_statement_period
 from vnibb.services.foreign_flow_coverage import (
     PROVIDER_ROW_CAP,
@@ -2982,25 +2987,6 @@ def _merge_ratio_row_collections(
     return sorted(merged.values(), key=lambda item: _ratio_period_sort_key(item.period))
 
 
-def _derive_dividend_yield_from_dps(dps: Any, latest_price: Any) -> Optional[float]:
-    dps_value = _coerce_optional_float(dps)
-    price_vnd = _coerce_optional_float(latest_price)
-    if dps_value is None or price_vnd in (None, 0):
-        return None
-    return (dps_value / price_vnd) * 100
-
-
-def _resolve_dividend_yield_percent(
-    raw_yield: Any,
-    dps: Any,
-    latest_price: Any,
-) -> Optional[float]:
-    normalized_raw = _coerce_optional_float(raw_yield)
-    if normalized_raw is not None:
-        return normalized_raw
-    return _derive_dividend_yield_from_dps(dps=dps, latest_price=latest_price)
-
-
 def _coerce_iso_date(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -3023,133 +3009,6 @@ def _coerce_iso_date(value: Any) -> Optional[str]:
         return datetime.fromisoformat(raw.replace("Z", "+00:00")).date().isoformat()
     except ValueError:
         return None
-
-
-def _extract_calendar_year(*values: Any) -> Optional[int]:
-    for value in values:
-        numeric = _coerce_optional_float(value)
-        if numeric is not None:
-            year = int(numeric)
-            if 1900 <= year <= 2100:
-                return year
-
-        iso_date = _coerce_iso_date(value)
-        if iso_date:
-            try:
-                year = int(iso_date[:4])
-                if 1900 <= year <= 2100:
-                    return year
-            except ValueError:
-                continue
-
-    return None
-
-
-def _classify_dividend_type(
-    raw_type: Any,
-    cash_dividend: Optional[float],
-    stock_dividend: Optional[float],
-    dividend_ratio: Any,
-    description: Any,
-) -> str:
-    text_parts = [
-        str(raw_type).strip().lower() if raw_type is not None else "",
-        str(dividend_ratio).strip().lower() if dividend_ratio is not None else "",
-        str(description).strip().lower() if description is not None else "",
-    ]
-    combined = " ".join(part for part in text_parts if part)
-
-    cash_keywords = ("cash", "tiền", "tien", "tm")
-    stock_keywords = (
-        "stock",
-        "share",
-        "cổ phiếu",
-        "co phieu",
-        "cp",
-        "cổ tức bằng cổ phiếu",
-        "co tuc bang co phieu",
-    )
-
-    has_cash = cash_dividend not in (None, 0)
-    has_stock = stock_dividend not in (None, 0)
-
-    if any(keyword in combined for keyword in cash_keywords):
-        has_cash = True
-    if any(keyword in combined for keyword in stock_keywords):
-        has_stock = True
-
-    if has_cash and has_stock:
-        return "mixed"
-    if has_cash:
-        return "cash"
-    if has_stock:
-        return "stock"
-    return "other"
-
-
-def _build_dividend_row_from_payload(
-    symbol: str, payload: dict[str, Any]
-) -> Optional[dict[str, Any]]:
-    cash_dividend = _coerce_optional_float(
-        payload.get("cash_dividend") or payload.get("cashDividend") or payload.get("value")
-    )
-    stock_dividend = _coerce_optional_float(
-        payload.get("stock_dividend") or payload.get("stockDividend")
-    )
-    dividend_ratio = payload.get("dividend_ratio") or payload.get("ratio")
-    if isinstance(dividend_ratio, str):
-        dividend_ratio = dividend_ratio.strip() or None
-
-    if cash_dividend is None and stock_dividend is None and dividend_ratio is None:
-        return None
-
-    ex_date = _coerce_iso_date(payload.get("ex_date") or payload.get("exDate"))
-    record_date = _coerce_iso_date(payload.get("record_date") or payload.get("recordDate"))
-    payment_date = _coerce_iso_date(payload.get("payment_date") or payload.get("paymentDate"))
-    fiscal_year = _extract_calendar_year(
-        payload.get("fiscal_year"),
-        payload.get("fiscalYear"),
-    )
-    issue_year = _extract_calendar_year(
-        payload.get("issue_year"),
-        payload.get("issueYear"),
-    )
-    event_year = _extract_calendar_year(
-        fiscal_year,
-        issue_year,
-        ex_date,
-        record_date,
-        payment_date,
-    )
-    raw_type = payload.get("dividend_type") or payload.get("type") or payload.get("issue_method")
-    description = payload.get("description")
-    dividend_type = _classify_dividend_type(
-        raw_type=raw_type,
-        cash_dividend=cash_dividend,
-        stock_dividend=stock_dividend,
-        dividend_ratio=dividend_ratio,
-        description=description,
-    )
-
-    return {
-        "symbol": symbol.upper(),
-        "ex_date": ex_date,
-        "record_date": record_date,
-        "payment_date": payment_date,
-        "type": dividend_type,
-        "dividend_type": dividend_type,
-        "raw_dividend_type": raw_type,
-        "cash_dividend": cash_dividend,
-        "stock_dividend": stock_dividend,
-        "dividend_ratio": dividend_ratio,
-        "value": cash_dividend if cash_dividend is not None else stock_dividend,
-        "fiscal_year": fiscal_year,
-        "issue_year": issue_year,
-        "year": event_year,
-        "annual_dps": None,
-        "dividend_yield": None,
-        "description": description,
-    }
 
 
 async def _resolve_profile_market_cap(
@@ -5072,7 +4931,10 @@ async def get_fundamental_analysis(
     }
     return StandardResponse(
         data=payload,
-        meta=MetaData(count=1, symbol=symbol_upper),
+        meta=MetaData(
+            count=1, symbol=symbol_upper,
+            events=_company_events_meta(symbol_upper, len(events)).model_dump(exclude_none=True),
+        ),
         error="Partial data unavailable" if section_errors else None,
     )
 
@@ -5752,7 +5614,7 @@ async def _load_company_events_fallback(
                     "symbol": item.symbol,
                     "event_type": "DIVIDEND",
                     "event_name": item.issue_method or "Dividend",
-                    "event_date": ex_date_iso or record_date_iso or payment_date_iso,
+                    "event_date": None,
                     "ex_date": ex_date_iso,
                     "record_date": record_date_iso,
                     "payment_date": payment_date_iso,
@@ -5763,7 +5625,7 @@ async def _load_company_events_fallback(
                     "action_category": "dividend",
                     "action_subtype": item.issue_method,
                     "effective_date": ex_date_iso or record_date_iso or payment_date_iso,
-                    "cash_amount_per_share": item.dividend_value,
+                    "cash_amount_per_share": None,
                     "share_ratio": None,
                 }
             )
@@ -5771,8 +5633,16 @@ async def _load_company_events_fallback(
     return rows
 
 
+def _company_events_meta(symbol: str, count: int) -> MetaData:
+    return MetaData(
+        count=count,
+        dividend_scope=RAW_DIVIDEND_SCOPE,
+        dividend_history_endpoint=f"/api/v1/equity/{symbol}/dividends",
+    )
+
+
 @router.get("/{symbol}/events", response_model=StandardResponse[List[Any]])
-@cached(ttl=3600, key_prefix="company_events_v29_stored_first")
+@cached(ttl=3600, key_prefix="company_events_v30_unreconciled")
 async def get_company_events(
     symbol: str,
     limit: int = Query(20, ge=1, le=100),
@@ -5796,7 +5666,7 @@ async def get_company_events(
         if release_read and db.in_transaction():
             await db.rollback()
     if stored_rows:
-        return StandardResponse(data=stored_rows, meta=MetaData(count=len(stored_rows)))
+        return StandardResponse(data=stored_rows, meta=_company_events_meta(symbol_upper, len(stored_rows)))
 
     try:
         data = await asyncio.wait_for(
@@ -5805,15 +5675,15 @@ async def get_company_events(
             ),
             timeout=min(10, _provider_timeout_budget()),
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
+        return StandardResponse(data=data, meta=_company_events_meta(symbol_upper, len(data)))
     except Exception as exc:
         error = "Company events provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
         logger.warning("Company events provider failed (symbol=%s): %s", symbol_upper, error)
-        return StandardResponse(data=[], error=error)
+        return StandardResponse(data=[], meta=_company_events_meta(symbol_upper, 0), error=error)
 
 
 @router.get("/{symbol}/calendar", response_model=StandardResponse[dict[str, Any]])
-@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_calendar_v26")
+@cached(ttl=settings.news_retention_days * 86400, key_prefix="company_calendar_v27_unreconciled")
 async def get_company_calendar(symbol: str, limit: int = Query(20, ge=1, le=100)):
     symbol_upper = symbol.upper()
     try:
@@ -5826,7 +5696,7 @@ async def get_company_calendar(symbol: str, limit: int = Query(20, ge=1, le=100)
             "message": "Upcoming company calendar events",
             "data": events,
         }
-        return StandardResponse(data=payload, meta=MetaData(count=len(events)))
+        return StandardResponse(data=payload, meta=_company_events_meta(symbol_upper, len(events)))
     except Exception as e:
         payload = {
             "symbol": symbol_upper,
@@ -5834,7 +5704,7 @@ async def get_company_calendar(symbol: str, limit: int = Query(20, ge=1, le=100)
             "message": "Company calendar data not yet available.",
             "data": [],
         }
-        return StandardResponse(data=payload, meta=MetaData(count=0), error=str(e))
+        return StandardResponse(data=payload, meta=_company_events_meta(symbol_upper, 0), error=str(e))
 
 
 @router.get("/{symbol}/estimates", response_model=StandardResponse[dict[str, Any]])
@@ -7426,157 +7296,39 @@ async def get_cash_flow(
         return StandardResponse(data=[], error=str(e))
 
 
-@router.get("/{symbol}/dividends", response_model=StandardResponse[List[Any]])
-@cached(ttl=86400, key_prefix="dividends_v2_stored_first")
+class DividendHistoryMeta(MetaData):
+    coverage: DividendCoverage
+
+
+class DividendHistoryResponse(StandardResponse[list[DividendDistribution]]):
+    meta: DividendHistoryMeta
+
+
+@router.get("/{symbol}/dividends", response_model=DividendHistoryResponse)
 async def get_dividends(
     symbol: str,
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-):
+) -> DividendHistoryResponse:
+    """Read retained dividend observations, not a complete payout history.
+
+    No provider fallback: its lossy projection cannot establish payout and
+    date basis. Action dates are not source freshness or proof of payment.
+    """
+    symbol = symbol.strip().upper()
     try:
-        symbol_upper = symbol.upper()
-        provider_error: str | None = None
-        release_read = (
-            isinstance(db, AsyncSession) and not db.in_transaction()
-            and not (db.new or db.dirty or db.deleted)
+        history = await load_dividend_history(db, symbol, limit)
+    except Exception:
+        logger.exception("Failed to read retained dividend history for %s", symbol)
+        return DividendHistoryResponse(
+            data=[],
+            meta=DividendHistoryMeta(count=0, limit=limit, coverage=DividendCoverage()),
+            error="Unable to read retained dividend observations",
         )
-        latest_price = await _get_latest_price(db, symbol_upper)
-
-        rows: list[dict[str, Any]] = []
-
-        if not rows:
-            fallback_dividends = (
-                (
-                    await db.execute(
-                        select(Dividend)
-                        .where(Dividend.symbol == symbol_upper)
-                        .order_by(desc(Dividend.exercise_date), desc(Dividend.cash_year))
-                        .limit(limit * 4)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for item in fallback_dividends:
-                payload = item.raw_data if isinstance(item.raw_data, dict) else {}
-                row = _build_dividend_row_from_payload(
-                    symbol_upper,
-                    {
-                        "ex_date": item.exercise_date,
-                        "record_date": item.record_date,
-                        "payment_date": item.payment_date,
-                        "cash_dividend": item.dividend_value,
-                        "dividend_ratio": item.dividend_rate,
-                        "dividend_type": item.issue_method,
-                        "fiscal_year": item.cash_year,
-                        "description": payload.get("description"),
-                    },
-                )
-                if row:
-                    rows.append(row)
-
-        if not rows:
-            fallback_events = (
-                (
-                    await db.execute(
-                        select(CompanyEvent)
-                        .where(CompanyEvent.symbol == symbol_upper)
-                        .order_by(desc(CompanyEvent.event_date), desc(CompanyEvent.ex_date))
-                        .limit(limit * 4)
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for item in fallback_events:
-                event_type = str(item.event_type or "").strip().lower()
-                description = item.description if isinstance(item.description, str) else None
-                if "div" not in event_type and "cổ tức" not in (description or "").lower():
-                    continue
-                payload = item.raw_data if isinstance(item.raw_data, dict) else {}
-                row = _build_dividend_row_from_payload(
-                    symbol_upper,
-                    {
-                        "ex_date": item.ex_date or item.event_date,
-                        "record_date": item.record_date,
-                        "payment_date": item.payment_date,
-                        "cash_dividend": payload.get("cash_dividend") or item.value,
-                        "stock_dividend": payload.get("stock_dividend"),
-                        "dividend_ratio": payload.get("dividend_ratio"),
-                        "dividend_type": item.event_type,
-                        "description": item.description,
-                        "fiscal_year": payload.get("fiscal_year"),
-                        "issue_year": payload.get("issue_year"),
-                    },
-                )
-                if row:
-                    rows.append(row)
-
-        if release_read and db.in_transaction():
-            await db.rollback()
-        if not rows:
-            try:
-                raw_items = await asyncio.wait_for(
-                    VnstockDividendsFetcher.fetch(symbol=symbol_upper),
-                    timeout=min(10, _provider_timeout_budget()),
-                )
-                for item in raw_items:
-                    payload = item.model_dump(mode="json", by_alias=False)
-                    row = _build_dividend_row_from_payload(symbol_upper, payload)
-                    if row:
-                        rows.append(row)
-            except Exception as exc:
-                reason = "provider deadline exceeded" if isinstance(exc, TimeoutError) else str(exc)
-                provider_error = f"VCI dividends unavailable: {reason}"
-                logger.warning("Dividends provider failed for %s: %s", symbol_upper, reason)
-
-        rows.sort(
-            key=lambda row: row.get("ex_date")
-            or row.get("record_date")
-            or row.get("payment_date")
-            or "",
-            reverse=True,
-        )
-
-        annual_cash_by_year: dict[int, float] = {}
-        for row in rows:
-            year = row.get("year")
-            cash_value = row.get("cash_dividend")
-            if isinstance(year, int) and cash_value is not None:
-                annual_cash_by_year[year] = annual_cash_by_year.get(year, 0.0) + float(cash_value)
-
-        if latest_price not in (None, 0):
-            for row in rows:
-                year = row.get("year")
-                annual_dps = annual_cash_by_year.get(year) if isinstance(year, int) else None
-                if annual_dps is None:
-                    continue
-                row["annual_dps"] = round(annual_dps, 4)
-                normalized_yield = _resolve_dividend_yield_percent(
-                    raw_yield=None,
-                    dps=annual_dps,
-                    latest_price=latest_price,
-                )
-                row["dividend_yield"] = (
-                    round(float(normalized_yield), 4) if normalized_yield is not None else None
-                )
-
-        data = rows[:limit]
-        return StandardResponse(
-            data=data,
-            meta=MetaData(
-                count=len(data),
-                last_data_date=_pick_latest_iso_date_from_rows(
-                    data,
-                    "ex_date",
-                    "record_date",
-                    "payment_date",
-                ),
-            ),
-            error=provider_error,
-        )
-    except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+    return DividendHistoryResponse(
+        data=history.rows,
+        meta=DividendHistoryMeta(count=len(history.rows), limit=limit, coverage=history.coverage),
+    )
 
 
 @router.get("/{symbol}/ownership", response_model=StandardResponse[List[Any]])

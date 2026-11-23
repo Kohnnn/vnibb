@@ -66,19 +66,15 @@ describe('dividend yield formatting', () => {
 
 describe('dividend payout formatting', () => {
   it.each<[Parameters<typeof formatDividendPayout>[0], string]>([
-    [{ cash_dividend: 0 }, 'VND0'],
-    [{ stock_dividend: 0 }, '0.00% stock'],
-    [{ cash_dividend: 0, stock_dividend: 0 }, 'VND0'],
-    [{ cash_dividend: 1000 }, 'VND1,000'],
-    [{ stock_dividend: 10 }, '10.00% stock'],
-    [{ cash_dividend: 1000, stock_dividend: 10 }, 'VND1,000 + 10.00% stock'],
-    [{ cash_dividend: -1000, stock_dividend: 10 }, '-VND1,000 + 10.00% stock'],
-    [{ cash_dividend: 0, dividend_ratio: 10, value: 1000 }, 'VND0'],
-    [{ stock_dividend: 0, dividend_ratio: 10, value: 1000 }, '0.00% stock'],
-    [{ dividend_ratio: 0, value: 1000 }, '0'],
-    [{ dividend_ratio: '10:1', value: 1000 }, '10:1'],
-    [{ dividend_ratio: null, value: 0 }, 'VND0'],
-    [{ cash_dividend: null, stock_dividend: null, dividend_ratio: null, value: null }, 'n/a'],
+    [{ cash_dividend: 1000 }, 'n/a'],
+    [{ stock_dividend: 10 }, 'n/a'],
+    [{ type: 'cash', cash_dividend: 0, currency: 'VND', cash_unit: 'VND/share' }, 'VND0/share'],
+    [{ type: 'cash', cash_dividend: 1000.125, currency: 'VND', cash_unit: 'VND/share' }, 'VND1,000.125/share'],
+    [{ type: 'stock', stock_dividend: 10.125, stock_unit: 'percent_of_existing_shares' }, '10.125% stock'],
+    [{ type: 'stock', cash_dividend: 0, currency: 'VND', cash_unit: 'VND/share', stock_dividend: 10, stock_unit: 'percent_of_existing_shares' }, '10% stock'],
+    [{ type: 'mixed', cash_dividend: 1000, currency: 'VND', cash_unit: 'VND/share', stock_dividend: 10, stock_unit: 'percent_of_existing_shares' }, 'VND1,000/share + 10% stock'],
+    [{ type: 'cash', cash_dividend: -1000, currency: 'VND', cash_unit: 'VND/share' }, 'n/a'],
+    [{ cash_dividend: null, stock_dividend: null }, 'n/a'],
     [{}, 'n/a'],
   ])('preserves reported payout %j as %s', (row, expected) => {
     expect(formatDividendPayout(row)).toBe(expected)

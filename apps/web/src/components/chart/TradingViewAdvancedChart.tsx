@@ -918,7 +918,7 @@ export function TradingViewAdvancedChart({
 
       {eventMarkers.length > 0 ? (
         <div className="pointer-events-none absolute bottom-7 left-3 z-10 flex flex-wrap items-center gap-1 rounded-lg border border-[var(--border-default)] bg-[var(--bg-modal)]/90 px-2 py-1 text-[10px] text-[var(--text-muted)] backdrop-blur">
-          <span>D dividend</span>
+          <span>D reported dividend event</span>
           <span>•</span>
           <span>S split</span>
           <span>•</span>

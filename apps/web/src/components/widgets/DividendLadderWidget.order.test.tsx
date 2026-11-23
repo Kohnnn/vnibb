@@ -3,6 +3,7 @@ import { act, render, screen } from '@testing-library/react'
 import { useDividends } from '@/lib/queries'
 import type { DividendRecord, DividendsResponse } from '@/lib/api'
 import { DividendLadderWidget } from './DividendLadderWidget'
+import { qualifiedDividendHistory } from './__fixtures__/dividendHistory'
 
 jest.mock('@/lib/queries', () => ({ useDividends: jest.fn() }))
 
@@ -10,7 +11,7 @@ const query = jest.mocked(useDividends)
 
 function mockDividends(rows: DividendRecord[]) {
   query.mockReturnValue({
-    data: { data: rows } as DividendsResponse,
+    data: qualifiedDividendHistory(rows),
     isLoading: false,
     isFetching: false,
     error: null,

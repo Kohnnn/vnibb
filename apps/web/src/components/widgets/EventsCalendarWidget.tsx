@@ -12,6 +12,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { formatShortDate } from '@/lib/formatDate';
 import { EMPTY_VALUE } from '@/lib/units';
+import { RAW_DIVIDEND_NOTE, RAW_DIVIDEND_SCOPE } from '@/lib/dividendHistory';
 
 interface EventsCalendarWidgetProps {
     symbol: string;
@@ -103,11 +104,12 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
                 empty: !hasData,
                 apiGroup: '/equity',
                 endpoint: `/equity/${symbol}/events`,
+                basis: RAW_DIVIDEND_NOTE,
                 sourceLabel: 'Company events',
                 lastDataDate: null,
                 fetchedAt: dataUpdatedAt,
                 stale: isFallback,
-                extra: { count: events.length },
+                extra: { count: events.length, dividend_scope: RAW_DIVIDEND_SCOPE },
             }),
         );
     }, [onDataChange, hasData, dataUpdatedAt, isFallback, events.length, symbol]);
@@ -144,6 +146,7 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
                     note="Company events"
                     align="right"
                 />
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">{RAW_DIVIDEND_NOTE}</p>
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-1 pt-2">
@@ -204,20 +207,20 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-3 mt-2 text-[10px] text-[var(--text-muted)]">
-                                    {(event.effective_date || event.event_date) && <span>📅 {formatDate(event.effective_date || event.event_date)}</span>}
-                                    {event.ex_date && <span>Ex: {formatDate(event.ex_date)}</span>}
+                                <div className="flex flex-wrap items-center gap-3 mt-2 text-[10px] text-[var(--text-muted)]">
+                                    {event.event_date && <span>Event: {formatDate(event.event_date)}</span>}
+                                    {event.ex_date && <span>{typeKey === 'DIVIDEND' ? 'Reported ex' : 'Ex'}: {formatDate(event.ex_date)}</span>}
                                 </div>
 
                                 {isExpanded && (
                                     <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] space-y-1 text-xs">
                                         {(event.share_ratio || event.value) && (
                                             <div className="flex justify-between">
-                                                <span className="text-[var(--text-muted)]">Value</span>
+                                                <span className="text-[var(--text-muted)]">{typeKey === 'DIVIDEND' ? 'Reported value' : 'Value'}</span>
                                                 <span className="text-[var(--text-primary)] font-medium">{event.share_ratio || event.value}</span>
                                             </div>
                                         )}
-                                        {event.cash_amount_per_share != null && (
+                                        {typeKey !== 'DIVIDEND' && event.cash_amount_per_share != null && (
                                             <div className="flex justify-between">
                                                 <span className="text-[var(--text-muted)]">Cash / Share</span>
                                                 <span className="text-[var(--text-primary)] font-medium">{event.cash_amount_per_share.toLocaleString()}</span>
@@ -225,13 +228,13 @@ export function EventsCalendarWidget({ symbol, onDataChange }: EventsCalendarWid
                                         )}
                                         {event.record_date && event.record_date !== 'None' && (
                                             <div className="flex justify-between">
-                                                <span className="text-[var(--text-muted)]">Record Date</span>
+                                                <span className="text-[var(--text-muted)]">{typeKey === 'DIVIDEND' ? 'Reported record date' : 'Record Date'}</span>
                                                 <span className="text-[var(--text-secondary)]">{formatDate(event.record_date)}</span>
                                             </div>
                                         )}
                                         {event.payment_date && event.payment_date !== 'None' && (
                                             <div className="flex justify-between">
-                                                <span className="text-[var(--text-muted)]">Payment Date</span>
+                                                <span className="text-[var(--text-muted)]">{typeKey === 'DIVIDEND' ? 'Reported payment date' : 'Payment Date'}</span>
                                                 <span className="text-[var(--text-secondary)]">{formatDate(event.payment_date)}</span>
                                             </div>
                                         )}

@@ -271,6 +271,8 @@ async def test_events_serve_persisted_dates_without_stalled_provider(client, tes
     response = await client.get("/api/v1/equity/VNM/events?limit=5")
 
     assert response.status_code == 200
+    assert response.json()["meta"]["dividend_scope"] == "unreconciled_observations"
+    assert response.json()["meta"]["dividend_history_endpoint"] == "/api/v1/equity/VNM/dividends"
     row = response.json()["data"][0]
     assert row["event_date"] == "2026-09-14"
     assert row["ex_date"] == "2026-09-15"
@@ -686,40 +688,36 @@ async def test_ratio_http_cancelled_support_sql_retains_rows_without_losing_call
 
 
 @pytest.mark.asyncio
-async def test_dividends_serve_persisted_payout_without_provider(client, test_db, monkeypatch):
+async def test_events_fallback_does_not_convert_retained_dividend_value_into_cash(client, test_db):
     test_db.add(Dividend(
-        id=1, symbol="VNM", exercise_date=date(2025, 9, 15), cash_year=2025,
+        id=1, symbol="VNM", payment_date=date(2025, 10, 5),
         dividend_value=1500, dividend_rate=15, issue_method="cash",
-        record_date=date(2025, 9, 16), payment_date=date(2025, 10, 5),
     ))
     await test_db.commit()
-    provider = AsyncMock(side_effect=AssertionError("stored payout must bypass provider"))
-    monkeypatch.setattr(equity.VnstockDividendsFetcher, "fetch", provider)
 
-    response = await client.get("/api/v1/equity/VNM/dividends?limit=5")
+    response = await client.get("/api/v1/equity/VNM/events?limit=5")
 
     assert response.status_code == 200
-    row = response.json()["data"][0]
-    assert row["cash_dividend"] == 1500
-    assert row["dividend_ratio"] == 15
-    assert row["year"] == 2025
-    assert row["payment_date"] == "2025-10-05"
-    provider.assert_not_awaited()
+    body = response.json()
+    assert body["meta"]["dividend_scope"] == "unreconciled_observations"
+    row, = body["data"]
+    assert row["value"] == 1500
+    assert row["cash_amount_per_share"] is None
+    assert row["event_date"] is None and row["ex_date"] is None
+    assert row["effective_date"] == row["payment_date"] == "2025-10-05"
 
 
 @pytest.mark.asyncio
-async def test_dividends_release_owned_read_before_provider_deadline(test_db, monkeypatch):
-    async def stalled_provider(*args, **kwargs):
-        assert not test_db.in_transaction()
-        await asyncio.Event().wait()
+async def test_dividends_distinguish_store_failure_from_successful_empty(client, test_db, monkeypatch):
+    empty = (await client.get("/api/v1/equity/VNM/dividends?limit=5")).json()
+    assert empty["data"] == [] and empty["error"] is None
+    assert empty["meta"]["coverage"]["status"] == "unavailable"
 
-    monkeypatch.setattr(equity.VnstockDividendsFetcher, "fetch", stalled_provider)
-    monkeypatch.setattr(equity, "_provider_timeout_budget", lambda: 0.01)
-
-    response = await equity.get_dividends.__wrapped__("VNM", limit=5, db=test_db)
-
-    assert response.data == []
-    assert response.error == "VCI dividends unavailable: provider deadline exceeded"
+    monkeypatch.setattr(test_db, "scalars", AsyncMock(side_effect=RuntimeError("fixture store failure")))
+    failed = (await client.get("/api/v1/equity/VNM/dividends?limit=5")).json()
+    assert failed["data"] == []
+    assert failed["error"] == "Unable to read retained dividend observations"
+    assert failed["meta"]["coverage"] == empty["meta"]["coverage"]
 
 
 @pytest.mark.asyncio

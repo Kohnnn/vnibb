@@ -18,12 +18,17 @@ from vnibb.core.price_units import persisted_price_record
 from vnibb.core.ratio_units import admitted_ratio_value
 from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.market import MarketSector, SectorPerformance
-from vnibb.models.news import CompanyEvent, CompanyNews, Dividend, InsiderDeal
+from vnibb.models.news import CompanyEvent, CompanyNews, InsiderDeal
 from vnibb.models.stock import Stock, StockIndex, StockPrice
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_quality import is_market_business_day
+from vnibb.services.dividend_history import (
+    RAW_DIVIDEND_SCOPE,
+    DividendCoverage,
+    load_dividend_history,
+)
 from vnibb.services.financial_service import (
     _build_ytd_snapshot,
     admit_statement_rows,
@@ -532,39 +537,7 @@ def _build_company_events_context(rows: list[dict[str, Any]]) -> dict[str, Any] 
     if not events:
         return None
 
-    return {"recent_events": events[:EVENT_LIMIT]}
-
-
-def _build_dividends_context(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-    dividends = [
-        _compact_dict(
-            {
-                "exercise_date": _iso_value(row.get("exercise_date")),
-                "record_date": _iso_value(row.get("record_date")),
-                "payment_date": _iso_value(row.get("payment_date")),
-                "cash_year": row.get("cash_year"),
-                "dividend_rate": _coerce_number(row.get("dividend_rate")),
-                "dividend_value": _coerce_number(row.get("dividend_value")),
-                "issue_method": row.get("issue_method"),
-            }
-        )
-        for row in rows
-    ]
-    dividends = [dividend for dividend in dividends if dividend]
-    if not dividends:
-        return None
-
-    return {
-        "recent_dividends": dividends[:EVENT_LIMIT],
-        "summary": _compact_dict(
-            {
-                "cash_dividend_total_recent": _sum_numeric(
-                    dividends[:EVENT_LIMIT], "dividend_value"
-                ),
-                "latest_issue_method": dividends[0].get("issue_method"),
-            }
-        ),
-    }
+    return {"dividend_scope": RAW_DIVIDEND_SCOPE, "recent_events": events[:EVENT_LIMIT]}
 
 
 def _source_priority_rank(source_system: str | None) -> int:
@@ -608,7 +581,6 @@ def _extract_section_as_of(section: Any) -> str | None:
             ("latest_articles", ("published_date",)),
             ("recent_deals", ("announce_date",)),
             ("recent_events", ("event_date", "ex_date")),
-            ("recent_dividends", ("exercise_date",)),
             ("recent_sessions", ("trade_date",)),
         ):
             items = section.get(list_key)
@@ -731,10 +703,12 @@ def _annotate_source_catalog(
             ("order_flow", "ORDERFLOW", "order_flow", "Order flow summary"),
             ("insider_deals", "INSIDERS", "insider_deals", "Insider transactions summary"),
             ("company_events", "EVENTS", "company_events", "Company events summary"),
-            ("dividends", "DIVIDENDS", "dividends", "Dividend summary"),
+            ("dividends", "DIVIDENDS", "dividends", "Retained dividend observations"),
         ):
             section = snapshot.get(key)
             if not section:
+                continue
+            if key == "dividends" and not section.get("recent_dividends"):
                 continue
             source_id = f"{symbol}-{code}"
             symbol_source_ids.append(source_id)
@@ -992,6 +966,7 @@ class AIContextService:
             "vnibb_mcp_enabled": vnibb_mcp_client_service.is_enabled,
             "notes": {
                 "client_context": "Browser-supplied widget data is untrusted and lower priority than server data.",
+                "dividends": "Use only qualified retained dividend observations for distribution terms. Calendar observations are not payouts. Announced or scheduled terms do not prove payment. Without a certified payout window and dated price basis, do not compute annual DPS or yield.",
                 "market_data": "Server context is served from the VNIBB database.",
             },
             "client_context": sanitized_client_context,
@@ -1031,10 +1006,17 @@ class AIContextService:
             "order_flow",
             "insider_deals",
             "company_events",
-            "dividends",
         ):
             if not merged.get(key):
                 merged[key] = fallback_snapshot.get(key)
+        if isinstance(merged.get("company_events"), dict):
+            merged["company_events"] = {**merged["company_events"], "dividend_scope": RAW_DIVIDEND_SCOPE}
+        # An older MCP sidecar can still return an unqualified sum of raw rows.
+        dividends = merged.get("dividends") or {}
+        if (dividends.get("coverage") or {}).get("scope") != "retained_observations":
+            merged["dividends"] = fallback_snapshot.get("dividends") or {
+                "coverage": DividendCoverage().model_dump(mode="json"), "recent_dividends": [],
+            }
         for key in ("income_statement", "balance_sheet", "cash_flow"):
             merged[key] = fallback_snapshot.get(key)
         merged["source"] = primary_snapshot.get("source") or fallback_snapshot.get("source")
@@ -1202,18 +1184,7 @@ class AIContextService:
                 .scalars()
                 .all()
             )
-            dividend_rows = (
-                (
-                    await session.execute(
-                        select(Dividend)
-                        .where(Dividend.symbol == symbol)
-                        .order_by(desc(Dividend.exercise_date), desc(Dividend.cash_year))
-                        .limit(EVENT_LIMIT)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            dividend_history = await load_dividend_history(session, symbol, EVENT_LIMIT)
 
         if not any(
             [
@@ -1226,7 +1197,8 @@ class AIContextService:
                 order_flow_rows,
                 insider_deal_rows,
                 company_event_rows,
-                dividend_rows,
+                dividend_history.coverage.admitted_count,
+                dividend_history.coverage.discrepancy_count,
             ]
         ):
             return None
@@ -1366,20 +1338,10 @@ class AIContextService:
                     for row in company_event_rows
                 ]
             ),
-            "dividends": _build_dividends_context(
-                [
-                    {
-                        "exercise_date": row.exercise_date,
-                        "record_date": row.record_date,
-                        "payment_date": row.payment_date,
-                        "cash_year": row.cash_year,
-                        "dividend_rate": row.dividend_rate,
-                        "dividend_value": row.dividend_value,
-                        "issue_method": row.issue_method,
-                    }
-                    for row in dividend_rows
-                ]
-            ),
+            "dividends": {
+                "coverage": dividend_history.coverage.model_dump(mode="json"),
+                "recent_dividends": [row.model_dump(mode="json") for row in dividend_history.rows],
+            },
         }
         return snapshot
 

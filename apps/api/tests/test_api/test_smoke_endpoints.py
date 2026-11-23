@@ -584,34 +584,8 @@ async def test_profile_cache_backfills_sector_without_guessing_share_or_cap_scal
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("provider_fails", [False, True])
 @pytest.mark.parametrize("fallback_model", [Dividend, CompanyEvent])
-async def test_dividends_endpoint_falls_back_to_cached_rows(
-    client, test_db, monkeypatch, provider_fails, fallback_model
-):
-    test_db.add(
-        Stock(
-            id=1,
-            symbol="VNM",
-            company_name="Vinamilk",
-            exchange="HOSE",
-        )
-    )
-    test_db.add(
-        StockPrice(
-            id=1,
-            stock_id=1,
-            symbol="VNM",
-            time=date(2026, 3, 14),
-            open=62900,
-            high=63400,
-            low=62300,
-            close=63100,
-            volume=2_050_000,
-            interval="1D",
-            source="vnstock_vnd:VCI",
-        )
-    )
+async def test_dividends_serve_qualified_retained_rows_not_unverified_event_values(client, test_db, fallback_model):
     if fallback_model is Dividend:
         fallback_row = Dividend(
             id=1,
@@ -638,43 +612,39 @@ async def test_dividends_endpoint_falls_back_to_cached_rows(
     test_db.add(fallback_row)
     await test_db.commit()
 
-    class Company:
-        def __init__(self, *, symbol, source):
-            assert symbol == "VNM"
-            assert source == "VCI"
-
-        def events(self):
-            if provider_fails:
-                raise RuntimeError("VCI events unavailable")
-            return None
-
-    monkeypatch.setattr("vnibb.providers.vnstock.runtime.get_company_class", lambda: Company)
+    # Both branches are retained reads; no provider or price fixture is needed.
 
     response = await client.get("/api/v1/equity/VNM/dividends?limit=5")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["meta"]["count"] == 1
-    assert payload["meta"]["last_data_date"] == "2025-10-05"
-    assert payload["data"][0]["cash_dividend"] == 4300.0
-    assert payload["data"][0]["dividend_ratio"] == 43.0
-    assert payload["data"][0]["type"] == "cash"
-    assert payload["data"][0]["annual_dps"] == 4300.0
-    assert payload["data"][0]["dividend_yield"] == pytest.approx(6.8146, rel=1e-4)
+    assert payload["meta"]["last_data_date"] is None
+    coverage = payload["meta"]["coverage"]
+    if fallback_model is Dividend:
+        row, = payload["data"]
+        assert row["cash_dividend"] == 4300.0
+        assert row["dividend_ratio"] == 43.0  # percent of par, not yield
+        assert row["type"] == "cash" and row["fiscal_year"] == 2025
+        assert row["annual_dps"] is None and row["dividend_yield"] is None
+        assert coverage["latest_covered_date"] == "2025-10-05"
+    else:
+        assert payload["data"] == []
+        assert coverage["status"] == "unavailable"
+        assert coverage["discrepancies"][0]["code"] == "unverified_event"
     assert payload["error"] is None
 
 
 @pytest.mark.asyncio
-async def test_dividends_endpoint_propagates_provider_cancellation(test_db, monkeypatch):
+async def test_dividends_endpoint_propagates_store_cancellation(test_db, monkeypatch):
     from vnibb.api.v1 import equity
 
-    fetch = AsyncMock(side_effect=asyncio.CancelledError())
-    monkeypatch.setattr(equity.VnstockDividendsFetcher, "fetch", fetch)
+    read_rows = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(test_db, "scalars", read_rows)
 
     with pytest.raises(asyncio.CancelledError):
-        await equity.get_dividends.__wrapped__(symbol="VNM", limit=5, db=test_db)
+        await equity.get_dividends(symbol="VNM", limit=5, db=test_db)
 
-    fetch.assert_awaited_once_with(symbol="VNM")
+    read_rows.assert_awaited_once()
     assert not test_db.in_transaction()
 
 

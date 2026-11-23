@@ -6,6 +6,7 @@ import type { DividendsResponse } from '@/lib/api'
 import type { CompanyNewsResponse } from '@/types/equity'
 import { useCompanyNews, useDividends, useInsiderDeals } from '@/lib/queries'
 import { NewsCorporateActionsWidget } from './NewsCorporateActionsWidget'
+import { cashTerms, qualifiedDividendHistory, stockTerms } from './__fixtures__/dividendHistory'
 
 jest.mock('@/lib/queries', () => ({
   useCompanyNews: jest.fn(),
@@ -32,40 +33,47 @@ function queryResult<T>(
   } as unknown as UseQueryResult<T, Error>
 }
 
-test.each<[number | null | undefined, string]>([
-  [0.25, 'Cash • 0.25%'],
-  [0, 'Cash • 0.00%'],
-  [1, 'Cash • 1.00%'],
-  [null, 'Cash'],
-  [undefined, 'Cash'],
-])('renders canonical dividend yield %s without scaling or inventing missing values', (dividendYield, label) => {
-  mockUseCompanyNews.mockReturnValue(queryResult({ symbol: 'VNM', count: 0, data: [] }))
+test('shows the HPG coverage gap instead of implying a current yield from an old record', () => {
+  mockUseCompanyNews.mockReturnValue(queryResult({ symbol: 'HPG', count: 0, data: [] }))
   mockUseInsiderDeals.mockReturnValue(queryResult([]))
-  mockUseDividends.mockReturnValue(queryResult<DividendsResponse>({
-    data: [{ cash_dividend: 1000, dividend_type: 'cash', dividend_yield: dividendYield }],
-  }))
+  mockUseDividends.mockReturnValue(queryResult(qualifiedDividendHistory([{
+    ...cashTerms, cash_dividend: 500, dividend_type: 'cash', observation_basis: 'retained_dividend_record',
+    ex_date: '2022-06-17', payment_date: '2022-07-06',
+  }], {
+    latest_covered_date: '2022-07-06', latest_covered_date_type: 'payment_date', discrepancy_count: 1,
+    discrepancies: [{
+      code: 'unverified_event', dataset: 'company_events', observation_id: 10,
+      observed_date: '2026-05-11', observed_date_type: 'ex_date', distribution_type: 'cash', fiscal_year: 2025,
+    }],
+  })))
 
-  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="VNM" />)
+  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
 
-  expect(screen.getByText(label)).toBeInTheDocument()
-  expect(screen.getByText('VND1,000')).toBeInTheDocument()
   expect(screen.getByText('Corporate Actions')).toBeInTheDocument()
+  expect(screen.getByText('VND500/share')).toBeInTheDocument()
+  expect(screen.getByText('Partial dividend coverage. Latest covered payment date: 2022-07-06.')).toBeInTheDocument()
+  const summary = screen.getByText('1 dividend discrepancy')
+  expect(summary.closest('details')).not.toHaveAttribute('open')
+  expect(summary).toBeInTheDocument()
+  expect(screen.getByText('Reported ex date 2026-05-11: Calendar cash (FY 2025) — event not verified.')).toBeInTheDocument()
+  expect(screen.getByText(/Annual DPS and yield unavailable/)).toBeInTheDocument()
+  expect(screen.queryByText(/2\.35%/)).not.toBeInTheDocument()
 })
 
 test.each([
-  [0, 'stock', '10.00% stock'],
-  [1000, 'mixed', 'VND1,000 + 10.00% stock'],
+  [0, 'stock', '10% stock'],
+  [1000, 'mixed', 'VND1,000/share + 10% stock'],
 ] as const)('renders reported stock payout with %s cash (%s)', (cashDividend, type, payout) => {
   mockUseCompanyNews.mockReturnValue(queryResult({ symbol: 'VNM', count: 0, data: [] }))
   mockUseInsiderDeals.mockReturnValue(queryResult([]))
-  mockUseDividends.mockReturnValue(queryResult<DividendsResponse>({
-    data: [{ cash_dividend: cashDividend, stock_dividend: 10, type }],
-  }))
+  mockUseDividends.mockReturnValue(queryResult(qualifiedDividendHistory([
+    { ...cashTerms, ...stockTerms, cash_dividend: cashDividend, stock_dividend: 10, type },
+  ])))
 
   render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="VNM" />)
 
   expect(screen.getByText(payout)).toBeInTheDocument()
-  expect(screen.queryByText('VND0')).not.toBeInTheDocument()
+  expect(screen.queryByText('VND0/share')).not.toBeInTheDocument()
 })
 
 test('shows no ranking number for a sector overlap but keeps direct-company rank', () => {
@@ -143,9 +151,9 @@ test.each(['dividend', 'insider'] as const)('top-level retry recovers terminal %
         refetch: refetchDividends,
       })
     }
-    return queryResult<DividendsResponse>({
-      data: failedSection === 'dividend' ? [{ cash_dividend: 1000, dividend_type: 'cash' }] : [],
-    }, { refetch: refetchDividends })
+    return queryResult(qualifiedDividendHistory(failedSection === 'dividend'
+      ? [{ ...cashTerms, cash_dividend: 1000, dividend_type: 'cash' }] : [],
+    ), { refetch: refetchDividends })
   })
   mockUseInsiderDeals.mockImplementation(() => {
     if (failedSection === 'insider' && !insiderRecovered) {
@@ -174,7 +182,7 @@ test.each(['dividend', 'insider'] as const)('top-level retry recovers terminal %
   fireEvent.click(screen.getByRole('button', { name: 'Try Again' }))
   rerender(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="VNM" />)
 
-  expect(screen.getByText(failedSection === 'dividend' ? 'VND1,000' : 'Nguyen Van A')).toBeInTheDocument()
+  expect(screen.getByText(failedSection === 'dividend' ? 'VND1,000/share' : 'Nguyen Van A')).toBeInTheDocument()
   expect(refetchNews).toHaveBeenCalledTimes(1)
   expect(refetchDividends).toHaveBeenCalledTimes(1)
   expect(refetchInsider).toHaveBeenCalledTimes(1)

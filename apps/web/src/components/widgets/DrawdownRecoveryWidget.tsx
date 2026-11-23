@@ -179,7 +179,7 @@ export function DrawdownRecoveryWidget({ symbol, onDataChange }: DrawdownRecover
             <div className="mb-2 flex items-center justify-between">
               <div className="text-[10px] uppercase tracking-widest text-[var(--text-muted)]">Underwater Curve</div>
               <div className="text-[10px] text-[var(--text-secondary)]">
-                {eventMarkers.length > 0 ? 'Current vs 52W high · D/S/R = corporate actions' : 'Current vs 52W high'}
+                {eventMarkers.length > 0 ? 'Current vs 52W high · D/S/R = reported corporate events' : 'Current vs 52W high'}
               </div>
             </div>
             <ChartMountGuard className="flex-1 min-h-[160px]" minHeight={160}>

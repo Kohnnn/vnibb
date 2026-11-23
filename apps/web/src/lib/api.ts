@@ -1439,25 +1439,60 @@ export interface InsiderDealsResponse {
 export interface DividendRecord {
     symbol?: string;
     source?: string | null;
+    source_event_id?: string | null;
+    revision?: number | null;
     source_url?: string | null;
-    url?: string | null;
+    observation_basis?: 'retained_dividend_record' | 'verified_event';
+    dataset?: 'dividends' | 'company_events';
+    observation_id?: number;
+    status?: 'observed' | 'announced' | 'scheduled' | 'confirmed' | 'paid';
+    published_at?: string | null;
+    event_date?: string | null;
     ex_date?: string | null;
     record_date?: string | null;
     payment_date?: string | null;
     type?: string | null;
     dividend_type?: string | null;
-    raw_dividend_type?: string | null;
     cash_dividend?: number | null;
+    currency?: 'VND' | null;
+    cash_unit?: 'VND/share' | null;
     stock_dividend?: number | null;
-    dividend_ratio?: number | string | null;
-    value?: number | null;
+    stock_unit?: 'percent_of_existing_shares' | null;
+    dividend_ratio?: number | null;
     fiscal_year?: number | null;
     issue_year?: number | null;
     year?: number | null;
-    annual_dps?: number | null;
-    /** Canonical percent points, computed by the dividends endpoint as annual DPS / VND price * 100. */
-    dividend_yield?: number | null;
+    annual_dps?: null;
+    dividend_yield?: null;
     description?: string | null;
+}
+
+export type DividendActionDate = 'ex_date' | 'record_date' | 'payment_date';
+
+export interface DividendDiscrepancy {
+    code: string;
+    dataset: 'dividends' | 'company_events';
+    observation_id: number;
+    source?: string | null;
+    source_event_id?: string | null;
+    revision?: number | null;
+    distribution_type?: 'cash' | 'stock' | 'mixed' | null;
+    fiscal_year?: number | null;
+    observed_date?: string | null;
+    observed_date_type?: DividendActionDate | 'event_date' | 'publication_date' | null;
+}
+
+export interface DividendCoverage {
+    scope: 'retained_observations';
+    status: 'partial' | 'unavailable';
+    latest_covered_date: string | null;
+    latest_covered_date_type: DividendActionDate | null;
+    admitted_count: number;
+    discrepancy_count: number;
+    discrepancies: DividendDiscrepancy[];
+    payout_window_certified: false;
+    annual_dps_unavailable_reason: 'uncertified_payout_window';
+    yield_unavailable_reason: 'uncertified_payout_window_and_price_basis';
 }
 
 export interface DividendsResponse {
@@ -1465,6 +1500,8 @@ export interface DividendsResponse {
     data: DividendRecord[];
     meta?: {
         count?: number;
+        limit?: number;
+        coverage?: DividendCoverage;
     };
     error?: string | null;
 }

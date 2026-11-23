@@ -129,6 +129,8 @@ export interface CompanyEventsResponse {
   data: CompanyEventData[];
   meta?: {
     count: number;
+    dividend_scope?: 'unreconciled_observations';
+    dividend_history_endpoint?: string;
   };
   error?: string | null;
 }
@@ -217,6 +219,7 @@ export interface FundamentalAnalysisResponse {
   meta?: {
     count?: number;
     last_data_date?: string | null;
+    events?: NonNullable<CompanyEventsResponse['meta']>;
   };
   error?: string | null;
 }

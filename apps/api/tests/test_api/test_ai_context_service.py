@@ -8,7 +8,6 @@ import pytest
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.services.ai_context_service import (
     AIContextService,
-    _build_dividends_context,
     _build_flow_context,
     _build_price_context,
 )
@@ -177,20 +176,6 @@ def test_build_flow_context_summarizes_recent_sessions():
     assert context["summary"]["net_value_5d"] == 13.0
     assert context["summary"]["positive_sessions_20d"] == 2
     assert context["summary"]["negative_sessions_20d"] == 1
-
-
-def test_build_dividends_context_keeps_recent_items_and_summary():
-    context = _build_dividends_context(
-        [
-            {"exercise_date": "2026-03-20", "dividend_value": 1200, "issue_method": "cash"},
-            {"exercise_date": "2025-09-20", "dividend_value": 800, "issue_method": "cash"},
-        ]
-    )
-
-    assert context is not None
-    assert context["summary"]["cash_dividend_total_recent"] == 2000.0
-    assert context["summary"]["latest_issue_method"] == "cash"
-
 
 
 def test_price_context_normalizes_full_orm_lineage_before_returns():

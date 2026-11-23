@@ -40,6 +40,7 @@ from vnibb.models.sync_status import SyncStatus
 from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderFlowDaily
 from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.ai_context_service import AIContextService
+from vnibb.services.dividend_history import RAW_DIVIDEND_SCOPE, load_dividend_history
 from vnibb.services.financial_service import admit_statement_rows
 from vnibb.services.matrix_service import (
     MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED,
@@ -66,6 +67,8 @@ Guardrails:
 - User-owned tables are excluded from generic queries. Matrix selections require the owner's
   verified Supabase JWT on each HTTP request and explicit source export rights.
 - Include freshness and source notes when summarizing data for downstream agents.
+- Use `get_dividend_history` for dividend terms and coverage. Corporate timeline and raw tables
+  are unreconciled observations, not confirmed payouts. Do not derive yields from partial history.
 - Provider execution is forbidden. Missing data stays unavailable; never fetch premium or
   banned provider data. Canonical financial evidence uses IQ primary/free VCI only.
 """.strip()
@@ -187,7 +190,7 @@ COLLECTION_SPECS: dict[str, CollectionSpec] = {
     ),
     "company_events": CollectionSpec(
         collection="company_events",
-        description="Corporate events such as AGM, dividends, and splits.",
+        description="Raw corporate events; dividend observations are not reconciled.",
         default_order="event_date",
         default_desc=True,
         max_limit=25,
@@ -197,7 +200,7 @@ COLLECTION_SPECS: dict[str, CollectionSpec] = {
     ),
     "dividends": CollectionSpec(
         collection="dividends",
-        description="Dividend history and exercise dates.",
+        description="Raw dividend records, not reconciled history. Use get_dividend_history for qualified terms.",
         default_order="exercise_date",
         default_desc=True,
         max_limit=25,
@@ -1522,6 +1525,8 @@ async def query_database_collection_data(
         **({"financial_coverage": "SQL only; Mongo observations and overwritten same-period sources are not compared"}
            if spec.collection in STATEMENT_COLLECTIONS.values() else {}),
         **(_price_series_metadata(rows) if spec.collection == "stock_prices" else {}),
+        **({"dividend_scope": RAW_DIVIDEND_SCOPE}
+           if spec.collection in {"dividends", "company_events"} else {}),
     }
 
 
@@ -2108,8 +2113,36 @@ async def get_company_news(symbol: str, limit: Annotated[int, Field(ge=0, json_s
 
 
 @mcp.tool()
+async def get_dividend_history(
+    symbol: str, limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 50})] = 20,
+) -> dict[str, Any]:
+    """Read the same admitted dividend terms and partial coverage as the equity API.
+
+    Cash and stock are distinct. Announced payment dates do not confirm receipt.
+    Annual DPS and yield are unavailable without a certified payout window and price basis.
+    """
+    await _ensure_database_available()
+    normalized = normalize_symbol_input(symbol)
+    if not normalized:
+        raise ValueError("A stock symbol is required")
+    bounded_limit = _coerce_limit(limit, 50)
+    async with async_session_maker() as session:
+        history = await load_dividend_history(session, normalized, bounded_limit)
+    return {
+        "symbol": normalized,
+        "source": "postgres:dividends,company_events",
+        "retrieved_at": datetime.now(UTC).isoformat(),
+        "limit": bounded_limit,
+        "max_limit": 50,
+        "row_count": len(history.rows),
+        "coverage": history.coverage.model_dump(mode="json"),
+        "items": [row.model_dump(mode="json") for row in history.rows],
+    }
+
+
+@mcp.tool()
 async def get_corporate_timeline(symbol: str, limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 30})] = 15) -> dict[str, Any]:
-    """Get a merged VNIBB database timeline across company events, dividends, and insider deals.
+    """Get a timeline of unreconciled company events, dividends, and insider deals.
 
     Each source is capped on its own timeline effective date before the merge:
     the event date, the dividend exercise date with the payment date as fallback
@@ -2174,6 +2207,8 @@ async def get_corporate_timeline(symbol: str, limit: Annotated[int, Field(ge=0, 
         "row_count": len(timeline),
         "limit": bounded_limit,
         "max_limit": 30,
+        "dividend_scope": RAW_DIVIDEND_SCOPE,
+        "dividend_history_tool": "get_dividend_history",
         "selection": {
             "order": "effective_date_desc",
             "dividend_date_rule": "exercise_date, else payment_date",
