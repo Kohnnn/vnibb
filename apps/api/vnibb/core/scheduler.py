@@ -320,7 +320,9 @@ async def _run_guarded_job(
             else:
                 result = await guarded_runner
             stages = list(result.values()) if isinstance(result, dict) else [result]
-            if any(getattr(stage, "success", True) is False for stage in stages):
+            if (isinstance(result, dict) and result.get("success") is False) or any(
+                getattr(stage, "success", True) is False for stage in stages
+            ):
                 raise RuntimeError("sync returned unsuccessful stage results")
             elapsed = (datetime.utcnow() - started_at).total_seconds()
             pending = sum(getattr(stage, "pending_count", 0) for stage in stages)
@@ -848,7 +850,7 @@ def configure_scheduler():
 
             logger.info("Starting scheduled RS rating calculation...")
             service = RSRatingService()
-            await service.calculate_all_rs_ratings()
+            return await service.calculate_all_rs_ratings()
 
         await _run_guarded_job("rs_rating_sync", _run, RS_RATING_TIMEOUT_SECONDS)
 
