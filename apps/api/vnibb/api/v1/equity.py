@@ -42,7 +42,9 @@ from vnibb.models.financials import BalanceSheet, CashFlow, IncomeStatement
 from vnibb.models.news import CompanyEvent, Dividend
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
-from vnibb.models.trading import FinancialRatio, ForeignTrading, OrderbookSnapshot, OrderFlowDaily
+from vnibb.models.trading import (
+    FinancialRatio, ForeignTrading, IntradayTrade, OrderbookSnapshot, OrderFlowDaily,
+)
 from vnibb.providers.vnstock.company_events import (
     CompanyEventsQueryParams,
     VnstockCompanyEventsFetcher,
@@ -80,7 +82,12 @@ from vnibb.providers.vnstock.foreign_trading import (
     VnstockForeignTradingFetcher,
 )
 from vnibb.providers.vnstock.general_rating import VnstockGeneralRatingFetcher
-from vnibb.providers.vnstock.intraday import IntradayQueryParams, VnstockIntradayFetcher
+from vnibb.providers.vnstock.intraday import (
+    INTRADAY_PROVIDER_LIMIT,
+    IntradayQueryParams,
+    IntradayTradeData,
+    VnstockIntradayFetcher,
+)
 from vnibb.providers.vnstock.officers import OfficersQueryParams, VnstockOfficersFetcher
 from vnibb.providers.vnstock.ownership import VnstockOwnershipFetcher
 from vnibb.providers.vnstock.price_depth import VnstockPriceDepthFetcher
@@ -93,7 +100,7 @@ from vnibb.providers.vnstock.stock_quote import StockQuoteData, VnstockStockQuot
 from vnibb.providers.vnstock.subsidiaries import SubsidiariesQueryParams, VnstockSubsidiariesFetcher
 from vnibb.providers.vnstock.trading_stats import TradingStatsData, VnstockTradingStatsFetcher
 from vnibb.services import statement_admission as _statement_admission
-from vnibb.services.cache_manager import CacheManager
+from vnibb.services.cache_manager import CacheManager, snapshot_session_coverage
 from vnibb.services.comparison_service import comparison_service
 from vnibb.services.data_pipeline import (
     CACHE_TTL_ORDERBOOK,
@@ -123,7 +130,20 @@ from vnibb.services.fundamental_valuation import (
 from vnibb.services.fundamental_valuation import (
     SCHEMA_VERSION as FUNDAMENTAL_SCHEMA_VERSION,
 )
-from vnibb.services.market_session import expected_market_session, verified_market_closure
+from vnibb.services.intraday_availability import (
+    CoveredTradeWindow,
+    Delivery,
+    FEED_ERROR_COPY,
+    FeedStatus,
+    depth_observation,
+    intraday_feed,
+    latest_trade_observation,
+    observation_time,
+    provider_feed_failure,
+)
+from vnibb.services.market_session import (
+    expected_market_session, intraday_market_session, verified_market_closure,
+)
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 from vnibb.services.vietcap_client import VietcapClient
@@ -6088,15 +6108,8 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
     entries: List[dict[str, Any]] = []
 
     def _meaningful_price(value: Any) -> bool:
-        # Treat 0 (or None) as "no price". Provider feeds sometimes emit 0
-        # for a level that has only volume; if we use 0 as a real price,
-        # `bid OR ask` fallback below picks the wrong side.
-        if value is None:
-            return False
-        try:
-            return float(value) > 0
-        except (TypeError, ValueError):
-            return False
+        price = _coerce_optional_float(value)
+        return price is not None and math.isfinite(price) and price > 0
 
     for level in range(1, 4):
         bid_level = _depth_value(depth_data, f"bid_{level}")
@@ -6115,9 +6128,9 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
             entries.append(
                 {
                     "level": level,
-                    "price": price,
-                    "bid_vol": bid_vol,
-                    "ask_vol": ask_vol,
+                    "price": _coerce_optional_float(price),
+                    "bid_vol": _finite_depth_number(bid_vol),
+                    "ask_vol": _finite_depth_number(ask_vol),
                 }
             )
 
@@ -6138,9 +6151,9 @@ def _normalize_orderbook_entries(depth_data: Any) -> List[dict[str, Any]]:
             entries.append(
                 {
                     "level": len(entries) + 1,
-                    "price": price,
-                    "bid_vol": bid_vol,
-                    "ask_vol": ask_vol,
+                    "price": _coerce_optional_float(price),
+                    "bid_vol": _finite_depth_number(bid_vol),
+                    "ask_vol": _finite_depth_number(ask_vol),
                 }
             )
 
@@ -6226,26 +6239,16 @@ def _normalize_orderbook_units(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _orderbook_payload_has_prices(payload: dict[str, Any] | None) -> bool:
-    if not isinstance(payload, dict):
-        return False
 
-    last_price = payload.get("last_price")
-    try:
-        if last_price is not None and float(last_price) > 0:
-            return True
-    except (TypeError, ValueError):
-        pass
+def _finite_depth_number(value: Any) -> float | None:
+    number = _coerce_optional_float(value)
+    return number if number is not None and math.isfinite(number) else None
 
-    for entry in payload.get("entries") or []:
-        if not isinstance(entry, dict):
-            continue
-        try:
-            if entry.get("price") is not None and float(entry.get("price")) > 0:
-                return True
-        except (TypeError, ValueError):
-            continue
-    return False
+def _orderbook_payload_has_prices(payload: dict[str, Any]) -> bool:
+    return any(
+        isinstance(entry, dict) and (price := _finite_depth_number(entry.get("price"))) is not None and price > 0
+        for entry in payload.get("entries") or []
+    )
 
 
 # Depth acquisition receipts travel with the payload so consumers can tell an
@@ -6278,7 +6281,7 @@ def _apply_orderbook_reference_price(
     reference_price: Any,
 ) -> dict[str, Any]:
     price = _coerce_optional_float(reference_price)
-    if price is None or price <= 0:
+    if price is None or not math.isfinite(price) or price <= 0:
         return payload
 
     priced_entries: list[dict[str, Any]] = []
@@ -6293,15 +6296,7 @@ def _apply_orderbook_reference_price(
         )
 
     if not priced_entries:
-        priced_entries = [
-            {
-                "level": 1,
-                "price": price,
-                "bid_vol": None,
-                "ask_vol": None,
-                "price_status": "reference",
-            }
-        ]
+        return payload
 
     last_price = _coerce_optional_float(payload.get("last_price"))
     if last_price is None or last_price <= 0:
@@ -6313,8 +6308,6 @@ def _apply_orderbook_reference_price(
             "entries": priced_entries,
             "last_price": last_price,
             "reference_price": price,
-            "is_stale": True,
-            "market_status": "closed",
             "price_source": "latest_price",
         }
     )
@@ -6335,10 +6328,10 @@ def _build_orderbook_payload(
     payload = {
         "symbol": symbol.upper(),
         "entries": entries,
-        "total_bid_volume": _depth_value(depth_data, "total_bid_volume"),
-        "total_ask_volume": _depth_value(depth_data, "total_ask_volume"),
-        "last_price": _depth_value(depth_data, "last_price"),
-        "last_volume": _depth_value(depth_data, "last_volume"),
+        "total_bid_volume": _finite_depth_number(_depth_value(depth_data, "total_bid_volume")),
+        "total_ask_volume": _finite_depth_number(_depth_value(depth_data, "total_ask_volume")),
+        "last_price": _finite_depth_number(_depth_value(depth_data, "last_price")),
+        "last_volume": _finite_depth_number(_depth_value(depth_data, "last_volume")),
         "snapshot_time": snapshot_time,
     }
     for key in _DEPTH_RECEIPT_KEYS:
@@ -6356,7 +6349,7 @@ def _build_orderbook_payload_from_snapshot(snapshot: OrderbookSnapshot) -> dict[
     payload = _build_orderbook_payload(
         snapshot.symbol,
         snapshot.price_depth or {},
-        snapshot_time=_serialize_meta_datetime(snapshot.snapshot_time),
+        snapshot_time=snapshot.snapshot_time.isoformat(),
     )
     if payload.get("entries") or _is_explicit_empty_depth_batch(payload):
         return payload
@@ -6449,116 +6442,181 @@ async def _cache_orderbook_payload(symbol: str, payload: dict[str, Any]) -> None
         return
 
 
-async def _get_orderbook_payload(symbol: str, db: AsyncSession) -> dict[str, Any]:
-    # A cached payload may carry an auditable depth receipt even without prices;
-    # _load_cached_orderbook_payload already returned None when the cache held
-    # neither prices nor an explicit batch receipt.
+async def _get_orderbook_payload(
+    symbol: str, db: AsyncSession,
+) -> tuple[dict[str, Any], FeedStatus, str | None, Delivery]:
     cached_payload = await _load_cached_orderbook_payload(symbol)
     if cached_payload is not None:
-        return cached_payload
+        status = "empty" if _is_explicit_empty_depth_batch(cached_payload) else "available"
+        return cached_payload, status, None, "cache"
 
+    payload: dict[str, Any] = {"symbol": symbol, "entries": []}
     try:
+        if not settings.orderbook_enabled:
+            raise ProviderError("Depth disabled", provider="vnstock", capability="price_depth_unavailable")
         depth = await asyncio.wait_for(
-            VnstockPriceDepthFetcher.fetch(symbol=symbol.upper(), source=settings.vnstock_source),
-            timeout=30,
+            VnstockPriceDepthFetcher.fetch(symbol=symbol, source=settings.vnstock_source), timeout=30,
         )
-    except Exception:
-        # Live fetch failed entirely: surface last DB snapshot as stale.
-        snapshot_payload = await _load_orderbook_snapshot_from_db(db, symbol)
-        if snapshot_payload is not None:
-            snapshot_payload = {
-                **snapshot_payload,
-                "is_stale": True,
-                "market_status": "closed",
-            }
-            return snapshot_payload
-        raise
+        payload = _build_orderbook_payload(symbol, depth, snapshot_time=datetime.now(UTC).isoformat())
+    except Exception as exc:
+        status, error = provider_feed_failure(exc)
+    else:
+        if _orderbook_payload_has_prices(payload):
+            await _cache_orderbook_payload(symbol, payload)
+            return payload, "available", None, "provider"
+        status, error = (
+            ("empty", None) if _is_explicit_empty_depth_batch(payload)
+            or (_depth_value(depth, "raw_levels") == [] and not payload["entries"])
+            else ("unusable", FEED_ERROR_COPY["unusable"])
+        )
 
-    payload = _build_orderbook_payload(
-        symbol,
-        depth,
-        snapshot_time=datetime.utcnow().isoformat(),
-    )
-
-    # Live fetch succeeded but returned no usable prices: market is likely
-    # closed. Some providers still emit bid/ask volumes with null/0 prices,
-    # which is worse than the previous session's priced snapshot.
-    if not payload.get("entries") or not _orderbook_payload_has_prices(payload):
-        snapshot_payload = await _load_orderbook_snapshot_from_db(db, symbol)
-        if snapshot_payload is not None and _orderbook_payload_has_prices(snapshot_payload):
-            snapshot_payload = {
-                **snapshot_payload,
-                "is_stale": True,
-                "market_status": "closed",
-            }
-            return snapshot_payload
-
-        reference_price = await _get_latest_price(db, symbol.upper())
-        reference_payload = _apply_orderbook_reference_price(payload, reference_price)
-        if _orderbook_payload_has_prices(reference_payload):
-            return reference_payload
-
-        return {
-            **payload,
-            "is_stale": True,
-            "market_status": "closed",
-            "price_source": "unavailable",
-        }
-
-    await _cache_orderbook_payload(symbol, payload)
-    return payload
-
-
-@router.get("/{symbol}/price-depth", response_model=StandardResponse[dict[str, Any]])
-async def get_price_depth(symbol: str, db: AsyncSession = Depends(get_db)):
     try:
-        payload = await _get_orderbook_payload(symbol, db)
-        return StandardResponse(
-            data=payload,
-            meta=MetaData(
-                count=len(payload.get("entries", [])),
-                last_data_date=_pick_optional_text(payload.get("snapshot_time")),
-            ),
-        )
-    except asyncio.TimeoutError:
-        return StandardResponse(
-            data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
-        )
-    except Exception as e:
-        return StandardResponse(data={"symbol": symbol.upper(), "entries": []}, error=str(e))
+        snapshot = await _load_orderbook_snapshot_from_db(db, symbol)
+        if snapshot is not None and (_orderbook_payload_has_prices(snapshot) or _is_explicit_empty_depth_batch(snapshot)):
+            return snapshot, status, error, "retained"
+        if status == "unusable" and payload["entries"]:
+            reference = _apply_orderbook_reference_price(payload, await _get_latest_price(db, symbol))
+            if _orderbook_payload_has_prices(reference):
+                return reference, status, error, "reference"
+    except Exception as exc:
+        logger.warning("Retained depth read failed for %s: %s", symbol, type(exc).__name__)
+        await db.rollback()
+    return {**payload, "entries": [], "price_source": "unavailable"}, status, error, "provider"
 
 
 @router.get("/{symbol}/orderbook", response_model=StandardResponse[dict[str, Any]])
 async def get_orderbook(symbol: str, db: AsyncSession = Depends(get_db)):
-    try:
-        payload = await _get_orderbook_payload(symbol, db)
-        return StandardResponse(
-            data=payload,
-            meta=MetaData(
-                count=len(payload.get("entries", [])),
-                last_data_date=_pick_optional_text(payload.get("snapshot_time")),
-            ),
-        )
-    except asyncio.TimeoutError:
-        return StandardResponse(
-            data={"symbol": symbol.upper(), "entries": []}, error="Request timed out"
-        )
-    except Exception as e:
-        return StandardResponse(data={"symbol": symbol.upper(), "entries": []}, error=str(e))
+    return await get_price_depth(symbol, db)
 
 
-@router.get("/{symbol}/intraday", response_model=StandardResponse[List[Any]])
-async def get_intraday(symbol: str, limit: int = Query(200, ge=1, le=1000)):
+@router.get("/{symbol}/price-depth", response_model=StandardResponse[dict[str, Any]])
+async def get_price_depth(symbol: str, db: AsyncSession = Depends(get_db)):
+    symbol = symbol.strip().upper()
+    payload, status, error, delivery = await _get_orderbook_payload(symbol, db)
+    now = datetime.now(UTC)
+    session = intraday_market_session(now)
+    receipt = payload.get("current_depth")
+    evidence = receipt if isinstance(receipt, dict) else {}
+    source_as_of = None if delivery == "reference" else depth_observation(
+        payload.get("observed_at") or evidence.get("observed_at"),
+        evidence.get("timestamp_meaning") or payload.get("timestamp_meaning"),
+        now=now,
+    )
+    fallback = delivery in {"retained", "reference"}
+    snapshot_at = observation_time(payload.get("snapshot_time"), naive_tz=UTC)
+    provider = f"vnstock:{settings.vnstock_source}"
+    feed = intraday_feed(
+        status,
+        requested_source=provider,
+        source={"cache": "orderbook_cache", "retained": "postgres:orderbook_snapshots",
+                "reference": "retained_close"}.get(delivery, provider),
+        source_as_of=source_as_of,
+        fetched_at=now,
+        snapshot_at=snapshot_at.isoformat() if snapshot_at else None,
+        delivery=delivery,
+        fallback=fallback,
+    )
+    return StandardResponse(
+        data={**payload, "is_stale": fallback, "market_status": session["state"]},
+        meta=MetaData(count=len(payload["entries"]), last_data_date=source_as_of, feed=feed, market_session=session),
+        error=error,
+    )
+
+
+async def _qualified_zero_trade_window(db: AsyncSession, symbol: str, now: datetime) -> CoveredTradeWindow | None:
+    current_date = now.astimezone(ZoneInfo(settings.vn_timezone)).date()
+    if expected_market_session(now=now) != current_date:
+        return None
+    snapshot = (await db.execute(select(ScreenerSnapshot).where(
+        ScreenerSnapshot.symbol == symbol, ScreenerSnapshot.snapshot_date == current_date,
+    ))).scalar_one_or_none()
+    if snapshot is None or snapshot_session_coverage(snapshot, current_date, now) != "no_trade":
+        return None
+
+    # SQL stores ICT wall clocks. Check the whole session independently of the response page.
+    start = datetime.combine(current_date, time.min)
+    conflict = await db.scalar(select(IntradayTrade.id).where(
+        IntradayTrade.symbol == symbol,
+        IntradayTrade.trade_time >= start,
+        IntradayTrade.trade_time < start + timedelta(days=1),
+    ).limit(1))
+    if conflict is not None:
+        return None
+
+    mongo = get_mongo_market_data_service()
+    # The service's disabled/unconfigured state is a standalone SQL deployment.
+    # An enabled read failure instead propagates to the caller without admitting zero.
+    if mongo.enabled and await mongo.tape_session_has_retained_trades(symbol, current_date, now=now):
+        return None
+    return {"session_date": current_date.isoformat(), "trade_count": 0, "basis": "vietcap_board"}
+
+
+async def _load_retained_intraday_trades(db: AsyncSession, symbol: str, limit: int) -> list[IntradayTradeData]:
+    records = await db.execute(select(IntradayTrade).where(IntradayTrade.symbol == symbol)
+                               .order_by(IntradayTrade.trade_time.desc(), IntradayTrade.id.desc()).limit(limit))
+    market_tz = ZoneInfo(settings.vn_timezone)
+    return [
+        IntradayTradeData(
+            symbol=row.symbol, time=row.trade_time.replace(tzinfo=market_tz).isoformat(),
+            price=row.price, volume=row.volume, match_type=row.match_type,
+        )
+        for row in records.scalars() if math.isfinite(row.price) and row.price > 0 and row.volume >= 0
+    ]
+
+
+@router.get("/{symbol}/intraday", response_model=StandardResponse[List[IntradayTradeData]])
+async def get_intraday(
+    symbol: str,
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol = symbol.strip().upper()
+    provider_limit = min(limit, INTRADAY_PROVIDER_LIMIT)
+    data = []
+    error = None
+    status: FeedStatus
     try:
         data = await asyncio.wait_for(
-            VnstockIntradayFetcher.fetch(IntradayQueryParams(symbol=symbol.upper(), limit=limit)),
-            timeout=30,
+            VnstockIntradayFetcher.fetch(IntradayQueryParams(symbol=symbol, limit=provider_limit)), timeout=30,
         )
-        return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except (asyncio.TimeoutError, ProviderTimeoutError):
-        return StandardResponse(data=[], error="Request timed out")
-    except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+        status = "available" if data else "empty"
+    except Exception as exc:
+        status, error = provider_feed_failure(exc)
+
+    now = datetime.now(UTC)
+    covered_window = None
+    retained = False
+    if not data:
+        try:
+            data = await _load_retained_intraday_trades(db, symbol, limit)
+            if status == "empty":
+                covered_window = await _qualified_zero_trade_window(db, symbol, now)
+                if covered_window:
+                    data = []
+        except Exception as exc:
+            logger.warning("Retained trade read failed for %s: %s", symbol, type(exc).__name__)
+            await db.rollback()
+        retained = bool(data)
+
+    as_of = covered_window["session_date"] if covered_window else latest_trade_observation(
+        (trade.time for trade in data), now=now,
+    )
+    provider = f"vnstock:{settings.vnstock_source}"
+    return StandardResponse(
+        data=data,
+        meta=MetaData(
+            count=len(data), limit=limit, symbol=symbol, provider_limit=provider_limit, last_data_date=as_of,
+            market_session=intraday_market_session(now),
+            feed=intraday_feed(
+                status, requested_source=provider,
+                source="postgres:intraday_trades" if retained else "vietcap:board" if covered_window else provider,
+                source_as_of=as_of, fetched_at=now,
+                delivery="retained" if retained or covered_window else "provider",
+                fallback=retained, covered_window=covered_window,
+            ),
+        ),
+        error=error,
+    )
 
 
 @router.get(

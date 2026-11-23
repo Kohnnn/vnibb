@@ -2,14 +2,20 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, TrendingDown, RefreshCw, AlertTriangle, Globe, Building2 } from 'lucide-react';
 import { useBlockTrades } from '@/lib/queries';
-import { formatTimestamp } from '@/lib/formatDate';
+import { formatSourceObservation } from '@/lib/formatDate';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
 import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { priceColorClass } from '@/lib/priceColor';
+import { sourceObservation } from '@/lib/intradayAvailability';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
+import type { BlockTrade } from '@/types/insider';
+
+const BLOCK_TRADE_LIMIT = 50;
+const EMPTY_TRADES: BlockTrade[] = [];
 
 interface BlockTradeWidgetProps {
   symbol?: string;
@@ -25,10 +31,6 @@ function formatCurrency(value: number | null | undefined): string {
   if (value >= 1e6) return `VND${(value / 1e6).toFixed(1)}mn`;
   if (value >= 1e3) return `VND${(value / 1e3).toFixed(1)}k`;
   return `VND${value}`;
-}
-
-function formatTime(dateStr: string): string {
-  return formatTimestamp(dateStr);
 }
 
 function formatQuantity(qty: number): string {
@@ -57,24 +59,19 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
     refetch,
     isFetching,
     dataUpdatedAt,
-  } = useBlockTrades({ symbol, limit: 50 });
+  } = useBlockTrades({ symbol, limit: BLOCK_TRADE_LIMIT });
 
-  const trades = data || [];
-  const lastDataDate = trades.reduce<string | null>((latest, trade) => {
-    const observedAt = new Date(trade.trade_time).getTime();
-    return Number.isFinite(observedAt) && (latest === null || observedAt > new Date(latest).getTime())
-      ? trade.trade_time
-      : latest;
-  }, null);
+  const trades = data ?? EMPTY_TRADES;
+  const lastDataDate = useMemo(() => trades.reduce<string | null>((latest, trade) => {
+    const observedAt = sourceObservation(trade.trade_time);
+    if (!observedAt || (latest && Date.parse(latest) >= Date.parse(observedAt))) return latest;
+    return observedAt;
+  }, null), [trades]);
   const hasData = trades.length > 0;
-  const isMissingData = trades.length === 0;
   const isFallback = Boolean(error && hasData);
-
-  // Filter by threshold
-  const filteredTrades = trades.filter((trade) => {
-    const valueInBillions = (trade.value || 0) / 1e9;
-    return valueInBillions >= minThreshold;
-  });
+  const filteredTrades = useMemo(() => trades.filter((trade) => (
+    (trade.value || 0) / 1e9 >= minThreshold
+  )), [trades, minThreshold]);
 
   // Calculate stats
   const totalBuyValue = filteredTrades
@@ -86,19 +83,23 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
   const netValue = totalBuyValue - totalSellValue;
 
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: {
-          empty: filteredTrades.length === 0,
-          compactHeight: 4,
-        },
-        provenance: {
-          updatedAt: lastDataDate,
-          fetchedAt: dataUpdatedAt,
-        },
-      },
-    });
-  }, [filteredTrades.length, onDataChange, lastDataDate, dataUpdatedAt]);
+    onDataChange?.(buildWidgetRuntime({
+      empty: filteredTrades.length === 0,
+      compactHeight: 4,
+      apiGroup: '/insider',
+      endpoint: `/insider/block-trades?limit=${BLOCK_TRADE_LIMIT}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ''}`,
+      sourceLabel: 'Retained block-trade detections',
+      lastDataDate,
+      fetchedAt: dataUpdatedAt || undefined,
+      coverage: 'unknown',
+      cached: hasData || undefined,
+      observationStatus: hasData ? 'available' : isLoading ? 'loading' : error ? 'unavailable' : 'empty',
+      refreshStatus: error ? 'failed' : isFetching ? 'refreshing' : data ? 'succeeded' : undefined,
+      warnings: error ? ['Block-trade refresh failed. Exchange coverage is unknown.'] : undefined,
+      basis: `Latest ${BLOCK_TRADE_LIMIT} retained detections before the VND ${minThreshold}bn filter; no session filter`,
+      exportData: filteredTrades.length ? filteredTrades : undefined,
+    }));
+  }, [data, dataUpdatedAt, error, filteredTrades, hasData, isFetching, isLoading, lastDataDate, minThreshold, onDataChange, symbol]);
 
   return (
     <div className="h-full flex flex-col">
@@ -106,7 +107,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
       <div className="flex items-center justify-between px-1 py-1 mb-2">
         <div className="flex items-center gap-2 text-xs">
           <AlertTriangle size={12} className="text-[var(--color-warning)]" />
-          <span className="text-[var(--text-muted)]">{filteredTrades.length} block trades</span>
+          <span className="text-[var(--text-muted)]">{hasData ? `${filteredTrades.length} of ${trades.length} detections shown` : 'Retained detections'}</span>
         </div>
         <div className="flex items-center gap-2">
           <WidgetMeta
@@ -114,7 +115,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
             fetchedAt={dataUpdatedAt}
             isFetching={isFetching && hasData}
             isCached={isFallback}
-            note="Large trades"
+            note={isFallback ? 'Refresh failed; showing retained detections' : undefined}
             align="right"
           />
           <button
@@ -136,8 +137,9 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
 
       {/* Threshold Selector */}
       <div className="flex items-center gap-2 mb-2 px-1">
-        <span className="text-[10px] text-[var(--text-muted)]">Min:</span>
+        <label htmlFor="block-trade-threshold" className="text-[10px] text-[var(--text-muted)]">Min:</label>
         <select
+          aria-label="Minimum block trade value"
           value={minThreshold}
           onChange={(e) => setMinThreshold(Number(e.target.value))}
           className="flex-1 px-2 py-1 text-[10px] bg-[var(--bg-secondary)] text-[var(--text-secondary)] rounded border border-[var(--border-color)] focus:border-[var(--color-state-border)] focus:outline-none"
@@ -180,11 +182,13 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
           <WidgetError title="Block trades unavailable" error={error as Error} onRetry={() => refetch()} />
         ) : filteredTrades.length === 0 ? (
           <WidgetEmpty
-            message={isMissingData ? 'No block trades published yet today.' : 'No block trades match your filter'}
+            message={hasData ? 'No returned detections match your filter' : 'No retained block-trade detections returned'}
             icon={<AlertTriangle size={18} />}
-            detail={isMissingData ? 'HOSE publishes large negotiated prints T+1 — typically after 16:00 VNT.' : undefined}
+            detail={hasData
+              ? `The threshold applies to the ${trades.length} retained detections returned, not to all exchange trades.`
+              : `The request reads up to ${BLOCK_TRADE_LIMIT} latest detections${symbol ? ` for ${symbol}` : ' across symbols'}, without a date filter. Exchange coverage is unknown.`}
             size="compact"
-            action={!isMissingData ? { label: 'Lower threshold', onClick: () => setMinThreshold(5) } : undefined}
+            action={hasData && minThreshold > 5 ? { label: 'Lower threshold', onClick: () => setMinThreshold(5) } : undefined}
           />
         ) : (
           <div className="space-y-1.5">
@@ -225,7 +229,7 @@ export function BlockTradeWidget({ symbol, onDataChange }: BlockTradeWidgetProps
                     <span>
                       {formatQuantity(trade.quantity)} @ {formatCurrency(trade.price)}
                     </span>
-                    <span>{formatTime(trade.trade_time)}</span>
+                    <span>{formatSourceObservation(sourceObservation(trade.trade_time)) ?? 'Trade time unverified'}</span>
                   </div>
                   {trade.volume_ratio !== null && trade.volume_ratio > 1 && (
                     <div className="mt-1 text-[10px] text-[var(--color-warning)]">

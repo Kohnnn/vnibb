@@ -506,6 +506,67 @@ class MongoMarketDataService:
 
         return await _read_mongo(_read, empty_page=empty_page)
 
+    async def tape_session_has_retained_trades(self, symbol: str, session: date, *, now: datetime) -> bool:
+        """Veto a tape board-zero on an exact ICT session; raise if absence can't be established."""
+        from zoneinfo import ZoneInfo
+
+        from pymongo import timeout
+
+        from vnibb.services.intraday_availability import retained_trade_time
+
+        market_tz = ZoneInfo(settings.vn_timezone)
+        start = datetime.combine(session, time.min, tzinfo=market_tz)
+        end = start + timedelta(days=1)
+        utc_start, utc_end = (stamp.astimezone(UTC).replace(tzinfo=None) for stamp in (start, end))
+        cap = 1000
+
+        def has_trade(collection, identity, clock, lower, upper) -> bool:
+            prefix = [*identity, clock]
+            index = next((
+                spec["name"] for spec in collection.list_indexes()
+                if list(spec["key"])[:len(prefix)] == prefix
+                and all(spec["key"][field] in (1, -1) for field in prefix)
+                and not spec.get("partialFilterExpression") and not spec.get("hidden")
+                and spec.get("collation", {}).get("locale", "simple") == "simple"
+            ), None)
+            if index is None:
+                raise MongoReadError("tape_session_index_missing")
+            cursor = collection.find(
+                {**identity, "batchReceipt": {"$ne": True}, "$or": [
+                    {clock: {"$gte": lower, "$lt": upper}},
+                    {clock: {"$not": {"$type": "date"}}},
+                ]},
+                {"_id": 0, "symbol": 1, "dataset": 1, "sourceDataset": 1, "raw": 1,
+                 "recordKey": 1, "sourceRecordKey": 1, "timestampMeaning": 1, clock: 1},
+                hint=index, collation={"locale": "simple"}, limit=cap + 1,
+            )
+            with cursor:
+                for count, row in enumerate(cursor, 1):
+                    if count > cap:
+                        raise MongoReadError("tape_session_probe_truncated")
+                    stamp = retained_trade_time(row, market_tz=market_tz)
+                    if stamp is None or stamp > now:
+                        raise MongoReadError("tape_session_trade_time_unqualified")
+                    if start <= stamp < end:
+                        return True
+            return False
+
+        def read() -> bool:
+            with timeout(settings.mongodb_timeout_ms / 1000):
+                raw = self._get_collection("market_vnstock_premium_records")
+                # Raw population can strip offsets from the indexed clock. Read its
+                # possible UTC/wall-clock encodings, then check the actual trade time.
+                for dataset in ("equity.intraday", "quote.intraday"):
+                    if has_trade(raw, {"dataset": dataset, "symbol": symbol}, "observedAt",
+                                 utc_start - timedelta(days=1), utc_end + timedelta(days=1)):
+                        return True
+                derived = self._get_collection("market_intraday_trades")
+                # Derivation stores either the local wall clock or the UTC instant.
+                return has_trade(derived, {"symbol": symbol}, "tradeTime",
+                                 min(utc_start, start.replace(tzinfo=None)), max(utc_end, end.replace(tzinfo=None)))
+
+        return await _read_mongo(read)
+
     async def get_price_depth(self, symbol: str, *, limit: int = 500) -> list[dict[str, Any]]:
         """Return current retained depth batch, never arbitrary historical levels."""
         return await self.get_price_depth_precise(symbol, limit=limit)
@@ -703,10 +764,15 @@ class MongoMarketDataService:
                 if record.get("batchReceipt") is True:
                     metadata.update({"latest_session_status": record.get("latestSessionStatus", "unknown"),
                                      "coverage": record.get("coverage", "unknown"), "batch_receipt": record})
-                    if record.get("rowCount") == 0:
+                    count = record.get("rowCount")
+                    if type(count) is int and count == 0:
                         return MongoReadRows([], metadata)
+                    metadata["has_depth_records"] = True
                     continue
-                raw = record.get("raw") or {}
+                metadata["has_depth_records"] = True
+                raw = record.get("raw")
+                if not isinstance(raw, dict):
+                    continue
                 levels = [raw] if "price" in raw else []
                 if not levels:
                     for index in range(1, 4):

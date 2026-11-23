@@ -92,17 +92,21 @@ describe('volume_delta saved dashboard widget', () => {
     expect(screen.getByText('Loaded Cum').parentElement).toHaveTextContent('+125');
   });
 
-  it('keeps derived historical volume available and marks it stale when microstructure fails', async () => {
+  it('keeps a successful historical proxy and reports microstructure failure separately', async () => {
     const { onDataChange } = showVolumeDelta(dailyCandles(() => 1000), new Error('Microstructure unavailable'));
     expect(await screen.findByText('Volume Delta (20D)')).toBeInTheDocument();
     expect(screen.getByText('OHLC proxy')).toBeInTheDocument();
     expect(screen.getByText('Today').parentElement).toHaveTextContent('+500');
     expect(screen.getByText('20D Cum').parentElement).toHaveTextContent('+10.0K');
-    expect(screen.getByText('Cached')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Microstructure unavailable');
+    expect(screen.queryByText(/^(Cached|Refresh failed)$/)).not.toBeInTheDocument();
     await waitFor(() => expect(onDataChange).toHaveBeenCalledWith(expect.objectContaining({
       __widgetRuntime: expect.objectContaining({
         layoutHint: expect.objectContaining({ empty: false }),
-        provenance: expect.objectContaining({ localOnly:true, stale:true }),
+        provenance: expect.objectContaining({
+          localOnly: true, cached: false, refreshStatus: 'succeeded', observationStatus: 'available',
+          warnings: ['Microstructure unavailable'],
+        }),
       }),
     })));
     expect(getWidgetExportData(onDataChange.mock.lastCall?.[0])).toEqual({ cumulativeDelta: 16_000 });

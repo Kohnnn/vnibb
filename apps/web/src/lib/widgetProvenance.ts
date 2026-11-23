@@ -1,4 +1,5 @@
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
+import type { IntradayProvenance } from '@/types/intraday';
 
 export type WidgetObservationStatus = 'loading' | 'available' | 'empty' | 'unsupported' | 'unavailable';
 export type WidgetRefreshStatus = 'refreshing' | 'failed' | 'succeeded';
@@ -41,6 +42,7 @@ export interface ExportProvenance {
   expectedClosedSession?: boolean;
   observationStatus?: WidgetObservationStatus;
   refreshStatus?: WidgetRefreshStatus;
+  intraday?: IntradayProvenance;
   adjustmentMode?: string;
   /** Effective reporting period; separate from request scope and source time. */
   period?: string;
@@ -105,6 +107,18 @@ function provenanceEntries(input: ExportProvenance) {
     ['stale', 'Stale', resolved.stale],
     ['market_closed', 'Market closed', resolved.marketClosed],
     ['expected_closed_session', 'Expected closed session', resolved.expectedClosedSession],
+    ['market_session', 'Market session', resolved.intraday?.sessionState],
+    ['session_basis', 'Session evidence', resolved.intraday?.sessionEvidence?.basis],
+    ['session_checked_at', 'Session checked at', resolved.intraday?.sessionEvidence?.checked_at],
+    ['session_valid_until', 'Session evidence expires', resolved.intraday?.sessionEvidence?.valid_until],
+    ['feed_status', 'Feed result', resolved.intraday?.feedStatus],
+    ['requested_source', 'Requested feed', resolved.intraday?.requestedSource],
+    ['feed_delivery', 'Feed delivery', resolved.intraday?.delivery],
+    ['retained_fallback', 'Retained fallback', resolved.intraday?.fallback],
+    ['snapshot_at', 'Snapshot stored at', resolved.intraday?.snapshotAt],
+    ['covered_session', 'Covered session', resolved.intraday?.coveredWindow?.session_date],
+    ['covered_trade_count', 'Trades in covered session', resolved.intraday?.coveredWindow?.trade_count],
+    ['covered_session_basis', 'Coverage evidence', resolved.intraday?.coveredWindow?.basis],
     ['observation_status', 'Observations', resolved.observationStatus],
     ['refresh_status', 'Refresh', resolved.refreshStatus],
     ['failure_kind', 'Failure kind', resolved.failureKind],

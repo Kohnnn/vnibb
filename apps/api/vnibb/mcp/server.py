@@ -42,6 +42,8 @@ from vnibb.providers.vnstock.financials import FinancialStatementData
 from vnibb.services.ai_context_service import AIContextService
 from vnibb.services.dividend_history import RAW_DIVIDEND_SCOPE, load_dividend_history
 from vnibb.services.financial_service import admit_statement_rows
+from vnibb.services.intraday_availability import retained_depth_feed, retained_tick_feed
+from vnibb.services.market_session import intraday_market_session
 from vnibb.services.matrix_service import (
     MATRIX_SNAPSHOT_EVIDENCE_UNVERIFIED,
     require_matrix_export_rights,
@@ -2465,7 +2467,7 @@ async def get_intraday_trades(
     lookback_days: Annotated[int, Field(ge=1)] = 7,
     limit: Annotated[int, Field(ge=0, json_schema_extra={"maximum": 20000})] = 1000,
 ) -> dict[str, Any]:
-    """Get read-only intraday tick trades for one symbol from MongoDB (bounded symbols)."""
+    """Read retained tick rows; an empty page is not evidence of zero trades."""
     _ensure_mongo_available()
     normalized = normalize_symbol_input(symbol)
     if not normalized:
@@ -2474,17 +2476,19 @@ async def get_intraday_trades(
     service = get_mongo_market_data_service()
     if int(lookback_days) < 1:
         raise ValueError("lookback_days must be positive")
+    bounded_limit = _coerce_limit(limit, 20000)
     rows = await service.get_intraday_trades(
-        normalized,
-        lookback_days=max(1, int(lookback_days)),
-        limit=_coerce_limit(limit, 20000),
+        normalized, lookback_days=int(lookback_days), limit=bounded_limit,
     )
+    now = datetime.now(UTC)
     return {
         "symbol": normalized,
         **_selected_store_metadata(rows),
-        "retrieved_at": datetime.now(UTC).isoformat(),
+        "retrieved_at": now.isoformat(),
+        "market_session": intraday_market_session(now),
+        "feed": retained_tick_feed(rows, normalized, lookback_days=int(lookback_days), now=now, limit=bounded_limit),
         "row_count": len(rows),
-        "limit": _coerce_limit(limit, 20000),
+        "limit": bounded_limit,
         "max_limit": 20000,
         "lookback_days": int(lookback_days),
         "items": serialize_data_value(rows),
@@ -2505,18 +2509,18 @@ async def get_price_depth(symbol: str, limit: Annotated[int, Field(ge=0, json_sc
         raise ValueError("A stock symbol is required")
 
     service = get_mongo_market_data_service()
-    rows = await service.get_price_depth_precise(
-        normalized,
-        limit=_coerce_limit(limit, 5000),
-        include_provenance=True,
-    )
+    bounded_limit = _coerce_limit(limit, 5000)
+    rows = await service.get_price_depth_precise(normalized, limit=bounded_limit, include_provenance=True)
+    now = datetime.now(UTC)
     return {
         "symbol": normalized,
         **_selected_store_metadata(rows),
         "coverage": "current_write_batch; not historical session replay",
         "row_count": len(rows),
-        "retrieved_at": datetime.now(UTC).isoformat(),
-        "limit": _coerce_limit(limit, 5000),
+        "retrieved_at": now.isoformat(),
+        "market_session": intraday_market_session(now),
+        "feed": retained_depth_feed(rows, now=now, limit=bounded_limit),
+        "limit": bounded_limit,
         "max_limit": 5000,
         "items": serialize_data_value(rows),
     }

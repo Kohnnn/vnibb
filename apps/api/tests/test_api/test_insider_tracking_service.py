@@ -102,3 +102,26 @@ async def test_block_trade_endpoint_distinguishes_failure_from_real_empty(monkey
         await get_block_trades(symbol="FAIL", limit=100, db=None)
     assert exc.value.status_code == 503
     assert exc.value.detail == "Block-trade data unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_clock,expected",
+    [
+        ("2026-11-23T09:13:46", "2026-11-23T09:13:46+07:00"),
+        ("2026-11-23T02:13:46+00:00", "2026-11-23T02:13:46Z"),
+    ],
+)
+async def test_block_trade_response_preserves_the_source_clock(client, monkeypatch, stored_clock, expected):
+    async def load_detections(self, symbol, limit):
+        return [{
+            "id": 1, "symbol": symbol, "side": None, "quantity": 100_000,
+            "price": 25_000, "value": 2_500_000_000, "trade_time": datetime.fromisoformat(stored_clock),
+            "volume_ratio": None, "is_foreign": False, "is_proprietary": False,
+        }]
+
+    monkeypatch.setattr(InsiderTrackingService, "get_recent_block_trades", load_detections)
+    response = await client.get("/api/v1/insider/block-trades?symbol=HPG")
+
+    assert response.status_code == 200
+    assert response.json()[0]["trade_time"] == expected

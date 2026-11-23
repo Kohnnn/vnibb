@@ -5,54 +5,21 @@ import { Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Too
 import { ChartMountGuard } from '@/components/ui/ChartMountGuard';
 import { WidgetContainer } from '@/components/ui/WidgetContainer';
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton';
-import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states';
-import { WidgetMeta } from '@/components/ui/WidgetMeta';
-import type { PriceDepthResponse } from '@/lib/api';
+import { WidgetEmpty } from '@/components/ui/widget-states';
+import { IntradayEmpty, IntradayStatus } from '@/components/ui/IntradayStatus';
+import { displayedDepth, positiveDepthPrice } from '@/lib/intradayAvailability';
 import { DEFAULT_TICKER } from '@/lib/defaultTicker';
 import { usePriceDepth } from '@/lib/queries';
 import { EMPTY_VALUE, formatNumber } from '@/lib/units';
 import type { WidgetHealthState } from '@/lib/widgetHealth';
+import { useIntradayAvailability } from '@/hooks/useIntradayAvailability';
+import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 
 interface OrderbookWidgetProps {
   symbol?: string;
   widgetId?: string;
   onDataChange?: (data: WidgetDataPayload) => void;
 }
-
-type DepthEntry = PriceDepthResponse['data']['entries'][number];
-
-/**
- * For order book entries, a literal 0 price is "no price" — provider feeds
- * sometimes emit 0 for a level that has only volume. Treating 0 as a real
- * value defeats the bid-or-ask fallback elsewhere and renders "0" rows.
- */
-function toFiniteOrderPrice(...values: unknown[]): number | null {
-  for (const value of values) {
-    const parsed = typeof value === 'number' ? value : Number(value);
-    if (Number.isFinite(parsed) && parsed !== 0) return parsed;
-  }
-  return null;
-}
-
-function getEntryPrice(entry: DepthEntry): number | null {
-  const row = entry as DepthEntry & Record<string, unknown>;
-  return toFiniteOrderPrice(
-    row.price,
-    row.bid_price,
-    row.ask_price,
-    row.bidPrice,
-    row.askPrice,
-    row.match_price,
-    row.matchPrice,
-  );
-}
-
-/**
- * Backend canonicalizes order book prices to "thousand VND" units in
- * `equity._normalize_orderbook_units`. The frontend no longer applies a
- * fallback heuristic — that logic was duplicating work and could
- * double-correct in transient deploy windows.
- */
 
 function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataChange }: OrderbookWidgetProps) {
   const {
@@ -64,78 +31,34 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
     dataUpdatedAt,
   } = usePriceDepth(symbol, Boolean(symbol));
 
-  const entries = (orderbook?.data?.entries || []) as DepthEntry[];
+  const { entries, referenceOnly } = useMemo(() => displayedDepth(orderbook), [orderbook]);
+  const lastPrice = positiveDepthPrice(orderbook?.data?.last_price);
+  const legacyRetained = Boolean(!orderbook?.meta?.feed && orderbook?.data?.is_stale);
   const hasData = entries.length > 0;
-  const isFallback = Boolean(error && hasData);
-  const lastPriceRaw = orderbook?.data?.last_price;
-  const lastPrice = lastPriceRaw === null || lastPriceRaw === undefined
-    ? null
-    : toFiniteOrderPrice(lastPriceRaw);
-  const isStale = Boolean(orderbook?.data?.is_stale);
-  const marketStatus = orderbook?.data?.market_status || null;
-  const snapshotTime = orderbook?.data?.snapshot_time || null;
-  const fetchedAt = dataUpdatedAt || snapshotTime;
-  const priceSource = orderbook?.data?.price_source || null;
-  const hasReferencePrices = priceSource === 'latest_price'
-    || entries.some((entry) => (entry as DepthEntry & Record<string, unknown>).price_status === 'reference');
+  const hasGenuineData = hasData && !referenceOnly;
+  const maxVolume = useMemo(() => entries.reduce(
+    (max, entry) => Math.max(max, Number(entry.bid_vol) || 0, Number(entry.ask_vol) || 0), 1,
+  ), [entries]);
 
-  const maxVolume = useMemo(() => {
-    if (entries.length === 0) return 1;
-    return Math.max(
-      1,
-      ...entries.map((entry) => Math.max(Number(entry.bid_vol) || 0, Number(entry.ask_vol) || 0))
-    );
-  }, [entries]);
-
-  // Backend is now canonical (raw VND -> thousand VND normalization happens
-  // in equity._normalize_orderbook_units). Frontend just reads the price.
-  const normalizedEntries = useMemo(
-    () => entries.map((entry) => ({ ...entry, price: getEntryPrice(entry) })),
-    [entries]
-  );
-
-  const metaNote = useMemo(() => {
-    if (hasReferencePrices) {
-      return 'Reference pricing only';
-    }
-    if (isStale && marketStatus === 'closed') {
-      const timeLabel = snapshotTime ? ` as of ${snapshotTime.slice(0, 16).replace('T', ' ')}` : '';
-      return `Market closed — last snapshot${timeLabel}`;
-    }
-    return 'Depth snapshot';
-  }, [hasReferencePrices, isStale, marketStatus, snapshotTime]);
-
-  const healthState: WidgetHealthState | undefined = useMemo(() => {
-    if (hasReferencePrices) {
-      return {
-        status: 'limited',
-        label: 'Reference close',
-        detail: 'Provider depth had no priced levels. Prices use the latest close as a reference and are not true level-by-level bid/ask quotes.',
-      };
-    }
-    if (isStale) {
-      return {
-        status: 'cached',
-        label: marketStatus === 'closed' ? 'Closed-market snapshot' : 'Cached depth',
-        detail: marketStatus === 'closed'
-          ? 'Showing the latest priced depth snapshot available after market close.'
-          : 'Showing a cached depth snapshot while live refresh catches up.',
-      };
-    }
-    return undefined;
-  }, [hasReferencePrices, isStale, marketStatus]);
+  const availability = useIntradayAvailability({
+    response: orderbook, error, hasData: hasGenuineData, isLoading, isFetching, dataUpdatedAt, legacyRetained,
+  });
+  const health: WidgetHealthState | undefined = referenceOnly ? {
+    status: 'limited',
+    label: 'Reference close',
+    detail: 'The displayed prices use the latest close, not level-by-level bid/ask quotes.',
+  } : undefined;
 
   const depthSeries = useMemo(() => {
-    const normalized = normalizedEntries
+    if (!hasGenuineData) return [];
+
+    const normalized = entries
       .map((entry) => ({
-        price: Number(entry.price),
+        price: entry.price,
         bidVol: Number(entry.bid_vol) || 0,
         askVol: Number(entry.ask_vol) || 0,
       }))
-      .filter((entry) => Number.isFinite(entry.price))
       .sort((a, b) => a.price - b.price);
-
-    if (!normalized.length) return [];
 
     let askRunning = 0;
     const askCumulative = normalized.map((entry) => {
@@ -155,27 +78,21 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
       bidCumulative: bidCumulative[index],
       askCumulative: askCumulative[index],
     }));
-  }, [normalizedEntries]);
+  }, [entries, hasGenuineData]);
 
   useEffect(() => {
-    onDataChange?.({
-      __widgetRuntime: {
-        layoutHint: {
-          empty: !hasData,
-          compactHeight: 6,
-        },
-        provenance: {
-          sourceLabel: 'Order book depth',
-          apiGroup: '/equity',
-          endpoint: `/equity/${symbol}/orderbook`,
-          stale: isStale,
-          localOnly: false,
-          updatedAt: null,
-          fetchedAt,
-        },
-      },
-    });
-  }, [hasData, onDataChange, symbol, isStale, fetchedAt]);
+    onDataChange?.(buildWidgetRuntime({
+      ...availability.runtime,
+      empty: !hasData,
+      compactHeight: 6,
+      sourceLabel: availability.source ?? 'Order book depth',
+      apiGroup: '/equity',
+      endpoint: `/equity/${symbol}/orderbook`,
+      basis: referenceOnly ? 'Retained close used as a reference, not a priced order book' : undefined,
+      units: 'Price: thousand VND; volume: shares',
+      exportData: hasData ? entries : undefined,
+    }));
+  }, [availability, entries, hasData, onDataChange, referenceOnly, symbol]);
 
   if (!symbol) {
     return <WidgetEmpty message="Select a symbol to view order book" />;
@@ -191,40 +108,40 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
     >
       <div className="h-full flex flex-col">
         <div className="px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-primary)]">
-          <WidgetMeta
-            updatedAt={null}
-            fetchedAt={fetchedAt}
-            isFetching={isFetching && hasData}
-            isCached={isFallback && !healthState}
-            isStale={isStale && !healthState}
-            health={healthState}
-            note={metaNote}
-            align="right"
+          <IntradayStatus
+            availability={availability}
+            hasData={hasGenuineData}
+            isFetching={isFetching}
+            health={health}
+            label={referenceOnly ? 'Reference pricing only' : undefined}
           />
         </div>
 
         {isLoading && !hasData ? (
           <WidgetSkeleton lines={6} />
-        ) : error && !hasData ? (
-          <WidgetError error={error as Error} onRetry={() => refetch()} />
         ) : !hasData ? (
-          <WidgetEmpty
-            message="Order book data not available yet"
-            detail="Market closed - showing this panel when the exchange publishes the next depth snapshot."
+          <IntradayEmpty
+            availability={availability}
+            unavailable="Order book data unavailable"
+            empty="No priced depth returned"
+            detail="This response does not establish order book coverage."
+            allowZero={false}
+            onRetry={() => refetch()}
           />
         ) : (
           <>
             <div className="border-b border-[var(--border-subtle)] px-3 py-3 bg-[var(--bg-primary)]">
-              {hasReferencePrices ? (
-                <div className="mb-2 rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-[10px] leading-4 text-[var(--color-warning)]">
+              {referenceOnly ? (
+                <div className="rounded-lg border border-[var(--color-state-border)] bg-[var(--color-state-bg)] px-2.5 py-2 text-[10px] leading-4 text-[var(--color-warning)]">
                   Provider depth did not include priced levels. The price column uses latest close as a reference, not live bid/ask depth.
                 </div>
-              ) : null}
-              <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                <span>Cumulative Depth</span>
-                <span>{lastPrice !== null ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : '10 levels'}</span>
-              </div>
-              {depthSeries.length < 2 ? (
+              ) : (
+                <div className="mb-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  <span>Cumulative Depth</span>
+                  <span>{lastPrice !== null ? `Last ${formatNumber(lastPrice, { decimals: 0 })}` : `${entries.length} levels`}</span>
+                </div>
+              )}
+              {!referenceOnly && (depthSeries.length < 2 ? (
                 <div className="text-[10px] text-[var(--text-secondary)]">Need at least two levels to draw depth.</div>
               ) : (
                 <ChartMountGuard className="h-[180px] min-h-[180px]" minHeight={180}>
@@ -278,17 +195,17 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                     </AreaChart>
                   </ResponsiveContainer>
                 </ChartMountGuard>
-              )}
+              ))}
             </div>
 
             <div className="grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] gap-2 border-b border-[var(--border-color)] px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
               <div>Bid Vol</div>
-              <div className="text-center">{hasReferencePrices ? 'Ref Price' : 'Price'}</div>
+              <div className="text-center">{referenceOnly ? 'Ref Price' : 'Price'}</div>
               <div className="text-right">Ask Vol</div>
             </div>
 
             <div className="flex-1 overflow-auto scrollbar-hide">
-              {normalizedEntries.map((entry, i) => (
+              {entries.map((entry, i) => (
                 <div key={i} className="relative grid grid-cols-[minmax(0,1fr)_74px_minmax(0,1fr)] items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-1.5">
                   <div
                     className="absolute left-0 top-0 h-full bg-[var(--color-positive-bg)]"
@@ -303,11 +220,9 @@ function OrderbookWidgetComponent({ symbol = DEFAULT_TICKER, widgetId, onDataCha
                     {entry.bid_vol?.toLocaleString() || EMPTY_VALUE}
                   </div>
                   <div className="text-center text-xs text-[var(--text-primary)] font-bold relative z-10">
-                    {entry.price !== null ? (
-                      <span className={hasReferencePrices ? 'text-[var(--text-secondary)]' : undefined}>
-                        {entry.price.toLocaleString()}
-                      </span>
-                    ) : EMPTY_VALUE}
+                    <span className={referenceOnly ? 'text-[var(--text-secondary)]' : undefined}>
+                      {entry.price.toLocaleString()}
+                    </span>
                   </div>
                   <div className="min-w-0 break-all text-right text-xs text-[var(--color-negative)] font-mono relative z-10">
                     {entry.ask_vol?.toLocaleString() || EMPTY_VALUE}

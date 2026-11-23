@@ -15,6 +15,7 @@ build, Jest) plus backend \`ruff\` and \`pytest\`. Individual verification logs
 live in \`docs/\`.
 
 ## [Unreleased]
+- Distinguish intraday feed failures, successful empty reads, and verified zero-trade sessions. Preserve retained observations and disclose their age independently of market session status. Keep priced order-book levels on legacy reference-only refreshes, and include the retained fallback in depth-profile exports after a failed refresh (#284).
 
 - Distinguish unavailable officers and subsidiaries from successful empty returns, keep previously fetched records for the same company on refresh failure, and carry the original source and fetch dates and separate failure reason through status, exports and VniAgent (#280).
 - Distinguish admitted positive, zero and negative FCF from a positivity-only test or unavailable evidence. Withhold DCF valuations from rejected bases, and preserve the retained computation and attached issuer in Fundamental Analysis exports and VniAgent (#278).

@@ -4,11 +4,12 @@
 
 import { useQuery } from '@tanstack/react-query';
 import * as api from '../api';
+import { retainPriceDepth, retainTradeTape } from '../intradayAvailability';
 import { logClientError } from '../clientLogger';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '../pollingPolicy';
 import { useDataSources } from '@/contexts/DataSourcesContext';
 import type { VnstockSource } from '@/contexts/DataSourcesContext';
-import type { CompanyReferenceResponse } from '@/types/equity';
+import type { CompanyReferenceResponse, IntradayResponse } from '@/types/equity';
 
 export class CompanyReferenceEnvelopeError extends Error {
     readonly name = 'CompanyReferenceEnvelopeError';
@@ -171,7 +172,10 @@ export function useIntraday(
 ) {
     return useQuery({
         queryKey: equityQueryKeys.intraday(symbol, options?.limit),
-        queryFn: () => api.getIntraday(symbol, { limit: options?.limit }),
+        queryFn: async ({ client, queryKey, signal }) => retainTradeTape(
+            await api.getIntraday(symbol, { limit: options?.limit, signal }),
+            client.getQueryData<IntradayResponse>(queryKey),
+        ),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 30 * 1000,
     });
@@ -180,7 +184,10 @@ export function useIntraday(
 export function usePriceDepth(symbol: string, enabled = true) {
     return useQuery({
         queryKey: equityQueryKeys.priceDepth(symbol),
-        queryFn: () => api.getPriceDepth(symbol),
+        queryFn: async ({ client, queryKey, signal }) => retainPriceDepth(
+            await api.getPriceDepth(symbol, signal),
+            client.getQueryData<api.PriceDepthResponse>(queryKey),
+        ),
         enabled: enabled && !!symbol,
         staleTime: 5 * 1000,
     });
