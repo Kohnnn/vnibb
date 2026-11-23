@@ -31,6 +31,9 @@ export interface ExportProvenance {
   /** Source observation/as-of only; retrieval belongs in fetchedAt. */
   updatedAt?: number | string | Date | null;
   fetchedAt?: number | string | Date | null;
+  /** When the failed attempt settled, not when the displayed observations were fetched. */
+  failedAt?: number | string | Date | null;
+  failureKind?: 'envelope' | 'request';
   coverage?: 'complete' | 'partial' | 'unknown';
   coverageDetail?: WidgetCoverageDetail;
   marketClosed?: boolean;
@@ -66,6 +69,7 @@ export function buildExportProvenance(input: ExportProvenance): ExportProvenance
     ...input,
     updatedAt,
     fetchedAt: normalizeTimestamp(input.fetchedAt),
+    ...(input.failedAt != null && { failedAt: normalizeTimestamp(input.failedAt) }),
     capturedAt: input.capturedAt ?? new Date().toISOString(),
   };
 }
@@ -84,6 +88,7 @@ function provenanceEntries(input: ExportProvenance) {
       : ['endpoint', 'Endpoint', resolved.endpoint],
     ['source_as_of', 'Source as of', resolved.updatedAt == null ? 'unknown' : String(resolved.updatedAt)],
     ['fetched_at', 'Fetched at', resolved.fetchedAt == null ? null : String(resolved.fetchedAt)],
+    ['failed_at', 'Failed at', resolved.failedAt == null ? null : String(resolved.failedAt)],
     ['units', 'Units', resolved.units],
     ['basis', 'Basis', resolved.basis],
     ['coverage', 'Coverage', resolved.coverage],
@@ -102,6 +107,7 @@ function provenanceEntries(input: ExportProvenance) {
     ['expected_closed_session', 'Expected closed session', resolved.expectedClosedSession],
     ['observation_status', 'Observations', resolved.observationStatus],
     ['refresh_status', 'Refresh', resolved.refreshStatus],
+    ['failure_kind', 'Failure kind', resolved.failureKind],
     ['adjustment_mode', 'Adjustment mode', resolved.adjustmentMode],
     ['warnings', 'Warnings', resolved.warnings?.join(' · ')],
     ['data_status', 'Data status', deriveWidgetHealth(input).label],

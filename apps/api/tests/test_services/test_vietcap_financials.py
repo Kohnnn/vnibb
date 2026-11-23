@@ -400,18 +400,20 @@ async def test_listing_bridge_joins_actual_search_fields_without_fake_shares():
     search = [{"code": "VNM", "name": "Search Name", "icbLv4": {"code": "FOOD", "name": "Food"}, "icbLv1": {"name": "Consumer"}}]
     assert await persist_vietcap_listings(trading, search, cache_manager=cache) == 1
     row = cache.store_listing_data.call_args.args[0][0]
-    assert row == {"symbol": "VNM", "company_name": "Search Name", "short_name": "VINAMILK", "exchange": "HOSE", "is_active": 1, "industry": "Food", "sector": "Consumer"}
+    assert row == {"symbol": "VNM", "company_name": "Search Name", "short_name": "VINAMILK", "exchange": "HOSE", "industry": "Food", "sector": "Consumer"}
     assert cache.store_listing_data.call_args.kwargs == {"source": "vietcap"}
 
 
 @pytest.mark.asyncio
-async def test_listing_bridge_keeps_delisted_stock_without_search_and_rejects_nonstock():
+async def test_listing_bridge_withholds_unverified_delisting_and_rejects_nonstock(caplog):
     cache = AsyncMock()
     cache.store_listing_data.return_value = 1
     trading = [{"symbol": "OLD", "type": "STOCK", "board": "DELISTED", "organName": "Old"}, {"symbol": "CW1", "type": "CW", "board": "HSX"}]
-    assert await persist_vietcap_listings(trading, [], cache_manager=cache) == 1
-    rows = cache.store_listing_data.call_args.args[0]
-    assert len(rows) == 1 and rows[0]["symbol"] == "OLD" and rows[0]["is_active"] == 0
+    outcome = {}
+    assert await persist_vietcap_listings(trading, [], cache_manager=cache, outcome=outcome) == 0
+    assert outcome == {"expected": ["OLD"], "withheld": ["OLD"], "persisted": {}}
+    cache.store_listing_data.assert_not_awaited()
+    assert "Withheld 1 IQ stock identities" in caplog.text
 
 
 @pytest.mark.asyncio

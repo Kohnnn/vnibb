@@ -137,15 +137,6 @@ export function useShareholders(symbol: string, enabled = true) {
     });
 }
 
-export function useOfficers(symbol: string, enabled = true) {
-    return useQuery({
-        queryKey: queryKeys.officers(symbol),
-        queryFn: () => api.getOfficers(symbol),
-        enabled: enabled && !!symbol,
-        staleTime: 30 * 60 * 1000, // 30 minutes
-    });
-}
-
 export function useIntraday(
     symbol: string,
     options?: { limit?: number; enabled?: boolean }
@@ -286,15 +277,6 @@ export function useCorrelationMatrix(
         staleTime: 10 * 60 * 1000,
         retry: 2,
     })
-}
-
-export function useSubsidiaries(symbol: string, enabled = true) {
-    return useQuery({
-        queryKey: queryKeys.subsidiaries(symbol),
-        queryFn: () => api.getSubsidiaries(symbol),
-        enabled: enabled && !!symbol,
-        staleTime: 60 * 60 * 1000, // 1 hour
-    });
 }
 
 export function useBalanceSheet(

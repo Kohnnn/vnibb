@@ -3,13 +3,14 @@
 import { useEffect } from 'react'
 import { ArrowDownToLine, ArrowUpToLine, Scale } from 'lucide-react'
 import { useHistoricalPrices, useMicrostructureAnalysis } from '@/lib/queries'
-import type { OHLCData } from '@/lib/chartUtils'
+import type { EquityHistoricalData } from '@/types/equity'
 import { WidgetSkeleton } from '@/components/ui/widget-skeleton'
 import { WidgetError, WidgetEmpty } from '@/components/ui/widget-states'
 import { WidgetMeta } from '@/components/ui/WidgetMeta'
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout'
 import { buildWidgetRuntime } from '@/lib/widgetRuntime'
 import { signedToneClass } from '@/lib/priceColor'
+import { isObservedVolume } from '@/lib/volumeObservation'
 
 interface VolumeDeltaWidgetProps {
   symbol: string
@@ -54,33 +55,25 @@ function percentChange(current: number, previous: number): number {
   return ((current - previous) / Math.abs(previous)) * 100
 }
 
-function calculateVolumeDelta(candles: OHLCData[]): VolumeDeltaPoint[] {
+function calculateVolumeDelta(candles: EquityHistoricalData[]): VolumeDeltaPoint[] | null {
+  const points: VolumeDeltaPoint[] = []
   let runningDelta = 0
 
-  return candles
-    .filter((candle) => Number.isFinite(candle.close))
-    .map((candle) => {
-      const high = Number(candle.high)
-      const low = Number(candle.low)
-      const close = Number(candle.close)
-      const volume = Math.max(0, Number(candle.volume ?? 0))
+  for (const { time, high, low, close, volume } of candles) {
+    if (!isObservedVolume(volume) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+      return null
+    }
 
-      const range = high - low
-      const closePosition = range > 0 ? clamp((close - low) / range, 0, 1) : 0.5
-      const buyVolume = volume * closePosition
-      const sellVolume = volume * (1 - closePosition)
-      const delta = buyVolume - sellVolume
+    const range = high - low
+    const closePosition = range > 0 ? clamp((close - low) / range, 0, 1) : 0.5
+    const buyVolume = volume * closePosition
+    const sellVolume = volume * (1 - closePosition)
+    const delta = buyVolume - sellVolume
+    runningDelta += delta
+    points.push({ time, close, delta, cumulativeDelta: runningDelta, closePosition })
+  }
 
-      runningDelta += delta
-
-      return {
-        time: String(candle.time),
-        close,
-        delta,
-        cumulativeDelta: runningDelta,
-        closePosition,
-      }
-    })
+  return points
 }
 
 function aggregateMicroBars(bars: Array<{ time: string; delta: number; cumulative_delta: number }>): VolumeDeltaPoint[] {
@@ -126,17 +119,7 @@ function calculateMonthlyAverageDelta(points: VolumeDeltaPoint[]): MonthlyDelta[
     .sort((a, b) => a.month - b.month)
 }
 
-function getDivergenceSignal(points: VolumeDeltaPoint[]) {
-  if (points.length < LOOKBACK_DAYS) {
-    return {
-      label: 'No signal',
-      className: 'text-[var(--text-secondary)]',
-      priceChange: 0,
-      deltaChange: 0,
-    }
-  }
-
-  const recent = points.slice(-LOOKBACK_DAYS)
+function getDivergenceSignal(recent: VolumeDeltaPoint[]) {
   const first = recent[0]
   const last = recent[recent.length - 1]
 
@@ -204,34 +187,40 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
     && ['confirmed_vnd', 'index_points', 'not_applicable'].includes(historyUnitStatus)
     && (data?.data ??[]).every((row) => row.price_unit === historyExpectedUnit)
   )
-  const candles = (historyWithheld ?[] : data?.data || []) as OHLCData[]
+  const candles = historyWithheld ? [] : (data?.data ?? [])
   const microBars = microstructure?.data?.deep_trades?.bars || []
   const hasMicroData = microBars.length > 0
   const lastDataDate = hasMicroData
     ? null
     : data?.meta?.freshness_as_of ?? data?.meta?.last_data_date ?? candles[candles.length - 1]?.time ?? null
   const fetchedAt = hasMicroData ? microUpdatedAt : dataUpdatedAt
-  const deltaSeries = hasMicroData ? aggregateMicroBars(microBars) : calculateVolumeDelta(candles)
-  const hasData = hasMicroData ? deltaSeries.length > 0 : deltaSeries.length > 30
+  // The monthly averages and exported cumulative delta depend on the full returned set.
+  const historicalDelta = hasMicroData ? null : calculateVolumeDelta(candles)
+  const deltaSeries = hasMicroData ? aggregateMicroBars(microBars) : (historicalDelta ?? [])
+  const unavailableReason = hasMicroData ? undefined : historyWithheld
+    ? 'Volume delta unavailable: historical price units were not certified.'
+    : historicalDelta === null ? 'Volume delta unavailable: incomplete historical observations.' : undefined
+  const lastPoint = deltaSeries.at(-1)
+  const hasData = !!lastPoint && (hasMicroData || deltaSeries.length > 30)
   const isFallback = Boolean((error || microError || !hasMicroData) && hasData)
   const primaryLoading = isMicroLoading || (!hasMicroData && isLoading)
   const { timedOut, resetTimeout } = useLoadingTimeout(primaryLoading && !hasData, { timeoutMs: 8_000 })
 
-  const lastPoint = deltaSeries[deltaSeries.length - 1]
-  const rollingDelta = (hasMicroData ? deltaSeries : deltaSeries.slice(-LOOKBACK_DAYS))
-    .reduce((sum, point) => sum + point.delta, 0)
-  const divergence = hasMicroData
+  const rollingPoints = hasMicroData ? deltaSeries : deltaSeries.slice(-LOOKBACK_DAYS)
+  const rollingDelta = rollingPoints.reduce((sum, point) => sum + point.delta, 0)
+  const divergence = !hasData || !lastPoint ? null : hasMicroData
     ? {
         label: 'Mongo match-type flow',
-        className: signedToneClass(lastPoint?.cumulativeDelta),
+        className: signedToneClass(lastPoint.cumulativeDelta),
         priceChange: 0,
-        deltaChange: lastPoint?.cumulativeDelta ?? 0,
+        deltaChange: lastPoint.cumulativeDelta,
       }
-    : getDivergenceSignal(deltaSeries)
+    : getDivergenceSignal(rollingPoints)
   const monthlyAverages = calculateMonthlyAverageDelta(deltaSeries).slice(-6)
 
   const recentPoints = deltaSeries.slice(-12)
   const maxAbsDelta = recentPoints.reduce((max, point) => Math.max(max, Math.abs(point.delta)), 1)
+  const cumulativeDelta = hasData ? lastPoint?.cumulativeDelta : undefined
 
   useEffect(() => {
     onDataChange?.(
@@ -242,14 +231,15 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
           ? `/microstructure/${upperSymbol}?interval=5m&lookback_days=7`
           : `/equity/historical?symbol=${upperSymbol}`,
         sourceLabel: hasMicroData ? 'Volume delta · trade ticks' : 'Volume delta (derived)',
+        basis: !hasMicroData && hasData ? 'Cumulative delta uses all returned bars; 20D flow uses the latest 20 bars.' : undefined,
         lastDataDate,
         fetchedAt,
         stale: isFallback,
         derived: !hasMicroData,
-        extra: hasData ? { cumulativeDelta: lastPoint?.cumulativeDelta ?? 0 } : undefined,
+        extra: cumulativeDelta !== undefined ? { cumulativeDelta } : undefined,
       }),
     )
-  }, [onDataChange, hasData, hasMicroData, isFallback, lastDataDate, fetchedAt, upperSymbol, lastPoint?.cumulativeDelta])
+  }, [onDataChange, hasData, hasMicroData, isFallback, lastDataDate, fetchedAt, upperSymbol, cumulativeDelta])
 
   if (!upperSymbol) {
     return <WidgetEmpty message="Select a symbol to view volume delta" icon={<Scale size={18} />} />
@@ -286,12 +276,10 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
         ) : primaryLoading && !hasData ? (
           <WidgetSkeleton lines={8} />
         ) : (microError || error) && !hasData ? (
-          <WidgetError error={(microError || error) as Error} onRetry={() => { refetchMicro(); refetch() }} />
-        ) : !hasData ? (
+          <WidgetError title={unavailableReason} error={(microError || error) as Error} onRetry={() => { refetchMicro(); refetch() }} />
+        ) : !lastPoint || !divergence ? (
           <WidgetEmpty
-            message={historyWithheld
-              ? 'Volume delta unavailable: historical price units were not certified.'
-              : 'Not enough historical candles'}
+            message={unavailableReason ?? 'Not enough historical candles'}
             icon={<Scale size={18} />}
             size="compact"
           />
@@ -300,9 +288,9 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
             <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[var(--text-muted)] uppercase tracking-widest">Today</div>
-                <div className={`font-mono ${signedToneClass(lastPoint?.delta)}`}>
-                  {Number(lastPoint?.delta ?? 0) > 0 ? '+' : ''}
-                  {formatCompact(lastPoint?.delta ?? 0)}
+                <div className={`font-mono ${signedToneClass(lastPoint.delta)}`}>
+                  {lastPoint.delta > 0 ? '+' : ''}
+                  {formatCompact(lastPoint.delta)}
                 </div>
               </div>
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
@@ -315,7 +303,7 @@ export function VolumeDeltaWidget({ symbol, onDataChange }: VolumeDeltaWidgetPro
               <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">
                 <div className="text-[var(--text-muted)] uppercase tracking-widest">{hasMicroData ? 'CVD' : 'Close Pos'}</div>
                 <div className="font-mono text-[var(--text-muted)]">
-                  {hasMicroData ? formatCompact(lastPoint?.cumulativeDelta ?? 0) : `${((lastPoint?.closePosition ?? 0) * 100).toFixed(0)}%`}
+                  {hasMicroData ? formatCompact(lastPoint.cumulativeDelta) : `${(lastPoint.closePosition * 100).toFixed(0)}%`}
                 </div>
               </div>
             </div>

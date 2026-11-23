@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: E402
 """
 Sprint V32 data completeness audit.
 
@@ -13,7 +14,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
@@ -33,6 +33,11 @@ from vnibb.models.news import CompanyEvent, CompanyNews
 from vnibb.models.screener import ScreenerSnapshot
 from vnibb.models.stock import Stock, StockPrice
 from vnibb.models.trading import FinancialRatio
+from vnibb.services.data_quality import (
+    PRICE_ROW_5Y_CUTOFF_POLICY,
+    PRICE_ROW_5Y_METRIC,
+    price_row_five_year_cutoff,
+)
 
 
 @dataclass
@@ -40,7 +45,7 @@ class CoverageSummary:
     total_stocks: int
     top_symbols: int
     top_with_prices: int
-    top_with_5y_prices: int
+    top_with_price_row_at_or_before_5y_cutoff: int
     top_with_ratios: int
     top_with_company_news: int
     top_with_company_events: int
@@ -49,6 +54,9 @@ class CoverageSummary:
     latest_ratio_update: str | None
     latest_company_news: str | None
     latest_company_event: str | None
+    price_row_five_year_cutoff: str
+    price_row_five_year_cutoff_policy: str = PRICE_ROW_5Y_CUTOFF_POLICY
+    historical_session_coverage_status: str = "not_assessed"
 
 
 def to_iso(value: Any) -> str | None:
@@ -125,12 +133,13 @@ async def get_top_symbols(limit: int) -> list[str]:
 
 
 async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
+    price_row_cutoff = price_row_five_year_cutoff(date.today())
     if not symbols:
         return CoverageSummary(
             total_stocks=0,
             top_symbols=0,
             top_with_prices=0,
-            top_with_5y_prices=0,
+            top_with_price_row_at_or_before_5y_cutoff=0,
             top_with_ratios=0,
             top_with_company_news=0,
             top_with_company_events=0,
@@ -139,6 +148,7 @@ async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
             latest_ratio_update=None,
             latest_company_news=None,
             latest_company_event=None,
+            price_row_five_year_cutoff=price_row_cutoff.isoformat(),
         )
 
     total_stocks = int(
@@ -178,14 +188,10 @@ async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
         )
         event_cov = event_rows.fetchall()
 
-    threshold_5y = date.today().replace(year=date.today().year - 5)
-    threshold_5y_with_grace = threshold_5y + timedelta(days=30)
     min_dates = [row.min_date for row in price_span if row.min_date is not None]
     max_dates = [row.max_date for row in price_span if row.max_date is not None]
 
-    top_with_5y = sum(
-        1 for row in price_span if row.min_date and row.min_date <= threshold_5y_with_grace
-    )
+    top_with_old_price_row = sum(1 for first_day in min_dates if first_day <= price_row_cutoff)
 
     latest_ratio_update = max((row[1] for row in ratio_cov if row[1] is not None), default=None)
     latest_company_news = max((row[1] for row in news_cov if row[1] is not None), default=None)
@@ -195,7 +201,7 @@ async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
         total_stocks=total_stocks,
         top_symbols=len(symbols),
         top_with_prices=len(price_span),
-        top_with_5y_prices=top_with_5y,
+        top_with_price_row_at_or_before_5y_cutoff=top_with_old_price_row,
         top_with_ratios=len(ratio_cov),
         top_with_company_news=len(news_cov),
         top_with_company_events=len(event_cov),
@@ -204,6 +210,7 @@ async def coverage_for_symbols(symbols: list[str]) -> CoverageSummary:
         latest_ratio_update=to_iso(latest_ratio_update),
         latest_company_news=to_iso(latest_company_news),
         latest_company_event=to_iso(latest_company_event),
+        price_row_five_year_cutoff=price_row_cutoff.isoformat(),
     )
 
 
@@ -272,7 +279,10 @@ def print_report(report: dict[str, Any]) -> None:
     for key in [
         "total_stocks",
         "top_with_prices",
-        "top_with_5y_prices",
+        PRICE_ROW_5Y_METRIC,
+        "price_row_five_year_cutoff",
+        "price_row_five_year_cutoff_policy",
+        "historical_session_coverage_status",
         "top_with_ratios",
         "top_with_company_news",
         "top_with_company_events",

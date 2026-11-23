@@ -210,12 +210,31 @@ async def test_unmarked_cache_is_not_spliced_into_vnd(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_quote_provider_scales_all_price_fields_but_not_volume(monkeypatch):
+@pytest.mark.parametrize(
+    ("raw_volume", "expected_volume"),
+    [
+        pytest.param(123, 123, id="positive"),
+        pytest.param(0, 0, id="measured-zero"),
+        pytest.param("0", 0, id="numeric-string-zero"),
+        pytest.param(None, None, id="missing"),
+        pytest.param(float("nan"), None, id="nan"),
+        pytest.param(float("inf"), None, id="infinite"),
+        pytest.param(True, None, id="true"),
+        pytest.param(False, None, id="false"),
+        pytest.param(-1, None, id="negative"),
+        pytest.param(0.5, None, id="fractional"),
+        pytest.param("unknown", None, id="nonnumeric"),
+        pytest.param(2**53, None, id="outside-exact-browser-range"),
+    ],
+)
+async def test_quote_provider_scales_all_price_fields_but_not_volume(
+    monkeypatch, raw_volume, expected_volume
+):
     class History:
         empty = False
         attrs = {"price_unit": "THOUSAND_VND"}
         def to_dict(self, orient):
-            return [bar(close=0.4), bar(time="2026-06-09", close=0.5)]
+            return [bar(close=0.4), bar(time="2026-06-09", close=0.5, volume=raw_volume)]
     class Provider:
         def __init__(self, *, symbol, source):
             assert (symbol, source) == ("XYZ", "VCI")
@@ -228,7 +247,7 @@ async def test_quote_provider_scales_all_price_fields_but_not_volume(monkeypatch
     assert (quote.price, quote.prev_close, quote.open, quote.high, quote.low) == (500, 400, 400, 600, 300)
     assert quote.change == 100
     assert quote.change_pct == 25
-    assert quote.volume == 123
+    assert quote.volume == expected_volume
     assert quote.upstream_source == "vnstock5_history:VCI"
 
 

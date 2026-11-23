@@ -22,6 +22,26 @@ export interface QuantRegimeInput {
   momentumLabel?: string | null
 }
 
+export interface VolumeDeltaBasis {
+  cumulative: 'full_returned_window' | 'observed_subtotal' | 'unavailable'
+  monthly_avg: 'observed_sample'
+  observed_delta_bars: number
+  returned_price_bars: number
+}
+
+export function describeCumulativeFlowBasis(basis: VolumeDeltaBasis | null | undefined): string | null {
+  switch (basis?.cumulative) {
+    case 'observed_subtotal':
+      return `Observed subtotal · ${basis.observed_delta_bars} of ${basis.returned_price_bars} returned bars observed`
+    case 'full_returned_window':
+      return 'Full returned window'
+    case 'unavailable':
+      return 'Cumulative delta unavailable'
+    default:
+      return null
+  }
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 export function average(values: number[]): number | null {
@@ -227,13 +247,12 @@ export function scoreSeasonality(hitRatePct: number | null): number {
   return clamp(hitRatePct, 0, 100)
 }
 
-export function scoreFlow(currentDelta: number | null, cumulativeDeltas: Array<number | null>): number {
-  if (currentDelta === null || !Number.isFinite(currentDelta)) return 50
-  const maxAbs = Math.max(
-    Math.abs(currentDelta),
-    ...cumulativeDeltas.map((value) => Math.abs(Number(value || 0))),
-    1,
-  )
+export function scoreFlow(currentDelta: number | null, cumulativeDeltas: ReadonlyArray<number | null>): number | null {
+  if (currentDelta === null || !Number.isFinite(currentDelta)) return null
+  let maxAbs = Math.max(Math.abs(currentDelta), 1)
+  for (const value of cumulativeDeltas) {
+    if (value !== null && Number.isFinite(value)) maxAbs = Math.max(maxAbs, Math.abs(value))
+  }
   return clamp(50 + (currentDelta / maxAbs) * 50, 0, 100)
 }
 

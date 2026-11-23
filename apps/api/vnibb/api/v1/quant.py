@@ -24,6 +24,7 @@ from vnibb.api.v1.equity import (
     _load_historical_from_db,
     _load_historical_from_mongo,
     _load_historical_from_recent_cache,
+    _preserve_same_bar_volume,
 )
 
 from vnibb.api.v1.schemas import MetaData, StandardResponse
@@ -43,6 +44,7 @@ from vnibb.providers.vnstock.equity_historical import (
 )
 from vnibb.providers.vnstock.stock_quote import VnstockStockQuoteFetcher
 from vnibb.services import statement_admission
+from vnibb.services.market_session import market_session_date
 from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
 
 logger = logging.getLogger(__name__)
@@ -428,7 +430,7 @@ def _normalize_provider_history_rows(
                 high=float(getattr(row, "high")),
                 low=float(getattr(row, "low")),
                 close=float(close),
-                volume=int(getattr(row, "volume") or 0),
+                volume=getattr(row, "volume", None),
                 value=getattr(row, "value", None),
                 raw_close=float(raw_close) if raw_close is not None else float(close),
                 adjusted_close=float(adjusted_close) if adjusted_close is not None else None,
@@ -453,15 +455,26 @@ def _excluded_historical_dates(*collections: list[EquityHistoricalData]) -> set[
     }
 
 
-def _merge_historical_rows(*collections: list[EquityHistoricalData]) -> list[EquityHistoricalData]:
-    by_time: dict[date, EquityHistoricalData] = {}
-    for collection in collections:
+def _merge_historical_rows(
+    *collections: tuple[str, list[EquityHistoricalData]],
+) -> list[EquityHistoricalData]:
+    by_time: dict[date, list[tuple[str, EquityHistoricalData]]] = {}
+    for reader, collection in collections:
         for row in collection:
             expected_unit = "index_points" if is_index_symbol(row.symbol) else "VND"
             if getattr(row, "price_unit", "unknown") != expected_unit:
                 continue
-            by_time[row.time] = row
-    return [by_time[key] for key in sorted(by_time)]
+            by_time.setdefault(row.time, []).append((reader, row))
+
+    merged = []
+    for timestamp in sorted(by_time):
+        candidates = by_time[timestamp]
+        # The later reader still wins for prices. Only fill its missing volume.
+        winner = candidates[-1][1]
+        if winner.volume is None and len(candidates) > 1:
+            winner = _preserve_same_bar_volume(winner, candidates[:-1])
+        merged.append(winner)
+    return merged
 
 
 def _build_price_frame_diagnostics(
@@ -610,31 +623,27 @@ async def _merge_latest_quote_into_frame(
     expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
     if getattr(quote, "price_unit", "unknown") != expected_unit:
         return frame, "Skipped latest quote with unknown or incompatible price units."
-    quote_time = getattr(quote, "updated_at", None)
-    if quote_price is None or quote_time is None:
+    quote_date = market_session_date(getattr(quote, "as_of", None))
+    if quote_price is None or quote_date is None or pd.isna(quote_date):
         return frame, None
-
-    quote_timestamp = pd.to_datetime(quote_time, errors="coerce")
-    if pd.isna(quote_timestamp):
-        return frame, None
-    if getattr(quote_timestamp, "tzinfo", None) is not None:
-        quote_timestamp = quote_timestamp.tz_localize(None)
 
     diagnostics = frame.attrs.get("price_diagnostics")
     merged = frame.copy().sort_values("time").reset_index(drop=True)
     last_row = merged.iloc[-1]
-    quote_date = quote_timestamp.normalize()
-    last_date = pd.to_datetime(last_row["time"], errors="coerce")
-    if pd.isna(last_date):
+    last_date = market_session_date(last_row["time"])
+    if last_date is None or pd.isna(last_date):
         return frame, None
-    last_date = last_date.normalize()
 
     if quote_date < last_date:
         return frame, None
 
+    quote_volume = getattr(quote, "volume", None)
+    if pd.isna(quote_volume) and quote_date == last_date:
+        quote_volume = last_row.get("volume")
+
     fallback_open = float(last_row.get("close") or quote_price)
     latest_row = {
-        "time": quote_timestamp,
+        "time": pd.Timestamp(quote_date),
         "open": float(getattr(quote, "open", None) or fallback_open),
         "high": float(
             getattr(quote, "high", None)
@@ -645,7 +654,7 @@ async def _merge_latest_quote_into_frame(
             or min(float(last_row.get("low") or quote_price), float(quote_price))
         ),
         "close": float(quote_price),
-        "volume": float(getattr(quote, "volume", None) or last_row.get("volume") or 0),
+        "volume": np.nan if pd.isna(quote_volume) else float(quote_volume),
     }
 
     if quote_date == last_date:
@@ -1669,7 +1678,7 @@ async def _load_price_frame(
         mongo_rows = []
 
     try:
-        rows = await _load_historical_from_db(
+        db_rows = await _load_historical_from_db(
             db=db,
             symbol=symbol,
             start_date=start_date,
@@ -1687,10 +1696,11 @@ async def _load_price_frame(
             )
         else:
             logger.warning("Quant price frame query failed for %s: %s", symbol, exc)
-        rows = []
+        db_rows = []
 
-    excluded_dates = _excluded_historical_dates(mongo_rows, rows)
-    rows = _merge_historical_rows(mongo_rows, rows)
+    collections = [("mongo", mongo_rows), ("db", db_rows)]
+    excluded_dates = _excluded_historical_dates(mongo_rows, db_rows)
+    rows = _merge_historical_rows(*collections)
     unresolved_dates = excluded_dates - {row.time for row in rows}
 
     if not rows or unresolved_dates:
@@ -1702,7 +1712,8 @@ async def _load_price_frame(
             adjustment_mode="raw",
         )
         excluded_dates.update(_excluded_historical_dates(recent_cache_rows))
-        rows = _merge_historical_rows(rows, recent_cache_rows)
+        collections.append(("recent_cache", recent_cache_rows))
+        rows = _merge_historical_rows(*collections)
         unresolved_dates = excluded_dates - {row.time for row in rows}
 
     frame = _historical_rows_to_frame(rows)
@@ -1738,7 +1749,8 @@ async def _load_price_frame(
             provider_rows,
             adjustment_mode="raw",
         )
-        rows = _merge_historical_rows(rows, normalized_provider_rows)
+        collections.append(("provider", normalized_provider_rows))
+        rows = _merge_historical_rows(*collections)
         excluded_dates.update(_excluded_historical_dates(normalized_provider_rows))
         unresolved_dates = excluded_dates - {row.time for row in rows}
 
@@ -1772,30 +1784,54 @@ async def _load_price_frame(
     return frame
 
 
+def _count_volume_divergence_months(enriched: pd.DataFrame) -> int | None:
+    monthly_rollup = enriched.groupby(enriched["time"].dt.to_period("M")).agg(
+        delta=("delta", lambda values: values.sum(min_count=1)),
+        observed_bars=("delta", "count"),
+        returned_bars=("delta", "size"),
+        close=("close", "last"),
+    )
+    # Compare successive returned months, not assumed calendar coverage.
+    comparisons = monthly_rollup.iloc[1:]
+    close_change = monthly_rollup["close"].pct_change(fill_method=None).iloc[1:]
+    if (
+        comparisons.empty
+        or not comparisons["observed_bars"].eq(comparisons["returned_bars"]).all()
+        or not np.isfinite(close_change.to_numpy(dtype=float, na_value=np.nan)).all()
+    ):
+        return None
+    return int(((close_change > 0) & (comparisons["delta"] < 0)).sum())
+
+
 def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
     enriched = frame.copy()
     price_range = (enriched["high"] - enriched["low"]).replace(0, np.nan)
     close_pos = ((enriched["close"] - enriched["low"]) / price_range).clip(0, 1).fillna(0.5)
 
-    enriched["delta"] = enriched["volume"] * (2 * close_pos - 1)
-    enriched["cumulative_delta"] = enriched["delta"].cumsum()
+    delta = enriched["volume"] * (2 * close_pos - 1)
+    enriched["delta"] = delta.replace([np.inf, -np.inf], np.nan)
+    enriched["cumulative_delta"] = enriched["delta"].cumsum(skipna=True)
     enriched["month"] = enriched["time"].dt.month
 
-    monthly_avg = enriched.groupby("month")["delta"].mean()
-    monthly_rollup = (
-        enriched.assign(month_key=enriched["time"].dt.to_period("M"))
-        .groupby("month_key", as_index=False)
-        .agg(delta=("delta", "sum"), close=("close", "last"))
-    )
-    monthly_rollup["close_change"] = monthly_rollup["close"].pct_change()
-    monthly_rollup["divergence"] = (monthly_rollup["close_change"] > 0) & (
-        monthly_rollup["delta"] < 0
-    )
+    monthly_avg = enriched.groupby("month")["delta"].mean().dropna()
+    observed_delta_bars = int(enriched["delta"].count())
+    if observed_delta_bars == 0:
+        cumulative_basis = "unavailable"
+    elif observed_delta_bars == len(enriched):
+        cumulative_basis = "full_returned_window"
+    else:
+        cumulative_basis = "observed_subtotal"
 
     strongest_buy_month = monthly_avg.idxmax() if not monthly_avg.empty else None
     strongest_sell_month = monthly_avg.idxmin() if not monthly_avg.empty else None
 
     return {
+        "basis": {
+            "cumulative": cumulative_basis,
+            "monthly_avg": "observed_sample",
+            "observed_delta_bars": observed_delta_bars,
+            "returned_price_bars": len(enriched),
+        },
         "monthly_avg": _build_month_map(monthly_avg, decimals=2),
         "cumulative": [
             {
@@ -1806,8 +1842,10 @@ def _compute_volume_delta(frame: pd.DataFrame) -> Dict[str, Any]:
             }
             for row in enriched.tail(252).itertuples(index=False)
         ],
-        "current_20d_cumulative_delta": _safe_float(enriched["delta"].tail(20).sum(), decimals=2),
-        "divergence_months": int(monthly_rollup["divergence"].sum()),
+        "current_20d_cumulative_delta": _safe_float(
+            enriched["delta"].tail(20).sum(min_count=20), decimals=2
+        ),
+        "divergence_months": _count_volume_divergence_months(enriched),
         "strongest_buy_month": MONTH_LABELS.get(int(strongest_buy_month), None)
         if strongest_buy_month is not None
         else None,
@@ -3736,6 +3774,14 @@ async def get_volume_flow_metric(
     adjustment_mode: str = Query(default="raw", pattern=r"^(raw|adjusted)$"),
     db: AsyncSession = Depends(get_db),
 ):
+    """Volume delta on returned bars, without inferring calendar coverage.
+
+    Monthly means use observed deltas. Cumulative values start at the first returned
+    bar, skip unobserved deltas (shown as gaps), and state their coverage in ``basis``.
+    The 20-bar total needs observed deltas on all of the latest 20 returned bars.
+    Divergence counts months with a rising close and negative net delta. It needs at
+    least one comparison and complete deltas for every month that is compared.
+    """
     return await _get_quant_metric_alias_response(
         symbol=symbol,
         metric_name="volume-flow",
@@ -4256,7 +4302,7 @@ async def run_quant_sweep(
 
 
 @router.get("/{symbol}", response_model=StandardResponse[QuantResponseData])
-@cached(ttl=900, key_prefix="quant_metrics_v3")
+@cached(ttl=900, key_prefix="quant_metrics_v4")
 async def get_quant_metrics(
     symbol: str,
     metrics: str = Query(

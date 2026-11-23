@@ -11,6 +11,7 @@ from vnibb.providers import market_data
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from vnibb.core.database import async_session_maker
 from vnibb.models import Stock
+from vnibb.services.stock_listing import listing_board_evidence, listing_symbol, listed_exchange_update
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,18 +33,18 @@ async def seed_all_stocks():
             
         total_stocks = len(df)
         logger.info(f"Found {total_stocks} stocks. Starting database seeding...")
+        rows = df.to_dict(orient="records")
+        boards, withheld = listing_board_evidence(rows)
+        if withheld:
+            logger.warning("Withheld %d VCI identities with contradictory listing evidence", len(withheld))
         
         async with async_session_maker() as session:
             count = 0
-            for _, row in df.iterrows():
-                symbol = row.get('symbol')
-                exchange = row.get('exchange')
-                if not isinstance(symbol, str) or not symbol.strip() or not isinstance(exchange, str) or not exchange.strip() or row.get('type') != 'STOCK':
+            for row in rows:
+                symbol = listing_symbol(row)
+                if symbol not in boards or row.get("type") != "STOCK":
                     continue
-                symbol = symbol.strip().upper()
-                exchange = exchange.strip().upper()
-                if exchange == 'HSX':
-                    exchange = 'HOSE'
+                exchange = boards[symbol]
 
                 company_name = row.get('organ_name')
                 short_name = row.get('organ_short_name')
@@ -51,7 +52,6 @@ async def seed_all_stocks():
                 # Truncate to fit DB constraints
                 if company_name: company_name = str(company_name)[:255]
                 if short_name: short_name = str(short_name)[:100]
-                if exchange: exchange = str(exchange)[:10]
                 
                 stmt = pg_insert(Stock).values(
                     symbol=symbol,
@@ -66,8 +66,7 @@ async def seed_all_stocks():
                     set_={
                         'company_name': company_name,
                         'short_name': short_name,
-                        'exchange': exchange,
-                        'is_active': 1,
+                        'exchange': listed_exchange_update(exchange),
                         'updated_at': datetime.utcnow(),
                     }
                 )

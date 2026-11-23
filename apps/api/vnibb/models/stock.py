@@ -49,10 +49,8 @@ class Stock(Base):
     is_active: Mapped[bool] = mapped_column(Integer, default=1, nullable=False)  # 1=active, 0=delisted
     listing_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     delisting_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    # Counter for consecutive provider "empty data" responses. The price
-    # sync auto-deactivates a symbol once this exceeds a small threshold
-    # (default 5) so the daily_trading run stops wasting cycles on
-    # delisted / suspended tickers. Reset to 0 on a successful fetch.
+    # Legacy diagnostic residue for #286. Do not read it as listing evidence
+    # or seed retry policy from it; new history attempts use feed-local state.
     empty_sync_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     
     # Timestamps

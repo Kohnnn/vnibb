@@ -41,9 +41,10 @@ def test_native_cached_universe_rejects_unconfirmed_symbols(cli):
         cli.select_universe(rows, "MISSING")
 
 
-def test_listing_activates_only_confirmed_stocks_and_deactivates_delisted():
+def test_listing_projects_confirmed_stock_metadata_without_membership_transitions():
     # SQL projection is exercised by the dedicated listing writer regression.
     from vnibb.services.vietcap_financials import listing_projection
-    assert listing_projection({"symbol": "ACB", "type": "STOCK", "board": "HSX"}, {})["is_active"] == 1
-    assert listing_projection({"symbol": "OLD", "type": "STOCK", "board": "DELISTED"}, {})["is_active"] == 0
+    row = listing_projection({"symbol": "ACB", "type": "STOCK", "board": "HSX"}, {})
+    assert row["exchange"] == "HOSE" and "is_active" not in row
+    assert listing_projection({"symbol": "OLD", "type": "STOCK", "board": "DELISTED"}, {}) is None
     assert listing_projection({"symbol": "CW", "type": "CW", "board": "HSX"}, {}) is None

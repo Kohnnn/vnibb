@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import { toast } from 'sonner';
 import { logClientError } from '@/lib/clientLogger';
 import { buildExportProvenance, provenanceLines, provenanceToMarkdown, type ExportProvenance } from '@/lib/widgetProvenance';
+import { isCompanyReferenceWidget } from '@/lib/companyReferenceRuntime';
 
 export { buildExportProvenance, provenanceToMarkdown, type ExportProvenance } from '@/lib/widgetProvenance';
 import { LIGHT_CAPTURE_ATTR, prepareLightCapture } from '@/lib/chartCapture';
@@ -51,6 +52,12 @@ export function exportToCSV(data: any, filename: string, provenance?: ExportProv
   const body = prefixLines.length ? `${prefixLines.join('\n')}\n${csv}` : csv;
   const blob = new Blob([body], { type: 'text/csv' });
   downloadBlob(blob, `${filename}.csv`);
+}
+
+/** A reference availability receipt has provenance, but no company entity rows. */
+export function exportCompanyReferenceStatusCSV(filename: string, provenance: ExportProvenance) {
+  const body = provenanceLines(provenance).map(([key, value]) => `# ${key},${serializeCSVCell(value)}`).join('\n');
+  downloadBlob(new Blob([`${body}\n`], { type: 'text/csv' }), `${filename}.csv`);
 }
 
 /**
@@ -149,6 +156,9 @@ export function exportToMarkdown(body: string, filename: string, provenance?: Ex
 /** The provenance facts a bitmap can carry without a sidecar file. */
 function provenanceFooterText(provenance?: ExportProvenance): string {
   const wanted = ['source', 'source_as_of', 'fetched_at', 'captured_at'];
+  if (provenance?.widgetType && isCompanyReferenceWidget(provenance.widgetType)) {
+    wanted.push('symbol', 'coverage', 'observation_status', 'refresh_status', 'failure_kind', 'failed_at', 'warnings');
+  }
   return provenanceLines(provenance)
     .filter(([key]) => wanted.includes(key))
     .map(([key, value]) => `${key}: ${value}`)
@@ -272,10 +282,17 @@ function reportExportFailure(error: unknown) {
  */
 let captureQueue: Promise<unknown> = Promise.resolve();
 
+function assertCurrentCapture(element: HTMLElement, isCurrent?: () => boolean) {
+  if (isCurrent && (!element.isConnected || !isCurrent())) {
+    throw new Error('The widget changed during PNG export. Export again.');
+  }
+}
+
 /**
  * Export a widget as a PNG. `target` is a widget id or the element itself.
  * Provenance is painted into the image, because a bitmap cannot carry a
  * `_provenance` key.
+ * `isCurrent` lets a caller reject a capture when its live data has changed.
  *
  * Resolves `true` only after the download started. Every failure is surfaced to
  * the user (toast) and reported as `false`, never as a silent wrong image.
@@ -284,8 +301,9 @@ export function exportToPNG(
   target: string | HTMLElement,
   filename: string,
   provenance?: ExportProvenance,
+  isCurrent?: () => boolean,
 ): Promise<boolean> {
-  const run = captureQueue.then(() => captureWidgetAsPNG(target, filename, provenance));
+  const run = captureQueue.then(() => captureWidgetAsPNG(target, filename, provenance, isCurrent));
   // A rejected link would poison every later export, so the queue never rejects.
   captureQueue = run.catch(() => {});
   return run;
@@ -295,6 +313,7 @@ async function captureWidgetAsPNG(
   target: string | HTMLElement,
   filename: string,
   provenance?: ExportProvenance,
+  isCurrent?: () => boolean,
 ): Promise<boolean> {
   const element = typeof target === 'string' ? document.getElementById(target) : target;
   if (!element) {
@@ -309,6 +328,7 @@ async function captureWidgetAsPNG(
   // on success, so a refused capture would leave one behind per attempt.
   const clonesBefore = new Set(document.querySelectorAll('iframe.html2canvas-container'));
   try {
+    assertCurrentCapture(element, isCurrent);
     const canvas = await html2canvas(element, {
       // html2canvas reads this after `onclone`, so the getter sees the clone's
       // resolved light surface rather than a guessed default.
@@ -322,6 +342,7 @@ async function captureWidgetAsPNG(
       // `html`/`body` — the whole page, not just the widget — so those two
       // values need the same downgrade or the export dies before painting.
       onclone: (documentClone, reference) => {
+        assertCurrentCapture(element, isCurrent);
         // The clone is themed light first, so the charts below read the light
         // palette from it. The live document keeps the user's theme throughout.
         documentClone.documentElement.classList.remove('dark');
@@ -354,6 +375,7 @@ async function captureWidgetAsPNG(
         }
       },
     });
+    assertCurrentCapture(element, isCurrent);
     const output = footerText ? stampFooter(canvas, footerText, element.clientWidth, lightSurface) : canvas;
     // A canvas without `toBlob` (or a browser that never calls back) would leave
     // the export pending forever; refuse instead of hanging without feedback.
@@ -367,7 +389,9 @@ async function captureWidgetAsPNG(
       if (encodedBlob) resolve(encodedBlob);
       else reject(new Error('The browser could not encode the captured chart'));
     }, 'image/png');
-    downloadBlob(await promise, `${filename}.png`);
+    const blob = await promise;
+    assertCurrentCapture(element, isCurrent);
+    downloadBlob(blob, `${filename}.png`);
     return true;
   } catch (error) {
     for (const clone of document.querySelectorAll('iframe.html2canvas-container')) {

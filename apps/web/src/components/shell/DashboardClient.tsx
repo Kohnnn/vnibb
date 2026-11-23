@@ -52,6 +52,7 @@ import {
     writeAdminLayoutControlsVisible,
 } from '@/lib/adminLayoutAccess';
 import { saveAdminSystemDashboardTemplate } from '@/lib/api';
+import { isCompanyReferenceWidget, type CompanyReferenceWidgetType } from '@/lib/companyReferenceRuntime';
 import { getWidgetDefinition } from '@/data/widgetDefinitions';
 import {
     DASHBOARD_WALKTHROUGH_RESTART_EVENT,
@@ -105,6 +106,19 @@ type TemplateApplyStatus = {
     tone: 'success' | 'warning';
 };
 
+type ReferenceAttachmentScope = {
+    dashboardId: string;
+    tabId: string;
+    widgetId: string;
+    widgetType: CompanyReferenceWidgetType;
+};
+
+type CopilotWidgetAttachment = {
+    name?: string;
+    data?: Record<string, unknown>;
+    reference?: ReferenceAttachmentScope;
+};
+
 const ADMIN_MANAGED_SYSTEM_IDS = new Set([
     MAIN_FUNDAMENTAL_DASHBOARD_ID,
     TECHNICAL_DASHBOARD_ID,
@@ -153,8 +167,21 @@ function DashboardContent() {
     const [isAppsLibraryOpen, setIsAppsLibraryOpen] = useState(false);
     const [isTemplateSelectorOpen, setIsTemplateSelectorOpen] = useState(false);
     const [showAICopilot, setShowAICopilot] = useState(false);
-    const [copilotWidgetContext, setCopilotWidgetContext] = useState<string | undefined>(undefined);
-    const [copilotWidgetData, setCopilotWidgetData] = useState<Record<string, unknown> | undefined>(undefined);
+    const [copilotAttachment, setCopilotAttachment] = useState<CopilotWidgetAttachment>();
+    const referenceTarget = copilotAttachment?.reference;
+    const selectedReferenceWidget = showAICopilot && referenceTarget && activeDashboard?.id === referenceTarget.dashboardId
+        && activeTab?.id === referenceTarget.tabId
+        ? activeTab.widgets.find(widget => widget.id === referenceTarget.widgetId && widget.type === referenceTarget.widgetType)
+        : undefined;
+    // A reference attachment has no click-time fallback when its tile disconnects.
+    const connectedAttachment = !referenceTarget || (selectedReferenceWidget && copilotAttachment?.data)
+        ? copilotAttachment : undefined;
+    const publishReferenceContext = useCallback((data: Record<string, unknown> | undefined) => {
+        setCopilotAttachment(current => {
+            if (!referenceTarget || current?.reference !== referenceTarget) return current;
+            return data ? { ...current, data } : undefined;
+        });
+    }, [referenceTarget]);
     const [copilotPromptLibraryRequestId, setCopilotPromptLibraryRequestId] = useState(0);
     const [copilotStarterPrompt, setCopilotStarterPrompt] = useState<'analyze' | 'technical' | undefined>(undefined);
     const [copilotStarterWorkflow, setCopilotStarterWorkflow] = useState<ResearchStarter['workflow'] | undefined>(undefined);
@@ -369,9 +396,9 @@ function DashboardContent() {
         source: string,
         contextName?: string,
         contextData?: Record<string, unknown>,
+        reference?: ReferenceAttachmentScope,
     ) => {
-        setCopilotWidgetContext(contextName);
-        setCopilotWidgetData(contextData);
+        setCopilotAttachment({ name: contextName, data: reference ? undefined : contextData, reference });
         setShowAICopilot(true);
         captureAnalyticsEvent(ANALYTICS_EVENTS.copilotOpened, {
             source,
@@ -1464,8 +1491,11 @@ function DashboardContent() {
                                                         const contextName = typeof context?.widgetType === 'string'
                                                             ? context.widgetType
                                                             : widgetType.replace(/_/g, ' ');
-                                                        openCopilot('widget', contextName, context || undefined);
+                                                        openCopilot('widget', contextName, context, isCompanyReferenceWidget(widgetType)
+                                                            ? { dashboardId: activeDashboard.id, tabId: activeTab.id, widgetId: widget.id, widgetType }
+                                                            : undefined);
                                                     }}
+                                                    onCopilotContextChange={widget === selectedReferenceWidget ? publishReferenceContext : undefined}
                                                     onSettingsClick={() => handleOpenWidgetSettings(widget.id)}
                                                     parameters={parameters}
                                                 >
@@ -1614,8 +1644,8 @@ function DashboardContent() {
                                         isOpen={showAICopilot}
                                         onClose={() => setShowAICopilot(false)}
                                         currentSymbol={stockGlobalSymbol}
-                                        widgetContext={copilotWidgetContext}
-                                        widgetContextData={copilotWidgetData}
+                                        widgetContext={connectedAttachment?.name}
+                                        widgetContextData={connectedAttachment?.data}
                                         activeTabName={activeTab?.name}
                                         workspaceContextKey={`${activeDashboard?.id || ''}:${activeTab?.id || ''}`}
                                         promptLibraryRequestId={copilotPromptLibraryRequestId}
@@ -1643,8 +1673,8 @@ function DashboardContent() {
                                 isOpen={showAICopilot}
                                 onClose={() => setShowAICopilot(false)}
                                 currentSymbol={stockGlobalSymbol}
-                                widgetContext={copilotWidgetContext}
-                                widgetContextData={copilotWidgetData}
+                                widgetContext={connectedAttachment?.name}
+                                widgetContextData={connectedAttachment?.data}
                                 activeTabName={activeTab?.name}
                                 workspaceContextKey={`${activeDashboard?.id || ''}:${activeTab?.id || ''}`}
                                 promptLibraryRequestId={copilotPromptLibraryRequestId}

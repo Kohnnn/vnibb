@@ -29,6 +29,8 @@ export interface WidgetRuntimeInput {
   lastDataDate?: number | string | Date | null
   /** Retrieval time; does not establish source freshness. */
   fetchedAt?: number | string | Date | null
+  failedAt?: ExportProvenance['failedAt']
+  failureKind?: ExportProvenance['failureKind']
   coverage?: ExportProvenance['coverage']
   coverageDetail?: ExportProvenance['coverageDetail']
   marketClosed?: boolean
@@ -98,6 +100,8 @@ export function buildWidgetRuntime(input: WidgetRuntimeInput): WidgetDataPayload
     basis: input.basis,
     updatedAt: input.lastDataDate ?? null,
     fetchedAt: input.fetchedAt,
+    ...(input.failedAt !== undefined && { failedAt: input.failedAt }),
+    ...(input.failureKind !== undefined && { failureKind: input.failureKind }),
     coverage: input.coverage,
     coverageDetail: input.coverageDetail,
     marketClosed: input.marketClosed,
