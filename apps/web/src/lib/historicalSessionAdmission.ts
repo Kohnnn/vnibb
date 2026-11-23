@@ -19,7 +19,11 @@ export function getHistoricalSessionAdmission(response?: EquityHistoricalRespons
   });
   if (!response) return unavailable('Historical session coverage unavailable.');
   if (response.error) return unavailable('Historical price request failed.');
-  if (!response.data.length) return unavailable('No historical observations were returned.');
+  if (!response.data.length) {
+    return unavailable((response.meta?.excluded_row_count ?? 0) > 0
+      ? 'No historical observations passed price-unit admission.'
+      : 'No historical observations were returned.');
+  }
 
   const { meta, data } = response;
   const unit = meta?.unit_status === 'confirmed_vnd'

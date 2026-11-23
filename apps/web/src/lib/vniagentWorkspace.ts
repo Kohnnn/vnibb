@@ -84,10 +84,15 @@ function unscopedCapabilityContext(): VniAgentWidgetCapabilityContext {
   }
 }
 
-function readCapabilitySymbol(value: unknown): string {
+// Benchmark identifiers used by the historical analytics widgets are not all three-letter tickers.
+const HISTORICAL_BENCHMARKS: Record<string, true> = {
+  VNINDEX: true, VN30: true, HNX: true, HNXINDEX: true, HNX30: true, UPCOM: true, UPCOMINDEX: true,
+}
+
+function readCapabilitySymbol(value: unknown, allowsHistoricalBenchmark: boolean): string {
   if (typeof value !== 'string') return ''
   const symbol = value.trim().toUpperCase()
-  return /^[A-Z0-9]{3}$/.test(symbol) ? symbol : ''
+  return /^[A-Z0-9]{3}$/.test(symbol) || (allowsHistoricalBenchmark && Object.hasOwn(HISTORICAL_BENCHMARKS, symbol)) ? symbol : ''
 }
 
 export function buildVniAgentWorkspaceContext(input: VniAgentWorkspaceContextInput): VniAgentWorkspaceContext {
@@ -97,10 +102,11 @@ export function buildVniAgentWorkspaceContext(input: VniAgentWorkspaceContextInp
     ? payload.widgetConfig as Record<string, unknown>
     : undefined
   const configuration = capability ? validateWidgetCapabilityConfiguration(capability, widgetConfig) : { values: {}, invalidKeys: [] }
+  const allowsHistoricalBenchmark = capability?.widgetType === 'atr_regime' || capability?.widgetType === 'gap_fill_stats'
   const symbol = capability?.scope === 'market'
     ? ''
-    : readCapabilitySymbol(payload.symbol !== undefined ? payload.symbol : input.symbol)
-  const snapshotMatchesScope = capability?.scope === 'symbol' && symbol === readCapabilitySymbol(input.symbol)
+    : readCapabilitySymbol(payload.symbol !== undefined ? payload.symbol : input.symbol, allowsHistoricalBenchmark)
+  const snapshotMatchesScope = capability?.scope === 'symbol' && !!symbol && symbol === readCapabilitySymbol(input.symbol, allowsHistoricalBenchmark)
 
   return {
     widgetType: capability?.name || input.widgetType || 'Dashboard',

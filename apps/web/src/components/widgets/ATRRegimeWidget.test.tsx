@@ -2,6 +2,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { formatAbsoluteTimestamp } from '@/lib/formatDate';
+import { buildVniAgentWorkspaceContext } from '@/lib/vniagentWorkspace';
 import { getWidgetExportData } from '@/lib/widgetRuntime';
 import type { EquityHistoricalResponse } from '@/types/equity';
 import { ATRRegimeWidget } from './ATRRegimeWidget';
@@ -35,7 +36,7 @@ type Options = {
 function bars(count: number, options: Options) {
   return Array.from({ length: count }, (_, index) => {
     const row = {
-      symbol: 'FPT',
+      symbol: options.index ? 'VN30' : 'FPT',
       time: options.datesMissing ? '' : sessions[index],
       open: 100000,
       high: options.flat ? 100000 : 110000,
@@ -59,7 +60,7 @@ function showATR(meta: NonNullable<EquityHistoricalResponse['meta']>, options: O
     error: options.error ?? null, refetch: jest.fn(), dataUpdatedAt: receivedAt,
   } as unknown as UseQueryResult<EquityHistoricalResponse, Error>);
   const publish = jest.fn();
-  render(<ATRRegimeWidget symbol="FPT" onDataChange={publish} />);
+  render(<ATRRegimeWidget symbol={options.index ? 'VN30' : 'FPT'} onDataChange={publish} />);
   return publish;
 }
 
@@ -168,6 +169,16 @@ describe('ATR regime availability', () => {
     expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'unavailable', atr: null, rank: null });
   });
 
+  it.each([
+    [0, 'No historical observations were returned.'],
+    [2, 'No historical observations passed price-unit admission.'],
+  ] as const)('separates an empty history from %s rejected candidates', (excludedRowCount, reason) => {
+    const publish = showATR({ ...certified, count: 0, excluded_row_count: excludedRowCount }, { count: 0 });
+    expect(screen.getByText('ATR regime unavailable')).toBeInTheDocument();
+    expect(publish.mock.lastCall?.[0].__widgetRuntime.provenance.admissionReason).toBe(reason);
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ unavailableReason: reason, atr: null, rank: null });
+  });
+
   it('accepts trailing range incompleteness but names the stale retained sample', () => {
     const publish = showATR({ ...certified, completeness_status: 'partial', missing_trailing_sessions: 2, missing_session_count: 2 }, { count: 38 });
     expect(screen.getByText(/38 consecutive sessions/)).toBeInTheDocument();
@@ -179,7 +190,14 @@ describe('ATR regime availability', () => {
     const publish = showATR({ ...certified, unit_status: 'not_applicable', session_basis: 'not_applicable' }, { index: true });
     expect(screen.getByText('ATR %')).toBeInTheDocument();
     expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
-    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'available', suggestedShares: null });
+    const dataSample = getWidgetExportData(publish.mock.lastCall?.[0]);
+    expect(dataSample).toMatchObject({ symbol: 'VN30', status: 'available', suggestedShares: null });
+    const request = buildVniAgentWorkspaceContext({
+      widgetTypeKey: 'atr_regime', symbol: 'FPT', dataSnapshot: { quote: { symbol: 'FPT' } },
+      widgetPayload: { symbol: 'vn30', dataSample },
+    });
+    expect(request).toMatchObject({ symbol: 'VN30', widgetPayload: { symbol: 'VN30', dataSample } });
+    expect(request.dataSnapshot).toEqual({});
   });
 
   it('shows the failure and no metrics when history cannot be loaded at all', () => {

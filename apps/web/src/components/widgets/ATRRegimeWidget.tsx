@@ -132,7 +132,7 @@ export function ATRRegimeWidget({ symbol, onDataChange }: ATRRegimeWidgetProps) 
 
   useEffect(() => {
     const summary = {
-      status: observationStatus, unavailableReason: admissionReason ?? null,
+      symbol: upperSymbol, status: observationStatus, unavailableReason: admissionReason ?? null,
       firstSession, lastSession, admittedSessions: hasData ? candles.length : 0, returnedSessions: candles.length,
       historyCount: atrSeries.length, basis: basis ?? null,
       excludedRows: meta?.excluded_row_count ?? null,
