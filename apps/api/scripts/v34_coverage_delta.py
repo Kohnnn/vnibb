@@ -18,11 +18,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from v32_data_audit import build_report
+from scripts.v32_data_audit import build_report
+from vnibb.services.data_quality import PRICE_ROW_5Y_METRIC, normalize_archived_price_row_metric
 
 COVERAGE_KEYS = [
     "top_with_prices",
-    "top_with_5y_prices",
+    PRICE_ROW_5Y_METRIC,
     "top_with_ratios",
     "top_with_company_news",
     "top_with_company_events",
@@ -38,7 +39,8 @@ def print_delta(delta: dict[str, Any]) -> None:
     print(f"- Generated: `{delta['generated_at']}`")
     print(f"- Baseline: `{delta['baseline_file']}`")
     print(f"- Current: `{delta['current_file']}`")
-    print(f"- SLA Passed: `{delta['sla_passed']}`")
+    print(f"- Audit targets passed: `{delta['sla_passed']}`")
+    print(f"- Historical session coverage: `{delta['historical_session_coverage_status']}`")
     print("")
     print("| Metric | Baseline | Current | Delta |")
     print("|--------|----------|---------|-------|")
@@ -72,8 +74,8 @@ async def run(args: argparse.Namespace) -> int:
         raise FileNotFoundError(f"Baseline file not found: {baseline_file}")
     baseline_report = load_json(baseline_file)
 
-    baseline_cov = baseline_report.get("top_symbol_coverage", {})
-    current_cov = current_report.get("top_symbol_coverage", {})
+    baseline_cov = normalize_archived_price_row_metric(baseline_report.get("top_symbol_coverage", {}))
+    current_cov = normalize_archived_price_row_metric(current_report.get("top_symbol_coverage", {}))
 
     metrics: dict[str, dict[str, int]] = {}
     notes: list[str] = []
@@ -92,30 +94,26 @@ async def run(args: argparse.Namespace) -> int:
             has_regression = True
             notes.append(f"{key} regressed by {abs(delta_value)}")
 
-    five_year_delta = metrics["top_with_5y_prices"]["delta"]
-    five_year_target_met = five_year_delta >= args.min_5y_improvement
-    if five_year_target_met:
-        notes.append(
-            f"5Y coverage improvement met target: +{five_year_delta} "
-            f"(min required {args.min_5y_improvement})"
-        )
-    else:
-        notes.append(
-            f"5Y coverage improvement below target: +{five_year_delta} "
-            f"(min required {args.min_5y_improvement})"
-        )
+    old_row_delta = metrics[PRICE_ROW_5Y_METRIC]["delta"]
+    old_row_target_met = old_row_delta >= args.min_old_price_row_improvement
+    outcome = "met" if old_row_target_met else "did not meet"
+    notes.append(
+        f"Old price-row count change {old_row_delta:+d} {outcome} target "
+        f"(minimum change {args.min_old_price_row_improvement}); continuity not assessed"
+    )
 
-    sla_passed = five_year_target_met and not has_regression
+    sla_passed = old_row_target_met and not has_regression
 
     delta_report = {
         "generated_at": datetime.now(UTC).isoformat(),
         "baseline_file": str(baseline_file),
         "current_file": str(current_file),
         "metrics": metrics,
+        "historical_session_coverage_status": "not_assessed",
         "notes": notes,
         "sla_passed": sla_passed,
         "requirements": {
-            "min_5y_improvement": args.min_5y_improvement,
+            "min_old_price_row_improvement": args.min_old_price_row_improvement,
             "allow_regression": args.allow_regression,
         },
     }
@@ -126,7 +124,7 @@ async def run(args: argparse.Namespace) -> int:
     print(f"\nSaved delta report to `{output_delta}`")
 
     if args.fail_on_miss:
-        if not five_year_target_met:
+        if not old_row_target_met:
             return 1
         if has_regression and not args.allow_regression:
             return 1
@@ -150,7 +148,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--top-limit", type=int, default=200)
     parser.add_argument("--core-symbols", default="VNM,FPT,VCB,HPG,VIC")
     parser.add_argument("--run-current-audit", action="store_true")
-    parser.add_argument("--min-5y-improvement", type=int, default=1)
+    parser.add_argument(
+        "--min-old-price-row-improvement",
+        type=int,
+        default=1,
+        help="Minimum change in symbols with a retained row on or before the 5-year cutoff",
+    )
     parser.add_argument("--allow-regression", action="store_true")
     parser.add_argument("--fail-on-miss", action="store_true")
     return parser.parse_args()

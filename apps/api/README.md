@@ -269,8 +269,8 @@ python scripts/backfill_historical_v34.py --years 5 --limit 200 --batch-size 10 
 # 3) Resumable fundamentals/news/events recovery (timeboxed)
 python scripts/backfill_fundamentals_v34.py --limit 200 --batch-size 10 --types ratios --max-runtime-minutes 15 --call-timeout-seconds 60 --report-json scripts/v36_ratios_backfill_run.json
 
-# 4) Coverage delta vs V34 baseline
-python scripts/v34_coverage_delta.py --run-current-audit --min-5y-improvement 1 --fail-on-miss
+# 4) Compare retained counts, not continuous history, with the V34 baseline
+python scripts/v34_coverage_delta.py --run-current-audit --min-old-price-row-improvement 1 --fail-on-miss
 
 # 5) Daily coverage + freshness quality check
 python scripts/data_quality_check.py --top-limit 200 --max-stale-days 7 --output-json scripts/data_quality_report.json
@@ -279,6 +279,8 @@ python scripts/data_quality_check.py --top-limit 200 --max-stale-days 7 --output
 Notes:
 - Never run unbounded backfills in shared/dev sessions; use `--max-runtime-minutes` on every run.
 - `backfill_historical_v34.py` now includes a hard-timeout watchdog that force-exits after the runtime window + grace period and still writes checkpoint/report.
+- `top_with_price_row_at_or_before_5y_cutoff` counts sampled symbols with at least one retained SQL price row dated on or before the audit host's date minus five years plus 30 days. It does not check daily intervals, unit validity, a recent endpoint, or intervening sessions. Historical session coverage is `not_assessed`; V34 reads archived `top_with_5y_prices` only as the same old-row measure, not as coverage.
+- A partial Mongo EOD audit sample warns even when the returned documents pass integrity checks. `no_row_symbols` means no row matched the sample query, not that an eligible trading record is missing. A failed or unavailable read does not establish no-row counts.
 
 ---
 

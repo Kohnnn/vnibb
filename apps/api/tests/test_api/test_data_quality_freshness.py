@@ -46,7 +46,7 @@ def test_cli_accepts_vietcap_calendar_day_threshold(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cli_passes_vietcap_calendar_day_threshold(monkeypatch, tmp_path):
+async def test_cli_passes_vietcap_calendar_day_threshold(monkeypatch, tmp_path, capsys):
     captured = {}
 
     async def fake_run_data_quality_check(**kwargs):
@@ -55,6 +55,7 @@ async def test_cli_passes_vietcap_calendar_day_threshold(monkeypatch, tmp_path):
             "generated_at": "2026-07-08T00:00:00",
             "status": "ok",
             "metrics": {},
+            "historical_session_coverage_status": "not_assessed",
             "targets": {},
             "warnings": [],
         }
@@ -73,3 +74,4 @@ async def test_cli_passes_vietcap_calendar_day_threshold(monkeypatch, tmp_path):
 
     assert await data_quality_check._main() == 0
     assert captured["vietcap_max_stale_days"] == 3
+    assert "Historical session coverage: not_assessed" in capsys.readouterr().out
