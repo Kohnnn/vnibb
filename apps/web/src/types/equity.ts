@@ -17,6 +17,8 @@ export interface EquityHistoricalData {
   adjustment_applied?: boolean;
   price_unit?: 'VND' | 'index_points' | 'unknown';
   price_source?: string | null;
+  volume_source?: string | null;
+  volume_resolution_source?: string | null;
 }
 
 export interface EquityHistoricalResponse {

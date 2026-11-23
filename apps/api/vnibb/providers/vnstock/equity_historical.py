@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from vnibb.core.config import settings
 from vnibb.core.exceptions import (
@@ -103,8 +103,19 @@ class EquityHistoricalData(BaseModel):
     price_unit: PriceUnit = Field(default="unknown", description="Canonical price unit, independent of adjustment mode")
     price_source: Optional[str] = Field(
         None,
-        description="Per-row source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
+        description="OHLC source provenance (e.g. vnstock_vnd:KBS, vnstock_history:VCI, vietcap); never inferred from magnitude",
     )
+    volume_source: str | None = Field(
+        None,
+        description="Source of borrowed volume; the resolving reader if no record source is known",
+    )
+    volume_resolution_source: str | None = Field(
+        None,
+        description="Reader that supplied borrowed volume, independent of the OHLC reader",
+    )
+
+    # Retained records can carry source lineage that is not exposed as price_source.
+    _retained_volume_source: str | None = PrivateAttr(default=None)
 
     # Optional extended fields from vnstock
     value: Optional[float] = Field(None, description="Trading value in VND")

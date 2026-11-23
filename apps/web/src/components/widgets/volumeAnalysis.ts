@@ -1,3 +1,4 @@
+import { isObservedVolume } from '@/lib/volumeObservation';
 import type { EquityHistoricalData, EquityHistoricalResponse } from '@/types/equity';
 
 const DISPLAY_LIMIT = 10;
@@ -117,7 +118,7 @@ export function analyzeVolume(response: EquityHistoricalResponse | undefined, st
     const historicalCoverage = readHistoricalCoverage(meta);
     const bars = unitsWithheld ? [] : returned.map((row, index) => ({
         date: isSessionDate(row.time) ? row.time : null,
-        volume: observedCount(row.volume),
+        volume: isObservedVolume(row.volume) ? row.volume : null,
         closeChange: getCloseChange(row, returned[index - 1], historicalCoverage),
     }));
     const observed = summarizeVolumes(bars);
