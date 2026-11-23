@@ -16,6 +16,7 @@ live in \`docs/\`.
 
 ## [Unreleased]
 
+- Distinguish admitted positive, zero and negative FCF from a positivity-only test or unavailable evidence. Show independent retained quality lineage in Fundamental Analysis, its exports and VniAgent attachments (#278).
 - Tie chart status, exports and agent attachments to the active price-history request. Show the fiscal source of each valuation multiple and retain monetary units and omission notes in Financial Ratios attachments (#270).
 - Add a Company Research workspace and market-wide news to Market Scan. Report breadth over classified observations, align screener columns on narrow screens and preserve heatmap session dates (#272).
 - Distinguish issuer, peer, sector and market-wide news and exclude market-wide fallback articles from issuer momentum (#250).

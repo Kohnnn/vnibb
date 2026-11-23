@@ -116,6 +116,7 @@ export const WIDGET_DESCRIPTIONS: Partial<Record<WidgetType, WidgetDescription>>
     interpretation: 'Use it as a source-preserving starting point before drilling into ratios, statements, valuation, and ownership widgets.',
     limitations: [
       'If the endpoint is not deployed yet, the widget intentionally shows an unavailable or empty state.',
+      'Quality metrics use their own retained snapshot, independent of the shared statement period. A false FCF positivity test does not establish a negative amount, and missing source dates are not inferred.',
     ],
   },
   backtest_lab: {

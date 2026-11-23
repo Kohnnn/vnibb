@@ -1277,7 +1277,7 @@ async def test_fundamental_analysis_never_publishes_superseded_derived_values(mo
         "moat": "wide", "moatScore": 95.0, "roe": 22.5,
         "inputs": {
             "unitQuality": "verified", "unitLineage": {"price": {"unit": "VND"}},
-            "derivedCoverage": {"cagr": {}, "fcf": {}},
+            "derivedCoverage": {"cagr": {}, "fcf": {"latestYear": 2025, "positive": True}},
         },
     }
 
