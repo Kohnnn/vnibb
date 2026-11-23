@@ -49,6 +49,12 @@ jobs:
           pip install --isolated --only-binary=vnstock --index-url https://pypi.org/simple -c apps/api/constraints-vnstock.txt -e "apps/api[dev]"
       - name: Run loopback TLS canary self-check
         run: bash scripts/oracle/lb_canary_tls_selfcheck.sh
+      - name: Replay retained daily history through the historical widgets
+        run: |
+          export VNIBB_HISTORY_CONTRACT_REPLAY="$(mktemp)"
+          trap 'rm -f "$VNIBB_HISTORY_CONTRACT_REPLAY"' EXIT
+          PYTHONPATH=apps/api python -m pytest -q apps/api/tests/test_api/test_historical_session_admission.py
+          pnpm --filter frontend exec jest --runInBand --runTestsByPath src/components/widgets/ATRRegimeWidget.route.test.tsx
       - name: Run root CI gate
         run: pnpm run ci:gate
 

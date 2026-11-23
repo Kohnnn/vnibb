@@ -69,6 +69,7 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
   const Icon = presentation.icon;
   const observation = formatSourceObservation(details?.updatedAt);
   const fetchedDate = toDate(details?.fetchedAt);
+  const detail = details?.admissionReason ?? health.detail;
 
   return (
     <Popover className="min-w-0">
@@ -92,8 +93,8 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
           <Icon size={12} />
           <span className="text-[11px] font-semibold text-[var(--text-primary)]">{health.label}</span>
         </div>
-        {health.detail && (
-          <p className="mb-2 text-[11px] leading-4 text-[var(--text-secondary)]">{health.detail}</p>
+        {detail && (
+          <p className="mb-2 text-[11px] leading-4 text-[var(--text-secondary)]">{detail}</p>
         )}
         <div className="space-y-1 text-[10px] text-[var(--text-secondary)]">
           {details?.sourceLabel && (
@@ -144,6 +145,12 @@ export function WidgetHealthChip({ health, details }: WidgetHealthChipProps) {
             <div className="flex justify-between gap-2">
               <span className="text-[var(--text-muted)]">Period</span>
               <span>{details.period}</span>
+            </div>
+          )}
+          {details?.basis && (
+            <div className="flex justify-between gap-2">
+              <span className="text-[var(--text-muted)]">Basis</span>
+              <span className="text-right text-[var(--text-primary)]">{details.basis}</span>
             </div>
           )}
           {details?.adjustmentMode && (

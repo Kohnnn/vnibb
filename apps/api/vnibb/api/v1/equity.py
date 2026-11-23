@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vnibb.api.v1.schemas import MetaData, StandardResponse
+from vnibb.api.v1.schemas import HistoricalMetaData, HistoricalResponse, MetaData, StandardResponse
 from vnibb.core.cache import build_cache_key, cached, redis_client
 from vnibb.core.config import settings
 from vnibb.core.database import async_session_factory, get_db
@@ -55,6 +55,7 @@ from vnibb.providers.vnstock.dividends import VnstockDividendsFetcher
 from vnibb.providers.vnstock.equity_historical import (
     EquityHistoricalData,
     EquityHistoricalQueryParams,
+    HistoricalProviderRows,
     VnstockEquityHistoricalFetcher,
 )
 from vnibb.providers.vnstock.equity_profile import (
@@ -110,7 +111,7 @@ from vnibb.services.foreign_flow_coverage import (
 )
 from vnibb.services.fundamental_valuation import admit_fundamental_snapshot, fundamental_valuation_unavailable_reason
 from vnibb.services.market_session import expected_market_session, verified_market_closure
-from vnibb.services.mongo_market_data_service import get_mongo_market_data_service
+from vnibb.services.mongo_market_data_service import MongoReadRows, get_mongo_market_data_service
 from vnibb.services.news_service import get_company_news_rows
 from vnibb.services.vietcap_client import VietcapClient
 from vnibb.services.vietcap_financials import persist_vietcap_financials
@@ -1451,9 +1452,9 @@ def _apply_adjustment_mode_to_ohlc(
         )
 
     return (
-        float(open_value) * factor,
-        float(high_value) * factor,
-        float(low_value) * factor,
+        adjusted_close_value if open_value == raw_close else float(open_value) * factor,
+        adjusted_close_value if high_value == raw_close else float(high_value) * factor,
+        adjusted_close_value if low_value == raw_close else float(low_value) * factor,
         adjusted_close_value,
         factor,
         True,
@@ -1471,7 +1472,7 @@ def _apply_adjustment_mode_to_historical_row(
             low_value=row.low,
             close_value=raw_close,
             adjusted_close=row.adjusted_close,
-            adjustment_mode=adjustment_mode,
+            adjustment_mode=adjustment_mode if row.price_unit != "index_points" else "raw",
         )
     )
     return row.model_copy(
@@ -1489,17 +1490,24 @@ def _apply_adjustment_mode_to_historical_row(
 
 
 def _to_historical_data(row: StockPrice, *, adjustment_mode: str = "raw") -> Optional[EquityHistoricalData]:
-    return _to_historical_data_from_payload(persisted_price_record(row), adjustment_mode=adjustment_mode)
+    record = persisted_price_record(row)
+    return _to_historical_data_from_payload(
+        {**record, "price_source": record.get("price_source") or record.get("source")},
+        adjustment_mode=adjustment_mode,
+    )
 
 
 def _to_historical_data_from_mongo(
     row: dict[str, Any], *, adjustment_mode: str = "raw"
 ) -> Optional[EquityHistoricalData]:
-    return _to_historical_data_from_payload(
-        {**row, "time": row.get("tradeDate") or row.get("time") or row.get("date"),
-         "price_source": row.get("price_source") or row.get("providerSource") or row.get("source")},
-        adjustment_mode=adjustment_mode,
-    )
+    return _to_historical_data_from_payload(_mongo_historical_payload(row), adjustment_mode=adjustment_mode)
+
+
+def _mongo_historical_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row, "time": row.get("tradeDate") or row.get("time") or row.get("date"),
+        "price_source": row.get("price_source") or row.get("providerSource") or row.get("source"),
+    }
 
 
 async def _load_historical_from_db(
@@ -1541,11 +1549,19 @@ async def _load_historical_from_mongo(
     if not mongo.enabled:
         return ([], []) if include_provenance else []
 
+    expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
+
+    def qualifies(doc: dict[str, Any]) -> bool:
+        row = _to_historical_data_from_mongo(doc, adjustment_mode=adjustment_mode)
+        return row is not None and row.price_unit == expected_unit and _usable_historical_ohlc(row)
+
     docs = await mongo.get_eod_prices_between(
         symbol,
         start_date=start_date,
         end_date=end_date,
-        include_provenance=include_provenance,
+        include_provenance=True,
+        include_candidates=include_provenance,
+        qualifies=qualifies,
     )
     rows = [
         item
@@ -1591,7 +1607,7 @@ def _to_historical_data_from_payload(
             low_value=low_value,
             close_value=close_value,
             adjusted_close=adj_close_value,
-            adjustment_mode=adjustment_mode,
+            adjustment_mode=adjustment_mode if doc["price_unit"] != "index_points" else "raw",
         )
     )
 
@@ -1880,11 +1896,24 @@ def _apply_corporate_action_adjustments(
     return adjusted_rows
 
 
+def _has_common_source_adjustment(
+    rows: list[EquityHistoricalData], actions: list[dict[str, Any]],
+) -> bool:
+    source = rows[0].price_source
+    return (
+        bool(source)
+        and all(row.adjustment_applied and row.price_source == source for row in rows)
+        # Without an explicit common adjustment basis across a retained action,
+        # per-row factors (including identity factors) cannot verify continuity.
+        and not any(rows[0].time < item["effective_date"] <= rows[-1].time for item in actions)
+    )
+
+
 def _historical_adjustment_meta(
     rows: list[EquityHistoricalData], adjustment_mode: str, **extra: Any
 ) -> MetaData:
     normalized_mode = str(adjustment_mode or "raw").strip().lower() or "raw"
-    requested_count = len(rows) if normalized_mode == "adjusted" else 0
+    requested_count = sum(row.price_unit != "index_points" for row in rows) if normalized_mode == "adjusted" else 0
     applied_count = (
         sum(1 for row in rows if row.adjustment_applied)
         if normalized_mode == "adjusted"
@@ -1919,6 +1948,14 @@ _HISTORICAL_SOURCE_RANK = {
 }
 
 
+def _usable_historical_ohlc(row: EquityHistoricalData) -> bool:
+    return (
+        all(math.isfinite(value) and value > 0 for value in (row.open, row.high, row.low, row.close))
+        and row.low <= min(row.open, row.close)
+        and row.high >= max(row.open, row.close)
+    )
+
+
 def _merge_historical_rows(
     source_rows: list[tuple[str, list[EquityHistoricalData]]],
 ) -> tuple[list[EquityHistoricalData], dict[str, int]]:
@@ -1927,7 +1964,7 @@ def _merge_historical_rows(
         source_rank = _HISTORICAL_SOURCE_RANK.get(source_name, len(_HISTORICAL_SOURCE_RANK))
         for row in rows:
             expected_unit = "index_points" if is_index_symbol(row.symbol) else "VND"
-            if row.price_unit != expected_unit:
+            if row.price_unit != expected_unit or not _usable_historical_ohlc(row):
                 continue
             row_key = json.dumps(row.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
             candidate = (source_rank, row_key)
@@ -1940,6 +1977,71 @@ def _merge_historical_rows(
         source_counts[source_name] = source_counts.get(source_name, 0) + 1
         merged.append(row)
     return merged, source_counts
+
+
+def _historical_unit_exclusions(
+    symbol: str,
+    source_rows: list[tuple[str, list[EquityHistoricalData]]],
+) -> list[EquityHistoricalData]:
+    expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
+    # The recent Redis window is populated from StockPrice. Keep distinct
+    # versions and independent provider/Mongo observations, not identical copies.
+    sql_rejections = {
+        (row.symbol, row.time): row
+        for source, rows in source_rows if source in {"cache", "db"}
+        for row in rows if row.price_unit != expected_unit
+    }
+    return [
+        row for source, rows in source_rows for row in rows
+        if row.price_unit != expected_unit
+        and (source != "recent_cache" or row != sql_rejections.get((row.symbol, row.time)))
+    ]
+
+
+def _historical_session_coverage(
+    rows: list[EquityHistoricalData], start_date: date, end_date: date, interval: str,
+    warnings: list[str],
+) -> dict[str, Any]:
+    coverage: dict[str, Any] = dict.fromkeys((
+        "calendar_verified", "expected_session_dates", "missing_session_count",
+        "missing_leading_sessions", "missing_interior_sessions", "missing_trailing_sessions",
+    ))
+    coverage["completeness_status"] = "unknown"
+    if interval.upper() != "1D" or start_date > end_date:
+        return coverage
+
+    holidays = OFFICIAL_MARKET_HOLIDAYS | {date.fromisoformat(value) for value in settings.market_holiday_dates}
+    expected = [
+        day for offset in range((end_date - start_date).days + 1)
+        if is_market_business_day(day := start_date + timedelta(days=offset), holidays)
+    ]
+    returned = {row.time for row in rows}
+    missing = [day for day in expected if day not in returned]
+    covered = [day for day in expected if day in returned]
+    leading = sum(day < covered[0] for day in missing) if covered else None
+    trailing = sum(day > covered[-1] for day in missing) if covered else None
+    interior = len(missing) - leading - trailing if leading is not None and trailing is not None else None
+    verified = all(market_calendar_metadata(date(year, 1, 1))["verified"]
+                   for year in range(start_date.year, end_date.year + 1))
+
+    if missing:
+        if interior:
+            warnings.append("internal business-day gaps detected" + ("" if verified else "; exchange-calendar certainty is limited"))
+        elif covered:
+            warnings.append("requested-range boundary gaps detected" + ("" if verified else "; exchange-calendar certainty is limited"))
+        else:
+            warnings.append("No daily observations cover the requested session range")
+    if not verified:
+        warnings.append("business-day completeness excludes unconfigured exchange holidays")
+
+    coverage.update(calendar_verified=verified, completeness_status="partial" if missing else "complete")
+    if verified:
+        coverage.update(
+            expected_session_dates=expected, missing_session_count=len(missing),
+            missing_leading_sessions=leading, missing_interior_sessions=interior,
+            missing_trailing_sessions=trailing,
+        )
+    return coverage
 
 
 def _historical_rows_cover_request(
@@ -1966,7 +2068,9 @@ def _historical_resolution_meta(
     source_counts: dict[str, int],
     mongo_docs: list[dict[str, Any]],
     warnings: list[str],
-) -> MetaData:
+    excluded_candidate_dates: list[date] | None = None,
+    source_adjusted: bool = False,
+) -> HistoricalMetaData:
     normalized_interval = (interval or "1D").upper()
     freshness = rows[-1].time.isoformat() if rows else None
     primary_source = min(
@@ -1974,52 +2078,54 @@ def _historical_resolution_meta(
         key=lambda name: _HISTORICAL_SOURCE_RANK.get(name, 99),
         default=None,
     )
-    completeness_status = "unknown"
-    if normalized_interval == "1D":
-        holidays = OFFICIAL_MARKET_HOLIDAYS | {date.fromisoformat(value) for value in settings.market_holiday_dates}
-        expected_dates = [
-            cursor
-            for cursor in (start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1))
-            if is_market_business_day(cursor, holidays)
-        ]
-        returned_dates = {row.time for row in rows}
-        missing_dates = [day for day in expected_dates if day not in returned_dates]
-        completeness_status = "complete" if not missing_dates else "partial"
-        if missing_dates:
-            first_expected = expected_dates[0] if expected_dates else None
-            last_expected = expected_dates[-1] if expected_dates else None
-            internal_gaps = [
-                day for day in missing_dates if day not in {first_expected, last_expected}
-            ]
-            if internal_gaps:
-                warnings.append("internal business-day gaps detected; exchange-calendar certainty is limited")
-            else:
-                warnings.append("requested-range boundary gaps detected; exchange-calendar certainty is limited")
-        elif not all(market_calendar_metadata(day)["verified"] for day in (start_date, end_date)):
-            warnings.append("business-day completeness excludes unconfigured exchange holidays")
+    coverage = _historical_session_coverage(rows, start_date, end_date, normalized_interval, warnings)
+    excluded_candidates = [day for day in excluded_candidate_dates or () if start_date <= day <= end_date]
+    if isinstance(mongo_docs, MongoReadRows):
+        for doc in mongo_docs.metadata["candidates"]:
+            payload = _mongo_historical_payload(doc)
+            day = _time_to_date(payload["time"])
+            if day is None or not start_date <= day <= end_date:
+                continue
+            # Unit admission is independent of whether this candidate has an OHLCV payload.
+            evidence = {key: payload[key] for key in ("symbol", "price_unit", "priceUnit", "price_source", "asset_type") if key in payload}
+            unit = normalize_price_record(evidence)["price_unit"]
+            expected_unit = "index_points" if is_index_symbol(evidence.get("symbol", "")) else "VND"
+            if unit != expected_unit:
+                excluded_candidates.append(day)
+    excluded_dates = set(excluded_candidates)
+    returned_dates = {row.time for row in rows}
+    sessions = coverage["expected_session_dates"]
+    unresolved_dates = sorted((excluded_dates & set(sessions)) - returned_dates) if sessions is not None else None
+    if excluded_candidates:
+        warnings.append(
+            f"Excluded {len(excluded_candidates)} row(s) with incompatible or unconfirmed price units; "
+            "legacy provenance may be insufficient."
+        )
+    if unresolved_dates:
+        warnings.append(f"{len(unresolved_dates)} date(s) have no admitted replacement after price-unit exclusion")
     selected_units = {row.price_unit for row in rows}
     unit_status = (
-        "not_applicable" if not selected_units or selected_units == {"index_points"}
+        "unconfirmed" if not selected_units and excluded_candidates
+        else "not_applicable" if not selected_units or selected_units == {"index_points"}
         else "confirmed_vnd" if selected_units == {"VND"}
         else "mixed" if len(selected_units) > 1
         else "unconfirmed"
     )
-    # Session price basis is only claimed when the resolution actually applied
-    # an adjustment. No resolved source contract documents that its stored
-    # history is unadjusted (Vietcap's ``raw`` marker denotes VND denomination,
-    # not an unadjusted series), so an unadjusted read is disclosed as
-    # unverified rather than certified as "raw".
+    # Unscaled VND does not prove that a source series is unadjusted. A partial
+    # adjustment or the read-side action reconstruction is not a certified basis.
     if not rows or selected_units == {"index_points"}:
         session_basis = "not_applicable"
-    elif any(row.adjustment_applied for row in rows):
+    elif source_adjusted:
         session_basis = "adjusted"
+    elif any(row.adjustment_applied for row in rows) and not all(row.adjustment_applied for row in rows):
+        session_basis = "mixed"
+        warnings.append("session price basis mixed: adjusted and unverified prices cannot form one series")
     else:
         session_basis = "unverified"
         warnings.append(
-            "session price basis unverified: no resolved source contract "
-            "documents whether the stored history is back-adjusted"
+            "session price basis unverified: retained OHLC does not have a common source-adjusted basis"
         )
-    return _historical_adjustment_meta(
+    metadata = _historical_adjustment_meta(
         rows,
         adjustment_mode,
         requested_start_date=start_date.isoformat(),
@@ -2031,10 +2137,17 @@ def _historical_resolution_meta(
         source_counts=source_counts,
         fallback_used=any(source not in {"mongo", "cache"} for source in source_counts),
         freshness_as_of=freshness,
-        completeness_status=completeness_status,
         unit_status=unit_status,
         session_basis=session_basis,
         warnings=warnings,
+    )
+    return HistoricalMetaData(
+        **metadata.model_dump(), **coverage,
+        excluded_row_count=len(excluded_candidates),
+        excluded_dates=sorted(excluded_dates),
+        replaced_excluded_dates=sorted(excluded_dates & returned_dates),
+        unresolved_excluded_dates=unresolved_dates,
+        unresolved_session_count=len(unresolved_dates) if unresolved_dates is not None else None,
     )
 
 
@@ -2114,6 +2227,7 @@ async def _load_historical_from_recent_cache(
                 "symbol": symbol.upper(),
                 "interval": "1D",
                 **row,
+                "price_source": row.get("price_source") or (row["source"] if isinstance(row.get("source"), str) else None),
             },
             adjustment_mode=adjustment_mode,
         )
@@ -4175,8 +4289,8 @@ async def _enrich_missing_ratio_metrics(
     return rows
 
 
-@router.get("/historical", response_model=StandardResponse[list[EquityHistoricalData]])
-@cached(key_prefix="historical_v6_stored_first")
+@router.get("/historical", response_model=HistoricalResponse[list[EquityHistoricalData]])
+@cached(key_prefix="historical_v9_session_admission")
 async def get_historical_prices(
     symbol: str = Query(..., min_length=1, max_length=10),
     start_date: date = Query(default_factory=lambda: date.today() - timedelta(days=365)),
@@ -4199,7 +4313,7 @@ async def get_historical_prices(
             start_date,
             end_date,
         )
-        if adjustment_mode == "adjusted"
+        if adjustment_mode == "adjusted" and not is_index_symbol(symbol_upper)
         else []
     )
 
@@ -4240,7 +4354,7 @@ async def get_historical_prices(
         source_rows.append(("recent_cache", recent_cache_data))
         merged, _ = _merge_historical_rows(source_rows)
 
-    if not _historical_rows_cover_request(merged, start_date, end_date, interval):
+    if not cache_result.hit and not _historical_rows_cover_request(merged, start_date, end_date, interval):
         fallback_data = await _load_historical_from_db(
             db=db,
             symbol=symbol_upper,
@@ -4255,6 +4369,7 @@ async def get_historical_prices(
     if release_read and db.in_transaction():
         await db.rollback()
     provider_error: Exception | None = None
+    provider_excluded_dates: list[date] | None = None
     if not _historical_rows_cover_request(merged, start_date, end_date, interval):
         try:
             params = EquityHistoricalQueryParams(
@@ -4268,12 +4383,15 @@ async def get_historical_prices(
                 VnstockEquityHistoricalFetcher.fetch(params),
                 timeout=min(10, _provider_timeout_budget()),
             )
+            if isinstance(provider_data, HistoricalProviderRows):
+                provider_excluded_dates = provider_data.unit_excluded_dates
             source_rows.append(
                 (
                     "provider",
                     [
                         _apply_adjustment_mode_to_historical_row(item, adjustment_mode)
                         for item in provider_data
+                        if item.symbol.upper() == symbol_upper and start_date <= item.time <= end_date
                     ],
                 )
             )
@@ -4290,18 +4408,19 @@ async def get_historical_prices(
                 interval,
                 exc,
             )
-        merged, _ = _merge_historical_rows(source_rows)
-
-
-    expected_unit = "index_points" if is_index_symbol(symbol_upper) else "VND"
-    excluded_count = sum(row.price_unit != expected_unit for _, rows in source_rows for row in rows)
-    if excluded_count:
-        warnings.append(f"Excluded {excluded_count} row(s) with incompatible or unconfirmed price units; legacy provenance may be insufficient.")
-
+    merged, source_counts = _merge_historical_rows(source_rows)
+    # Prefer candidate-level evidence over the rows that survived conversion.
+    exclusion_sources = [
+        (name, rows) for name, rows in source_rows
+        if not (name == "mongo" and isinstance(mongo_docs, MongoReadRows))
+        and not (name == "provider" and provider_excluded_dates is not None)
+    ]
+    excluded_dates = [row.time for row in _historical_unit_exclusions(symbol_upper, exclusion_sources)]
+    excluded_dates.extend(provider_excluded_dates or ())
     if merged:
-        merged, source_counts = _merge_historical_rows(source_rows)
+        source_adjusted = _has_common_source_adjustment(merged, corporate_actions)
         merged = _apply_corporate_action_adjustments(merged, corporate_actions, adjustment_mode)
-        return StandardResponse(
+        return HistoricalResponse[list[EquityHistoricalData]](
             data=merged,
             meta=_historical_resolution_meta(
                 merged,
@@ -4312,6 +4431,8 @@ async def get_historical_prices(
                 source_counts=source_counts,
                 mongo_docs=mongo_docs,
                 warnings=warnings,
+                excluded_candidate_dates=excluded_dates,
+                source_adjusted=source_adjusted,
             ),
         )
 
@@ -4335,8 +4456,9 @@ async def get_historical_prices(
         source_counts={},
         mongo_docs=mongo_docs,
         warnings=warnings,
+        excluded_candidate_dates=excluded_dates,
     )
-    return StandardResponse(
+    return HistoricalResponse[list[EquityHistoricalData]](
         data=[],
         meta=empty_meta,
         error=f"Data unavailable: {provider_error}" if provider_error else None,

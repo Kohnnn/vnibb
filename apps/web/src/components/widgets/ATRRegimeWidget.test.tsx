@@ -2,6 +2,8 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { useHistoricalPrices } from '@/lib/queries';
 import { formatAbsoluteTimestamp } from '@/lib/formatDate';
+import { buildVniAgentWorkspaceContext } from '@/lib/vniagentWorkspace';
+import { getWidgetExportData } from '@/lib/widgetRuntime';
 import type { EquityHistoricalResponse } from '@/types/equity';
 import { ATRRegimeWidget } from './ATRRegimeWidget';
 
@@ -9,7 +11,14 @@ jest.mock('@/lib/queries', () => ({ useHistoricalPrices: jest.fn() }));
 
 const historicalQuery = jest.mocked(useHistoricalPrices);
 const receivedAt = Date.parse('2026-10-05T10:00:00Z');
-const certified = { count: 40, unit_status: 'confirmed_vnd' } as const satisfies NonNullable<EquityHistoricalResponse['meta']>;
+const sessions = Array.from({ length: 60 }, (_, index) => new Date(Date.UTC(2026, 5, 8 + index)))
+  .filter((day) => day.getUTCDay() !== 0 && day.getUTCDay() !== 6)
+  .map((day) => day.toISOString().slice(0, 10)).slice(0, 40);
+const certified = {
+  count: 40, unit_status: 'confirmed_vnd', calendar_verified: true, expected_session_dates: sessions,
+  session_basis: 'adjusted', excluded_row_count: 0, unresolved_session_count: 0,
+  unresolved_excluded_dates: [], replaced_excluded_dates: [],
+} satisfies NonNullable<EquityHistoricalResponse['meta']>;
 const unavailableText = /ATR regime unavailable/;
 
 type Options = {
@@ -17,24 +26,31 @@ type Options = {
   error?: Error | null;
   count?: number;
   flat?: boolean;
+  adjustedFinalClose?: boolean;
   /** Drop per-row price_unit so certified metadata has no row-level proof. */
   rowsMissingUnitProof?: boolean;
+  skipSession?: string;
+  indexSymbol?: string;
 };
 
 function bars(count: number, options: Options) {
   return Array.from({ length: count }, (_, index) => {
     const row = {
-      symbol: 'FPT',
-      time: options.datesMissing ? '' : new Date(Date.UTC(2024, 0, index + 1)).toISOString().slice(0, 10),
+      symbol: options.indexSymbol ?? 'FPT',
+      time: options.datesMissing ? '' : sessions[index],
       open: 100000,
       high: options.flat ? 100000 : 110000,
       low: options.flat ? 100000 : 90000,
       close: 100000,
       volume: 1000,
-      price_unit: 'VND' as const,
+      price_unit: options.indexSymbol ? 'index_points' as const : 'VND' as const,
+      raw_close: options.adjustedFinalClose && index === count - 1 ? 200000 : 100000,
+      adjustment_factor: options.indexSymbol ? null : options.adjustedFinalClose && index === count - 1 ? 0.5 : 1,
+      adjustment_mode: 'adjusted' as const,
+      adjustment_applied: !options.indexSymbol,
     };
     return options.rowsMissingUnitProof ? { ...row, price_unit: undefined } : row;
-  });
+  }).filter((row) => row.time !== options.skipSession);
 }
 
 function showATR(meta: NonNullable<EquityHistoricalResponse['meta']>, options: Options = {}) {
@@ -43,7 +59,9 @@ function showATR(meta: NonNullable<EquityHistoricalResponse['meta']>, options: O
     isLoading:false, isFetching:false,
     error: options.error ?? null, refetch: jest.fn(), dataUpdatedAt: receivedAt,
   } as unknown as UseQueryResult<EquityHistoricalResponse, Error>);
-  render(<ATRRegimeWidget symbol="FPT" />);
+  const publish = jest.fn();
+  render(<ATRRegimeWidget symbol={options.indexSymbol ?? 'FPT'} onDataChange={publish} />);
+  return publish;
 }
 
 function showATRFailure(error: Error) {
@@ -64,29 +82,28 @@ describe('ATR regime availability', () => {
   });
 
   it('marks old observations stale and prefers backend freshness over receipt time', () => {
-    showATR({ ...certified, freshness_as_of: '2024-02-09', last_data_date: '2026-10-05' });
+    showATR({ ...certified, freshness_as_of: '2026-07-31', last_data_date: '2026-10-05' });
 
-    expect(screen.getByText('As of 2024-02-09')).toBeInTheDocument();
+    expect(screen.getByText('As of 2026-07-31')).toBeInTheDocument();
     expect(screen.getByText('Stale')).toBeInTheDocument();
     expect(screen.getByText(`Fetched ${formatAbsoluteTimestamp(new Date(receivedAt))}`)).toBeInTheDocument();
   });
 
   it('uses last_data_date when freshness_as_of is absent', () => {
-    showATR({ ...certified, last_data_date: '2024-02-08' });
-
-    expect(screen.getByText('As of 2024-02-08')).toBeInTheDocument();
+    showATR({ ...certified, last_data_date: '2026-07-30' });
+    expect(screen.getByText('As of 2026-07-30')).toBeInTheDocument();
   });
 
   it('uses the final returned bar when metadata dates are absent or invalid', () => {
     showATR({ ...certified, freshness_as_of: 'invalid', last_data_date: null });
 
-    expect(screen.getByText('As of 2024-02-09')).toBeInTheDocument();
+    expect(screen.getByText('As of 2026-07-31')).toBeInTheDocument();
   });
 
   it('does not present the receipt time as a source observation date', () => {
     showATR(certified, { datesMissing:true });
 
-    expect(screen.queryByText(/^As of /)).not.toBeInTheDocument();
+    expect(screen.getByText('As-of unknown')).toBeInTheDocument();
     expect(screen.queryByText('Live')).not.toBeInTheDocument();
     expect(screen.getByText(/Historical observation date unavailable/)).toBeInTheDocument();
   });
@@ -132,10 +149,55 @@ describe('ATR regime availability', () => {
   });
 
   it('withholds regime when certified history still has unresolved source quality', () => {
-    showATR({ ...certified, unresolved_excluded_dates: ['2024-01-05'] } as NonNullable<EquityHistoricalResponse['meta']>);
+    showATR({ ...certified, unresolved_excluded_dates: [sessions[4]], unresolved_session_count: 1 }, { skipSession: sessions[4] });
 
     expect(screen.getAllByText(unavailableText).length).toBeGreaterThan(0);
     expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+  });
+
+  it('does not certify a returned bar also reported as unresolved', () => {
+    const publish = showATR({ ...certified, unresolved_excluded_dates: [sessions[4]], unresolved_session_count: 1 });
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'unavailable', atr: null });
+    expect(publish.mock.lastCall?.[0].__widgetRuntime.provenance.stale).toBe(true);
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+  });
+
+  it('withholds older envelopes missing calendar proof, not just uncertified units', () => {
+    const publish = showATR({ count: 40, unit_status: 'confirmed_vnd' });
+    expect(screen.getByText('ATR regime unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Sizing Model')).not.toBeInTheDocument();
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'unavailable', atr: null, rank: null });
+  });
+
+  it.each([
+    [0, 'No historical observations were returned.'],
+    [2, 'No historical observations passed price-unit admission.'],
+  ] as const)('separates an empty history from %s rejected candidates', (excludedRowCount, reason) => {
+    const publish = showATR({ ...certified, count: 0, excluded_row_count: excludedRowCount }, { count: 0 });
+    expect(screen.getByText('ATR regime unavailable')).toBeInTheDocument();
+    expect(publish.mock.lastCall?.[0].__widgetRuntime.provenance.admissionReason).toBe(reason);
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ unavailableReason: reason, atr: null, rank: null });
+  });
+
+  it('accepts trailing range incompleteness but names the stale retained sample', () => {
+    const publish = showATR({ ...certified, completeness_status: 'partial', missing_trailing_sessions: 2, missing_session_count: 2 }, { count: 38 });
+    expect(screen.getByText(/38 consecutive sessions/)).toBeInTheDocument();
+    expect(screen.getByText('Stale')).toBeInTheDocument();
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ status: 'available', admittedSessions: 38, historyCount: 25 });
+  });
+
+  it.each(['VN30', 'VN100', 'VNDIAMOND'])('keeps %s in the ATR handoff without inventing share sizing', (indexSymbol) => {
+    const publish = showATR({ ...certified, unit_status: 'not_applicable', session_basis: 'not_applicable' }, { indexSymbol });
+    expect(screen.getByText('ATR %')).toBeInTheDocument();
+    expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
+    const dataSample = getWidgetExportData(publish.mock.lastCall?.[0]);
+    expect(dataSample).toMatchObject({ symbol: indexSymbol, status: 'available', suggestedShares: null });
+    const request = buildVniAgentWorkspaceContext({
+      widgetTypeKey: 'atr_regime', symbol: 'FPT', dataSnapshot: { quote: { symbol: 'FPT' } },
+      widgetPayload: { symbol: indexSymbol.toLowerCase(), dataSample },
+    });
+    expect(request).toMatchObject({ symbol: indexSymbol, widgetPayload: { symbol: indexSymbol, dataSample } });
+    expect(request.dataSnapshot).toEqual({});
   });
 
   it('shows the failure and no metrics when history cannot be loaded at all', () => {
@@ -155,11 +217,23 @@ describe('ATR regime availability', () => {
     expect(screen.getByText('Suggested Shares')).toBeInTheDocument();
   });
 
+  it('keeps valid adjusted volatility but does not size shares on a rescaled final close', () => {
+    const publish = showATR(certified, { adjustedFinalClose: true });
+    expect(screen.getByText('ATR %')).toBeInTheDocument();
+    expect(screen.getByText(/Share sizing requires the final close/)).toBeInTheDocument();
+    expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({
+      atr: 20000, rank: 100, stopDistance: null, suggestedShares: null, suggestedValue: null,
+    });
+  });
+
   it('reports a genuine zero ATR instead of missing history', () => {
-    showATR(certified, { flat:true });
+    const publish = showATR(certified, { flat: true });
 
     expect(screen.getByText('Sizing Model')).toBeInTheDocument();
     expect(screen.queryByText('Not enough ATR history')).not.toBeInTheDocument();
+    expect(screen.queryByText('Suggested Shares')).not.toBeInTheDocument();
+    expect(getWidgetExportData(publish.mock.lastCall?.[0])).toMatchObject({ atr: 0, atrPct: 0, rank: 100, suggestedShares: null });
   });
 
   it('reports missing history instead of a zero ATR', () => {

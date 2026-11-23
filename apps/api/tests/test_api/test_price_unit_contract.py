@@ -573,7 +573,7 @@ def test_historical_meta_never_certifies_unadjusted_history_as_raw():
     assert any("session price basis unverified" in warning for warning in meta.warnings)
 
 
-def test_historical_meta_marks_applied_adjustment_as_adjusted_basis():
+def test_historical_meta_does_not_equate_an_applied_factor_with_verified_source_basis():
     row = equity._to_historical_data_from_payload(
         bar(price_unit="VND", adj_close=0.45), adjustment_mode="adjusted"
     )
@@ -588,7 +588,7 @@ def test_historical_meta_marks_applied_adjustment_as_adjusted_basis():
         mongo_docs=[],
         warnings=[],
     )
-    assert meta.session_basis == "adjusted"
+    assert meta.session_basis == "unverified"
 
 
 def test_historical_meta_index_basis_is_not_applicable():

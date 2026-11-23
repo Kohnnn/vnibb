@@ -84,10 +84,21 @@ function unscopedCapabilityContext(): VniAgentWidgetCapabilityContext {
   }
 }
 
-function readCapabilitySymbol(value: unknown): string {
+// Keep the named benchmarks aligned with _INDEX_SYMBOLS in vnibb/core/price_units.py.
+const HISTORICAL_BENCHMARKS = new Set([
+  'VNINDEX', 'HNXINDEX', 'UPCOMINDEX', 'HNX30', 'VN30', 'VNMID', 'VNSML',
+  'VN100', 'VNALL', 'VNSI', 'VNIT', 'VNIND', 'VNCONS', 'VNCOND', 'VNHEAL',
+  'VNENE', 'VNUTI', 'VNREAL', 'VNFIN', 'VNMAT', 'VNDIAMOND', 'VNFINLEAD',
+  'VNFINSELECT', 'VNX50', 'VNXALL', 'HNXFIN', 'HNXCON', 'HNXLCAP', 'HNXMAN',
+  'HNXMSCAP', 'UPCOMLAR', 'UPCOMMID', 'UPCOMSML', 'HNX', 'UPCOM',
+  'VNMIDCAP', 'VNSMALLCAP', 'VNALLSHARE',
+])
+
+function readCapabilitySymbol(value: unknown, allowsHistoricalBenchmark: boolean): string {
   if (typeof value !== 'string') return ''
   const symbol = value.trim().toUpperCase()
-  return /^[A-Z0-9]{3}$/.test(symbol) ? symbol : ''
+  const isBenchmark = allowsHistoricalBenchmark && HISTORICAL_BENCHMARKS.has(symbol.replace(/-/g, ''))
+  return /^[A-Z0-9]{3}$/.test(symbol) || isBenchmark ? symbol : ''
 }
 
 export function buildVniAgentWorkspaceContext(input: VniAgentWorkspaceContextInput): VniAgentWorkspaceContext {
@@ -97,10 +108,11 @@ export function buildVniAgentWorkspaceContext(input: VniAgentWorkspaceContextInp
     ? payload.widgetConfig as Record<string, unknown>
     : undefined
   const configuration = capability ? validateWidgetCapabilityConfiguration(capability, widgetConfig) : { values: {}, invalidKeys: [] }
+  const allowsHistoricalBenchmark = capability?.widgetType === 'atr_regime' || capability?.widgetType === 'gap_fill_stats'
   const symbol = capability?.scope === 'market'
     ? ''
-    : readCapabilitySymbol(payload.symbol !== undefined ? payload.symbol : input.symbol)
-  const snapshotMatchesScope = capability?.scope === 'symbol' && symbol === readCapabilitySymbol(input.symbol)
+    : readCapabilitySymbol(payload.symbol !== undefined ? payload.symbol : input.symbol, allowsHistoricalBenchmark)
+  const snapshotMatchesScope = capability?.scope === 'symbol' && !!symbol && symbol === readCapabilitySymbol(input.symbol, allowsHistoricalBenchmark)
 
   return {
     widgetType: capability?.name || input.widgetType || 'Dashboard',

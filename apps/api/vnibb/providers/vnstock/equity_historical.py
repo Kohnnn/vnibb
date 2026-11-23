@@ -7,7 +7,7 @@ for Vietnam-listed stocks using the vnstock library.
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -19,7 +19,7 @@ from vnibb.core.exceptions import (
     ProviderError,
     ProviderTimeoutError,
 )
-from vnibb.core.price_units import PriceUnit, history_price_records, normalize_price_record
+from vnibb.core.price_units import PriceUnit, history_price_records, is_index_symbol, normalize_price_record
 from vnibb.providers.vnstock.runtime import run_reference_provider, validate_source
 
 logger = logging.getLogger(__name__)
@@ -143,6 +143,14 @@ class EquityHistoricalData(BaseModel):
 from vnibb.core.retry import vnstock_cb, circuit_breaker
 
 
+class HistoricalProviderRows(list[EquityHistoricalData]):
+    """Dated unit rejections survive conversion to usable OHLCV rows."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unit_excluded_dates: list[date] = []
+
+
 class VnstockEquityHistoricalFetcher(
     BaseFetcher[EquityHistoricalQueryParams, EquityHistoricalData]
 ):
@@ -228,18 +236,20 @@ class VnstockEquityHistoricalFetcher(
     def transform_data(
         params: EquityHistoricalQueryParams,
         data: List[dict[str, Any]],
-    ) -> List[EquityHistoricalData]:
+    ) -> HistoricalProviderRows:
         """
         Transform raw vnstock response to standardized EquityHistoricalData.
 
         vnstock returns columns: time, open, high, low, close, volume
         Some sources may also include: value, ticker
         """
-        results: List[EquityHistoricalData] = []
+        results = HistoricalProviderRows()
+        symbol = params.symbol.upper()
+        expected_unit = "index_points" if is_index_symbol(symbol) else "VND"
 
         for row in data:
             try:
-                row = normalize_price_record(row, symbol=params.symbol, source=row.get("price_source") or f"vnstock5_history:{params.source.upper()}")
+                row = normalize_price_record(row, symbol=symbol, source=row.get("price_source") or f"vnstock5_history:{params.source.upper()}")
                 # Handle different column names from different sources
                 time_value = row.get("time") or row.get("date") or row.get("trading_date")
 
@@ -248,10 +258,16 @@ class VnstockEquityHistoricalFetcher(
                     time_value = date.fromisoformat(time_value[:10])
                 elif hasattr(time_value, "date"):
                     time_value = time_value.date()
+                if (
+                    row["price_unit"] != expected_unit
+                    and isinstance(time_value, date)
+                    and not isinstance(time_value, datetime)
+                ):
+                    results.unit_excluded_dates.append(time_value)
 
                 results.append(
                     EquityHistoricalData(
-                        symbol=params.symbol.upper(),
+                        symbol=symbol,
                         time=time_value,
                         price_unit=row["price_unit"],
                         price_source=row.get("price_source"),
@@ -265,7 +281,7 @@ class VnstockEquityHistoricalFetcher(
                         adjusted_close=float(row["adjusted_close"]) if row.get("adjusted_close") is not None else float(row["adj_close"]) if row.get("adj_close") is not None else None,
                     )
                 )
-            except (KeyError, ValueError, TypeError) as e:
+            except (KeyError, ValueError, TypeError, OverflowError) as e:
                 logger.warning(f"Skipping invalid row: {row}, error: {e}")
                 continue
 
