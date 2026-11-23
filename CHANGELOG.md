@@ -13,6 +13,7 @@ live in `docs/`.
 
 ## [Unreleased]
 
+- Distinguish unavailable officers and subsidiaries from successful empty returns, keep previously fetched records for the same company on refresh failure, and carry the original source and fetch dates and separate failure reason through status, exports and VniAgent (#280).
 - Tie chart status, exports and agent attachments to the active price-history request. Show the fiscal source of each valuation multiple and retain monetary units and omission notes in Financial Ratios attachments (#270).
 - Add a Company Research workspace and market-wide news to Market Scan. Report breadth over classified observations, align screener columns on narrow screens and preserve heatmap session dates (#272).
 - Distinguish issuer, peer, sector and market-wide news and exclude market-wide fallback articles from issuer momentum (#250).

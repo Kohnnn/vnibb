@@ -247,11 +247,13 @@ export interface OfficerData {
   ownership_pct?: number;
 }
 
-export interface OfficersResponse {
-  symbol: string;
-  count: number;
-  data: OfficerData[];
+export interface CompanyReferenceResponse<Row> {
+  data: Row[];
+  meta?: { count: number; symbol?: string | null; last_data_date?: string | null } | null;
+  error?: string | null;
 }
+
+export type OfficersResponse = CompanyReferenceResponse<OfficerData>;
 
 export interface IntradayTradeData {
   symbol: string;
@@ -510,11 +512,7 @@ export interface SubsidiaryData {
   charter_capital?: number;
 }
 
-export interface SubsidiariesResponse {
-  symbol: string;
-  count: number;
-  data: SubsidiaryData[];
-}
+export type SubsidiariesResponse = CompanyReferenceResponse<SubsidiaryData>;
 
 interface StatementProvenance {
   source?: string | null;

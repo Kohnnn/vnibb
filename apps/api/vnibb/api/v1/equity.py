@@ -5817,8 +5817,11 @@ async def get_officers(symbol: str):
     try:
         data = await VnstockOfficersFetcher.fetch(OfficersQueryParams(symbol=symbol))
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+    except (TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=[], error="Provider request timed out")
+    except Exception as exc:
+        logger.warning("Officers source failed for %s: %s", symbol.upper(), exc)
+        return StandardResponse(data=[], error="Provider unavailable")
 
 
 def _depth_value(depth_data: Any, key: str) -> Any:
@@ -6655,10 +6658,11 @@ async def get_subsidiaries(symbol: str):
             timeout=30,
         )
         return StandardResponse(data=data, meta=MetaData(count=len(data)))
-    except (asyncio.TimeoutError, ProviderTimeoutError):
-        return StandardResponse(data=[], error="Request timed out")
-    except Exception as e:
-        return StandardResponse(data=[], error=str(e))
+    except (TimeoutError, ProviderTimeoutError):
+        return StandardResponse(data=[], error="Provider request timed out")
+    except Exception as exc:
+        logger.warning("Subsidiaries source failed for %s: %s", symbol.upper(), exc)
+        return StandardResponse(data=[], error="Provider unavailable")
 
 
 @router.get("/{symbol}/trading-stats", response_model=StandardResponse[Any])
