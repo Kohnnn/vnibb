@@ -97,6 +97,8 @@ VNIBB_MCP_URL=http://127.0.0.1:8001/mcp
 
 This repository is self-contained: clone `Kohnnn/vnibb` and everything below exists. Repository instructions are tracked in this file and [the docs hub](docs/README.md). An `AGENTS.md` is deliberately untracked (`.gitignore`), so a local checkout or hosting environment may supply extra local rules; this repository alone ships none, and nothing here depends on one.
 
+For a bounded `swarm ready` task, start with the [swarm-ready handoff](SWARM_READY.md) and continue the existing issue and owner.
+
 ## Quick handoff prompt
 
 ```
