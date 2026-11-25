@@ -17,7 +17,7 @@ function describeWindow(now: string, session: string, closure?: typeof fridayClo
     requested_start_date: session, requested_end_date: session,
     requested_session_count: 1, observed_session_count: 1, gap_session_count: 0,
     last_validated_session: session, last_data_date: session,
-    calendar_verified: true, window_contract: 'sessions', coverage_status: 'complete',
+    calendar_verified: true, window_contract: 'sessions-v2', coverage_status: 'complete',
     latest_closed_session: closure,
   } as const;
   return describeForeignFlow({
@@ -54,6 +54,21 @@ describe('foreign flow session provenance', () => {
     expect(result.marketClosed).toBeUndefined();
     expect(result.expectedClosedSession).toBe(false);
     expect(provenanceLines(result).some(([name]) => name === 'market_closed')).toBe(false);
+  });
+
+  it('rejects an old complete response and its as-of and closure claims', () => {
+    const response = {
+      symbol: 'HPG', count: 1,
+      data: [{ symbol: 'HPG', date: fridayClosure.date, buy_volume: 0, sell_volume: 0 }],
+      meta: { count: 1, window_contract: 'sessions' as const, calendar_verified: true,
+        requested_session_count: 1, requested_start_date: fridayClosure.date, requested_end_date: fridayClosure.date,
+        observed_session_count: 1, gap_session_count: 0, coverage_status: 'complete' as const,
+        last_validated_session: fridayClosure.date, last_data_date: fridayClosure.date, latest_closed_session: fridayClosure },
+    };
+    const result = describeForeignFlow({ response, requestFailed: false, isLoading: false, isFetching: false, fetchedAt: Date.parse(saturday), requestedSessions: 1 }, Date.parse(saturday));
+    expect(result).toMatchObject({ updatedAt: null, coverage: 'partial', expectedClosedSession: false,
+      coverageDetail: { requestedSessions: 1, observedSessions: null, calendarVerified: null, lastValidatedSession: null } });
+    expect(result.marketClosed).toBeUndefined();
   });
 
   it('honors a verified holiday closure during ordinary weekday trading hours', () => {

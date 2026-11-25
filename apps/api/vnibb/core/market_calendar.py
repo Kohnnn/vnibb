@@ -17,6 +17,21 @@ CALENDAR_SOURCES = (
     "https://hnx.vn/chi-tiet-lich-nghi-gd-60022084.html?_page=1",
 )
 
+# HOSE published this closure after the shared 2026 calendar was assembled.
+# This is a venue-specific discrepancy, not a change to the global holiday set.
+# Source: https://www.hsx.vn/vi/lich-giao-dich
+_UNRECONCILED_HOSE_DATES = frozenset({date(2026, 11, 24)})
+
+
+def foreign_flow_calendar_verified(start: date, selection_cutoff: date) -> bool:
+    """Reject ranges intersecting venue dates absent from the shared contract."""
+    return (
+        start <= selection_cutoff
+        and market_calendar_metadata(start)["verified"]
+        and market_calendar_metadata(selection_cutoff)["verified"]
+        and not any(start <= day <= selection_cutoff for day in _UNRECONCILED_HOSE_DATES)
+    )
+
 
 def market_calendar_metadata(anchor: date) -> dict:
     verified = anchor.year == 2026

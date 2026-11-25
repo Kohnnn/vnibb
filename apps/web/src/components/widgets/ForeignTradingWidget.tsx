@@ -11,6 +11,7 @@ import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { cn } from '@/lib/utils';
 import { formatShortDate } from '@/lib/formatDate';
 import { describeForeignFlow } from '@/lib/foreignFlowProvenance';
+import { parseForeignSessionDate, qualifyForeignFlowWindow } from '@/lib/foreignFlowWindow';
 import { deriveWidgetHealth } from '@/lib/widgetHealth';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { memo, useEffect, useMemo, useState } from 'react';
@@ -38,14 +39,14 @@ interface ForeignTradingWidgetProps {
 }
 
 function formatVolume(vol: number | null | undefined): string {
-    if (vol == null) return 'n/a';
+    if (vol == null || !Number.isFinite(vol)) return 'n/a';
     if (Math.abs(vol) >= 1e6) return `${(vol / 1e6).toFixed(2)}M`;
     if (Math.abs(vol) >= 1e3) return `${(vol / 1e3).toFixed(1)}K`;
     return vol.toLocaleString();
 }
 
 function getNetVolume(buy: number | null | undefined, sell: number | null | undefined): number | null {
-    if (buy == null || sell == null) return null;
+    if (buy == null || sell == null || !Number.isFinite(buy) || !Number.isFinite(sell)) return null;
     return buy - sell;
 }
 
@@ -82,48 +83,24 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     });
 
     const coverage = data?.meta;
-    // Rows are already admitted to the session window server-side; sorting is
-    // presentation only and never re-derives a window total from a row count.
-    const trades = useMemo(() => {
-        const raw = data?.data || [];
-        return [...raw].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
-    }, [data]);
-
-    const windowNet = useMemo(() => {
-        if (trades.length === 0) return null;
-        // A partial window is a partial disclosure: the admitted rows sum, but
-        // they may not be presented as the selected window's net.
-        if (coverage?.coverage_status !== undefined && coverage.coverage_status !== 'complete') {
-            return null;
-        }
-        if (coverage?.window_net_volume !== undefined) return coverage.window_net_volume;
-        let total = 0;
-        for (const trade of trades) {
-            const net = getNetVolume(trade.buy_volume, trade.sell_volume);
-            if (net === null) return null;
-            total += net;
-        }
-        return total;
-    }, [coverage?.coverage_status, coverage?.window_net_volume, trades]);
-
-    const coverageLabel = useMemo(() => {
-        const requested = coverage?.requested_session_count ?? WINDOW_SESSIONS[flowWindow];
-        const observed = coverage?.observed_session_count ?? null;
-        if (observed === null) return `${requested} sessions requested`;
-        const range = [coverage?.observed_start_date, coverage?.observed_end_date]
-            .filter((value): value is string => Boolean(value))
-            .map((value) => formatDate(value))
-            .join(' – ');
-        const gaps = coverage?.gap_session_count ?? 0;
-        return `${observed}/${requested} sessions${range ? ` · ${range}` : ''}${gaps ? ` · ${gaps} gap${gaps === 1 ? '' : 's'}` : ''}`;
-    }, [coverage, flowWindow]);
+    const flowData = useMemo(
+        () => qualifyForeignFlowWindow(data?.data, coverage, WINDOW_SESSIONS[flowWindow]),
+        [data?.data, coverage, flowWindow],
+    );
+    const trades = useMemo(() => [...flowData.rows].sort(
+        (a, b) => String(b.date || '').localeCompare(String(a.date || '')),
+    ), [flowData.rows]);
+    const windowNet = flowData.total;
+    const coverageLabel = flowData.windowed
+        ? `${flowData.observed}/${WINDOW_SESSIONS[flowWindow]} ${flowData.calendarVerified ? 'qualifying' : 'candidate'} sessions · requested ${flowData.requestedStart} – ${flowData.requestedEnd} · returned ${flowData.returnedStart ?? 'none'} – ${flowData.returnedEnd ?? 'none'} · ${flowData.gaps ?? 'unknown'} missing · ${flowData.nullSessions} null`
+        : `${WINDOW_SESSIONS[flowWindow]} sessions requested · retained history (unverified window) · ${flowData.returnedStart ?? 'unknown'} – ${flowData.returnedEnd ?? 'unknown'}`;
 
     const columns = useMemo((): VirtualizedColumn<any>[] => [
         {
             id: 'date',
             header: 'Date',
             accessor: (row) => (
-                <div className="text-[var(--text-muted)] font-mono text-[10px]">{formatDate(row.date)}</div>
+                <div className="text-[var(--text-muted)] font-mono text-[10px]">{parseForeignSessionDate(row.date) ?? '-'}</div>
             ),
             width: 70,
         },
@@ -173,12 +150,13 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             response: data,
             fetchedAt: dataUpdatedAt,
             requestedSessions: WINDOW_SESSIONS[flowWindow],
+            window: flowData,
             requestFailed: Boolean(error),
             isLoading,
             isFetching,
         }, Math.max(lastClosureCheck, Date.now()));
         return { provenance, closureExpiresAt };
-    }, [data, dataUpdatedAt, error, flowWindow, isLoading, isFetching, lastClosureCheck]);
+    }, [data, dataUpdatedAt, error, flowData, flowWindow, isLoading, isFetching, lastClosureCheck]);
 
     useEffect(() => {
         if (closureExpiresAt === undefined) return;
@@ -189,10 +167,10 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
     const coverageWarning = [
         ...(provenance.warnings ?? []),
-        coverage?.provider_row_cap_applied && `Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`,
-        coverage?.non_session_dates?.length && `${coverage.non_session_dates.length} row(s) dated on a non-session were excluded.`,
-        coverage?.duplicate_session_dates?.length && `${coverage.duplicate_session_dates.length} duplicated session date(s) collapsed.`,
-        coverage?.calendar_verified === false && 'Exchange calendar unverified for this range; closures may appear as gaps.',
+        flowData.windowed && coverage?.provider_row_cap_applied && `Live feed caps ${coverage.provider_row_cap} rows; longer windows rely on retained history.`,
+        flowData.windowed && coverage?.non_session_dates?.length && `${coverage.non_session_dates.length} row(s) dated on a non-session were excluded.`,
+        flowData.windowed && coverage?.duplicate_session_dates?.length && `${coverage.duplicate_session_dates.length} duplicated session date(s) collapsed.`,
+        flowData.windowed && coverage?.calendar_verified === false && 'Exchange calendar unverified for this range; closures may appear as gaps.',
     ].filter(Boolean).join(' ');
     const health = deriveWidgetHealth(provenance);
     const observed = provenance.updatedAt;
@@ -209,13 +187,13 @@ function ForeignTradingWidgetComponent({ id, symbol, onRemove, onDataChange }: F
             compactHeight: 3,
             sourceLabel: 'Foreign trading',
             apiGroup: '/equity',
-            endpoint: `/equity/${symbol}/foreign-trading?sessions=${WINDOW_SESSIONS[flowWindow]}`,
+            endpoint: `/equity/${symbol}/foreign-trading?sessions=${WINDOW_SESSIONS[flowWindow]}&window_contract=sessions-v2`,
             lastDataDate: updatedAt,
             units: 'Volume: shares',
-            basis: 'Admitted foreign trading sessions; window net requires complete coverage.',
+            basis: flowData.windowed ? 'Admitted foreign trading sessions; window net requires complete coverage.' : 'Retained foreign history; requested session window is unverified.',
             exportData: trades,
         }));
-    }, [flowWindow, hasData, onDataChange, provenance, symbol, trades]);
+    }, [flowData.windowed, flowWindow, hasData, onDataChange, provenance, symbol, trades]);
 
     return (
         <WidgetContainer

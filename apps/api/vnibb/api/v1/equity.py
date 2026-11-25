@@ -29,7 +29,9 @@ from vnibb.core.exceptions import (
     ProviderError,
     ProviderTimeoutError,
 )
-from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
+from vnibb.core.market_calendar import (
+    OFFICIAL_MARKET_HOLIDAYS, foreign_flow_calendar_verified, market_calendar_metadata,
+)
 from vnibb.core.market_cap import reconcile_market_caps, resolve_market_cap
 from vnibb.core.price_units import is_index_symbol, normalize_price_record, persisted_price_record, screener_price_record
 from vnibb.core.ratio_units import ADMITTED_RATIO_FIELDS, admit_ratio_units, admitted_ratio_value
@@ -6828,8 +6830,9 @@ async def _load_foreign_trading_fallback(
         select(ForeignTrading)
         .where(ForeignTrading.symbol == symbol.upper())
         .order_by(ForeignTrading.trade_date.desc())
-        .limit(limit)
     )
+    if start_date is None and end_date is None:
+        statement = statement.limit(limit)
     if start_date is not None:
         statement = statement.where(ForeignTrading.trade_date >= start_date)
     if end_date is not None:
@@ -6864,6 +6867,9 @@ async def get_foreign_trading(
             "session. Omit to read the latest retained rows."
         ),
     ),
+    window_contract: Optional[Literal["sessions-v2"]] = Query(
+        None, description="Opt in to versioned session-window coverage metadata."
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Foreign flow for an explicit market-session window.
@@ -6875,6 +6881,15 @@ async def get_foreign_trading(
     and rows whose buy/sell volumes are unknown never become zero.
     """
     symbol_upper = symbol.upper()
+    if sessions and window_contract != "sessions-v2":
+        # Legacy consumers infer completeness from row counts, ignoring calendar
+        # certification. Never expose a session packet they could sum as 20D.
+        warning = "session-window coverage requires window_contract=sessions-v2"
+        return StandardResponse(
+            data=[],
+            meta=MetaData(count=0, symbol=symbol_upper, window_contract="sessions", warnings=[warning]),
+            error=warning,
+        )
     provider_limit = provider_row_limit(sessions, limit)
     provider_error: str | None = None
     provider_rows: list[ForeignTradingData] = []
@@ -6892,8 +6907,19 @@ async def get_foreign_trading(
         provider_error = "live foreign trading feed unavailable"
 
     checked_at = datetime.now(UTC)
+    market_time = checked_at.astimezone(ZoneInfo(settings.vn_timezone))
+    selection_cutoff = market_time.date()
+    if market_time.time() < time.fromisoformat(settings.intraday_market_close):
+        selection_cutoff -= timedelta(days=1)
     expected_session = expected_market_session(now=checked_at)
     closure = verified_market_closure(now=checked_at, latest_session=expected_session)
+    if closure and not foreign_flow_calendar_verified(
+        expected_session,
+        datetime.fromisoformat(closure["valid_until"]).astimezone(
+            ZoneInfo(settings.vn_timezone)
+        ).date(),
+    ):
+        closure = None
     window_start: date | None = None
     window_end: date | None = None
     if sessions:
@@ -6915,6 +6941,7 @@ async def get_foreign_trading(
         requested_sessions=sessions,
         start_date=window_start,
         end_date=window_end,
+        selection_cutoff=selection_cutoff,
         row_limit=None if sessions else limit,
         primary_source_count=len(provider_rows),
     )

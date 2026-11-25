@@ -46,6 +46,12 @@ describe('ownershipAnalytics', () => {
     const summary = buildOwnershipSummary([{ symbol: 'VCI', ownership_pct: 0, ownership_unit: 'percent', ownership_unit_status: 'explicit' }], zeroFlowWindow(), {
       symbol: 'VCI', period_days: 90, buy_count: 0, sell_count: 0, buy_value: 0, sell_value: 0,
       net_value: 0, sentiment_score: 0, total_deals: 0, value_unit: 'VND',
+    }, {
+      count: 20, window_contract: 'sessions-v2', calendar_verified: true,
+      requested_session_count: 20, requested_start_date: '2026-05-04', requested_end_date: '2026-05-29',
+      observed_session_count: 20, observed_start_date: '2026-05-04', observed_end_date: '2026-05-29',
+      last_validated_session: '2026-05-29', gap_session_count: 0, null_session_count: 0,
+      coverage_status: 'complete', window_net_volume: 0,
     })
     expect(summary.top3Pct).toBe(0)
     expect(summary.coverage).toBe('complete')

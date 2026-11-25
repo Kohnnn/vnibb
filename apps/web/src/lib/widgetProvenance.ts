@@ -10,9 +10,12 @@ export type WidgetCoverageDetail = {
   readonly requestedEnd?: string | null;
   readonly observedStart?: string | null;
   readonly observedEnd?: string | null;
+  readonly returnedStart?: string | null;
+  readonly returnedEnd?: string | null;
   readonly requestedSessions?: number | null;
   readonly observedSessions?: number | null;
   readonly gapSessions?: number | null;
+  readonly nullSessions?: number | null;
   readonly lastValidatedSession?: string | null;
   readonly calendarVerified?: boolean | null;
 };
@@ -98,9 +101,12 @@ function provenanceEntries(input: ExportProvenance) {
     ['requested_end', 'Requested end', resolved.coverageDetail?.requestedEnd],
     ['observed_start', 'Observed start', resolved.coverageDetail?.observedStart],
     ['observed_end', 'Observed end', resolved.coverageDetail?.observedEnd],
+    ['returned_start', 'Returned start', resolved.coverageDetail?.returnedStart],
+    ['returned_end', 'Returned end', resolved.coverageDetail?.returnedEnd],
     ['requested_sessions', 'Requested sessions', resolved.coverageDetail?.requestedSessions],
     ['observed_sessions', 'Observed sessions', resolved.coverageDetail?.observedSessions],
     ['gap_sessions', 'Missing sessions', resolved.coverageDetail?.gapSessions],
+    ['null_sessions', 'Null sessions', resolved.coverageDetail?.nullSessions],
     ['last_validated_session', 'Last validated session', resolved.coverageDetail?.lastValidatedSession],
     ['calendar_verified', 'Calendar verified', resolved.coverageDetail?.calendarVerified],
     ['cached', 'Delivery', resolved.cached],

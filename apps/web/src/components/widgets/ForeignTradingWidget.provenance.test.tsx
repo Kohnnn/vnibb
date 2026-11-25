@@ -33,7 +33,7 @@ function fridayWindow(observation: string, refreshWarning?: string) {
     requested_start_date: '2026-08-19', requested_end_date: friday, requested_session_count: 60,
     observed_start_date: observation, observed_end_date: observation, observed_session_count: 1,
     last_validated_session: observation, gap_session_count: 59, coverage_status: 'partial',
-    window_contract: 'sessions', calendar_verified: true, latest_closed_session: fridayClosure, window_net_volume: 0,
+    window_contract: 'sessions-v2', calendar_verified: true, latest_closed_session: fridayClosure, window_net_volume: 0,
     warnings,
   } as const;
   return {
@@ -107,8 +107,8 @@ describe('Foreign Trading weekend provenance (#270)', () => {
 
     try {
       expect(await screen.findByText(bodyStatus)).toBeVisible();
-      expect(getForeignTrading).toHaveBeenCalledWith('HPG', { limit: undefined, sessions: 60 });
-      expect(screen.getByText(/1\/60 sessions.*59 gaps/)).toBeVisible();
+      expect(getForeignTrading).toHaveBeenCalledWith('HPG', { limit: undefined, sessions: 60, window_contract: 'sessions-v2' });
+      expect(screen.getByText(/1\/60 qualifying sessions.*59 missing.*0 null/)).toBeVisible();
       expect(screen.getByText('Unavailable')).toBeVisible();
       expect(screen.getByText('Flat 0')).toBeVisible();
       const payload = onDataChange.mock.lastCall?.[0];

@@ -762,10 +762,10 @@ export async function getMetricsHistory(
 
 export async function getForeignTrading(
     symbol: string,
-    options?: { limit?: number; sessions?: number }
+    options?: { limit?: number; sessions?: number; window_contract?: 'sessions-v2' }
 ): Promise<ForeignTradingResponse> {
     return fetchAPI<ForeignTradingResponse>(`/equity/${symbol}/foreign-trading`, {
-        params: { limit: options?.limit, sessions: options?.sessions },
+        params: { limit: options?.limit, sessions: options?.sessions, window_contract: options?.window_contract },
     });
 }
 

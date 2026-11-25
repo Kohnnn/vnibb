@@ -15,6 +15,7 @@ import type { WidgetHealthState } from '@/lib/widgetHealth';
 import type { WidgetDataPayload } from '@/lib/widgetRuntime';
 import { getMarketState } from '@/lib/marketHours';
 import { parseForeignTradingSnapshotTime } from './ForeignTradingWidget';
+import { foreignFlowRefreshFailed, foreignFlowWarnings } from '@/lib/foreignFlowProvenance';
 import { signedToneClass } from '@/lib/priceColor';
 
 interface OwnershipRatingSummaryWidgetProps {
@@ -51,20 +52,22 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const foreignCoverage = foreignQuery.data?.meta
   const insider = insiderQuery.data
   const shareholderError = useMemo(() => shareholdersQuery.error || (shareholdersQuery.data?.error ? new Error(shareholdersQuery.data.error) : null), [shareholdersQuery.error, shareholdersQuery.data?.error])
-  const foreignEnvelopeError = !foreignQuery.error && foreignQuery.data?.error ? foreignQuery.data.error : null
   const summary = useMemo(
     () => buildOwnershipSummary(shareholders, foreignFlow, insider, foreignCoverage),
     [shareholders, foreignFlow, insider, foreignCoverage],
   )
-  const hasData = summary.availableSources > 0
+  const foreignWarnings = useMemo(
+    () => foreignFlowWarnings(foreignQuery.data, summary.foreignFlowCoverage.windowVerified),
+    [foreignQuery.data, summary.foreignFlowCoverage.windowVerified],
+  )
+  const foreignFailed = foreignFlowRefreshFailed(Boolean(foreignQuery.error), foreignWarnings)
+  const hasData = summary.availableSources > 0 || Boolean(foreignFlow?.length)
   const isLoading = (shareholdersQuery.isLoading || foreignQuery.isLoading || insiderQuery.isLoading) && !hasData
   const isFetching = shareholdersQuery.isFetching || foreignQuery.isFetching || insiderQuery.isFetching
-  // A response-level fallback/error from the foreign feed is retained even
-  // when numeric rows still arrive (#249): the total becomes a partial read.
   const error = shareholderError || foreignQuery.error || insiderQuery.error
-    || (foreignEnvelopeError ? new Error(foreignEnvelopeError) : null)
+    || (foreignFailed ? new Error('Foreign flow refresh failed') : null)
   const fetchedAt = Math.max(shareholdersQuery.dataUpdatedAt, foreignQuery.dataUpdatedAt, insiderQuery.dataUpdatedAt) || null
-  const foreignDate = foreignFlow?.length ? foreignCoverage?.last_data_date : null
+  const foreignDate = summary.foreignFlowCoverage.calendarVerified ? summary.foreignFlowCoverage.lastValidatedSession : null
   const foreignSnapshot = parseForeignTradingSnapshotTime(foreignDate)
   const foreignSnapshotTime = foreignSnapshot?.getTime()
   const foreignAgeHours = foreignSnapshotTime !== undefined && Number.isFinite(foreignSnapshotTime) && foreignSnapshotTime <= Date.now()
@@ -77,27 +80,24 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
   const warnings = useMemo(() => {
     const inputs = [
       ['Shareholders', { ...shareholdersQuery, error: shareholderError }, summary.holderCount !== null && summary.holderCount > 0],
-      ['Foreign flow', { ...foreignQuery, error: foreignQuery.error || (foreignEnvelopeError ? new Error(foreignEnvelopeError) : null) }, summary.foreignNetVolume !== null],
+      ['Foreign flow', { ...foreignQuery, error: foreignFailed ? new Error('Foreign flow refresh failed') : null }, Boolean(foreignFlow?.length)],
       ['Insider sentiment', insiderQuery, summary.insiderNetValue !== null],
     ] as const
     const coverage = summary.foreignFlowCoverage
-    const coverageNote = coverage.status === 'unavailable'
-      ? null
+    const coverageNote = coverage.windowVerified && coverage.status !== 'complete'
+      ? [`Foreign flow: ${coverage.observedSessions}/${coverage.requestedSessions} ${coverage.calendarVerified ? 'qualifying' : 'candidate'} sessions; requested ${coverage.requestedStartDate} to ${coverage.requestedEndDate}; returned ${coverage.startDate ?? 'none'} to ${coverage.endDate ?? 'none'}; ${coverage.gapSessions ?? 'unknown'} missing, ${coverage.nullSessions} null; ${coverage.requestedSessions}D total withheld.`]
       : coverage.status === 'partial'
-        ? [`Foreign flow: ${coverage.observedSessions}/${coverage.requestedSessions} sessions observed${coverage.startDate ? ` (${coverage.startDate} to ${coverage.endDate})` : ''}${coverage.gapSessions ? `, ${coverage.gapSessions} gap(s)` : ''}; ${coverage.requestedSessions}D total withheld.`]
+        ? [`Foreign flow: retained history (${coverage.startDate ?? 'unknown'} to ${coverage.endDate ?? 'unknown'}); requested ${coverage.requestedSessions}-session range and coverage unverified; ${coverage.requestedSessions}D total withheld.`]
         : []
     return inputs.flatMap(([name, query, usable]) => query.error
       ? [`${name}: ${usable ? 'refresh failed; retained data may be stale' : 'unavailable (request failed)'}.`]
       : !usable ? [`${name}: ${query.isLoading ? 'loading' : 'no usable observations'}.`] : [])
-      .concat(foreignEnvelopeError ? [`Foreign flow: ${foreignEnvelopeError}`] : [])
-      .concat((foreignCoverage?.warnings ?? [])
-        .filter((warning) => !foreignEnvelopeError?.includes(warning))
-        .map((warning) => `Foreign flow: ${warning}`))
+      .concat(foreignWarnings.map((warning) => `Foreign flow: ${warning}`))
       .concat(coverageNote ?? [])
       .concat(coverage.warning && coverage.status !== 'partial' ? [`Foreign flow: ${coverage.warning}.`] : [])
       .concat(summary.holderCount && summary.ownershipUnitStatus !== 'explicit' ? ['Ownership percentages withheld: explicit source-unit evidence unavailable.'] : [])
       .concat(summary.score === null ? ['Composite withheld until all three inputs and ownership percentage units are usable.'] : [])
-  }, [foreignCoverage?.warnings, foreignEnvelopeError, shareholderError, shareholdersQuery.isLoading, foreignQuery.error, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
+  }, [foreignWarnings, foreignFailed, foreignFlow?.length, shareholderError, shareholdersQuery.isLoading, foreignQuery.isLoading, insiderQuery.error, insiderQuery.isLoading, summary])
   const ownershipHealth: WidgetHealthState | undefined = error && hasData
     ? { status: 'stale', label: 'Refresh failed', detail: warnings.join(' ') }
     : foreignStale
@@ -157,7 +157,7 @@ export function OwnershipRatingSummaryWidget({ id, symbol, onRemove, onDataChang
           </div>
           <WidgetMeta updatedAt={foreignAsOf} fetchedAt={fetchedAt} isFetching={isFetching && hasData} sourceLabel={foreignAsOf ? 'Foreign flow as-of only' : undefined} note={summary.holderCount !== null ? `${summary.holderCount} reported holders` : 'Holder count unavailable'} health={ownershipHealth} align="right" />
         </div>
-        {hasData && warnings.length > 0 && <p role="status" className="mb-3 text-[11px] text-[var(--text-secondary)]">{warnings.join(' ')}</p>}
+        {(hasData || summary.foreignFlowCoverage.windowVerified) && warnings.length > 0 && <p role="status" className="mb-3 text-[11px] text-[var(--text-secondary)]">{warnings.join(' ')}</p>}
 
         {isLoading ? (
           <WidgetSkeleton lines={6} />
