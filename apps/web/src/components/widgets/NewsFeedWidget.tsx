@@ -24,7 +24,8 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
-import { normalizeNewsItemTimestamp, newsObservationProvenance } from '@/lib/newsTime';
+import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
+import { hasNewsAssociationEvidence } from '@/lib/newsAssociation';
 import { getSentimentProvenance } from '@/components/widgets/news/NewsCard';
 
 interface NewsArticle {
@@ -52,6 +53,7 @@ interface NewsArticle {
     match_reason?: string | null;
     is_market_wide_fallback?: boolean;
     association_class?: string | null;
+    match_evidence?: unknown;
 }
 
 function isMarketWideArticle(article: NewsArticle) {
@@ -59,8 +61,7 @@ function isMarketWideArticle(article: NewsArticle) {
 }
 
 function isAdmittedArticle(article: NewsArticle) {
-    return !isMarketWideArticle(article) && (article.association_class === 'direct_company'
-        || article.association_class === 'verified_peer' || article.association_class === 'verified_sector');
+    return hasNewsAssociationEvidence(article);
 }
 
 function NewsAssociation({ article, symbol }: { readonly article: NewsArticle; readonly symbol: string }) {
@@ -228,14 +229,16 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
         networkMode: 'online',
     });
 
-    const isRelated = requestMode === 'related' && data?.mode !== 'all';
+    const isRelated = requestMode === 'related';
+    const admittedRows = useMemo(
+        () => (data?.articles || []).filter((item: NewsArticle) => (
+            !isRelated || (data?.fallback_used !== true && isAdmittedArticle(item))
+        )),
+        [data?.articles, data?.fallback_used, isRelated]
+    );
     const newsItems: NewsArticle[] = useMemo(
-        () => (data?.articles || []).map((item: NewsArticle) => ({
-            ...item,
-            published_date: normalizeNewsItemTimestamp(item) || item.published_date || null,
-            is_market_wide_fallback: data?.fallback_used === true || item.is_market_wide_fallback,
-        })),
-        [data?.articles, data?.fallback_used]
+        () => admittedRows.map(item => ({ ...item, published_date: newsItemObservation(item) })),
+        [admittedRows]
     );
     const hasData = newsItems.length > 0;
     const isFallback = Boolean(error && hasData);
@@ -250,8 +253,8 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
     // which may fall back to crawl aliases) so the latest genuine article date is
     // used and the query receipt never becomes freshness.
     const observation = useMemo(
-        () => newsObservationProvenance(data?.articles, { receiptAt: dataUpdatedAt }),
-        [data?.articles, dataUpdatedAt],
+        () => newsObservationProvenance(admittedRows, { receiptAt: dataUpdatedAt }),
+        [admittedRows, dataUpdatedAt],
     );
     const { timedOut, resetTimeout } = useLoadingTimeout(isLoading && !hasData, { timeoutMs: 8_000 });
 
@@ -436,12 +439,13 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                         </select>
 
                         {/* Source filter */}
-                        {sources.length > 0 && (
+                        {(sources.length > 0 || sourceFilter) && (
                             <select
                                 value={sourceFilter}
                                 onChange={(e) => setSourceFilter(e.target.value)}
                                 className="text-[10px] px-2 py-1 rounded bg-background/80 border border-border text-foreground focus:outline-none focus:border-primary/40"
                             >
+                                {sourceFilter && !sources.includes(sourceFilter) && <option value={sourceFilter}>{sourceFilter}</option>}
                                 <option value="">All Sources</option>
                                 {sources.map(source => (
                                     <option key={source} value={source}>{source}</option>
@@ -469,7 +473,7 @@ export function NewsFeedWidget({ symbol, isEditing, onRemove, onDataChange }: Ne
                     ) : !hasData ? (
                         <WidgetEmpty
                             message={symbol
-                                ? `No news available for ${symbol}. Try refreshing or check back later.`
+                                ? `No related news found for ${symbol}. Market-wide news is available in Market News.`
                                 : 'No news available yet. Try refreshing or check back later.'}
                             icon={<Newspaper size={18} />}
                             action={{ label: 'Refresh', onClick: () => refetch() }}

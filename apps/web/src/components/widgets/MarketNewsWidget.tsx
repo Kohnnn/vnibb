@@ -11,6 +11,7 @@ import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { API_BASE_URL } from '@/lib/api';
 import { formatTimestamp } from '@/lib/formatDate';
 import { normalizeNewsItemTimestamp, newsObservationProvenance } from '@/lib/newsTime';
+import { hasNewsAssociationEvidence } from '@/lib/newsAssociation';
 import { getAdaptiveRefetchInterval, POLLING_PRESETS } from '@/lib/pollingPolicy';
 
 function decodeHtml(value: string | null | undefined): string {
@@ -146,21 +147,19 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
     networkMode: 'online',
   });
 
-  const articles = news?.articles || [];
+  const articles = useMemo(() => (news?.articles || []).filter(item => mode !== 'related' || !upperSymbol || (
+    !news?.fallbackUsed && hasNewsAssociationEvidence(item)
+  )), [news, mode, upperSymbol]);
   const hasData = articles.length > 0;
   const isFallback = Boolean(error && hasData);
-  const showAssociation = mode === 'related' && Boolean(upperSymbol) && news?.mode !== 'all';
-  const feedNote = showAssociation
-    ? news?.fallbackUsed || (hasData && articles.every(item => item.isMarketWideFallback))
-      ? 'Market-wide fallback'
-      : `Related to ${upperSymbol}`
-    : 'Global feed';
+  const showAssociation = mode === 'related' && Boolean(upperSymbol);
+  const feedNote = showAssociation ? `Related to ${upperSymbol}` : 'Global feed';
   // Source observation only: latest genuine article publication date. Receipt
   // time (dataUpdatedAt) is retrieval evidence and never becomes freshness, and
   // undated rows keep the feed at partial coverage rather than looking fresh.
   const observation = useMemo(
-    () => newsObservationProvenance(news?.articles, { receiptAt: dataUpdatedAt }),
-    [news?.articles, dataUpdatedAt],
+    () => newsObservationProvenance(articles, { receiptAt: dataUpdatedAt }),
+    [articles, dataUpdatedAt],
   );
 
   const exportRows = useMemo(
@@ -250,9 +249,13 @@ function MarketNewsWidgetComponent({ symbol, config, onDataChange }: { symbol?: 
             <WidgetError error={error as Error} onRetry={() => refetch()} />
           ) : !hasData ? (
             <WidgetEmpty
-              message="No market news yet. Try refreshing or check back later."
+              message={showAssociation
+                ? `No related news found for ${upperSymbol}. View All News for market-wide coverage.`
+                : 'No market news yet. Try refreshing or check back later.'}
               icon={<Newspaper size={18} />}
-              action={{ label: 'Refresh', onClick: () => refetch() }}
+              action={showAssociation
+                ? { label: 'View All News', onClick: () => setMode('all') }
+                : { label: 'Refresh', onClick: () => refetch() }}
             />
           ) : (
             <div className="divide-y divide-[var(--border-subtle)]">

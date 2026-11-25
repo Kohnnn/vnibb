@@ -11,6 +11,7 @@ import { useUnit } from '@/contexts/UnitContext';
 import { useCashFlow, useCompanyEvents, useCompanyNews, useEarningsQuality, useIncomeStatement } from '@/lib/queries';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { formatDate, formatRelativeTime } from '@/lib/formatDate';
+import { hasNewsAssociationEvidence } from '@/lib/newsAssociation';
 import { formatFinancialPeriodLabel, periodSortKey } from '@/lib/financialPeriods';
 import { convertFinancialValueForUnit, formatNumber, formatPercent } from '@/lib/units';
 import { percentToneClass } from '@/lib/priceColor';
@@ -60,6 +61,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
     const earningsQualityQuery = useEarningsQuality(symbol, Boolean(symbol));
     const newsQuery = useCompanyNews(symbol, { limit: 5, enabled: Boolean(symbol) });
     const eventsQuery = useCompanyEvents(symbol, { limit: 8, enabled: Boolean(symbol) });
+    const relatedNews = useMemo(() => (newsQuery.data?.data || []).filter(item => hasNewsAssociationEvidence(item, false)), [newsQuery.data?.data]);
 
     const orderedIncomeRows = useMemo(
         () => [...(incomeQuery.data?.data || [])].sort((left, right) => periodSortKey(right.period) - periodSortKey(left.period)),
@@ -252,7 +254,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
         latestIncome,
     ]);
 
-    const hasData = Boolean(latestIncome || latestCash || earningsQualityQuery.data?.data || newsQuery.data?.data?.length || eventsQuery.data?.data?.length);
+    const hasData = Boolean(latestIncome || latestCash || earningsQualityQuery.data?.data || relatedNews.length || eventsQuery.data?.data?.length);
     const isLoading = incomeQuery.isLoading && cashFlowQuery.isLoading && newsQuery.isLoading && eventsQuery.isLoading;
     const combinedError = incomeQuery.error || cashFlowQuery.error || newsQuery.error || eventsQuery.error || earningsQualityQuery.error;
     const fetchedAt = Math.max(
@@ -440,7 +442,7 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                     Related news
                                 </div>
                                 <div className="space-y-2">
-                                    {(newsQuery.data?.data || []).slice(0, 5).map((news) => (
+                                    {relatedNews.slice(0, 5).map((news) => (
                                         <a
                                             key={`${news.url || news.title}`}
                                             href={news.url || '#'}
@@ -451,11 +453,15 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                             <div className="font-medium text-[var(--text-primary)]">{news.title}</div>
                                             <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--text-muted)]">
                                                 <span>{news.source || 'News source'}</span>
-                                                <span>{news.published_at ? formatRelativeTime(news.published_at) : '-'}</span>
+                                                <span>{news.published_at ? formatRelativeTime(news.published_at) : 'Date unavailable'}</span>
                                             </div>
                                         </a>
                                     ))}
-                                    {(newsQuery.data?.data || []).length === 0 ? (
+                                    {newsQuery.error ? (
+                                        <div role="alert" className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-4 text-[11px] text-[var(--text-muted)]">
+                                            Company news unavailable. {relatedNews.length > 0 ? 'Showing previously loaded news. ' : null}<button type="button" onClick={() => newsQuery.refetch()}>Retry news</button>
+                                        </div>
+                                    ) : relatedNews.length === 0 ? (
                                         <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-4 text-[11px] text-[var(--text-muted)]">
                                             No linked earnings news yet.
                                         </div>

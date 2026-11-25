@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { useCashFlow, useCompanyEvents, useCompanyNews, useEarningsQuality, useIncomeStatement } from '@/lib/queries';
 import { EarningsReleaseRecapWidget } from './EarningsReleaseRecapWidget';
 
@@ -61,6 +61,48 @@ function show(incomeRows: object[], cashRows: object[] = [], qualityData?: objec
   jest.mocked(useCompanyEvents).mockReturnValue(idle());
   return render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" onDataChange={onDataChange} />);
 }
+
+test('recap rejects unverified cached articles while retaining direct issuer news', () => {
+  const view = show([row('2026-Q1', { revenue: 100, net_income: 20 })]);
+  jest.mocked(useCompanyNews).mockReturnValue({
+    error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000, data: { data: [
+      { title: 'Cholesterol health fixture', association_class: 'none' },
+      { title: 'FPT issuer release fixture', association_class: 'direct_company', published_at: null, match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'FPT' }] } },
+    ] },
+  } as never);
+  view.rerender(<EarningsReleaseRecapWidget id="recap" symbol="FPT" />);
+  expect(screen.queryByText('Cholesterol health fixture')).not.toBeInTheDocument();
+  expect(screen.getByText('FPT issuer release fixture')).toBeVisible();
+  expect(screen.getByText('Date unavailable')).toBeVisible();
+});
+
+test('recap shows news failure alongside available earnings and retries news', () => {
+  const view = show([row('2026-Q1', { revenue: 100, net_income: 20 })]);
+  const refetch = jest.fn();
+  jest.mocked(useCompanyNews).mockReturnValue({
+    data: undefined, error: new Error('Company news unavailable'), isLoading: false, isFetching: false, refetch, dataUpdatedAt: 0,
+  } as never);
+  view.rerender(<EarningsReleaseRecapWidget id="recap" symbol="FPT" />);
+  expect(screen.getByRole('alert')).toHaveTextContent('Company news unavailable');
+  expect(screen.queryByText('No linked earnings news yet.')).not.toBeInTheDocument();
+  expect(screen.getByText('Revenue YoY')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry news' }));
+  expect(refetch).toHaveBeenCalledTimes(1);
+});
+
+test('recap identifies previously loaded news after a failed refresh', () => {
+  const view = show([row('2026-Q1', { revenue: 100, net_income: 20 })]);
+  const refetch = jest.fn();
+  jest.mocked(useCompanyNews).mockReturnValue({
+    data: { data: [{ title: 'FPT retained issuer news', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'FPT' }] } }] },
+    error: new Error('Company news unavailable'), isLoading: false, isFetching: false, refetch, dataUpdatedAt: 1750000000000,
+  } as never);
+  view.rerender(<EarningsReleaseRecapWidget id="recap" symbol="FPT" />);
+  expect(screen.getByText('FPT retained issuer news')).toBeVisible();
+  expect(screen.getByRole('alert')).toHaveTextContent('Company news unavailable. Showing previously loaded news.');
+  fireEvent.click(screen.getByRole('button', { name: 'Retry news' }));
+  expect(refetch).toHaveBeenCalledTimes(1);
+});
 
 /** The value tile beside a label, e.g. "Net Income YoY". */
 function tile(label: string): HTMLElement {

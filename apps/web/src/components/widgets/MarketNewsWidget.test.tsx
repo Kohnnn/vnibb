@@ -27,6 +27,7 @@ const steel = {
   match_reason: 'sector_keyword',
   relevance_score: null,
   matched_symbols: [],
+  match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'steel' }], classification: { sector: 'Steel', sector_source: 'stock.sector' } },
 };
 
 afterEach(() => {
@@ -46,22 +47,45 @@ test('shows industry-only provenance without a company rank on an admitted secto
   expect(row).not.toHaveTextContent(/rank|\bHPG\b/i);
 });
 
-test('keeps market fallback boilerplate readable without ticker-match markup', async () => {
-  globalThis.fetch = jest.fn().mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      mode: 'related', fallback_used: true,
-      articles: [{ ...boilerplate, association_class: 'general_market', is_market_wide_fallback: true, relevance_score: 0 }],
-    }),
+test('rejects old market fallback under Related and offers All News separately', async () => {
+  globalThis.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    const isRelated = new URL(String(input)).searchParams.get('mode') === 'related';
+    return {
+      ok: true,
+      json: async () => isRelated
+        ? { mode: 'related', fallback_used: true, articles: [{ ...boilerplate, association_class: 'general_market' }] }
+        : { mode: 'all', articles: [boilerplate] },
+    } as Response;
   });
   render(<QueryClientProvider client={client}><MarketNewsWidget symbol="HPG" /></QueryClientProvider>);
 
-  const row = await screen.findByRole('link', { name: /Cholesterol cao/ });
-  expect(row).toHaveAttribute('href', boilerplate.url);
-  expect(row).toHaveTextContent(boilerplate.summary);
-  expect(row).toHaveTextContent(/market-wide/i);
-  expect(row.querySelector('mark')).not.toBeInTheDocument();
-  expect(row).not.toHaveTextContent(/rank/i);
+  expect(await screen.findByText(/No related news found for HPG/)).toBeVisible();
+  expect(screen.queryByText(boilerplate.title)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'View All News' }));
+  expect(await screen.findByRole('link', { name: /Cholesterol cao/ })).toBeVisible();
+});
+
+test('keeps direct and sector matches but rejects unverified cached health articles', async () => {
+  const direct = {
+    ...boilerplate, id: 'direct', title: 'HPG issuer update', published_date: null,
+    association_class: 'direct_company', match_reason: 'exact_symbol_title', matched_symbols: ['HPG'],
+    match_evidence: { matched_terms: [{ term: 'HPG', field: 'title', kind: 'symbol' }] },
+  };
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true, json: async () => ({ mode: 'related', articles: [direct, steel,
+      { ...boilerplate, association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'related_symbols', kind: 'symbol', term: 'HPG' }] } },
+      { ...boilerplate, id: 'blank', title: 'Blank evidence', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: ' ' }] } },
+      { ...steel, id: 'no-basis', title: 'Sector without classification', match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'steel' }] } },
+    ] }),
+  });
+  render(<QueryClientProvider client={client}><MarketNewsWidget symbol="HPG" /></QueryClientProvider>);
+
+  const row = await screen.findByRole('link', { name: /HPG issuer update/ });
+  expect(row).toHaveTextContent('Date unavailable');
+  expect(screen.getByText('Steel production fixture')).toBeVisible();
+  expect(screen.queryByText(boilerplate.title)).not.toBeInTheDocument();
+  expect(screen.queryByText('Blank evidence')).not.toBeInTheDocument();
+  expect(screen.queryByText('Sector without classification')).not.toBeInTheDocument();
 });
 
 test('shows both articles as plain text when switching from related to All News', async () => {

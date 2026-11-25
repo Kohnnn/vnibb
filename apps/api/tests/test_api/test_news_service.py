@@ -436,6 +436,117 @@ async def test_related_feed_retains_verified_sector_but_drops_unrelated(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_related_feed_empty_does_not_substitute_unrelated_market_news(monkeypatch):
+    # The title and URL were reported in #250; body and context are synthetic.
+    health = {
+        "id": "reported-health",
+        "title": "Cholesterol cao lâu ngày gây hại cơ thể thế nào",
+        "summary": "Synthetic health-only test summary.",
+        "source": "vnexpress",
+        "published_date": None,
+        "url": "https://vnexpress.net/cholesterol-cao-lau-ngay-gay-hai-co-the-the-nao-5122739.html",
+        "related_symbols": [],
+    }
+    context = {
+        "symbol": "HPG",
+        "peer_symbols": [],
+        "company_keywords": ["hoa phat"],
+        "sector_keywords": ["thép"],
+        "classification_provenance": {"sector": "Thép", "sector_source": "stock.sector"},
+    }
+    monkeypatch.setattr(
+        "vnibb.services.news_service.news_crawler.get_latest_news", AsyncMock(return_value=[health])
+    )
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", AsyncMock(return_value=context))
+    monkeypatch.setattr("vnibb.services.news_service._enrich_sentiment_rows", _identity_rows)
+
+    from vnibb.services.news_service import get_ranked_news_rows
+
+    assert _score_news_row(health, context)["association_class"] == "none"
+    related, fallback = await get_ranked_news_rows(symbol="HPG", mode="related")
+    assert related == []
+    assert fallback is False
+    general, _ = await get_ranked_news_rows(mode="all")
+    assert general == [health]
+
+
+@pytest.mark.asyncio
+async def test_related_query_failure_reports_unavailable_without_provider(monkeypatch):
+    from vnibb.services.news_service import get_ranked_news_rows
+
+    monkeypatch.setattr(
+        "vnibb.services.news_service.news_crawler.get_latest_news", AsyncMock(side_effect=RuntimeError("unavailable"))
+    )
+    provider = AsyncMock()
+    monkeypatch.setattr("vnibb.services.news_service._hydrate_company_news_fallback", provider)
+
+    with pytest.raises(RuntimeError, match="Related news retrieval unavailable"):
+        await get_ranked_news_rows(symbol="HPG", mode="related", source="cafef", sentiment="neutral", offset=5)
+    provider.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_related_pages_rank_after_filter_and_keep_source_and_sentiment(monkeypatch):
+    from vnibb.services.news_service import get_ranked_news_rows
+
+    rows = [
+        {"id": str(index), "title": f"HPG update {index}", "published_date": f"2026-11-{index:02d}"}
+        for index in range(1, 5)
+    ]
+    latest = AsyncMock(return_value=rows)
+    monkeypatch.setattr("vnibb.services.news_service.news_crawler.get_latest_news", latest)
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", AsyncMock(return_value={"symbol": "HPG"}))
+    monkeypatch.setattr("vnibb.services.news_service._enrich_sentiment_rows", _identity_rows)
+
+    first, _ = await get_ranked_news_rows(symbol="HPG", mode="related", source="cafef", sentiment="neutral", limit=2)
+    second, _ = await get_ranked_news_rows(symbol="HPG", mode="related", source="cafef", sentiment="neutral", limit=2, offset=2)
+    assert [row["id"] for row in first] == ["4", "3"]
+    assert [row["id"] for row in second] == ["2", "1"]
+    assert all(call.kwargs["source"] == "cafef" and call.kwargs["sentiment"] == "neutral" for call in latest.await_args_list)
+
+
+def test_source_tags_alone_cannot_prove_company_or_peer_association():
+    context = {"symbol": "HPG", "peer_symbols": ["HSG"], "company_keywords": [], "sector_keywords": []}
+    row = _score_news_row({"title": "Cholesterol health advice", "related_symbols": ["HPG", "HSG"]}, context)
+    assert row["association_class"] == "none"
+    assert row["matched_symbols"] == []
+    peer = _score_news_row({"title": "HSG publishes results", "related_symbols": []}, context)
+    assert peer["association_class"] == "verified_peer"
+
+@pytest.mark.asyncio
+async def test_issuer_control_and_undated_article_survive_company_admission(monkeypatch):
+    # Independently published headline, not established as a previously served row.
+    items = [
+        SimpleNamespace(
+            title="Hoa Phat's nine-month after-tax profit reaches VND 23,746 billion, beating annual target by 8%",
+            summary=None,
+            source="Hoa Phat",
+            published_at=datetime(2026, 10, 29, tzinfo=UTC),
+            url="https://www.hoaphat.com.vn/news/hoa-phat-s-nine-month-after-tax-profit-reaches-vnd-23-746-billion-beating-annual-target-by-8.html",
+        ),
+        SimpleNamespace(
+            title="HPG issuer update (synthetic undated control)",
+            summary=None,
+            source="Fixture",
+            published_at=None,
+            url="https://fixture.invalid/hpg-undated",
+        ),
+    ]
+    context = {"symbol": "HPG", "company_keywords": ["hoa phat"], "sector_keywords": [], "peer_symbols": []}
+    monkeypatch.setattr("vnibb.services.news_service.VnstockCompanyNewsFetcher.fetch", AsyncMock(return_value=items))
+    monkeypatch.setattr("vnibb.services.news_service._load_symbol_context", AsyncMock(return_value=context))
+    monkeypatch.setattr("vnibb.services.news_service.get_ranked_news_rows", AsyncMock(return_value=([], False)))
+    monkeypatch.setattr("vnibb.services.news_service._enrich_sentiment_rows", _identity_rows)
+
+    rows = await get_company_news_rows("HPG")
+    assert len(rows) == 2
+    by_url = {row["url"]: row for row in rows}
+    assert by_url[items[0].url]["association_class"] == "direct_company"
+    assert by_url[items[0].url]["match_reason"] == "company_keyword"
+    assert by_url[items[1].url]["published_date"] is None
+    assert by_url[items[1].url]["association_class"] == "direct_company"
+
+@pytest.mark.asyncio
 async def test_provider_fallback_rows_are_rescored_not_promoted(monkeypatch):
     """#250 review: the request symbol is metadata, not article evidence."""
 
@@ -476,12 +587,7 @@ async def test_provider_fallback_rows_are_rescored_not_promoted(monkeypatch):
 
     rows = await get_company_news_rows("HPG", limit=5)
 
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["association_class"] == "none"
-    assert row["relevance_score"] == 0.0
-    assert row["matched_symbols"] == []
-    assert row["match_evidence"]["provider_validated_text"] is False
+    assert rows == []
 
 
 @pytest.mark.asyncio
@@ -785,12 +891,12 @@ async def test_get_news_flow_uses_primary_crawler_rows(monkeypatch):
     assert response.has_more is False
     assert response.items[0].id == "row-1"
     assert response.items[0].symbols == ["VNM", "FPT"]
-    assert response.items[0].relevance_score == 0.97
-    assert response.items[0].matched_symbols == ["VNM", "FPT"]
+    assert response.items[0].relevance_score == 0.84
+    assert response.items[0].matched_symbols == ["VNM"]
 
 
 @pytest.mark.asyncio
-async def test_get_news_flow_returns_empty_when_primary_and_fallback_fail(monkeypatch):
+async def test_get_news_flow_reports_primary_failure(monkeypatch):
     async def fake_latest_news(*, source=None, symbol, sentiment, limit, offset):
         raise RuntimeError("crawler unavailable")
 
@@ -806,15 +912,12 @@ async def test_get_news_flow_returns_empty_when_primary_and_fallback_fail(monkey
         fake_company_news,
     )
 
-    response = await get_news_flow(symbols=["VNM"], limit=3)
-
-    assert response.total == 0
-    assert response.items == []
-    assert response.has_more is False
+    with pytest.raises(RuntimeError, match="Related news retrieval unavailable"):
+        await get_news_flow(symbols=["VNM"], limit=3)
 
 
 @pytest.mark.asyncio
-async def test_get_news_flow_hydrates_from_company_news_when_primary_empty(monkeypatch):
+async def test_get_news_flow_does_not_fetch_provider_when_primary_empty(monkeypatch):
     async def fake_latest_news(*, source=None, symbol, sentiment, limit, offset):
         return []
 
@@ -826,16 +929,7 @@ async def test_get_news_flow_hydrates_from_company_news_when_primary_empty(monke
             "company_keywords": ["fpt"],
         }
 
-    async def fake_company_news(_query):
-        return [
-            SimpleNamespace(
-                title="FPT signs major AI partnership",
-                summary="Enterprise expansion",
-                source=None,
-                published_at=datetime(2026, 2, 14, 10, 0),
-                url="https://example.com/fpt-news",
-            )
-        ]
+    fake_company_news = AsyncMock()
 
     monkeypatch.setattr(
         "vnibb.services.news_service.news_crawler.get_latest_news",
@@ -849,10 +943,9 @@ async def test_get_news_flow_hydrates_from_company_news_when_primary_empty(monke
 
     response = await get_news_flow(symbols=["fpt"], limit=2)
 
-    assert response.total == 1
-    assert response.items[0].title == "FPT signs major AI partnership"
-    assert response.items[0].source == "vnstock"
-    assert response.items[0].symbols == ["FPT"]
+    assert response.total == 0
+    assert response.items == []
+    fake_company_news.assert_not_awaited()
     assert response.has_more is False
 
 
@@ -862,7 +955,7 @@ async def test_get_news_flow_marks_has_more_when_total_matches_limit(monkeypatch
         return [
             {
                 "id": f"id-{index}",
-                "title": f"Story {index}",
+                "title": f"VCB Story {index}",
                 "source": "vnexpress",
                 "published_date": "2026-02-14T09:00:00",
                 "url": f"https://example.com/news-{index}",
@@ -893,7 +986,7 @@ async def test_get_news_flow_marks_has_more_when_total_matches_limit(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_get_news_flow_uses_market_wide_fallback_when_no_relevant_rows(monkeypatch):
+async def test_get_news_flow_returns_empty_when_no_relevant_rows(monkeypatch):
     async def fake_latest_news(*, source=None, symbol, sentiment, limit, offset):
         return [
             {
@@ -924,10 +1017,9 @@ async def test_get_news_flow_uses_market_wide_fallback_when_no_relevant_rows(mon
 
     response = await get_news_flow(symbols=["VNM"], limit=3)
 
-    assert response.total == 1
-    assert response.fallback_used is True
-    assert response.items[0].is_market_wide_fallback is True
-    assert response.items[0].relevance_score == 0.0
+    assert response.total == 0
+    assert response.fallback_used is False
+    assert response.items == []
 
 
 @pytest.mark.asyncio
