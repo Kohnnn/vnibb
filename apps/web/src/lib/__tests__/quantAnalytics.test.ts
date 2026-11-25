@@ -123,7 +123,18 @@ describe('ownership analytics', () => {
       { symbol: 'FPT', shareholder_name: 'Fund A', shareholder_type: 'Institutional fund', ownership_pct: 30, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
       { symbol: 'FPT', shareholder_name: 'Foreign B', shareholder_type: 'Foreign investor', ownership_pct: 20, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
       { symbol: 'FPT', shareholder_name: 'Exec C', shareholder_type: 'Management insider', ownership_pct: 10, ownership_unit: 'percent', ownership_unit_status: 'explicit' },
-    ], flowWindow(1000, 250), insider(20 * 750, 'VND'))
+    ], flowWindow(1000, 250), insider(20 * 750, 'VND'), {
+      count: 20,
+      window_contract: 'sessions-v2',
+      calendar_verified: true,
+      requested_session_count: 20,
+      requested_start_date: '2026-05-04',
+      requested_end_date: '2026-05-29',
+      observed_session_count: 20,
+      gap_session_count: 0,
+      last_validated_session: '2026-05-29',
+      coverage_status: 'complete',
+    })
     expect(summary.top3Pct).toBe(60)
     expect(summary.foreignNetVolume).toBe(20 * 750)
     expect(summary.insiderNetValue).toBe(20 * 750)
