@@ -119,9 +119,11 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
   });
 
   const isRelated = filters.symbols.length > 0;
-  const allNews = useMemo(() => data?.pages.flatMap(page => page.items.filter(item => (
-    !isRelated || (page.fallback_used !== true && hasTickerEvidence(item))
-  ))) ?? [], [data?.pages, isRelated]);
+  const allNews = useMemo(() => data?.pages.flatMap(page => page.items.flatMap(item => {
+    const fallback = page.fallback_used === true || isMarketWide(item);
+    if (isRelated) return !fallback && hasTickerEvidence(item) ? [item] : [];
+    return [fallback ? { ...item, symbols: [], is_market_wide_fallback: true, association_class: 'general_market', matched_symbols: [], relevance_score: null, match_reason: null, match_evidence: undefined } : item];
+  })) ?? [], [data?.pages, isRelated]);
   const hasData = allNews.length > 0;
   const isFallback = Boolean(error && hasData);
   let feedNote = 'Market feed';

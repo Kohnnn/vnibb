@@ -91,7 +91,11 @@ export function useCompanyNews(
 ) {
     return useQuery({
         queryKey: queryKeys.companyNews(symbol, options?.limit),
-        queryFn: () => api.getCompanyNews(symbol, { limit: options?.limit }),
+        queryFn: async () => {
+            const response = await api.getCompanyNews(symbol, { limit: options?.limit });
+            if (response.error != null) throw new Error('Company news unavailable');
+            return response;
+        },
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
     });

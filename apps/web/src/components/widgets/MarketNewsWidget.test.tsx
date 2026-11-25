@@ -27,7 +27,7 @@ const steel = {
   match_reason: 'sector_keyword',
   relevance_score: null,
   matched_symbols: [],
-  match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'steel' }] },
+  match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'steel' }], classification: { sector: 'Steel', sector_source: 'stock.sector' } },
 };
 
 afterEach(() => {
@@ -72,7 +72,11 @@ test('keeps direct and sector matches but rejects unverified cached health artic
     match_evidence: { matched_terms: [{ term: 'HPG', field: 'title', kind: 'symbol' }] },
   };
   globalThis.fetch = jest.fn().mockResolvedValue({
-    ok: true, json: async () => ({ mode: 'related', articles: [direct, steel, { ...boilerplate, association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'related_symbols', kind: 'symbol' }] } }] }),
+    ok: true, json: async () => ({ mode: 'related', articles: [direct, steel,
+      { ...boilerplate, association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'related_symbols', kind: 'symbol', term: 'HPG' }] } },
+      { ...boilerplate, id: 'blank', title: 'Blank evidence', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: ' ' }] } },
+      { ...steel, id: 'no-basis', title: 'Sector without classification', match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'steel' }] } },
+    ] }),
   });
   render(<QueryClientProvider client={client}><MarketNewsWidget symbol="HPG" /></QueryClientProvider>);
 
@@ -80,6 +84,8 @@ test('keeps direct and sector matches but rejects unverified cached health artic
   expect(row).toHaveTextContent('Date unavailable');
   expect(screen.getByText('Steel production fixture')).toBeVisible();
   expect(screen.queryByText(boilerplate.title)).not.toBeInTheDocument();
+  expect(screen.queryByText('Blank evidence')).not.toBeInTheDocument();
+  expect(screen.queryByText('Sector without classification')).not.toBeInTheDocument();
 });
 
 test('shows both articles as plain text when switching from related to All News', async () => {

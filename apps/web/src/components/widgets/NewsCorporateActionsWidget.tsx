@@ -248,6 +248,12 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                 </div>
                 <span className="text-[10px] text-[var(--text-muted)]">{recentNewsCount}/{news.length} in 7d</span>
               </div>
+              {newsError && hasNews && (
+                <div role="alert" className="text-xs text-[var(--text-muted)]">
+                  Company news unavailable. Showing previously loaded news.{' '}
+                  <button type="button" onClick={() => refetchNews()}>Retry news</button>
+                </div>
+              )}
 
               {newsLoading && !hasNews ? (
                 <WidgetSkeleton lines={4} />

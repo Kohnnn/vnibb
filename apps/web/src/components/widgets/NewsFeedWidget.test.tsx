@@ -19,7 +19,7 @@ test('preserves HTTP 429 as a rate limit and recovers the surviving feed through
         url: 'https://fpt.com/en/ir', published_at: '2026-10-20T06:00:00Z',
         related_symbols: ['FPT'], sectors: [], sentiment: 'neutral', read_count: 0, bookmarked: false,
         association_class: 'direct_company', match_reason: 'exact_symbol_title', matched_symbols: ['FPT'],
-        match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] },
+        match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'FPT' }] },
     };
     const fetchMock = jest.fn(async (input: RequestInfo | URL) => {
         const url = new URL(String(input));
@@ -59,8 +59,8 @@ test('distinguishes exact symbol evidence, uncertain sector scores, zero fallbac
     const originalFetch = globalThis.fetch;
     const base = { source: 'Stored source', published_date: '2026-09-21T14:17:14', related_symbols: ['CEO'], sectors: [], read_count: 0, bookmarked: false };
     const articles = [
-        { ...base, id: 130723, title: 'Giá thép xây dựng tăng trong quý này', relevance_score: null, matched_symbols: [], match_reason: 'sector_keyword', association_class: 'verified_sector', match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword' }] } },
-        { ...base, id: 'exact', title: 'MSR issuer notice', relevance_score: 1, matched_symbols: ['MSR'], match_reason: 'exact_symbol_title', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
+        { ...base, id: 130723, title: 'Giá thép xây dựng tăng trong quý này', relevance_score: null, matched_symbols: [], match_reason: 'sector_keyword', association_class: 'verified_sector', match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'thép' }], classification: { sector: 'Thép', sector_source: 'stock.sector' } } },
+        { ...base, id: 'exact', title: 'MSR issuer notice', relevance_score: 1, matched_symbols: ['MSR'], match_reason: 'exact_symbol_title', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'MSR' }] } },
         { ...base, id: 'zero', title: 'General market fallback', relevance_score: 0, matched_symbols: [], match_reason: null, is_market_wide_fallback: true, association_class: 'general_market' },
         { ...base, id: 'missing', title: 'No association metadata' },
     ];
@@ -87,9 +87,9 @@ test('distinguishes exact symbol evidence, uncertain sector scores, zero fallbac
 
 describe('Company News association', () => {
     const base = { source: 'QA fixture only', published_date: '2026-11-16T04:15:00Z', related_symbols: [], sectors: [] };
-    const direct = { ...base, id: 'direct', title: 'HPG publishes a fixture update', association_class: 'direct_company', match_reason: 'exact_symbol_title', matched_symbols: ['HPG'], match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } };
-    const peer = { ...base, id: 'peer', title: 'QAP publishes a fixture update', association_class: 'verified_peer', match_reason: 'peer_mentions', matched_symbols: ['QAP'], relevance_score: 0.68, match_evidence: { matched_terms: [{ field: 'title', kind: 'peer_symbol' }] } };
-    const sector = { ...base, id: 'sector', title: 'Steel production fixture', association_class: 'verified_sector', match_reason: 'sector_keyword', relevance_score: null, match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword' }] } };
+    const direct = { ...base, id: 'direct', title: 'HPG publishes a fixture update', association_class: 'direct_company', match_reason: 'exact_symbol_title', matched_symbols: ['HPG'], match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] } };
+    const peer = { ...base, id: 'peer', title: 'QAP publishes a fixture update', association_class: 'verified_peer', match_reason: 'peer_mentions', matched_symbols: ['QAP'], relevance_score: 0.68, match_evidence: { matched_terms: [{ field: 'title', kind: 'peer_symbol', term: 'QAP' }], classification: { sector: 'Steel', sector_source: 'stock.sector', peer_basis: 'sector' } } };
+    const sector = { ...base, id: 'sector', title: 'Steel production fixture', association_class: 'verified_sector', match_reason: 'sector_keyword', relevance_score: null, match_evidence: { matched_terms: [{ field: 'title', kind: 'sector_keyword', term: 'steel' }], classification: { sector: 'Steel', sector_source: 'stock.sector' } } };
     const market = { ...base, id: 'market', title: 'Russian tourist deportation', association_class: 'general_market', is_market_wide_fallback: true };
     const unverified = { ...base, id: 'unknown', title: 'Unverified fixture', association_class: 'none' };
     const originalFetch = globalThis.fetch;
@@ -134,6 +134,18 @@ describe('Company News association', () => {
         expect(screen.getByText('Showing 3 of 3 articles')).toBeVisible();
         expect(screen.queryByText(market.title)).not.toBeInTheDocument();
         expect(screen.queryByText(unverified.title)).not.toBeInTheDocument();
+    });
+
+    test('rejects direct and peer rows with incomplete cached evidence', async () => {
+        show([direct,
+            { ...direct, id: 'no-term', title: 'Missing matched term', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
+            { ...peer, id: 'no-class', title: 'Peer without classification', match_evidence: { matched_terms: [{ field: 'title', kind: 'peer_symbol', term: 'QAP' }] } },
+            { ...peer, id: 'no-peer-basis', title: 'Peer without peer basis', match_evidence: { ...peer.match_evidence, classification: { sector: 'Steel', sector_source: 'stock.sector' } } },
+        ]);
+        expect(await screen.findByText(direct.title)).toBeVisible();
+        expect(screen.queryByText('Missing matched term')).not.toBeInTheDocument();
+        expect(screen.queryByText('Peer without classification')).not.toBeInTheDocument();
+        expect(screen.queryByText('Peer without peer basis')).not.toBeInTheDocument();
     });
 
     test('does not substitute ingest time for an undated admitted article', async () => {

@@ -107,6 +107,7 @@ export interface CompanyNewsResponse {
   symbol: string;
   count: number;
   data: CompanyNewsData[];
+  error?: string | null;
 }
 
 export interface CompanyEventData {

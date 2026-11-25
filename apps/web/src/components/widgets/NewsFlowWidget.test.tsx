@@ -27,7 +27,7 @@ const direct = {
   matched_symbols: ['HPG'],
   association_class: 'direct_company',
   match_reason: 'exact_symbol_title',
-  match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] },
+  match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] },
   relevance_score: 1,
 };
 
@@ -77,4 +77,18 @@ test('keeps later pages reachable when every first-page item is rejected', async
   fireEvent.click(screen.getByRole('button', { name: /load more articles/i }));
   expect(await screen.findByRole('link', { name: /HPG publishes a fixture update/ })).toBeVisible();
   expect(screen.queryByText(market.title)).not.toBeInTheDocument();
+});
+
+test.each(['page', 'row', 'class'] as const)('normalizes conflicting %s fallback markers in market flow', async marker => {
+  const conflicting = { ...direct, title: 'Unrelated market fixture', symbols: ['HPG'], is_market_wide_fallback: marker === 'row', association_class: marker === 'class' ? 'general_market' : 'direct_company' };
+  globalThis.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    const { pathname, searchParams } = new URL(String(input));
+    expect(pathname).toBe('/api/v1/news/flow');
+    expect(searchParams.has('symbols')).toBe(false);
+    return { ok: true, json: async () => ({ mode: 'all', fallback_used: marker === 'page', items: [conflicting] }) } as Response;
+  });
+  render(<QueryClientProvider client={client}><NewsFlowWidget id="market-flow" /></QueryClientProvider>);
+  const article = await screen.findByRole('link', { name: /Unrelated market fixture/ });
+  expect(article).toHaveTextContent('Market-wide fallback');
+  expect(article).not.toHaveTextContent(/rank|exact symbol|HPG/i);
 });

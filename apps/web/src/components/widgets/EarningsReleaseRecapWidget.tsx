@@ -457,7 +457,11 @@ function EarningsReleaseRecapWidgetComponent({ id, symbol, hideHeader, onRemove,
                                             </div>
                                         </a>
                                     ))}
-                                    {relatedNews.length === 0 ? (
+                                    {newsQuery.error ? (
+                                        <div role="alert" className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-4 text-[11px] text-[var(--text-muted)]">
+                                            Company news unavailable. {relatedNews.length > 0 ? 'Showing previously loaded news. ' : null}<button type="button" onClick={() => newsQuery.refetch()}>Retry news</button>
+                                        </div>
+                                    ) : relatedNews.length === 0 ? (
                                         <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-4 text-[11px] text-[var(--text-muted)]">
                                             No linked earnings news yet.
                                         </div>

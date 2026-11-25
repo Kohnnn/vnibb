@@ -76,6 +76,42 @@ test.each([
   expect(screen.queryByText('VND0/share')).not.toBeInTheDocument()
 })
 
+test('reports company news failure while retaining available corporate actions', () => {
+  const refetchNews = jest.fn()
+  mockUseCompanyNews.mockReturnValue(queryResult<CompanyNewsResponse>(
+    { symbol: 'HPG', count: 0, data: [] },
+    { error: new Error('Company news unavailable'), refetch: refetchNews },
+  ))
+  mockUseInsiderDeals.mockReturnValue(queryResult([]))
+  mockUseDividends.mockReturnValue(queryResult(qualifiedDividendHistory([
+    { ...cashTerms, cash_dividend: 1000, dividend_type: 'cash' },
+  ])))
+
+  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
+
+  expect(screen.getByText('Company news unavailable')).toBeVisible()
+  expect(screen.queryByText('No news available yet.')).not.toBeInTheDocument()
+  expect(screen.getByText('VND1,000/share')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Try Again' }))
+  expect(refetchNews).toHaveBeenCalledTimes(1)
+})
+
+test('marks retained issuer news stale when its refresh fails', () => {
+  const refetchNews = jest.fn()
+  mockUseCompanyNews.mockReturnValue(queryResult<CompanyNewsResponse>({
+    symbol: 'HPG', count: 1, data: [{ symbol: 'HPG', title: 'HPG retained issuer news', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] } }],
+  }, { error: new Error('Company news unavailable'), refetch: refetchNews }))
+  mockUseInsiderDeals.mockReturnValue(queryResult([]))
+  mockUseDividends.mockReturnValue(queryResult(qualifiedDividendHistory([])))
+
+  render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
+
+  expect(screen.getByText('HPG retained issuer news')).toBeVisible()
+  expect(screen.getByRole('alert')).toHaveTextContent('Company news unavailable. Showing previously loaded news.')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry news' }))
+  expect(refetchNews).toHaveBeenCalledTimes(1)
+})
+
 test('excludes cached sector-only company rows but keeps direct-company rank', () => {
   mockUseCompanyNews.mockReturnValue(queryResult<CompanyNewsResponse>({
     symbol: 'HPG',
@@ -95,7 +131,7 @@ test('excludes cached sector-only company rows but keeps direct-company rank', (
         source: 'cafef',
         match_reason: 'exact_symbol_title',
         association_class: 'direct_company',
-        match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] },
+        match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] },
         relevance_score: 1,
       },
     ],
@@ -115,9 +151,9 @@ test('states where a news sentiment label came from instead of implying impact',
     symbol: 'HPG',
     count: 3,
     data: [
-      { symbol: 'HPG', title: 'HPG local estimate', source: 'cafef', sentiment: 'bullish', sentiment_score: 0, sentiment_source: 'heuristic', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
-      { symbol: 'HPG', title: 'HPG provider class', source: 'issuer', sentiment: 'positive', sentiment_source: 'provider', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
-      { symbol: 'HPG', title: 'HPG no label', source: 'cafef', sentiment_source: 'unavailable', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
+      { symbol: 'HPG', title: 'HPG local estimate', source: 'cafef', sentiment: 'bullish', sentiment_score: 0, sentiment_source: 'heuristic', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] } },
+      { symbol: 'HPG', title: 'HPG provider class', source: 'issuer', sentiment: 'positive', sentiment_source: 'provider', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] } },
+      { symbol: 'HPG', title: 'HPG no label', source: 'cafef', sentiment_source: 'unavailable', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol', term: 'HPG' }] } },
     ],
   }))
   mockUseInsiderDeals.mockReturnValue(queryResult([]))
