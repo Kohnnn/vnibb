@@ -8,7 +8,6 @@ be summed as a session.
 from datetime import date, datetime, timedelta
 
 import pytest
-
 from vnibb.api.v1 import equity as equity_module
 from vnibb.core.config import settings
 from vnibb.models.trading import ForeignTrading
