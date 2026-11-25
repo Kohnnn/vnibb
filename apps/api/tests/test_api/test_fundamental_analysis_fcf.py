@@ -1,6 +1,5 @@
 """Exercise retained-snapshot FCF through the actual analysis HTTP response."""
 
-import asyncio
 import json
 from datetime import date, datetime
 from unittest.mock import AsyncMock
@@ -83,7 +82,6 @@ def analysis_route(monkeypatch):
     monkeypatch.setattr(settings, "mongodb_enabled", True)
     monkeypatch.setattr(settings, "mongodb_url", "mongodb://127.0.0.1:1/vnibb-market")
     monkeypatch.setattr(equity, "get_mongo_market_data_service", lambda: service)
-    monkeypatch.setattr(equity, "FUNDAMENTAL_SECTION_TIMEOUT_SECONDS", 0.10)
     for section in (
         "get_profile", "get_financial_ratios", "get_shareholders", "get_officers",
         "get_subsidiaries", "get_company_news", "get_company_events",
@@ -92,7 +90,7 @@ def analysis_route(monkeypatch):
 
     async def financials(**kwargs):
         if kwargs["statement_type"] == "cashflow":
-            await asyncio.Event().wait()
+            raise TimeoutError("fixture cash-flow dependency timed out")
         return StandardResponse(data=[{"period": "2025", "source": "request-2025-fixture"}])
 
     monkeypatch.setattr(equity, "get_financials", financials)
@@ -114,7 +112,7 @@ async def _get_analysis(analysis_route, doc):
     body = response.json()
     assert body["error"] == "Partial data unavailable"
     data = body["data"]
-    assert data["section_errors"]["financials.cashflow"] == "Section deadline exceeded"
+    assert data["section_errors"]["financials.cashflow"] == "Dependency timed out"
     assert data["financials"]["cashflow"] == []
     assert data["latest_fundamental_snapshot"]["financials"]["cashflow"] is None
     return data
@@ -371,7 +369,8 @@ async def test_agent_prompt_keeps_retained_evidence_under_context_limit(analysis
             "status": "admitted", "fiscalYear": LATEST_YEAR, "unit": "VND", "value": 0,
         }
         doc["inputs"]["unitLineage"]["statements"][0]["source"]["sourceDate"] = "2025-03-20"
-    quality = (await _get_analysis(analysis_route, doc))["competitive_advantage"]
+    analysis = await _get_analysis(analysis_route, doc)
+    quality = analysis["competitive_advantage"]
     fcf = quality["fcf"]
     assert fcf["status"] == evidence
     assert fcf["amount"] == (0 if evidence == "zero" else None)
@@ -388,7 +387,7 @@ async def test_agent_prompt_keeps_retained_evidence_under_context_limit(analysis
             "moat_factor_years": "FY2020, FY2021, FY2022, FY2023, FY2024",
             "revenue_cagr_window": "FY2019–FY2024", "profit_cagr_window": "FY2019–FY2024",
         },
-        "cashflow_section_error": "Section deadline exceeded",
+        "cashflow_section_error": analysis["section_errors"]["financials.cashflow"],
     }
     rich_browser_snapshot = {
         section: {f"field_{i}": "x" * 500 for i in range(20)} for section in ("profile", "ratios")
