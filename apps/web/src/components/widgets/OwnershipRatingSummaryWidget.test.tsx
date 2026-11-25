@@ -34,6 +34,24 @@ for (const day = new Date(Date.UTC(2026, 4, 29)); sessionDates.length < 20; day.
   if (weekday !== 0 && weekday !== 6) sessionDates.push(day.toISOString().slice(0, 10));
 }
 const foreignRows = sessionDates.map((date) => ({ symbol: 'FPT', date, buy_volume: 0, sell_volume: 0 }));
+function completeForeignMeta(rows = foreignRows) {
+  return {
+    count: rows.length,
+    window_contract: 'sessions-v2' as const,
+    calendar_verified: true,
+    requested_session_count: 20,
+    requested_start_date: rows[rows.length - 1].date,
+    requested_end_date: rows[0].date,
+    observed_session_count: rows.length,
+    observed_start_date: rows[rows.length - 1].date,
+    observed_end_date: rows[0].date,
+    last_validated_session: rows[0].date,
+    gap_session_count: 0,
+    null_session_count: 0,
+    window_net_volume: 0,
+    coverage_status: 'complete' as const,
+  };
+}
 const insiderWindow = {
   symbol: 'FPT', period_days: 90, buy_count: 0, sell_count: 0,
   buy_value: 0, sell_value: 0, net_value: 0, sentiment_score: 0, total_deals: 0, value_unit: 'VND',
@@ -41,7 +59,7 @@ const insiderWindow = {
 
 function setInputs(holders: boolean, flows: boolean, sentiment: boolean) {
   shareholders.mockReturnValue(holders ? readyQuery({ data: holderRows }) : failedQuery());
-  foreign.mockReturnValue(flows ? readyQuery({ data: foreignRows }) : failedQuery());
+  foreign.mockReturnValue(flows ? readyQuery({ data: foreignRows, meta: completeForeignMeta() }) : failedQuery());
   insider.mockReturnValue(sentiment ? readyQuery(insiderWindow) : failedQuery());
 }
 
@@ -127,11 +145,103 @@ describe('OwnershipRatingSummaryWidget admission', () => {
     expect(screen.queryByText('Ownership feed unavailable')).not.toBeInTheDocument();
   });
 
+  test('keeps legacy foreign rows as retained history without certifying a 20D total', () => {
+    setInputs(true, true, true);
+    foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: { count: 20, last_data_date: '2026-05-29' } }));
+    const onDataChange = jest.fn();
+    render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+
+    expect(screen.getByText('Foreign Net (partial)').nextElementSibling).toHaveTextContent('n/a');
+    expect(screen.queryByText('Foreign Net 20D')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('retained history (2026-05-04 to 2026-05-29)');
+    expect(screen.getByRole('status')).toHaveTextContent('coverage unverified; 20D total withheld');
+    const payload = onDataChange.mock.calls.at(-1)?.[0];
+    expect(payload.foreignNetVolume).toBeNull();
+    expectWithheld(payload);
+    expect(getWidgetExportData(payload)).toEqual(expect.objectContaining({ foreignNetVolume: null, foreignFlowCoverage: expect.objectContaining({ windowVerified: false, observedSessions: null }) }));
+  });
+
+  test('discloses an answered zero-row window alongside other available ownership data', () => {
+    setInputs(true, true, true);
+    foreign.mockReturnValue(readyQuery({
+      data: [],
+      meta: { ...completeForeignMeta(), count: 0, observed_session_count: 0, observed_start_date: null, observed_end_date: null, last_validated_session: null, gap_session_count: 20, null_session_count: 0, coverage_status: 'unavailable', window_net_volume: null },
+    }));
+    const onDataChange = jest.fn();
+    render(<OwnershipRatingSummaryWidget id="ownership-empty-window" symbol="FPT" onDataChange={onDataChange} />);
+    expect(screen.getByRole('status')).toHaveTextContent('0/20 qualifying sessions');
+    expect(screen.getByRole('status')).toHaveTextContent('requested 2026-05-04 to 2026-05-29');
+    expect(screen.getByRole('status')).toHaveTextContent('returned none to none; 20 missing, 0 null; 20D total withheld');
+    const payload = onDataChange.mock.calls.at(-1)?.[0];
+    expect(payload.foreignNetVolume).toBeNull();
+    expect(payload.foreignFlowCoverage).toMatchObject({ windowVerified: true, observedSessions: 0, gapSessions: 20, nullSessions: 0, status: 'unavailable' });
+    expectWithheld(payload);
+  });
+
+  test('discloses an answered empty window even when companion feeds fail', () => {
+    shareholders.mockReturnValue(failedQuery());
+    insider.mockReturnValue(failedQuery());
+    foreign.mockReturnValue(readyQuery({ data: [], meta: { ...completeForeignMeta(), count: 0, observed_session_count: 0, gap_session_count: 20, coverage_status: 'unavailable' } }));
+    render(<OwnershipRatingSummaryWidget id="ownership-empty-errors" symbol="FPT" />);
+    expect(screen.getByRole('status')).toHaveTextContent('0/20 qualifying sessions');
+    expect(screen.getByRole('status')).toHaveTextContent('20 missing, 0 null; 20D total withheld');
+    expect(screen.getByText('Ownership feed unavailable')).toBeInTheDocument();
+  });
+
+  test('coverage-only envelope warning does not claim refresh failed or cached', () => {
+    setInputs(true, true, true);
+    const rows = foreignRows.map((row, index) => index === 0 ? { ...row, buy_volume: null } : row);
+    const warning = '1 session row(s) have missing buy/sell volumes';
+    foreign.mockReturnValue(readyQuery({ data: rows, error: warning, meta: { ...completeForeignMeta(), count: 20, observed_session_count: 19, null_session_count: 1, coverage_status: 'partial', window_net_volume: null, warnings: [warning] } }));
+    const onDataChange = jest.fn();
+    render(<OwnershipRatingSummaryWidget id="ownership-coverage-warning" symbol="FPT" onDataChange={onDataChange} />);
+    expect(screen.getByRole('status')).toHaveTextContent(warning);
+    expect(screen.queryByText('Refresh failed')).not.toBeInTheDocument();
+    expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance).toMatchObject({ cached: false, stale: false });
+  });
+
+  test('discloses missing and null sessions separately in the ownership summary', () => {
+    setInputs(true, true, true);
+    const rows = foreignRows.slice(0, 19).map((row, index) => index === 2 ? { ...row, buy_volume: null } : row);
+    foreign.mockReturnValue(readyQuery({
+      data: rows,
+      meta: {
+        ...completeForeignMeta(), count: 19, observed_session_count: 18, observed_start_date: '2026-05-05',
+        gap_session_count: 1, null_session_count: 1, coverage_status: 'partial', window_net_volume: null,
+        warnings: ['1 session row(s) have missing buy/sell volumes'],
+      },
+    }));
+    const onDataChange = jest.fn();
+    render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+
+    expect(screen.getByText('Foreign Net (partial)').nextElementSibling).toHaveTextContent('n/a');
+    expect(screen.getByRole('status')).toHaveTextContent('18/20 qualifying sessions');
+    expect(screen.getByRole('status')).toHaveTextContent('1 missing, 1 null; 20D total withheld');
+    expect(screen.getByRole('status')).toHaveTextContent('1 session row(s) have missing buy/sell volumes');
+    const payload = onDataChange.mock.calls.at(-1)?.[0];
+    expect(payload.foreignNetVolume).toBeNull();
+    expect(payload.foreignFlowCoverage).toEqual(expect.objectContaining({ observedSessions: 18, gapSessions: 1, nullSessions: 1, status: 'partial' }));
+    expectWithheld(payload);
+  });
+
+  test('reports candidate sessions rather than a 20D total for an unverified calendar', () => {
+    setInputs(true, true, true);
+    foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: { ...completeForeignMeta(), calendar_verified: false } }));
+    const onDataChange = jest.fn();
+    render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('20/20 candidate sessions');
+    expect(screen.getByText('Foreign Net (partial)').nextElementSibling).toHaveTextContent('n/a');
+    const payload = onDataChange.mock.calls.at(-1)?.[0];
+    expect(payload.foreignFlowCoverage).toEqual(expect.objectContaining({ calendarVerified: false, status: 'partial' }));
+    expectWithheld(payload);
+  });
+
   test('retains only the foreign source as-of and marks an old no-error snapshot stale', () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-06-03T12:00:00Z'));
     try {
       setInputs(true, true, true);
-      foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: { last_data_date: '2026-05-29' } }));
+      foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: { ...completeForeignMeta(), last_data_date: '2026-05-29' } }));
       const onDataChange = jest.fn();
       const { rerender } = render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
       expect(screen.getByText('Foreign flow stale')).toBeInTheDocument();
@@ -143,7 +253,7 @@ describe('OwnershipRatingSummaryWidget admission', () => {
       const freshRows = ['2026-06-03', '2026-06-02', '2026-06-01']
         .map((date) => ({ symbol: 'FPT', date, buy_volume: 0, sell_volume: 0 }))
         .concat(foreignRows.slice(0, 17));
-      foreign.mockReturnValue(readyQuery({ data: freshRows, meta: { last_data_date: '2026-06-03', last_validated_session: '2026-06-03' } }));
+      foreign.mockReturnValue(readyQuery({ data: freshRows, meta: { ...completeForeignMeta(freshRows), last_data_date: '2026-06-03' } }));
       rerender(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
       expect(screen.queryByText('Foreign flow stale')).not.toBeInTheDocument();
       expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance).toEqual(expect.objectContaining({ updatedAt: '2026-06-03', stale: false }));
@@ -151,6 +261,8 @@ describe('OwnershipRatingSummaryWidget admission', () => {
       foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: {} }));
       rerender(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
       expect(screen.getByText('As-of unknown')).toBeInTheDocument();
+      expect(screen.getByText('Foreign Net (partial)').nextElementSibling).toHaveTextContent('n/a');
+      expect(onDataChange.mock.calls.at(-1)?.[0].foreignNetVolume).toBeNull();
       expect(onDataChange.mock.calls.at(-1)?.[0].__widgetRuntime.provenance).toEqual(expect.objectContaining({ updatedAt: null, stale: false }));
     } finally {
       jest.useRealTimers();
@@ -160,7 +272,7 @@ describe('OwnershipRatingSummaryWidget admission', () => {
   test('retains foreign fallback and metadata warnings alongside admitted values', () => {
     setInputs(true, true, true);
     const warning = 'Live foreign trading feed returned no rows; using cached database fallback.';
-    foreign.mockReturnValue(readyQuery({ data: foreignRows, error: warning, meta: { last_data_date: '2026-05-29', warnings: [warning] } }));
+    foreign.mockReturnValue(readyQuery({ data: foreignRows, error: warning, meta: { ...completeForeignMeta(), last_data_date: '2026-05-29', warnings: [warning] } }));
     const onDataChange = jest.fn();
     render(<OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} />);
     expect(screen.getByRole('status')).toHaveTextContent(warning);
@@ -226,7 +338,7 @@ describe('OwnershipRatingSummaryWidget admission', () => {
       ownership_unit: 'percent', ownership_unit_status: 'explicit', ownership_source_field: 'disclosed_percent',
     }));
     shareholders.mockReturnValue(readyQuery({ data: rows }));
-    foreign.mockReturnValue(readyQuery({ data: foreignRows }));
+    foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: completeForeignMeta() }));
     insider.mockReturnValue(readyQuery(insiderWindow));
     const tableData = jest.fn();
     const summaryData = jest.fn();
@@ -250,7 +362,7 @@ describe('OwnershipRatingSummaryWidget admission', () => {
       ownership_unit: 'percent', ownership_unit_status: 'explicit',
     }));
     shareholders.mockReturnValue(readyQuery({ data: rows }));
-    foreign.mockReturnValue(readyQuery({ data: foreignRows }));
+    foreign.mockReturnValue(readyQuery({ data: foreignRows, meta: completeForeignMeta() }));
     insider.mockReturnValue(readyQuery(insiderWindow));
     const onDataChange = jest.fn();
     const { rerender } = render(<><MajorShareholdersWidget symbol="FPT" /><OwnershipRatingSummaryWidget id="ownership" symbol="FPT" onDataChange={onDataChange} /></>);

@@ -58,7 +58,7 @@ export const equityQueryKeys = {
     ratioHistory: (symbol: string, period: string, ratios: string[], limit?: number) => ['ratioHistory', symbol, period, ratios, limit] as const,
     metricsHistory: (symbol: string, limit?: number) => ['metricsHistory', symbol, limit] as const,
     foreignTrading: (symbol: string, limit?: number, sessions?: number) =>
-        ['foreignTrading', symbol, limit, sessions] as const,
+        sessions == null ? ['foreignTrading', symbol, limit, sessions] as const : ['foreignTrading', symbol, limit, sessions, 'sessions-v2'] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
     flowCoverage: (days: number) => ['flowCoverage', days] as const,
     correlationMatrix: (symbol: string, days: number, topN: number) => ['correlationMatrix', symbol, days, topN] as const,
@@ -206,7 +206,7 @@ export function useForeignTrading(
 ) {
     return useQuery({
         queryKey: equityQueryKeys.foreignTrading(symbol, options?.limit, options?.sessions),
-        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit, sessions: options?.sessions }),
+        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit, sessions: options?.sessions, window_contract: options?.sessions == null ? undefined : 'sessions-v2' }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000,
         refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.foreignTrading),

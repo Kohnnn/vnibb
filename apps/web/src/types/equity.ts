@@ -387,13 +387,13 @@ export interface RatioHistoryResponse {
 
 export interface ForeignTradingData {
   symbol: string;
-  date?: string;
-  buy_volume?: number;
-  sell_volume?: number;
-  buy_value?: number;
-  sell_value?: number;
-  net_volume?: number;
-  net_value?: number;
+  date?: string | null;
+  buy_volume?: number | null;
+  sell_volume?: number | null;
+  buy_value?: number | null;
+  sell_value?: number | null;
+  net_volume?: number | null;
+  net_value?: number | null;
 }
 
 export type ForeignFlowCoverageStatus = 'complete' | 'partial' | 'unavailable';
@@ -410,6 +410,9 @@ export interface ForeignTradingMeta {
   observed_session_count?: number | null;
   observed_start_date?: string | null;
   observed_end_date?: string | null;
+  returned_start_date?: string | null;
+  returned_end_date?: string | null;
+  null_session_count?: number | null;
   last_validated_session?: string | null;
   gap_session_count?: number | null;
   gap_session_dates?: string[];
@@ -419,7 +422,7 @@ export interface ForeignTradingMeta {
   out_of_window_row_count?: number | null;
   window_net_volume?: number | null;
   coverage_status?: ForeignFlowCoverageStatus;
-  window_contract?: 'sessions' | 'latest_retained_rows';
+  window_contract?: 'sessions-v2' | 'sessions' | 'latest_retained_rows';
   calendar_verified?: boolean | null;
   /** API calendar proof, separate from window coverage; valid until the next open (exclusive). */
   latest_closed_session?: { readonly date: string; readonly checked_at: string; readonly valid_until: string } | null;

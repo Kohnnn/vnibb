@@ -192,7 +192,7 @@ export function useForeignTrading(
 ) {
     return useQuery({
         queryKey: queryKeys.foreignTrading(symbol, options?.limit, options?.sessions),
-        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit, sessions: options?.sessions }),
+        queryFn: () => api.getForeignTrading(symbol, { limit: options?.limit, sessions: options?.sessions, window_contract: options?.sessions == null ? undefined : 'sessions-v2' }),
         enabled: options?.enabled !== false && !!symbol,
         staleTime: 5 * 60 * 1000, // 5 minutes
         refetchInterval: () => getAdaptiveRefetchInterval(POLLING_PRESETS.foreignTrading),

@@ -35,7 +35,7 @@ export const queryKeys = {
     financialRatios: (symbol: string, period: string) => ['financialRatios', symbol, period] as const,
     ratioHistory: (symbol: string, period: string, ratios: string[], limit?: number) => ['ratioHistory', symbol, period, ratios, limit] as const,
     foreignTrading: (symbol: string, limit?: number, sessions?: number) =>
-        ['foreignTrading', symbol, limit, sessions] as const,
+        sessions == null ? ['foreignTrading', symbol, limit, sessions] as const : ['foreignTrading', symbol, limit, sessions, 'sessions-v2'] as const,
     transactionFlow: (symbol: string, days: number) => ['transactionFlow', symbol, days] as const,
     correlationMatrix: (symbol: string, days: number, topN: number) => ['correlationMatrix', symbol, days, topN] as const,
 

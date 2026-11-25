@@ -1,5 +1,6 @@
 import type { ForeignTradingMeta, ShareholderData } from '@/types/equity'
 import type { InsiderSentiment } from '@/types/insider'
+import { qualifyForeignFlowWindow } from '@/lib/foreignFlowWindow'
 
 interface ForeignTradingRow {
   date?: string | null
@@ -14,12 +15,17 @@ export interface ForeignFlowCoverage {
   /** Sessions the consumer asked for; `FOREIGN_WINDOW_SESSIONS` by default. */
   requestedSessions: number
   /** Distinct qualifying sessions actually observed. */
-  observedSessions: number
+  observedSessions: number | null
   /** Observed range, from the admitted rows (not from the row count). */
   startDate: string | null
   endDate: string | null
   lastValidatedSession: string | null
   gapSessions: number | null
+  nullSessions: number | null
+  requestedStartDate: string | null
+  requestedEndDate: string | null
+  windowVerified: boolean
+  calendarVerified: boolean
   status: 'complete' | 'partial' | 'unavailable'
   /** Response-level degradation text, kept even when rows were retained. */
   warning: string | null
@@ -62,72 +68,6 @@ function classifyHolderType(type: string | null | undefined): 'institutional' | 
   return 'other'
 }
 
-function finiteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-/**
- * Count distinct qualifying sessions and their actual range.
- *
- * Rows are grouped by UTC calendar day so a duplicated feed line cannot
- * inflate the count. A weekend date is never an exchange session, so it is
- * rejected rather than summed; a row without a parsable date cannot qualify,
- * and its date is never assumed to be "today". Exchange closures are not
- * fabricated locally — the backend calendar owns those, and any gap it reports
- * is carried through as `gapSessions`.
- */
-function readForeignFlowCoverage(
-  rows: ForeignTradingRow[] | null | undefined,
-  meta: ForeignTradingMeta | null | undefined,
-): { coverage: ForeignFlowCoverage; sessions: string[] } {
-  const requestedSessions = finiteNumber(meta?.requested_session_count) ?? FOREIGN_WINDOW_SESSIONS
-  const sessions = new Set<string>()
-  const nonSession = new Set<string>()
-  let undated = 0
-
-  for (const row of rows ?? []) {
-    const day = String(row.date ?? '').trim().slice(0, 10)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(Date.parse(`${day}T00:00:00Z`))) {
-      undated += 1
-      continue
-    }
-    const weekday = new Date(`${day}T00:00:00Z`).getUTCDay()
-    if (weekday === 0 || weekday === 6) { nonSession.add(day); continue }
-    sessions.add(day)
-  }
-
-  const ordered = [...sessions].sort()
-  const observed = ordered.length
-  // Prefer the backend contract when it answered; otherwise qualify locally.
-  const serverObserved = finiteNumber(meta?.observed_session_count)
-  const gapSessions = finiteNumber(meta?.gap_session_count)
-    ?? Math.max(0, requestedSessions - (serverObserved ?? observed))
-  const status: ForeignFlowCoverage['status'] = observed === 0
-    ? 'unavailable'
-    : observed >= requestedSessions && gapSessions === 0 && nonSession.size === 0 && undated === 0
-      ? 'complete'
-      : 'partial'
-
-  const warnings: string[] = []
-  if (undated > 0) warnings.push(`${undated} row(s) without a parsable date excluded`)
-  if (nonSession.size > 0) warnings.push(`${nonSession.size} non-session date(s) excluded`)
-  if (status === 'partial') warnings.push(`${observed}/${requestedSessions} sessions observed`)
-
-  return {
-    sessions: ordered,
-    coverage: {
-      requestedSessions,
-      observedSessions: observed,
-      startDate: ordered[0] ?? null,
-      endDate: ordered[observed - 1] ?? null,
-      lastValidatedSession: meta?.last_validated_session ?? ordered[observed - 1] ?? null,
-      gapSessions,
-      status,
-      warning: warnings.join('; ') || null,
-    },
-  }
-}
-
 function gradeFromScore(score: number): OwnershipSummary['grade'] {
   if (score >= 80) return 'A'
   if (score >= 65) return 'B'
@@ -161,17 +101,23 @@ export function buildOwnershipSummary(
     if (bucket === 'insider') insiderCount += 1
   })
 
-  const { coverage: foreignFlowCoverage, sessions: foreignSessions } = readForeignFlowCoverage(foreignTrading, foreignMeta)
-  // Every row must expose both sides: an unknown side is not a zero, and a
-  // partial window is a partial disclosure, not a "20D" total.
-  const usableForeignRows = Boolean(foreignTrading?.length) && foreignTrading!.every((row) =>
-    typeof row.buy_volume === 'number' && Number.isFinite(row.buy_volume)
-    && typeof row.sell_volume === 'number' && Number.isFinite(row.sell_volume))
-  const foreignNetVolume = usableForeignRows
-    && foreignSessions.length === foreignTrading!.length
-    && foreignFlowCoverage.status === 'complete'
-    ? foreignTrading!.reduce((sum, row) => sum + row.buy_volume! - row.sell_volume!, 0)
-    : null
+  const foreignWindow = qualifyForeignFlowWindow(foreignTrading, foreignMeta, FOREIGN_WINDOW_SESSIONS)
+  const foreignFlowCoverage: ForeignFlowCoverage = {
+    requestedSessions: FOREIGN_WINDOW_SESSIONS,
+    observedSessions: foreignWindow.observed,
+    startDate: foreignWindow.returnedStart,
+    endDate: foreignWindow.returnedEnd,
+    lastValidatedSession: foreignWindow.lastValidated,
+    gapSessions: foreignWindow.gaps,
+    nullSessions: foreignWindow.nullSessions,
+    requestedStartDate: foreignWindow.requestedStart,
+    requestedEndDate: foreignWindow.requestedEnd,
+    windowVerified: foreignWindow.windowed,
+    calendarVerified: foreignWindow.calendarVerified,
+    status: !foreignWindow.rows.length ? 'unavailable' : foreignWindow.complete ? 'complete' : 'partial',
+    warning: foreignWindow.windowed ? null : 'Retained history is not a verified session window',
+  }
+  const foreignNetVolume = foreignWindow.total
   const insiderNetValue = insiderSentiment?.value_unit === 'VND'
     && typeof insiderSentiment.net_value === 'number' && Number.isFinite(insiderSentiment.net_value)
     ? insiderSentiment.net_value

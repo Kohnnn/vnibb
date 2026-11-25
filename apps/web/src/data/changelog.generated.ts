@@ -15,6 +15,7 @@ build, Jest) plus backend \`ruff\` and \`pytest\`. Individual verification logs
 live in \`docs/\`.
 
 ## [Unreleased]
+- Keep Foreign Trading and Ownership Summary within the selected session window, disclose missing and null-volume dates separately, and withhold totals when coverage or the exchange calendar is unverified (#249).
 - Record failed relative-strength calculations as scheduler failures instead of reporting success when calculation data is unavailable (#172).
 - Distinguish intraday feed failures, successful empty reads, and verified zero-trade sessions. Preserve retained observations and disclose their age independently of market session status. Keep priced order-book levels on legacy reference-only refreshes, and include the retained fallback in depth-profile exports after a failed refresh (#284).
 

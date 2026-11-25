@@ -46,6 +46,102 @@ def test_session_windows_skip_weekends_and_closures():
     assert len(session_dates_between(date(2026, 8, 24), date(2026, 11, 13))) == 57
 
 
+def test_august_2026_dates_and_configured_november_closure(monkeypatch):
+    # Application calendar classifies these as Friday, Saturday, Sunday. This
+    # does not establish the provenance of any stored foreign-flow record.
+    assert session_dates_between(date(2026, 8, 21), date(2026, 8, 23)) == [date(2026, 8, 21)]
+    monkeypatch.setattr(settings, "market_holiday_dates", ["2026-11-24"])
+    assert session_dates_between(date(2026, 11, 23), date(2026, 11, 25)) == [
+        date(2026, 11, 23), date(2026, 11, 25)
+    ]
+
+
+def test_affected_window_cannot_certify_unconfigured_known_closure(monkeypatch):
+    monkeypatch.setattr(settings, "market_holiday_dates", [])
+    rows = [_row("2026-11-23"), _row("2026-11-24"), _row("2026-11-25")]
+    coverage = build_foreign_flow_coverage(
+        rows, start_date=date(2026, 11, 23), end_date=date(2026, 11, 25)
+    )
+    assert coverage.calendar_verified is False
+    assert coverage.status == "partial"
+    assert coverage.net_volume is None
+    assert coverage.observed_end_date == date(2026, 11, 25)
+    assert coverage.last_validated_session is None
+    assert coverage.meta()["gap_session_count"] is None
+    assert coverage.meta()["gap_session_dates"] == []
+    assert "3 of 3 requested sessions candidate" in coverage.warnings
+
+    monkeypatch.setattr(settings, "market_holiday_dates", ["2026-11-24"])
+    configured = build_foreign_flow_coverage(
+        rows, start_date=date(2026, 11, 23), end_date=date(2026, 11, 25)
+    )
+    assert configured.calendar_verified is False
+    assert configured.status == "partial"
+    assert configured.net_volume is None
+    assert configured.last_validated_session is None
+
+
+@pytest.mark.asyncio
+async def test_endpoint_refuses_skipped_holiday_before_market_close(client, monkeypatch):
+    _set_market_clock(monkeypatch, "2026-11-25T03:00:00+00:00")
+    monkeypatch.setattr(settings, "market_holiday_dates", ["2026-11-24"])
+
+    async def fake_fetch(params):
+        return [ForeignTradingData(symbol="HPG", date="2026-11-23", buy_volume=0, sell_volume=0)]
+
+    monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", fake_fetch)
+    payload = (await client.get("/api/v1/equity/HPG/foreign-trading?sessions=1&window_contract=sessions-v2")).json()
+    assert payload["meta"]["requested_end_date"] == "2026-11-23"
+    assert payload["meta"]["calendar_verified"] is False
+    assert payload["meta"]["coverage_status"] == "partial"
+    assert payload["meta"]["window_net_volume"] is None
+    assert payload["meta"]["observed_end_date"] == "2026-11-23"
+    assert payload["meta"]["last_validated_session"] is None
+    assert payload["meta"]["last_data_date"] is None
+    assert payload["meta"]["latest_closed_session"] is None
+
+
+@pytest.mark.parametrize(
+    ("now", "session", "extra_closures"),
+    [
+        ("2026-11-23T09:00:00+00:00", "2026-11-23", []),
+        ("2026-11-23T09:00:00+00:00", "2026-11-23", ["2026-11-24"]),
+        ("2026-11-24T09:00:00+00:00", "2026-11-24", []),
+    ],
+)
+@pytest.mark.asyncio
+async def test_closure_proof_excludes_unreconciled_interval(client, monkeypatch, now, session, extra_closures):
+    _set_market_clock(monkeypatch, now)
+    monkeypatch.setattr(settings, "market_holiday_dates", extra_closures)
+
+    async def fake_fetch(params):
+        return [ForeignTradingData(symbol="HPG", date=session, buy_volume=100, sell_volume=40)]
+
+    monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", fake_fetch)
+    payload = (await client.get("/api/v1/equity/HPG/foreign-trading?sessions=1&window_contract=sessions-v2")).json()
+    assert payload["meta"]["latest_closed_session"] is None
+    if session == "2026-11-24":
+        assert payload["meta"]["observed_end_date"] == session
+        assert payload["meta"]["last_validated_session"] is None
+        assert payload["meta"]["last_data_date"] is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_session_client_cannot_sum_unverified_window(client, monkeypatch):
+    _set_market_clock(monkeypatch, "2026-11-25T09:00:00+00:00")
+
+    async def forbidden_fetch(params):
+        raise AssertionError("legacy request must fail before provider access")
+
+    monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", forbidden_fetch)
+    response = await client.get("/api/v1/equity/HPG/foreign-trading?sessions=20")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["data"] == []
+    assert payload["meta"]["count"] == 0
+    assert "window_contract=sessions-v2" in payload["error"]
+
+
 def test_window_total_excludes_weekend_gap_and_duplicate_rows():
     # 2026-05-29 is a Friday; 30-31 are the weekend.
     rows = [
@@ -74,6 +170,16 @@ def test_window_total_excludes_weekend_gap_and_duplicate_rows():
     assert coverage.calendar_verified is True
 
 
+def test_verified_unaffected_complete_zero_remains_zero():
+    coverage = build_foreign_flow_coverage(
+        [_row("2026-11-13", buy=0, sell=0)],
+        start_date=date(2026, 11, 13), end_date=date(2026, 11, 13),
+    )
+    assert coverage.calendar_verified is True
+    assert coverage.status == "complete"
+    assert coverage.net_volume == 0
+
+
 def test_partial_history_reports_gaps_and_keeps_the_total_unavailable():
     coverage = build_foreign_flow_coverage(
         [_row("2026-05-29"), _row("2026-05-27")],
@@ -90,7 +196,7 @@ def test_partial_history_reports_gaps_and_keeps_the_total_unavailable():
     assert any("2 of 20 requested sessions observed" in warning for warning in coverage.warnings)
     meta = coverage.meta()
     assert meta["coverage_status"] == "partial"
-    assert meta["window_contract"] == "sessions"
+    assert meta["window_contract"] == "sessions-v2"
     assert meta["gap_session_count"] == 18
     assert meta["last_validated_session"] == "2026-05-29"
 
@@ -109,7 +215,7 @@ def test_out_of_window_and_undated_rows_are_excluded_not_summed():
     assert coverage.observed_sessions == 1
     assert coverage.out_of_window_rows == 1
     assert coverage.undated_rows == 1
-    assert coverage.net_volume == 60.0
+    assert coverage.net_volume is None
 
 
 def test_unknown_side_withholds_the_window_total_instead_of_zeroing_it():
@@ -119,8 +225,28 @@ def test_unknown_side_withholds_the_window_total_instead_of_zeroing_it():
         end_date=date(2026, 5, 29),
     )
 
-    assert coverage.observed_sessions == 2
+    assert coverage.observed_sessions == 1
+    assert coverage.null_sessions == 1
+    assert coverage.gap_sessions == 0
     assert coverage.net_volume is None
+
+
+def test_missing_and_null_sessions_are_distinct_and_partial_total_is_withheld():
+    coverage = build_foreign_flow_coverage(
+        [_row("2026-11-20"), _row("2026-11-17", buy=None), _row("2026-11-16")],
+        requested_sessions=5,
+        start_date=date(2026, 11, 16),
+        end_date=date(2026, 11, 20),
+    )
+
+    assert len(coverage.rows) == 3
+    assert coverage.observed_sessions == 2
+    assert coverage.null_sessions == 1
+    assert coverage.gap_sessions == 2
+    assert coverage.gap_dates == [date(2026, 11, 18), date(2026, 11, 19)]
+    assert coverage.status == "partial"
+    assert coverage.net_volume is None
+    assert coverage.meta()["null_session_count"] == 1
 
 
 def test_unwindowed_read_labels_itself_as_retained_rows():
@@ -166,12 +292,13 @@ async def test_endpoint_separates_calendar_close_proof_from_coverage(
         return [ForeignTradingData(symbol="HPG", date=session, buy_volume=1200, sell_volume=1200)]
 
     monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", fake_fetch)
-    response = await client.get("/api/v1/equity/HPG/foreign-trading?sessions=1")
+    response = await client.get("/api/v1/equity/HPG/foreign-trading?sessions=1&window_contract=sessions-v2")
 
     assert response.status_code == 200
     meta = response.json()["meta"]
-    assert meta["requested_end_date"] == meta["last_validated_session"] == session
-    assert meta["coverage_status"] == "complete"
+    assert meta["requested_end_date"] == session
+    assert meta["last_validated_session"] == (session if session.startswith("2026") else None)
+    assert meta["coverage_status"] == ("complete" if session.startswith("2026") else "partial")
     assert meta["latest_closed_session"] == (
         {"date": session, "checked_at": now, "valid_until": next_open} if next_open else None
     )
@@ -179,6 +306,7 @@ async def test_endpoint_separates_calendar_close_proof_from_coverage(
 
 @pytest.mark.asyncio
 async def test_endpoint_qualifies_a_session_window_and_reports_coverage(client, monkeypatch, test_db):
+    _set_market_clock(monkeypatch, "2026-11-14T03:00:00+00:00")
     expected = requested_session_dates(3)
     first, last = expected[0], expected[-1]
     seeded = [
@@ -201,7 +329,7 @@ async def test_endpoint_qualifies_a_session_window_and_reports_coverage(client, 
         equity_module.VnstockForeignTradingFetcher, "fetch", fake_fetch, raising=True
     )
 
-    response = await client.get("/api/v1/equity/MSN/foreign-trading?sessions=3")
+    response = await client.get("/api/v1/equity/MSN/foreign-trading?sessions=3&window_contract=sessions-v2")
 
     assert response.status_code == 200
     payload = response.json()
@@ -217,6 +345,40 @@ async def test_endpoint_qualifies_a_session_window_and_reports_coverage(client, 
     assert [row["date"] for row in payload["data"]] == [
         day.isoformat() for day in sorted(expected, reverse=True)
     ]
+
+
+@pytest.mark.asyncio
+async def test_window_fallback_reads_past_weekend_rows_before_admission(client, monkeypatch, test_db):
+    _set_market_clock(monkeypatch, "2026-11-21T03:00:00+00:00")
+    test_db.add_all([
+        ForeignTrading(id=970 + index, symbol="HPG", trade_date=day, buy_volume=100, sell_volume=40)
+        for index, day in enumerate([
+            date(2026, 11, 20), date(2026, 11, 19), date(2026, 11, 18),
+            date(2026, 11, 17), date(2026, 11, 16), date(2026, 11, 15),
+            date(2026, 11, 14), date(2026, 11, 13), date(2026, 11, 12),
+            date(2026, 11, 11), date(2026, 11, 10), date(2026, 11, 9),
+            date(2026, 11, 23), date(2026, 11, 8),
+        ])
+    ])
+    await test_db.commit()
+
+    async def empty_fetch(params):
+        assert params.limit == 10
+        return []
+
+    monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", empty_fetch)
+    response = await client.get("/api/v1/equity/HPG/foreign-trading?sessions=10&limit=10&window_contract=sessions-v2")
+    payload = response.json()
+    assert payload["meta"]["requested_start_date"] == "2026-11-09"
+    assert payload["meta"]["requested_end_date"] == "2026-11-20"
+    assert payload["meta"]["observed_session_count"] == 10
+    assert payload["meta"]["gap_session_count"] == 0
+    assert payload["meta"]["non_session_dates"] == ["2026-11-14", "2026-11-15"]
+    assert payload["meta"]["out_of_window_row_count"] == 0
+    assert [row["date"] for row in payload["data"]] == [
+        day.isoformat() for day in reversed(requested_session_dates(10, end=date(2026, 11, 20)))
+    ]
+    assert len(payload["data"]) == 10
 
 
 @pytest.mark.asyncio
@@ -245,7 +407,7 @@ async def test_endpoint_keeps_provider_failure_visible_when_rows_are_retained(
         equity_module.VnstockForeignTradingFetcher, "fetch", failing_fetch, raising=True
     )
 
-    response = await client.get("/api/v1/equity/FPT/foreign-trading?sessions=2")
+    response = await client.get("/api/v1/equity/FPT/foreign-trading?sessions=2&window_contract=sessions-v2")
 
     assert response.status_code == 200
     assert sentinel not in response.text
@@ -253,7 +415,7 @@ async def test_endpoint_keeps_provider_failure_visible_when_rows_are_retained(
     assert payload["meta"]["count"] == 1
     assert payload["meta"]["observed_session_count"] == 1
     assert payload["meta"]["coverage_status"] == "partial"
-    assert payload["meta"]["window_net_volume"] == 300.0
+    assert payload["meta"]["window_net_volume"] is None
     provider_warning = "live foreign trading feed unavailable; using cached database fallback"
     assert provider_warning in payload["error"]
     assert provider_warning in payload["meta"]["warnings"]
@@ -280,7 +442,7 @@ async def test_endpoint_discloses_the_row_cap_for_long_windows(client, monkeypat
         equity_module.VnstockForeignTradingFetcher, "fetch", fake_fetch, raising=True
     )
 
-    response = await client.get("/api/v1/equity/FPT/foreign-trading?sessions=250")
+    response = await client.get("/api/v1/equity/FPT/foreign-trading?sessions=250&window_contract=sessions-v2")
 
     payload = response.json()
     assert payload["meta"]["provider_row_cap_applied"] is True
@@ -292,6 +454,7 @@ async def test_endpoint_discloses_the_row_cap_for_long_windows(client, monkeypat
 async def test_empty_live_feed_serving_retained_rows_stays_degraded(
     client, monkeypatch, test_db
 ):
+    _set_market_clock(monkeypatch, "2026-11-14T03:00:00+00:00")
     sessions_ = requested_session_dates(2)
     test_db.add_all(
         [
@@ -314,7 +477,7 @@ async def test_empty_live_feed_serving_retained_rows_stays_degraded(
         equity_module.VnstockForeignTradingFetcher, "fetch", empty_fetch, raising=True
     )
 
-    response = await client.get("/api/v1/equity/VNM/foreign-trading?sessions=2")
+    response = await client.get("/api/v1/equity/VNM/foreign-trading?sessions=2&window_contract=sessions-v2")
 
     payload = response.json()
     # A complete cache window does not make an empty live answer healthy.
@@ -334,6 +497,7 @@ async def test_empty_live_feed_serving_retained_rows_stays_degraded(
 async def test_disjoint_sources_return_exactly_the_latest_unwindowed_rows(
     client, monkeypatch, test_db
 ):
+    _set_market_clock(monkeypatch, "2026-11-14T03:00:00+00:00")
     recent = requested_session_dates(3)
     older = requested_session_dates(6)[:3]
     test_db.add_all(
@@ -371,6 +535,7 @@ async def test_disjoint_sources_return_exactly_the_latest_unwindowed_rows(
     # Provider and cache dates are disjoint, so a per-source cap would return 6.
     assert payload["meta"]["count"] == 3
     assert payload["meta"]["window_contract"] == "latest_retained_rows"
+    assert payload["meta"]["gap_session_count"] == 0
     assert [row["date"] for row in payload["data"]] == [
         day.isoformat() for day in sorted(recent, reverse=True)
     ]
@@ -378,9 +543,33 @@ async def test_disjoint_sources_return_exactly_the_latest_unwindowed_rows(
 
 
 @pytest.mark.asyncio
+async def test_limit_only_null_row_count_and_as_of_are_explicit(client, monkeypatch):
+    _set_market_clock(monkeypatch, "2026-11-14T03:00:00+00:00")
+
+    async def partial_fetch(params):
+        return [
+            ForeignTradingData(symbol="HPG", date="2026-11-13", buy_volume=None, sell_volume=50),
+            ForeignTradingData(symbol="HPG", date="2026-11-12", buy_volume=100, sell_volume=40),
+        ]
+
+    monkeypatch.setattr(equity_module.VnstockForeignTradingFetcher, "fetch", partial_fetch)
+    payload = (await client.get("/api/v1/equity/HPG/foreign-trading?limit=2")).json()
+    assert payload["meta"]["window_contract"] == "latest_retained_rows"
+    assert payload["meta"]["count"] == 2
+    assert payload["meta"]["observed_session_count"] == 1
+    assert payload["meta"]["null_session_count"] == 1
+    assert payload["meta"]["gap_session_count"] == 0
+    assert payload["meta"]["last_validated_session"] == "2026-11-12"
+    assert payload["meta"]["last_data_date"] == "2026-11-12"
+    assert payload["meta"]["window_net_volume"] is None
+    assert "1 session row(s) have missing buy/sell volumes" in payload["error"]
+
+
+@pytest.mark.asyncio
 async def test_long_session_window_is_not_truncated_by_the_default_row_limit(
     client, monkeypatch, test_db
 ):
+    _set_market_clock(monkeypatch, "2026-11-14T03:00:00+00:00")
     # 6M = 120 sessions; the request keeps the default limit of 60.
     window = requested_session_dates(120)
     test_db.add_all(
@@ -416,7 +605,7 @@ async def test_long_session_window_is_not_truncated_by_the_default_row_limit(
         equity_module.VnstockForeignTradingFetcher, "fetch", newest_fetch, raising=True
     )
 
-    response = await client.get("/api/v1/equity/VCI/foreign-trading?sessions=120")
+    response = await client.get("/api/v1/equity/VCI/foreign-trading?sessions=120&window_contract=sessions-v2")
 
     payload = response.json()
     assert payload["meta"]["count"] == 120
@@ -434,7 +623,7 @@ async def test_long_session_window_is_not_truncated_by_the_default_row_limit(
 
 
 def test_calendar_metadata_is_disclosed_for_unverified_years(monkeypatch):
-    monkeypatch.setattr(coverage_module, "market_calendar_metadata", lambda anchor: {"verified": False})
+    monkeypatch.setattr(coverage_module, "foreign_flow_calendar_verified", lambda start, end: False)
 
     coverage = build_foreign_flow_coverage(
         [_row("2025-05-29"), _row("2025-05-28")],
@@ -452,6 +641,7 @@ def test_calendar_metadata_is_disclosed_for_unverified_years(monkeypatch):
 async def test_endpoint_admits_only_sessions_and_discloses_each_exclusion(
     client, monkeypatch, test_db
 ):
+    _set_market_clock(monkeypatch, "2026-11-14T03:00:00+00:00")
     window = requested_session_dates(3)
     out_of_window = requested_session_dates(4)[0]
     weekend = window[-1] + timedelta(days=(5 - window[-1].weekday()) % 7 or 7)
@@ -507,7 +697,7 @@ async def test_endpoint_admits_only_sessions_and_discloses_each_exclusion(
         equity_module.VnstockForeignTradingFetcher, "fetch", mixed_fetch, raising=True
     )
 
-    response = await client.get("/api/v1/equity/GAS/foreign-trading?sessions=3")
+    response = await client.get("/api/v1/equity/GAS/foreign-trading?sessions=3&window_contract=sessions-v2")
 
     assert response.status_code == 200
     payload = response.json()

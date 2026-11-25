@@ -20,7 +20,7 @@ from math import isfinite
 from typing import Any
 
 from vnibb.core.config import settings
-from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, market_calendar_metadata
+from vnibb.core.market_calendar import OFFICIAL_MARKET_HOLIDAYS, foreign_flow_calendar_verified
 from vnibb.services.data_quality import is_market_business_day
 from vnibb.services.market_session import expected_market_session, market_session_date
 
@@ -83,6 +83,9 @@ class ForeignFlowCoverage:
     requested_sessions: int | None = None
     observed_sessions: int = 0
     observed_start_date: date | None = None
+    returned_start_date: date | None = None
+    returned_end_date: date | None = None
+    null_sessions: int = 0
     observed_end_date: date | None = None
     last_validated_session: date | None = None
     gap_sessions: int = 0
@@ -101,7 +104,12 @@ class ForeignFlowCoverage:
     def status(self) -> str:
         if self.observed_sessions == 0:
             return "unavailable"
-        if self.windowed and (self.gap_sessions or (self.requested_sessions or 0) > self.observed_sessions):
+        if self.windowed and (
+            self.gap_sessions
+            or self.null_sessions
+            or self.calendar_verified is False
+            or (self.requested_sessions or 0) > self.observed_sessions
+        ):
             return "partial"
         return "complete"
 
@@ -114,9 +122,12 @@ class ForeignFlowCoverage:
             "observed_session_count": self.observed_sessions,
             "observed_start_date": self.observed_start_date.isoformat() if self.observed_start_date else None,
             "observed_end_date": self.observed_end_date.isoformat() if self.observed_end_date else None,
+            "returned_start_date": self.returned_start_date.isoformat() if self.returned_start_date else None,
+            "returned_end_date": self.returned_end_date.isoformat() if self.returned_end_date else None,
+            "null_session_count": self.null_sessions,
             "last_validated_session": self.last_validated_session.isoformat() if self.last_validated_session else None,
-            "gap_session_count": self.gap_sessions,
-            "gap_session_dates": [day.isoformat() for day in self.gap_dates],
+            "gap_session_count": self.gap_sessions if not self.windowed or self.calendar_verified else None,
+            "gap_session_dates": [day.isoformat() for day in self.gap_dates] if self.calendar_verified else [],
             "non_session_dates": list(self.non_session_dates),
             "duplicate_session_dates": list(self.duplicate_session_dates),
             "source_overlap_session_count": self.source_overlap_sessions,
@@ -124,7 +135,7 @@ class ForeignFlowCoverage:
             "out_of_window_row_count": self.out_of_window_rows,
             "window_net_volume": self.net_volume,
             "coverage_status": self.status,
-            "window_contract": "sessions" if self.windowed else "latest_retained_rows",
+            "window_contract": "sessions-v2" if self.windowed else "latest_retained_rows",
             "calendar_verified": self.calendar_verified,
             "provider_row_cap": PROVIDER_ROW_CAP,
             "provider_row_cap_applied": bool(
@@ -140,6 +151,7 @@ def build_foreign_flow_coverage(
     requested_sessions: int | None = None,
     start_date: date | None = None,
     end_date: date | None = None,
+    selection_cutoff: date | None = None,
     row_limit: int | None = None,
     primary_source_count: int = 0,
 ) -> ForeignFlowCoverage:
@@ -181,14 +193,13 @@ def build_foreign_flow_coverage(
         coverage.requested_sessions = len(expected_days) if expected_days else (requested_sessions or 0)
         coverage.calendar_verified = bool(
             expected_days
-            and all(
-                market_calendar_metadata(day)["verified"]
-                for day in (coverage.requested_start_date, coverage.requested_end_date)
+            and foreign_flow_calendar_verified(
+                coverage.requested_start_date, selection_cutoff or coverage.requested_end_date
             )
         )
         if expected_days and coverage.calendar_verified is False:
             coverage.warnings.append(
-                "exchange calendar not verified for the requested year; "
+                "exchange calendar not verified for the requested range; "
                 "closures may appear as missing sessions"
             )
     else:
@@ -232,11 +243,30 @@ def build_foreign_flow_coverage(
     if row_limit is not None and not coverage.windowed:
         admitted = admitted[: max(0, int(row_limit))]
     coverage.rows = [row for _, row in admitted]
-    coverage.observed_sessions = len(admitted)
     if admitted:
-        coverage.observed_end_date = admitted[0][0]
-        coverage.observed_start_date = admitted[-1][0]
-        coverage.last_validated_session = admitted[0][0]
+        coverage.returned_end_date = admitted[0][0]
+        coverage.returned_start_date = admitted[-1][0]
+    qualified: list[tuple[date, Any]] = []
+    net_total = 0.0
+    for session, row in admitted:
+        buy = _finite(row.get("buy_volume") if isinstance(row, dict) else getattr(row, "buy_volume", None))
+        sell = _finite(row.get("sell_volume") if isinstance(row, dict) else getattr(row, "sell_volume", None))
+        if buy is None or sell is None:
+            coverage.null_sessions += 1
+        else:
+            qualified.append((session, row))
+            net_total += buy - sell
+    coverage.observed_sessions = len(qualified)
+    if qualified:
+        coverage.observed_end_date = qualified[0][0]
+        coverage.observed_start_date = qualified[-1][0]
+        if coverage.windowed:
+            if coverage.calendar_verified:
+                coverage.last_validated_session = qualified[0][0]
+        else:
+            coverage.last_validated_session = next(
+                (day for day, _ in qualified if foreign_flow_calendar_verified(day, day)), None
+            )
     coverage.non_session_dates = sorted(set(non_session))
     coverage.duplicate_session_dates = sorted(set(duplicates))
     coverage.source_overlap_sessions = len(set(overlaps))
@@ -258,20 +288,17 @@ def build_foreign_flow_coverage(
                 f"{coverage.undated_rows} row(s) without a parsable date were excluded"
             )
 
-    net_total = 0.0
-    for _, row in admitted:
-        buy = _finite(row.get("buy_volume") if isinstance(row, dict) else getattr(row, "buy_volume", None))
-        sell = _finite(row.get("sell_volume") if isinstance(row, dict) else getattr(row, "sell_volume", None))
-        if buy is None or sell is None:
-            coverage.net_volume = None
-            break
-        net_total += buy - sell
-    else:
-        coverage.net_volume = net_total if admitted else None
+    if coverage.null_sessions:
+        coverage.warnings.append(
+            f"{coverage.null_sessions} session row(s) have missing buy/sell volumes"
+        )
+    if qualified and not coverage.null_sessions and (not coverage.windowed or coverage.status == "complete"):
+        coverage.net_volume = net_total
 
     if coverage.windowed and coverage.observed_sessions and coverage.status == "partial":
+        qualifier = "observed" if coverage.calendar_verified else "candidate"
         coverage.warnings.append(
-            f"{coverage.observed_sessions} of {coverage.requested_sessions} requested sessions observed"
+            f"{coverage.observed_sessions} of {coverage.requested_sessions} requested sessions {qualifier}"
         )
 
     return coverage
