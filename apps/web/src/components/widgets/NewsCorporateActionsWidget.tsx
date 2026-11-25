@@ -14,6 +14,7 @@ import { normalizeInsiderAction } from '@/lib/insiderActions';
 import { useLoadingTimeout } from '@/hooks/useLoadingTimeout';
 import { addNotebookItem } from '@/lib/researchNotebook';
 import { newsItemObservation, newsObservationProvenance } from '@/lib/newsTime';
+import { hasNewsAssociationEvidence } from '@/lib/newsAssociation';
 import { getSentimentProvenance } from '@/components/widgets/news/NewsCard';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { EMPTY_VALUE } from '@/lib/units';
@@ -90,7 +91,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
     dataUpdatedAt: insiderUpdatedAt,
   } = useInsiderDeals(symbol, { limit: 6, enabled: Boolean(symbol) });
 
-  const news = newsData?.data ?? [];
+  const news = useMemo(() => (newsData?.data ?? []).filter(item => hasNewsAssociationEvidence(item, false)), [newsData?.data]);
   const dividendCoverage = readDividendCoverage(dividendData);
   const dividends = admittedDividendRows(dividendData);
   const dividendFailure = dividendsError?.message || dividendData?.error;
@@ -317,7 +318,7 @@ export function NewsCorporateActionsWidget({ id, symbol, onRemove, onDataChange 
                       </div>
                       <div className="mt-1 flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
                         {item.source && <span>{item.source}</span>}
-                        {newsItemObservation(item) && <span>• {formatTimestamp(newsItemObservation(item)!)}</span>}
+                        <span>• {newsItemObservation(item) ? formatTimestamp(newsItemObservation(item)!) : 'Date unavailable'}</span>
                       </div>
                     </div>
                     );

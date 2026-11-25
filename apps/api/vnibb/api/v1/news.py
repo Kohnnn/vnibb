@@ -398,16 +398,19 @@ async def get_news_feed_api(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> NewsFeed:
-    feed = await get_news_feed(
-        source=source,
-        sentiment=sentiment,
-        symbol=symbol,
-        mode=mode if symbol else "all",
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        feed = await get_news_feed(
+            source=source,
+            sentiment=sentiment,
+            symbol=symbol,
+            mode=mode if symbol else "all",
+            limit=limit,
+            offset=offset,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail="News feed temporarily unavailable") from error
 
-    if feed.total == 0:
+    if feed.total == 0 and not (symbol and mode == "related"):
         background_tasks.add_task(
             news_crawler.crawl_market_news,
             sources=None,
@@ -439,14 +442,17 @@ async def get_news_flow_api(
     """
     symbol_list = symbols.split(",") if symbols else None
 
-    return await get_news_flow(
-        symbols=symbol_list,
-        sector=sector,
-        sentiment=sentiment,
-        mode=mode,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        return await get_news_flow(
+            symbols=symbol_list,
+            sector=sector,
+            sentiment=sentiment,
+            mode=mode,
+            limit=limit,
+            offset=offset,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail="News flow temporarily unavailable") from error
 
 
 @router.get(

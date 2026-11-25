@@ -62,6 +62,20 @@ function show(incomeRows: object[], cashRows: object[] = [], qualityData?: objec
   return render(<EarningsReleaseRecapWidget id="recap" symbol="FPT" onDataChange={onDataChange} />);
 }
 
+test('recap rejects unverified cached articles while retaining direct issuer news', () => {
+  const view = show([row('2026-Q1', { revenue: 100, net_income: 20 })]);
+  jest.mocked(useCompanyNews).mockReturnValue({
+    error: null, isLoading: false, isFetching: false, refetch: jest.fn(), dataUpdatedAt: 1750000000000, data: { data: [
+      { title: 'Cholesterol health fixture', association_class: 'none' },
+      { title: 'FPT issuer release fixture', association_class: 'direct_company', published_at: null, match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
+    ] },
+  } as never);
+  view.rerender(<EarningsReleaseRecapWidget id="recap" symbol="FPT" />);
+  expect(screen.queryByText('Cholesterol health fixture')).not.toBeInTheDocument();
+  expect(screen.getByText('FPT issuer release fixture')).toBeVisible();
+  expect(screen.getByText('Date unavailable')).toBeVisible();
+});
+
 /** The value tile beside a label, e.g. "Net Income YoY". */
 function tile(label: string): HTMLElement {
   return screen.getByText(label).nextElementSibling as HTMLElement;

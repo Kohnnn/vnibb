@@ -579,8 +579,6 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
             )
         )
     )
-    related_symbols = _parse_symbols(row.get("related_symbols"))
-    related_set = {item.upper() for item in related_symbols}
     matched_symbols: list[str] = []
     score = 0.0
     reason = None
@@ -595,11 +593,6 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
             reason = "exact_symbol_title"
             matched_symbols.append(symbol)
             matched_terms.append({"term": symbol, "field": "title", "kind": "symbol"})
-        elif symbol in related_set:
-            score = 0.97
-            reason = "exact_symbol_related"
-            matched_symbols.append(symbol)
-            matched_terms.append({"term": symbol, "field": "related_symbols", "kind": "symbol"})
         elif _contains_symbol(body, symbol):
             score = 0.94
             reason = "exact_symbol_body"
@@ -627,12 +620,7 @@ def _score_news_row(row: dict[str, Any], context: dict[str, Any]) -> dict[str, A
     peer_hits = 0
     peer_evidence: list[str] = []
     for peer_symbol in context.get("peer_symbols", []):
-        if peer_symbol in related_set:
-            peer_evidence.append(peer_symbol)
-            matched_terms.append(
-                {"term": peer_symbol, "field": "related_symbols", "kind": "peer_symbol"}
-            )
-        elif _contains_symbol(title, peer_symbol):
+        if _contains_symbol(title, peer_symbol):
             peer_evidence.append(peer_symbol)
             matched_terms.append({"term": peer_symbol, "field": "title", "kind": "peer_symbol"})
         elif _contains_symbol(body, peer_symbol):
@@ -847,15 +835,20 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
     )
 
     relevant_provider_rows = [
-        row for row in provider_rows if float(row.get("relevance_score") or 0) >= 0.65
+        row for row in provider_rows if row.get("association_class") in RANKED_ASSOCIATIONS
     ]
 
-    ranked_rows, _ = await get_ranked_news_rows(
-        symbol=upper_symbol,
-        limit=max(limit * 2, 12),
-        offset=0,
-        mode="related",
-    )
+    try:
+        ranked_rows, _ = await get_ranked_news_rows(
+            symbol=upper_symbol,
+            limit=max(limit * 2, 12),
+            offset=0,
+            mode="related",
+        )
+    except RuntimeError:
+        if not relevant_provider_rows:
+            raise
+        ranked_rows = []
     # Company news is issuer news: a verified sector overlap belongs on the
     # related feed as an industry-only row, not in a company's own news list.
     ranked_rows = [
@@ -880,8 +873,6 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
     append_rows(relevant_provider_rows)
     if len(merged_rows) < limit:
         append_rows(ranked_rows)
-    if len(merged_rows) == 0:
-        append_rows(await _hydrate_company_news_fallback(symbol=upper_symbol, limit=limit))
 
     merged_rows.sort(
         key=lambda row: (
@@ -899,7 +890,11 @@ async def get_company_news_rows(symbol: str, limit: int = 20) -> list[dict[str, 
         cutoff = datetime.now(UTC) - timedelta(days=90)
         any_fresh = any(_publication_sort_key(row) >= cutoff for row in merged_rows)
         if any_fresh:
-            merged_rows = [row for row in merged_rows if _publication_sort_key(row) >= cutoff]
+            merged_rows = [
+                row for row in merged_rows
+                if _parse_published_at(row.get("published_date") or row.get("published_at")) is None
+                or _publication_sort_key(row) >= cutoff
+            ]
 
     return await _enrich_sentiment_rows(merged_rows[:limit])
 
@@ -918,7 +913,7 @@ async def get_ranked_news_rows(
 
     try:
         if related_mode:
-            candidate_limit = min(max(limit * 6, 60), 180)
+            candidate_limit = 180
             results = await news_crawler.get_latest_news(
                 source=source,
                 sentiment=sentiment,
@@ -946,27 +941,7 @@ async def get_ranked_news_rows(
             if relevant_rows:
                 enriched_rows = await _enrich_sentiment_rows(relevant_rows[offset : offset + limit])
                 return enriched_rows, False
-
-            market_rows = await news_crawler.get_latest_news(
-                source=source,
-                sentiment=sentiment,
-                symbol=None,
-                limit=limit,
-                offset=offset,
-            )
-            fallback_rows = []
-            for row in market_rows:
-                enriched = dict(row)
-                enriched["relevance_score"] = 0.0
-                enriched["matched_symbols"] = []
-                enriched["match_reason"] = None
-                enriched["association_class"] = "general_market"
-                enriched["match_evidence"] = {}
-                enriched["is_market_wide_fallback"] = True
-                fallback_rows.append(enriched)
-            if fallback_rows:
-                enriched_fallback_rows = await _enrich_sentiment_rows(fallback_rows)
-                return enriched_fallback_rows, True
+            return [], False
         else:
             results = await news_crawler.get_latest_news(
                 source=source,
@@ -987,6 +962,8 @@ async def get_ranked_news_rows(
                 "error": str(error),
             },
         )
+        if related_mode:
+            raise RuntimeError("Related news retrieval unavailable") from error
 
     fallback_rows = await _hydrate_company_news_fallback(symbol=upper_symbol, limit=limit)
     enriched_fallback_rows = await _enrich_sentiment_rows(fallback_rows[offset : offset + limit])

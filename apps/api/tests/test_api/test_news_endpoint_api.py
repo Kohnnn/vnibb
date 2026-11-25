@@ -4,9 +4,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from fastapi import BackgroundTasks
-
 import pytest
+from fastapi import BackgroundTasks
 
 from vnibb.api.v1 import news
 from vnibb.core.market_cap import resolve_market_cap
@@ -344,6 +343,64 @@ async def test_news_feed_endpoint_returns_related_mode_payload(client, monkeypat
     assert payload["articles"][0]["matched_symbols"] == ["VCI", "SSI"]
     assert payload["articles"][0]["relevance_score"] == 0.97
 
+
+@pytest.mark.asyncio
+async def test_empty_related_feed_does_not_schedule_a_crawl(monkeypatch):
+    tasks = BackgroundTasks()
+    monkeypatch.setattr(news, "get_news_feed", AsyncMock(return_value=news.NewsFeed(
+        articles=[], total=0, mode="related"
+    )))
+
+    feed = await news.get_news_feed_api(
+        background_tasks=tasks, source=None, sentiment=None, symbol="HPG",
+        mode="related", limit=10, offset=0,
+    )
+
+    assert feed.articles == []
+    assert tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_related_endpoint_replays_issuer_and_reported_health_without_source_tags(monkeypatch):
+    from vnibb.services import news_service
+
+    health = {
+        "id": "reported-health", "title": "Cholesterol cao lâu ngày gây hại cơ thể thế nào",
+        "source": "vnexpress", "related_symbols": ["HPG"], "published_date": None,
+        "url": "https://vnexpress.net/cholesterol-cao-lau-ngay-gay-hai-co-the-the-nao-5122739.html",
+    }
+    issuer = {
+        "id": "issuer-control",
+        "title": "Hoa Phat's nine-month after-tax profit reaches VND 23,746 billion, beating annual target by 8%",
+        "source": "Hoa Phat", "related_symbols": [], "published_date": "2026-10-29",
+        "url": "https://www.hoaphat.com.vn/news/hoa-phat-s-nine-month-after-tax-profit-reaches-vnd-23-746-billion-beating-annual-target-by-8.html",
+    }
+    context = {"symbol": "HPG", "company_keywords": ["hoa phat"], "peer_symbols": [], "sector_keywords": ["thép"]}
+    monkeypatch.setattr(news_service.news_crawler, "get_latest_news", AsyncMock(return_value=[health, issuer]))
+    monkeypatch.setattr(news_service, "_load_symbol_context", AsyncMock(return_value=context))
+    monkeypatch.setattr(news_service, "_enrich_sentiment_rows", AsyncMock(side_effect=lambda rows: rows))
+    tasks = BackgroundTasks()
+
+    feed = await news.get_news_feed_api(tasks, None, None, "HPG", "related", 10, 0)
+    assert [article.id for article in feed.articles] == ["issuer-control"]
+    assert feed.articles[0].association_class == "direct_company"
+    assert feed.articles[0].match_reason == "company_keyword"
+    general = await news.get_news_feed(mode="all")
+    assert {article.id for article in general.articles} == {"reported-health", "issuer-control"}
+    assert tasks.tasks == []
+
+
+@pytest.mark.asyncio
+async def test_related_feed_http_failure_is_503_without_provider(client, monkeypatch):
+    from vnibb.services import news_service
+
+    monkeypatch.setattr(news_service.news_crawler, "get_latest_news", AsyncMock(side_effect=RuntimeError("private")))
+    provider = AsyncMock()
+    monkeypatch.setattr(news_service, "_hydrate_company_news_fallback", provider)
+    response = await client.get("/api/v1/news/feed", params={"symbol": "HPG", "mode": "related"})
+    assert response.status_code == 503
+    assert "private" not in response.text
+    provider.assert_not_awaited()
 
 @pytest.mark.asyncio
 async def test_news_feed_endpoint_marks_market_wide_fallback(client, monkeypatch):

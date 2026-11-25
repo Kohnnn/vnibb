@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { NewsFlowWidget } from './NewsFlowWidget';
 
 jest.mock('@/lib/env', () => ({ env: { apiUrl: 'https://api.example.test' } }));
@@ -27,6 +27,7 @@ const direct = {
   matched_symbols: ['HPG'],
   association_class: 'direct_company',
   match_reason: 'exact_symbol_title',
+  match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] },
   relevance_score: 1,
 };
 
@@ -54,44 +55,26 @@ function show(readPage: (offset: string | null) => object) {
   return onDataChange;
 }
 
-test('reports market-wide provenance when every loaded row is fallback', async () => {
+test('rejects an old market-wide fallback from a ticker flow', async () => {
   const changes = show(() => ({ mode: 'related', items: [market], fallback_used: true }));
-  const row = await screen.findByRole('link', { name: /Cholesterol cao/ });
-  expect(row).toHaveAttribute('href', market.url);
-  expect(row).toHaveTextContent(market.summary);
-  expect(row.querySelector('mark')).not.toBeInTheDocument();
-  expect(row).toHaveTextContent('Market-wide fallback');
-  expect(row).not.toHaveTextContent(/rank/i);
-  expect(within(screen.getByLabelText('News flow stream')).queryByText(/^Ticker feed$/i)).not.toBeInTheDocument();
-  expect(changes.mock.lastCall?.[0].__widgetRuntime?.provenance?.sourceLabel).toMatch(/market-wide/i);
-});
-
-test('keeps a paginated stream with admitted rows a ticker feed', async () => {
-  const changes = show(offset => offset === '0'
-    ? { mode: 'related', items: [market], fallback_used: true, has_more: true }
-    : { mode: 'related', items: [direct], fallback_used: false, has_more: false });
-  await screen.findByRole('link', { name: /Cholesterol cao/ });
-  fireEvent.click(screen.getByRole('button', { name: /load more articles/i }));
-
-  const directRow = await screen.findByRole('link', { name: /HPG publishes a fixture update/ });
-  expect(directRow).toHaveTextContent(/rank 100\/100/i);
-  expect(screen.getByRole('link', { name: /Cholesterol cao/ })).toHaveTextContent(/market-wide/i);
-  expect(within(screen.getByLabelText('News flow stream')).getByText(/^Ticker feed$/i)).toBeVisible();
+  expect(await screen.findByText(/No related news found/)).toBeVisible();
+  expect(screen.queryByRole('link', { name: /Cholesterol cao/ })).not.toBeInTheDocument();
   expect(changes.mock.lastCall?.[0].__widgetRuntime?.provenance?.sourceLabel).toMatch(/ticker feed/i);
 });
 
+test('shows supported ticker stories and hides unverified rows', async () => {
+  show(() => ({ mode: 'related', items: [direct, market, { ...market, id: 'none', association_class: 'none', is_market_wide_fallback: false }] }));
+  const directRow = await screen.findByRole('link', { name: /HPG publishes a fixture update/ });
+  expect(directRow).toHaveTextContent(/rank 100\/100/i);
+  expect(screen.queryByRole('link', { name: /Cholesterol cao/ })).not.toBeInTheDocument();
+});
 
-test('applies a fallback envelope only to its own page, even with stale rank metadata', async () => {
-  const fallback = { ...direct, id: market.id, title: market.title, url: market.url };
+test('keeps later pages reachable when every first-page item is rejected', async () => {
   show(offset => offset === '0'
-    ? { mode: 'related', items: [direct], has_more: true }
-    : { mode: 'related', items: [fallback], fallback_used: true });
-  await screen.findByRole('link', { name: /HPG publishes a fixture update/ });
+    ? { mode: 'related', items: [market], fallback_used: true, has_more: true }
+    : { mode: 'related', items: [direct], has_more: false });
+  expect(await screen.findByText(/No related news found/)).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: /load more articles/i }));
-
-  const fallbackRow = await screen.findByRole('link', { name: /Cholesterol cao/ });
-  expect(fallbackRow).toHaveTextContent('Market-wide fallback');
-  expect(fallbackRow).not.toHaveTextContent(/rank|\bHPG\b/i);
-  expect(screen.getByRole('link', { name: /HPG publishes a fixture update/ })).toHaveTextContent(/rank 100\/100/i);
-  expect(within(screen.getByLabelText('News flow stream')).getByText(/^Ticker feed$/i)).toBeVisible();
+  expect(await screen.findByRole('link', { name: /HPG publishes a fixture update/ })).toBeVisible();
+  expect(screen.queryByText(market.title)).not.toBeInTheDocument();
 });

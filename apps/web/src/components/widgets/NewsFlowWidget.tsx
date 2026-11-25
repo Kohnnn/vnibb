@@ -9,6 +9,7 @@ import { WidgetMeta } from '@/components/ui/WidgetMeta';
 import { buildWidgetRuntime } from '@/lib/widgetRuntime';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { newsObservationProvenance } from '@/lib/newsTime';
+import { hasNewsAssociationEvidence } from '@/lib/newsAssociation';
 import { NewsFilterBar } from './news/NewsFilterBar';
 import { NewsCard } from './news/NewsCard';
 import { Loader2, Newspaper } from 'lucide-react';
@@ -42,6 +43,7 @@ type NewsFlowItem = {
   is_market_wide_fallback?: boolean;
   match_reason?: string | null;
   association_class?: string | null;
+  match_evidence?: unknown;
   sentiment_source?: 'provider' | 'heuristic' | 'unavailable' | null;
 };
 type NewsFlowPage = {
@@ -56,8 +58,7 @@ function isMarketWide(item: NewsFlowItem) {
 }
 
 function hasTickerEvidence(item: NewsFlowItem) {
-  return !isMarketWide(item) && (item.association_class === 'direct_company'
-    || item.association_class === 'verified_peer' || item.association_class === 'verified_sector');
+  return hasNewsAssociationEvidence(item);
 }
 
 /** Shape check for the `/news/flow` envelope before it reaches rendering. */
@@ -117,16 +118,10 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
     staleTime: 5 * 60 * 1000,
   });
 
-  const isRelated = filters.symbols.length > 0 && data?.pages[0]?.mode !== 'all';
-  const allNews = useMemo(() => data?.pages.flatMap(page => page.items.map(item => {
-    if (isMarketWide(item) || page.fallback_used === true) {
-      return { ...item, association_class: 'general_market', matched_symbols: [] };
-    }
-    if (isRelated && !hasTickerEvidence(item)) {
-      return { ...item, association_class: 'none', matched_symbols: [] };
-    }
-    return item;
-  })) ?? [], [data?.pages, isRelated]);
+  const isRelated = filters.symbols.length > 0;
+  const allNews = useMemo(() => data?.pages.flatMap(page => page.items.filter(item => (
+    !isRelated || (page.fallback_used !== true && hasTickerEvidence(item))
+  ))) ?? [], [data?.pages, isRelated]);
   const hasData = allNews.length > 0;
   const isFallback = Boolean(error && hasData);
   let feedNote = 'Market feed';
@@ -198,14 +193,17 @@ function NewsFlowWidgetComponent({ id, symbol, initialSymbols, onRemove, onDataC
             <WidgetSkeleton lines={6} />
           ) : error && !hasData ? (
             <WidgetError error={error as Error} onRetry={() => refetch()} />
-          ) : !hasData ? (
-            <WidgetEmpty
-              message="No news flow yet. Try refreshing or adjust filters."
-              icon={<Newspaper size={18} />}
-              action={{ label: 'Refresh', onClick: () => refetch() }}
-            />
           ) : (
             <div className="flex flex-col">
+              {!hasData && (
+                <WidgetEmpty
+                  message={isRelated
+                    ? 'No related news found. Clear the ticker filter for market-wide news.'
+                    : 'No news flow yet. Try refreshing or adjust filters.'}
+                  icon={<Newspaper size={18} />}
+                  action={{ label: 'Refresh', onClick: () => refetch() }}
+                />
+              )}
             {allNews.map((item, index) => (
               <NewsCard key={`${item.id ?? item.url ?? item.title}-${index}`} news={{ ...item, id: String(item.id) }} />
             ))}

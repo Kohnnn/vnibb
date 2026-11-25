@@ -5850,7 +5850,7 @@ async def get_growth_rates(
 
 # Re-adding missing endpoints for completeness
 @router.get("/{symbol}/news", response_model=StandardResponse[List[Any]])
-@cached(ttl=1800, key_prefix="company_news_v27")
+@cached(ttl=1800, key_prefix="company_news_v28")
 async def get_company_news(symbol: str, limit: int = Query(20)):
     try:
         data = await get_company_news_rows(symbol, limit=limit)

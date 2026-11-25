@@ -76,7 +76,7 @@ test.each([
   expect(screen.queryByText('VND0/share')).not.toBeInTheDocument()
 })
 
-test('shows no ranking number for a sector overlap but keeps direct-company rank', () => {
+test('excludes cached sector-only company rows but keeps direct-company rank', () => {
   mockUseCompanyNews.mockReturnValue(queryResult<CompanyNewsResponse>({
     symbol: 'HPG',
     count: 2,
@@ -95,6 +95,7 @@ test('shows no ranking number for a sector overlap but keeps direct-company rank
         source: 'cafef',
         match_reason: 'exact_symbol_title',
         association_class: 'direct_company',
+        match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] },
         relevance_score: 1,
       },
     ],
@@ -104,9 +105,9 @@ test('shows no ranking number for a sector overlap but keeps direct-company rank
 
   render(<NewsCorporateActionsWidget id="news-corporate-actions" symbol="HPG" />)
 
-  expect(screen.getByText('industry overlap · no company evidence')).toBeInTheDocument()
+  expect(screen.queryByText('Giá thép xây dựng tăng trong quý này')).not.toBeInTheDocument()
   expect(screen.getByText(/exact symbol title · rank 100\/100/)).toBeInTheDocument()
-  expect(screen.queryByText(/industry overlap · no company evidence · rank/)).not.toBeInTheDocument()
+  expect(screen.getByText(/Date unavailable/)).toBeInTheDocument()
 })
 
 test('states where a news sentiment label came from instead of implying impact', () => {
@@ -114,9 +115,9 @@ test('states where a news sentiment label came from instead of implying impact',
     symbol: 'HPG',
     count: 3,
     data: [
-      { symbol: 'HPG', title: 'HPG local estimate', source: 'cafef', sentiment: 'bullish', sentiment_score: 0, sentiment_source: 'heuristic' },
-      { symbol: 'HPG', title: 'HPG provider class', source: 'issuer', sentiment: 'positive', sentiment_source: 'provider' },
-      { symbol: 'HPG', title: 'HPG no label', source: 'cafef', sentiment_source: 'unavailable' },
+      { symbol: 'HPG', title: 'HPG local estimate', source: 'cafef', sentiment: 'bullish', sentiment_score: 0, sentiment_source: 'heuristic', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
+      { symbol: 'HPG', title: 'HPG provider class', source: 'issuer', sentiment: 'positive', sentiment_source: 'provider', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
+      { symbol: 'HPG', title: 'HPG no label', source: 'cafef', sentiment_source: 'unavailable', association_class: 'direct_company', match_evidence: { matched_terms: [{ field: 'title', kind: 'symbol' }] } },
     ],
   }))
   mockUseInsiderDeals.mockReturnValue(queryResult([]))
