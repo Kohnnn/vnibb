@@ -2,7 +2,7 @@
 
 Observation window: **2026-11-25 05:44–05:45 UTC (12:44 ICT)**, `https://web.vnibb.xyz/`. Visible release badge: **v1.5.0**; global health: **Degraded — Data validation degraded**. Browser session was read-only; no login, refresh, workspace edits, provider acquisition, export, or settings change.
 
-The separate running API probe at 05:13–05:14 UTC reported API revision `db1926523c15c6e25b5673b0294e571574163ef5`, detailed health degraded, verified screener universe unavailable. GitHub's last Production frontend deployment record still points to `df6a6d6f35c1e5bcee60d67b79c81c351530d425`; the visible web alias is not bound here to an immutable frontend source revision. Database census at 05:48 UTC, after browser capture, is recorded in issue #274 comment 7154415283.
+The separate running API probe at 05:13–05:14 UTC reported API revision `db1926523c15c6e25b5673b0294e571574163ef5`, detailed health degraded, verified screener universe unavailable. **At browser-capture time**, the latest GitHub frontend Production deployment record was `7992166328` for source `df6a6d6f35c1e5bcee60d67b79c81c351530d425`. After the capture, GitHub recorded deployment `8050072097` for `c2176456ff5af66f65c8a8129b1a7e3666708b3e`, status `success`, with `environment="Production"` but `production_environment=false`. That completed deployment record does not establish that the canonical `web.vnibb.xyz` alias serves its artifact; the alias was not bound here to an immutable frontend source revision. Database census at 05:48 UTC, after browser capture, is recorded in issue #274 comment 7154415283.
 
 ## Captures
 
