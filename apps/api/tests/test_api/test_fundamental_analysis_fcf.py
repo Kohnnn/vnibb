@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
-
 from vnibb.api.v1 import copilot, equity
 from vnibb.api.v1.schemas import StandardResponse
 from vnibb.core.config import settings
